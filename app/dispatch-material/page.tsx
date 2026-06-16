@@ -700,11 +700,39 @@ export default function DispatchMaterialPage() {
   }
 
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
+  const getSortValue = (row: any, colId: string): string => {
+    if (colId === "status") {
+      return "Pending"
+    }
+    if (colId === "productName") {
+      return String(row._allProducts?.[0]?.productName || "—")
+    }
+    const firstProd = row._allProducts?.[0] || {}
+    if (colId === "oilType") return String(firstProd.oilType || "—")
+    if (colId === "ratePer15Kg") return String(firstProd.ratePer15Kg || "—")
+    if (colId === "ratePerLtr") return String(firstProd.ratePerLtr || "—")
+    if (colId === "rateOfMaterial") return String(firstProd.rateOfMaterial || "—")
+    if (colId === "rate") return String(firstProd.rate || "—")
+    if (colId === "uom") return String(firstProd.uom || "—")
+    if (colId === "orderQty") return String(firstProd.orderQty || "—")
+    if (colId === "altUom") return String(firstProd.altUom || "—")
+    if (colId === "altQty") return String(firstProd.altQty || "—")
+    if (colId === "skuName") return String(firstProd.skuName || "—")
+    if (colId === "approvalQty") return String(firstProd.approvalQty || "—")
+    if (colId === "qtyToDispatch") return String(row.qtyToDispatch || 0)
+    if (colId === "deliveryFrom") return String(firstProd.deliveryFrom || "—")
+
+    const directVal = row[colId]
+    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
+
+    return "—"
+  }
+
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
+      const aVal = getSortValue(a, pendingSortField).toLowerCase()
+      const bVal = getSortValue(b, pendingSortField).toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0

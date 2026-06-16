@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { damageAdjustmentApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -401,22 +401,59 @@ export default function DamageAdjustmentPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
+  const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "productCount", "productName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
+
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
+  const getSortValue = (group: any, field: string) => {
+    if (field === "status") {
+      return "Pending Adjustment"
+    }
+    if (field === "products") {
+      return group._productCount || 0
+    }
+    if (field === "orderNo") {
+      return group.doNumber || ""
+    }
+    if (field === "processid") {
+      return group.processId || ""
+    }
+    
+    let val;
+    if (FIXED_COLUMN_IDS.includes(field)) {
+      val = group[field]
+    } else {
+      val = getDynamicColumnValue(group, field)
+    }
+
+    if (val === undefined || val === null || val === "—" || val === "") return ""
+    
+    if (typeof val === "number") return val
+    if (["rate", "qty", "amount", "total", "ratePerLtr", "ratePer15Kg", "orderQty", "altQty", "totalWithGst", "advanceAmount"].some(k => field.toLowerCase().includes(k))) {
+      const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""))
+      return isNaN(num) ? -Infinity : num
+    }
+    return String(val).toLowerCase()
+  }
+
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
+      const aVal = getSortValue(a, pendingSortField)
+      const bVal = getSortValue(b, pendingSortField)
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return pendingSortDir === "asc" ? aVal - bVal : bVal - aVal
+      }
+      const aStr = String(aVal)
+      const bStr = String(bVal)
+      if (aStr < bStr) return pendingSortDir === "asc" ? -1 : 1
+      if (aStr > bStr) return pendingSortDir === "asc" ? 1 : -1
       return 0
     })
   }, [displayRows, pendingSortField, pendingSortDir])
 
-  const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "productCount", "productName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
   const dynamicColumns = visibleColumns.filter((colId) => !FIXED_COLUMN_IDS.includes(colId))
 
-  const getDynamicColumnValue = (group: any, colId: string) => {
+  function getDynamicColumnValue(group: any, colId: string) {
     const directValue = group?.[colId]
     if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
 

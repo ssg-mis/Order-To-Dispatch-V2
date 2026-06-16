@@ -5,7 +5,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import {
   BarChart2, Download, Search, X, RefreshCw, TrendingUp, Package,
   Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronRight,
-  FileText, Filter, Calendar, Layers
+  Filter, Calendar, Layers
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -69,11 +69,6 @@ function downloadCSV(data: any[], filename: string) {
   const a = document.createElement("a"); a.href = url; a.download = filename + ".csv"; a.click()
   URL.revokeObjectURL(url)
 }
-
-function downloadExcel(data: any[], filename: string) {
-  downloadCSV(data, filename)
-}
-
 
 // ─── Main Report Page ──────────────────────────────────────────────────────
 export default function ReportsPage() {
@@ -212,13 +207,6 @@ export default function ReportsPage() {
               downloadCSV(exportData, `oms-report-${activeTab}`)
             }}>
             <Download className="h-3.5 w-3.5" /> CSV
-          </Button>
-          <Button variant="outline" size="sm" className="rounded-xl text-xs font-bold gap-1.5 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors"
-            onClick={() => {
-              const exportData = activeTab === "skus" ? skuExportData : activeTab === "timeline" ? timelineExportData : summaryExportData
-              downloadExcel(exportData, `oms-report-${activeTab}`)
-            }}>
-            <FileText className="h-3.5 w-3.5" /> Excel
           </Button>
           <ExportPdfModal />
           <Button size="sm" className="rounded-xl text-xs font-bold gap-1.5" style={{ background: "oklch(0.42 0.18 265)" }}

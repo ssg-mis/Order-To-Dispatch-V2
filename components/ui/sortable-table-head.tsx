@@ -20,8 +20,8 @@ export function SortableTableHead({ id, className, onClick, children }: Sortable
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
 
   const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+    transform: transform ? CSS.Transform.toString(transform) : undefined,
+    transition: transform ? transition : undefined,
     opacity: isDragging ? 0.4 : 1,
     position: isDragging ? "relative" : undefined,
     zIndex: isDragging ? 10 : undefined,

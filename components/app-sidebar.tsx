@@ -69,12 +69,12 @@ const modules = [
   { title: "Damage Adjustment", icon: AlertCircle, url: "/damage-adjustment" },
   { title: "Gate In", icon: Car, url: "/gate-in" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
-  { title: "Settings", icon: Settings2, url: "/settings" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },
   { title: "Production", icon: Factory, url: "/production" },
   { title: "Master", icon: BookMarked, url: "/master" },
   { title: "Inventory", icon: Warehouse, url: "/inventory" },
   { title: "Reports", icon: BarChart2, url: "/reports" },
+  { title: "Settings", icon: Settings2, url: "/settings" },
 ]
 
 export function AppSidebar() {

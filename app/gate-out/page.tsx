@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { gateOutApi, orderApi, customerApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
@@ -552,12 +552,32 @@ export default function GateOutPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
+  const getSortValue = (group: any, colId: string): string => {
+    if (colId === "partySoDate") return group.partySoDate || ""
+    if (colId === "orderNo") return group.orderNo || ""
+    if (colId === "processid") return group.processid || ""
+    if (colId === "customerName") return group.customerName || ""
+    if (colId === "actual1Date") return group.actual1Date || ""
+    if (colId === "invoiceNo") return group.invoiceNo || ""
+    if (colId === "vehicleNo") return group.vehicleNo || ""
+    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
+    if (colId === "status") {
+      return group.isReverted 
+        ? "Issue Reported" 
+        : group._allProducts?.some((p: any) => p.status_1 === "Issue") 
+          ? "Issue Reported" 
+          : "Pending Review"
+    }
+    if (colId === "products") return String(group._productCount || 0)
+    return String(getDynamicColumnValue(group, colId))
+  }
+
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
+      const aVal = getSortValue(a, pendingSortField).toLowerCase()
+      const bVal = getSortValue(b, pendingSortField).toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0

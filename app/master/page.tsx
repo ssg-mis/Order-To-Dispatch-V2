@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
 import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext } from "@/lib/api-service"
@@ -137,9 +138,13 @@ interface Vehicle {
   fitness_image?: string
   state_permit?: string
   state_permit_image?: string
+  state_permit_type?: string
+  fuel_type?: string
   gvw?: number
   ulw?: number
   passing?: number
+  life_time_tax?: string
+  life_time_tax_image?: string
 }
 
 interface Driver {
@@ -186,6 +191,69 @@ const ALL_MASTER_TABS = [
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master"
 ]
 
+const formatDocDate = (dateStr?: string) => {
+  if (!dateStr) return "—"
+  const d = new Date(dateStr)
+  return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+const renderDocBadge = (label: string, image?: string, expiry?: string) => {
+  if (!image && !expiry) return null;
+
+  const badgeEl = (
+    <Badge 
+      variant="outline" 
+      className={`text-[10px] ${image ? 'bg-blue-50 cursor-pointer hover:bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-50 border-slate-200 text-slate-500'} transition-all`}
+      onClick={image ? (e) => { e.stopPropagation(); window.open(image, '_blank'); } : undefined}
+    >
+      {label}
+    </Badge>
+  );
+
+  return (
+    <Tooltip key={label}>
+      <TooltipTrigger asChild>
+        {badgeEl}
+      </TooltipTrigger>
+      <TooltipContent className="bg-slate-900 text-white p-2.5 rounded-xl shadow-xl border border-slate-800 z-[100] max-w-xs">
+        <div className="space-y-1">
+          <p className="font-semibold text-xs text-slate-200">{label} Details</p>
+          <p className="text-[10px] text-slate-300">
+            Expiry: <span className="text-white font-medium">{formatDocDate(expiry)}</span>
+          </p>
+          <p className="text-[10px] text-slate-400">
+            {image ? "Click to view document image" : "No image uploaded"}
+          </p>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const renderDocCell = (expiry?: string, image?: string, type?: string) => {
+  if (!expiry && !image && !type) return <TableCell className="text-slate-400 text-xs">—</TableCell>;
+  return (
+    <TableCell className="text-xs">
+      <div className="flex flex-col gap-0.5 min-w-[100px]">
+        {type && (
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+            {type} Permit
+          </span>
+        )}
+        <span className="text-slate-700 font-medium">{formatDocDate(expiry)}</span>
+        {image && (
+          <button 
+            onClick={() => window.open(image, '_blank')} 
+            className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold text-left w-fit"
+          >
+            View Image
+          </button>
+        )}
+      </div>
+    </TableCell>
+  );
+};
+
 export default function MasterPage() {
   const { toast } = useToast()
   const { user } = useAuth()
@@ -229,6 +297,7 @@ export default function MasterPage() {
     setCustomerSubTab('active'); setDepotSubTab('active'); setBrokerSubTab('active')
     setSalespersonSubTab('active'); setSkuSubTab('active'); setVehicleSubTab('active')
     setDriverSubTab('active'); setTransportSubTab('active')
+    setSelectedVehicleType('all')
     return () => { setMasterTabContext(null) }
   }, [activeTab])
 
@@ -347,13 +416,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     () => (allActiveTransportersData || []).filter((t: any) => t.status === 'Active'),
     [allActiveTransportersData]
   )
-  const sortedVehicleTransporters = useMemo(
+  const sortedVehicleTransporters = useMemo<string[]>(
     () => {
-      const names = activeTransporters
+      const names: string[] = (activeTransporters || [])
         .map((t: any) => t.transporter_name?.trim())
-        .filter((name: string | undefined): name is string => Boolean(name))
+        .filter((name: any): name is string => typeof name === "string" && name.length > 0)
 
-      return Array.from(new Set(names)).sort((a: any, b: string) =>
+      return Array.from(new Set<string>(names)).sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
       )
     },
@@ -517,15 +586,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     refetch: refetchVehicle,
   } = useInfiniteQuery({
     queryKey: ["vehicle_master", searchTerm],
-    queryFn: ({ pageParam = 1 }) => vehicleMasterApi.getAll({ page: pageParam, limit: 20, search: searchTerm }),
-    getNextPageParam: (lastPage) => {
-      const { page, limit, total } = lastPage.data.pagination;
-      return page * limit < total ? page + 1 : undefined;
+    queryFn: ({ pageParam = 1 }) => vehicleMasterApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" }),
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.data?.vehicles?.length || 0), 0)
+      return currentCount < (lastPage.data?.pagination?.total || 0) ? allPages.length + 1 : undefined
     },
     initialPageParam: 1,
   })
 
   const vehicles = useMemo(() => vehicleData?.pages.flatMap(p => p.data.vehicles) || [], [vehicleData])
+
+  const uniqueVehicleTypes = useMemo(() => {
+    const types = vehicles
+      .map((v: any) => v?.vehicle_type?.trim())
+      .filter((type: string): type is string => Boolean(type))
+    return Array.from(new Set(types)).sort()
+  }, [vehicles])
 
   useEffect(() => {
     if (vehicleInView && hasNextVehicle && !isFetchingNextVehicle) fetchNextVehicle()
@@ -542,11 +618,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [depotSort, setDepotSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'depot_id', dir: 'asc' })
   const [brokerSort, setBrokerSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'broker_id', dir: 'asc' })
   const [salespersonSort, setSalespersonSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'broker_id', dir: 'asc' })
-  const [vehicleSort, setVehicleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'registration_no', dir: 'asc' })
+  const [vehicleSort, setVehicleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'vehicle_master_id', dir: 'asc' })
+  const [selectedVehicleType, setSelectedVehicleType] = useState<string>("all")
+  const [roadTaxType, setRoadTaxType] = useState<'expiry' | 'lifetime'>('expiry')
   const [skuSort, setSkuSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'sku_code', dir: 'asc' })
   const [skuSellingPriceSort, setSkuSellingPriceSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'packing_material', dir: 'asc' })
-  const [driverSort, setDriverSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'driver_name', dir: 'asc' })
-  const [transportSort, setTransportSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'transporter_name', dir: 'asc' })
+  const [driverSort, setDriverSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'driver_master_id', dir: 'asc' })
+  const [transportSort, setTransportSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'transport_master_id', dir: 'asc' })
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -627,9 +705,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     fitness_image: '',
     state_permit: '',
     state_permit_image: '',
+    state_permit_type: '',
+    fuel_type: 'Diesel',
     gvw: '',
     ulw: '',
-    passing: ''
+    passing: '',
+    life_time_tax: '',
+    life_time_tax_image: ''
   })
 
   const [driverForm, setDriverForm] = useState<Partial<Driver>>({
@@ -792,10 +874,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       fitness_image: '',
       state_permit: '',
       state_permit_image: '',
+      state_permit_type: '',
+      fuel_type: 'Diesel',
       gvw: '',
       ulw: '',
-      passing: ''
+      passing: '',
+      life_time_tax: '',
+      life_time_tax_image: ''
     })
+    setRoadTaxType('expiry')
     setDriverForm({
       driver_master_id: "",
       status: "Active",
@@ -884,10 +971,26 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await skuSellingPriceApi.create(skuSellingPriceForm)
         }
       } else if (activeTab === "vehicle_master") {
-        if (editingItem) {
-          res = await vehicleMasterApi.update(editingItem.id, vehicleForm)
+        const payload = { ...vehicleForm }
+        if (roadTaxType === 'expiry') {
+          payload.life_time_tax = null
+          payload.life_time_tax_image = null
         } else {
-          res = await vehicleMasterApi.create(vehicleForm)
+          payload.road_tax = null
+          payload.road_tax_image = null
+        }
+        const isPermitEnabled = payload.gvw !== '' && Number(payload.gvw) < 3000;
+        if (!isPermitEnabled) {
+          payload.state_permit = null;
+          payload.state_permit_image = null;
+          payload.state_permit_type = null;
+        } else {
+          payload.state_permit_type = payload.state_permit_type || 'State';
+        }
+        if (editingItem) {
+          res = await vehicleMasterApi.update(editingItem.id, payload)
+        } else {
+          res = await vehicleMasterApi.create(payload)
         }
       } else if (activeTab === "driver_master") {
         if (editingItem) {
@@ -1115,7 +1218,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     } else if (activeTab === "sku_selling_price") {
       setSkuSellingPrice({ ...item })
     } else if (activeTab === "vehicle_master") {
-      setVehicleForm({ ...item })
+      setVehicleForm({
+        state_permit_type: '',
+        fuel_type: 'Diesel',
+        ...item
+      })
+      setRoadTaxType(item.life_time_tax || item.life_time_tax_image ? 'lifetime' : 'expiry')
     } else if (activeTab === "driver_master") {
       setDriverForm({ ...item })
     } else if (activeTab === "transport_master") {
@@ -1155,11 +1263,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     matchesSearch(s?.packing_material, searchTerm)
   )
 
-  const filteredVehicles = vehicles.filter(v =>
-    matchesSearch(v?.registration_no, searchTerm) ||
-    matchesSearch(v?.vehicle_master_id, searchTerm) ||
-    matchesSearch(v?.transporter, searchTerm)
-  )
+  const filteredVehicles = vehicles.filter(v => {
+    const matchesSearchTerm = matchesSearch(v?.registration_no, searchTerm) ||
+      matchesSearch(v?.vehicle_master_id, searchTerm) ||
+      matchesSearch(v?.transporter, searchTerm)
+    const matchesType = selectedVehicleType === "all" || v?.vehicle_type === selectedVehicleType
+    return matchesSearchTerm && matchesType
+  })
 
   const filteredDrivers = drivers.filter(dr =>
     matchesSearch(dr?.driver_name, searchTerm) ||
@@ -1711,28 +1821,69 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>RTO</Label>
-            <Input value={vehicleForm.rto} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="e.g. Raipur" />
+            <Label>Fuel Type</Label>
+            <Select value={vehicleForm.fuel_type || 'Diesel'} onValueChange={val => setVehicleForm({...vehicleForm, fuel_type: val})}>
+              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Diesel">Diesel</SelectItem>
+                <SelectItem value="Petrol">Petrol</SelectItem>
+                <SelectItem value="Electrical">Electrical</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
         <Separator className="my-2" />
         <h3 className="text-sm font-semibold text-slate-500">Document Details & Images</h3>
         
-        <div className="grid grid-cols-2 gap-4 border p-3 rounded-lg bg-slate-50/50">
+        <div className="border p-4 rounded-xl bg-slate-50/50 space-y-4">
           <div className="space-y-2">
-            <Label>Road Tax Expiry</Label>
-            <Input type="date" value={vehicleForm.road_tax?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, road_tax: e.target.value})} />
+            <Label>Road Tax Option</Label>
+            <Select value={roadTaxType} onValueChange={(val: 'expiry' | 'lifetime') => setRoadTaxType(val)}>
+              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="expiry">Expiry Date</SelectItem>
+                <SelectItem value="lifetime">Life time tax</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-2">
-            <FileUploadField
-              label="Road Tax Image"
-              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-              value={vehicleForm.road_tax_image}
-              helperText="Max file size: 20 MB"
-              uploading={false}
-              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "road_tax_image")}
-            />
+          
+          <div className="grid grid-cols-2 gap-4">
+            {roadTaxType === 'expiry' ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Road Tax Expiry</Label>
+                  <Input type="date" value={vehicleForm.road_tax?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, road_tax: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <FileUploadField
+                    label="Road Tax Image"
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                    value={vehicleForm.road_tax_image}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "road_tax_image")}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Life time tax Date</Label>
+                  <Input type="date" value={vehicleForm.life_time_tax?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, life_time_tax: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <FileUploadField
+                    label="Life time tax Image"
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                    value={vehicleForm.life_time_tax_image}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "life_time_tax_image")}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1787,20 +1938,48 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border p-3 rounded-lg bg-slate-50/50">
+        <div className="border p-4 rounded-xl bg-slate-50/50 space-y-4">
           <div className="space-y-2">
-            <Label>State Permit Expiry</Label>
-            <Input type="date" value={vehicleForm.state_permit?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, state_permit: e.target.value})} />
+            <Label className="flex justify-between items-center">
+              <span>State/National Permit Type</span>
+              {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000) && (
+                <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &lt; 3000 KGS)</span>
+              )}
+            </Label>
+            <Select 
+              value={vehicleForm.state_permit_type || 'State'} 
+              disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+              onValueChange={(val: 'State' | 'National') => setVehicleForm({...vehicleForm, state_permit_type: val})}
+            >
+              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="State">State Permit</SelectItem>
+                <SelectItem value="National">National Permit</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-2">
-            <FileUploadField
-              label="State Permit Image"
-              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-              value={vehicleForm.state_permit_image}
-              helperText="Max file size: 20 MB"
-              uploading={false}
-              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "state_permit_image")}
-            />
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Permit Expiry Date</Label>
+              <Input 
+                type="date" 
+                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+                value={vehicleForm.state_permit?.split('T')[0] || ''} 
+                onChange={e => setVehicleForm({...vehicleForm, state_permit: e.target.value})} 
+              />
+            </div>
+            <div className="space-y-2">
+              <FileUploadField
+                label="Permit Image"
+                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                value={vehicleForm.state_permit_image}
+                helperText="Max file size: 20 MB"
+                uploading={false}
+                onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "state_permit_image")}
+              />
+            </div>
           </div>
         </div>
 
@@ -1812,7 +1991,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               const gvw = e.target.value
               const ulw = vehicleForm.ulw
               const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
-              setVehicleForm({...vehicleForm, gvw, passing})
+              const clearPermit = gvw === '' || Number(gvw) >= 3000
+              setVehicleForm((prev: any) => ({
+                ...prev,
+                gvw,
+                passing,
+                ...(clearPermit 
+                  ? { state_permit: '', state_permit_image: '', state_permit_type: '' } 
+                  : { state_permit_type: prev.state_permit_type || 'State' })
+              }))
             }} />
           </div>
           <div className="space-y-2">
@@ -2028,6 +2215,21 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          {activeTab === "vehicle_master" && (
+            <div className="w-[180px]">
+              <Select value={selectedVehicleType} onValueChange={setSelectedVehicleType}>
+                <SelectTrigger className="h-9 md:h-10 border-slate-200 rounded-xl bg-white shadow-sm">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {uniqueVehicleTypes.map(type => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <Button 
             variant="outline" 
             size="sm"
@@ -2310,7 +2512,41 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <p className="text-sm font-medium">No pending approvals</p>
                       </div>
                     ) : (
-                      <table className="w-full caption-bottom text-sm">
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingCustomers.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.customer_name}</p>
+                                  <p className="text-xs text-slate-500">{item.customer_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">GSTIN: </span>{item.gstin || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Location: </span>{item.state ? `${item.state} (${item.pincode})` : "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('customers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'customers', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
                         <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
                           <TableRow className="hover:bg-transparent border-b">
                             <TableHead className="pl-6">ID</TableHead>
@@ -2355,6 +2591,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           )})}
                         </TableBody>
                       </table>
+                    </>
                     )}
                   </div>
                 </div>
@@ -2390,15 +2627,86 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {depotSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingDepots.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Depot Name</TableHead><TableHead>State</TableHead><TableHead>Salesman/Broker</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingDepots.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.depot_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.depot_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell><TableCell>{item.state || "—"}</TableCell><TableCell>{item.salesman_broker_name || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingDepots.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.depot_id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.depot_name}</p>
+                                  <p className="text-xs text-slate-500">{item.depot_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">State: </span>{item.state || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Salesman/Broker: </span>{item.salesman_broker_name || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">ID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Depot Name</TableHead>
+                            <TableHead>State</TableHead>
+                            <TableHead>Salesman/Broker</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingDepots.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.depot_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.depot_id}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell>
+                              <TableCell>{item.state || "—"}</TableCell>
+                              <TableCell>{item.salesman_broker_name || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -2555,15 +2863,86 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {brokerSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingBrokers.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Depot</TableHead><TableHead>Mobile</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingBrokers.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.depot_name || "—"}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingBrokers.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.broker_id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.salesman_name}</p>
+                                  <p className="text-xs text-slate-500">{item.broker_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Depot: </span>{item.depot_name || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Mobile: </span>{item.mobile_no || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">ID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Depot</TableHead>
+                            <TableHead>Mobile</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingBrokers.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell>
+                              <TableCell>{item.depot_name || "—"}</TableCell>
+                              <TableCell>{item.mobile_no || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -2718,15 +3097,86 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {salespersonSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingSalespersons.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>Email</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingSalespersons.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.email_id || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingSalespersons.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.broker_id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.salesman_name}</p>
+                                  <p className="text-xs text-slate-500">{item.broker_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Mobile: </span>{item.mobile_no || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Email: </span>{item.email_id || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">ID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Mobile</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingSalespersons.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell>
+                              <TableCell>{item.mobile_no || "—"}</TableCell>
+                              <TableCell>{item.email_id || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -2881,15 +3331,83 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {skuSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingSkus.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">SKU Code</TableHead><TableHead>Type</TableHead><TableHead>SKU Name</TableHead><TableHead>Main UOM</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingSkus.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.sku_code}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.sku_name}</TableCell><TableCell>{item.main_uom || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('sku_details', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'sku_details', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingSkus.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.sku_name}</p>
+                                  <p className="text-xs text-slate-500">{item.sku_code}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Main UOM: </span>{item.main_uom || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('sku_details', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'sku_details', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">SKU Code</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>SKU Name</TableHead>
+                            <TableHead>Main UOM</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingSkus.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.sku_code}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.sku_name}</TableCell>
+                              <TableCell>{item.main_uom || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('sku_details', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'sku_details', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -3198,15 +3716,86 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {vehicleSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingVehicles.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Reg No</TableHead><TableHead>Type</TableHead><TableHead>Vehicle ID</TableHead><TableHead>Vehicle Type</TableHead><TableHead>Transporter</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingVehicles.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-semibold text-slate-900 pl-6">{item.registration_no}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-medium text-slate-500">{item.vehicle_master_id}</TableCell><TableCell>{item.vehicle_type || "—"}</TableCell><TableCell>{item.transporter || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('vehicle_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'vehicle_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingVehicles.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.registration_no}</p>
+                                  <p className="text-xs text-slate-500">{item.vehicle_master_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Type: </span>{item.vehicle_type || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Transporter: </span>{item.transporter || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('vehicle_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'vehicle_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">Reg No</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Vehicle ID</TableHead>
+                            <TableHead>Vehicle Type</TableHead>
+                            <TableHead>Transporter</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingVehicles.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-semibold text-slate-900 pl-6">{item.registration_no}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-medium text-slate-500">{item.vehicle_master_id}</TableCell>
+                              <TableCell>{item.vehicle_type || "—"}</TableCell>
+                              <TableCell>{item.transporter || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('vehicle_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'vehicle_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -3234,14 +3823,91 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
                           <div><span className="font-medium text-slate-600">Transporter: </span>{item.transporter || "—"}</div>
                           <div><span className="font-medium text-slate-600">Type: </span>{item.vehicle_type || "—"}</div>
-                          <div><span className="font-medium text-slate-600">RTO: </span>{item.rto || "—"}</div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {item.road_tax_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.road_tax_image, '_blank')}>Tax</Badge>}
-                          {item.pollution_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.pollution_image, '_blank')}>Poll</Badge>}
-                          {item.insurance_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.insurance_image, '_blank')}>Ins</Badge>}
-                          {item.fitness_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.fitness_image, '_blank')}>Fit</Badge>}
-                          {item.state_permit_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.state_permit_image, '_blank')}>Permit</Badge>}
+                        <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Document Expiry Details</p>
+                          <div className="grid grid-cols-1 gap-1.5 text-xs">
+                            {(item.road_tax || item.road_tax_image) && (
+                              <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                                <span className="font-medium text-slate-500">Road Tax Expiry</span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.road_tax)}
+                                  {item.road_tax_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.road_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {(item.life_time_tax || item.life_time_tax_image) && (
+                              <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                                <span className="font-medium text-slate-500">Lifetime Tax Date</span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.life_time_tax)}
+                                  {item.life_time_tax_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.life_time_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {(item.pollution || item.pollution_image) && (
+                              <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                                <span className="font-medium text-slate-500">Pollution Expiry</span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.pollution)}
+                                  {item.pollution_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.pollution_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {(item.insurance || item.insurance_image) && (
+                              <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                                <span className="font-medium text-slate-500">Insurance Expiry</span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.insurance)}
+                                  {item.insurance_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.insurance_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {(item.fitness || item.fitness_image) && (
+                              <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                                <span className="font-medium text-slate-500">Fitness Expiry</span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.fitness)}
+                                  {item.fitness_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.fitness_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {(item.state_permit || item.state_permit_image || item.state_permit_type) && (
+                              <div className="flex items-center justify-between py-0.5">
+                                <span className="font-medium text-slate-500">
+                                  {item.state_permit_type ? `${item.state_permit_type} Permit` : 'State Permit'} Expiry
+                                </span>
+                                <span className="text-slate-700 flex items-center gap-1.5">
+                                  {formatDocDate(item.state_permit)}
+                                  {item.state_permit_image && (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.state_permit_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
+                                      [View]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
@@ -3262,8 +3928,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('vehicle_master_id', vehicleSort, setVehicleSort)}>ID <SortIcon col="vehicle_master_id" sort={vehicleSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('registration_no', vehicleSort, setVehicleSort)}>Reg No <SortIcon col="registration_no" sort={vehicleSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('transporter', vehicleSort, setVehicleSort)}>Transporter <SortIcon col="transporter" sort={vehicleSort} /></TableHead>
-                        <TableHead>Type/RTO</TableHead>
-                        <TableHead>Documents</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Road Tax</TableHead>
+                        <TableHead>Lifetime Tax</TableHead>
+                        <TableHead>Pollution</TableHead>
+                        <TableHead>Insurance</TableHead>
+                        <TableHead>Fitness</TableHead>
+                        <TableHead>State Permit</TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', vehicleSort, setVehicleSort)}>Status <SortIcon col="status" sort={vehicleSort} /></TableHead>
                         <TableHead className="text-right pr-6">Actions</TableHead>
                       </TableRow>
@@ -3275,14 +3946,19 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
                             <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
                             <TableCell><div className="h-4 w-40 bg-slate-200 animate-pulse rounded" /></TableCell>
-                            <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
-                            <TableCell><div className="h-4 w-40 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-24 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
                             <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                             <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
                           </TableRow>
                         ))
                       ) : vehicles.length === 0 ? (
-                        <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">No vehicles found</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={12} className="text-center py-20 text-slate-400">No vehicles found</TableCell></TableRow>
                       ) : (
                         <>
                           {sortedVehicles.map(item => (
@@ -3291,20 +3967,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               <TableCell className="font-semibold text-slate-900">{item.registration_no}</TableCell>
                               <TableCell className="text-slate-600">{item.transporter || "—"}</TableCell>
                               <TableCell>
-                                <div className="text-xs">
-                                  <p className="font-medium text-slate-700">{item.vehicle_type || "—"}</p>
-                                  <p className="text-slate-400">{item.rto || "—"}</p>
-                                </div>
+                                <span className="font-medium text-slate-700 text-sm">{item.vehicle_type || "—"}</span>
                               </TableCell>
-                              <TableCell>
-                                <div className="flex flex-wrap gap-1">
-                                  {item.road_tax_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.road_tax_image, '_blank')}>Tax</Badge>}
-                                  {item.pollution_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.pollution_image, '_blank')}>Poll</Badge>}
-                                  {item.insurance_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.insurance_image, '_blank')}>Ins</Badge>}
-                                  {item.fitness_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.fitness_image, '_blank')}>Fit</Badge>}
-                                  {item.state_permit_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.state_permit_image, '_blank')}>Permit</Badge>}
-                                </div>
-                              </TableCell>
+                              {renderDocCell(item.road_tax, item.road_tax_image)}
+                              {renderDocCell(item.life_time_tax, item.life_time_tax_image)}
+                              {renderDocCell(item.pollution, item.pollution_image)}
+                              {renderDocCell(item.insurance, item.insurance_image)}
+                              {renderDocCell(item.fitness, item.fitness_image)}
+                              {renderDocCell(item.state_permit, item.state_permit_image, item.state_permit_type)}
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
@@ -3383,15 +4053,86 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {driverSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingDrivers.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Driver ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>DL No</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingDrivers.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.driver_master_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.driver_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.driving_licence_no || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('driver_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'driver_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingDrivers.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.driver_name}</p>
+                                  <p className="text-xs text-slate-500">{item.driver_master_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Mobile: </span>{item.mobile_no || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">DL No: </span>{item.driving_licence_no || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('driver_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'driver_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">Driver ID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Mobile</TableHead>
+                            <TableHead>DL No</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingDrivers.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.driver_master_id}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.driver_name}</TableCell>
+                              <TableCell>{item.mobile_no || "—"}</TableCell>
+                              <TableCell>{item.driving_licence_no || "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('driver_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'driver_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -3564,15 +4305,87 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {transportSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingTransporters.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Contact</TableHead><TableHead>GSTIN</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingTransporters.map(item => {
-                      const isEdit = item.request_type === 'edit'
-                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
-                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
-                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.transport_master_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.transporter_name}</TableCell><TableCell>{item.contact_number || "—"}</TableCell><TableCell>{item.gstin || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
-                      <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('transport_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'transport_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>)})}</TableBody></table>
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingTransporters.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.transporter_name}</p>
+                                  <p className="text-xs text-slate-500">{item.transport_master_id}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Contact: </span>{item.contact_number || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">GSTIN: </span>{item.gstin || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('transport_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'transport_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">ID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Contact</TableHead>
+                            <TableHead>GSTIN</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingTransporters.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                              <TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6 text-slate-500">{item.transport_master_id}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                    {isEdit ? "Edit" : "New"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.transporter_name}</TableCell>
+                                <TableCell>{item.contact_number || "—"}</TableCell>
+                                <TableCell>{item.gstin || "—"}</TableCell>
+                                <TableCell>{submittedBy || "—"}</TableCell>
+                                <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button size="sm" onClick={() => openApprovalModal('transport_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                      <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'transport_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                      <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </table>
+                    </>
                   )}
                 </div></div>
               ) : (
@@ -3925,7 +4738,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {approvalReviewModal?.item?.request_type === 'edit' && (() => {
                 let pc = approvalReviewModal.item.pending_changes
                 if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', rto: 'RTO', transporter: 'Transporter' }
+                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', transporter: 'Transporter' }
                 const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
                 return (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
@@ -3952,8 +4765,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Vehicle Type</Label><Input value={approvalEditData.vehicle_type || ''} onChange={e => setApprovalEditData(p => ({...p, vehicle_type: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">RTO</Label><Input value={approvalEditData.rto || ''} onChange={e => setApprovalEditData(p => ({...p, rto: e.target.value}))} /></div>
+                <div className="space-y-1 col-span-2"><Label className="text-xs">Vehicle Type</Label><Input value={approvalEditData.vehicle_type || ''} onChange={e => setApprovalEditData(p => ({...p, vehicle_type: e.target.value}))} /></div>
               </div>
               <div className="space-y-1"><Label className="text-xs">Transporter</Label>
                 <Combobox

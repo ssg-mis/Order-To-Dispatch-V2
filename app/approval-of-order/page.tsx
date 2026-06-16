@@ -694,20 +694,37 @@ export default function CommitmentReviewPage() {
   }
 
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
+  const getSortValue = (order: any, field: string) => {
+    if (field === "status") {
+      return order._productCount || 0
+    }
+    const row = buildApprovalDisplayRow(order)
+    const val = (row as any)[field]
+    if (val === undefined || val === null || val === "—") return ""
+    if (["ratePerLtr", "ratePer15Kg", "orderQty", "altQty", "rate", "totalWithGst", "advanceAmount"].includes(field)) {
+      const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""))
+      return isNaN(num) ? -Infinity : num
+    }
+    return String(val).toLowerCase()
+  }
+
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
+      const aVal = getSortValue(a, pendingSortField)
+      const bVal = getSortValue(b, pendingSortField)
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return pendingSortDir === "asc" ? aVal - bVal : bVal - aVal
+      }
+      const aStr = String(aVal)
+      const bStr = String(bVal)
+      if (aStr < bStr) return pendingSortDir === "asc" ? -1 : 1
+      if (aStr > bStr) return pendingSortDir === "asc" ? 1 : -1
       return 0
     })
   }, [displayRows, pendingSortField, pendingSortDir])
 
-
-
-  const buildApprovalDisplayRow = (order: any) => {
+  function buildApprovalDisplayRow(order: any) {
     const products = order._allProducts || []
     const firstProduct = products[0] || {}
     const orderDetails = Object.values(order._ordersMap)[0] as any || {}

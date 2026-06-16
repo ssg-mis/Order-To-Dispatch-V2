@@ -793,12 +793,42 @@ export default function ActualDispatchPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
+  const getSortValue = (row: any, colId: string): string => {
+    if (colId === "status") {
+      return row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In"
+    }
+    if (colId === "qtyToDispatch") {
+      return String(row.qtyToDispatch || 0)
+    }
+    // Check if the column is a product-level column that was flattened/nested
+    const firstProd = row._allProducts?.[0] || {}
+    if (colId === "oilType") return String(firstProd.oilType || firstProd.oil_type || "—")
+    if (colId === "productName") return String(firstProd.productName || firstProd.product_name || "—")
+    if (colId === "ratePer15Kg") return String(firstProd.ratePer15Kg || firstProd.rate_per_15kg || "—")
+    if (colId === "ratePerLtr") return String(firstProd.ratePerLtr || firstProd.rate_per_ltr || "—")
+    if (colId === "rateOfMaterial") return String(firstProd.rateOfMaterial || firstProd.rate_of_material || "—")
+    if (colId === "rate") return String(firstProd.rate || firstProd.final_rate || "—")
+    if (colId === "uom") return String(firstProd.uom || "—")
+    if (colId === "orderQty") return String(firstProd.orderQty || firstProd.order_quantity || "—")
+    if (colId === "altUom") return String(firstProd.altUom || firstProd.alternate_uom || "—")
+    if (colId === "altQty") return String(firstProd.altQty || firstProd.alternate_qty_kg || "—")
+    if (colId === "skuName") return String(firstProd.skuName || firstProd.sku_name || "—")
+    if (colId === "approvalQty") return String(firstProd.approvalQty || firstProd.approval_qty || "—")
+    if (colId === "deliveryFrom") return String(firstProd.deliveryFrom || firstProd.dispatch_from || "—")
+
+    // Standard fields
+    const directVal = row[colId]
+    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
+
+    return "—"
+  }
+
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
+      const aVal = getSortValue(a, pendingSortField).toLowerCase()
+      const bVal = getSortValue(b, pendingSortField).toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0
@@ -1663,6 +1693,7 @@ export default function ActualDispatchPage() {
       partyNames={filterOptions.customerNames}
       onFilterChange={setFilterValues}
       remarksColName="Confirmation"
+      showStatusFilter={true}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
       showDateFilters={false}
@@ -1736,13 +1767,13 @@ export default function ActualDispatchPage() {
 
         {availableDepots.length > 0 && (
           <div className="mt-4 mb-2">
-            <Tabs value={selectedDepoTab} onValueChange={setSelectedDepoTab} className="w-full">
-              <TabsList className="bg-slate-100/50 p-1 h-auto flex-wrap justify-start gap-1 border border-slate-200/60 rounded-xl shadow-sm">
+            <Tabs value={selectedDepoTab} onValueChange={setSelectedDepoTab} className="w-full overflow-hidden">
+              <TabsList className="w-full bg-slate-100/50 p-1 h-auto flex overflow-x-auto justify-start gap-1 border border-slate-200/60 rounded-xl shadow-sm">
                 {availableDepots.map((depoName: string) => (
                   <TabsTrigger
                     key={depoName}
                     value={depoName}
-                    className="px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all duration-300 data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-md hover:bg-white/60 text-slate-500"
+                    className="shrink-0 px-4 sm:px-6 py-2.5 text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm rounded-lg transition-all"
                   >
                     {depoName}
                   </TabsTrigger>

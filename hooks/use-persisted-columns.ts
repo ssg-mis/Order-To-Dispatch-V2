@@ -103,7 +103,14 @@ export function usePersistedColumns(
   defaultColumns: string[]
 ): [string[], Dispatch<SetStateAction<string[]>>] {
   const [visibleColumns, setVisibleColumnsInternal] = useState<string[]>(() => {
-    return readFromStorage(stageKey) ?? defaultColumns
+    const saved = readFromStorage(stageKey)
+    if (!saved) return defaultColumns
+    
+    // Merge: keep saved visible preferences, but automatically add any newly introduced
+    // columns from defaultColumns, and remove any columns that no longer exist in defaultColumns.
+    const defaultSet = new Set(defaultColumns)
+    const newCols = defaultColumns.filter(id => !new Set(saved).has(id))
+    return [...saved.filter(id => defaultSet.has(id)), ...newCols]
   })
 
   // Wrap the setter so every update is mirrored to localStorage

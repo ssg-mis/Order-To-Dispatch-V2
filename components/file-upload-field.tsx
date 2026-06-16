@@ -82,7 +82,7 @@ export function FileUploadField({
         url,
         name: uploadedNames[index] || getFileName(url),
       }))
-    : uploadedNames.map((name) => ({ name }))
+    : uploadedNames.map((name) => ({ url: undefined as string | undefined, name }))
 
   const openPicker = () => {
     if (disabled || uploading) return

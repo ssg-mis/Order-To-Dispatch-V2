@@ -25,7 +25,7 @@ import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, X, Plus, Settings2, ShieldAlert, ShieldCheck, Truck, ChevronDown, ChevronUp, FileText, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { securityGuardApprovalApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -594,12 +594,42 @@ export default function SecurityApprovalPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
+  function getDynamicColumnValue(group: any, colId: string) {
+    const directValue = group?.[colId]
+    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
+
+    const firstProduct = group?._allProducts?.[0] || {}
+    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
+
+    const orderValue = (firstOrder as any)?.[colId]
+    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
+
+    const productValue = (firstProduct as any)?.[colId]
+    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
+
+    return "—"
+  }
+
+  const getSortValue = (group: any, colId: string): string => {
+    if (colId === "partySoDate") return group.partySoDate || ""
+    if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
+    if (colId === "processId" || colId === "processid") return group.processId || ""
+    if (colId === "customerName") return group.customerName || ""
+    if (colId === "productCount") return String(group._productCount || 0)
+    if (colId === "vehicleNo") return group.vehicleNo || ""
+    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
+    if (colId === "status") {
+      return group._allProducts?.every((p: any) => p.status_1 === "Completed") ? "Verified" : "Pending Verification"
+    }
+    return String(getDynamicColumnValue(group, colId))
+  }
+
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
+      const aVal = getSortValue(a, pendingSortField).toLowerCase()
+      const bVal = getSortValue(b, pendingSortField).toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0
@@ -665,21 +695,7 @@ export default function SecurityApprovalPage() {
     }
   }
 
-  const getDynamicColumnValue = (group: any, colId: string) => {
-    const directValue = group?.[colId]
-    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
 
-    const firstProduct = group?._allProducts?.[0] || {}
-    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
-
-    const orderValue = (firstOrder as any)?.[colId]
-    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
-
-    const productValue = (firstProduct as any)?.[colId]
-    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
-
-    return "—"
-  }
 
 
 

@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, Warehouse, RefreshCw, TrendingUp, TrendingDown, Package, X } from "lucide-react"
+import { Loader2, Warehouse, RefreshCw, TrendingUp, TrendingDown, Package, X, Settings2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   Dialog,
@@ -31,6 +31,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+
+// Toggleable columns for the inventory table (id matches the table cell key, label is the header text)
+const INVENTORY_COLUMNS = [
+  { id: "sku_id", label: "SKU ID" },
+  { id: "depot_name", label: "Depo Name" },
+  { id: "product_name", label: "SKU Name" },
+  { id: "openingQty", label: "Opening Qty" },
+  { id: "stockIn", label: "Stock In" },
+  { id: "stockOut", label: "Stock Out" },
+  { id: "production", label: "Production" },
+  { id: "sales", label: "Sales" },
+  { id: "closingStock", label: "Closing Stock" },
+]
+const INVENTORY_COLUMN_IDS = INVENTORY_COLUMNS.map((c) => c.id)
 
 type InventoryRow = {
   depot_name: string
@@ -46,13 +67,19 @@ type InventoryRow = {
 
 export default function InventoryPage() {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, isAdmin, isFeatureEnabled } = useAuth()
   const queryClient = useQueryClient()
 
   // Filters
   const [selectedDepo, setSelectedDepo] = useState<string>("all")
   const [selectedProduct, setSelectedProduct] = useState<string>("all")
   const [skuWiseMode, setSkuWiseMode] = useState(false)
+
+  // Column visibility — persisted per-browser under col_prefs_inventory, same as workflow stages
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("inventory", INVENTORY_COLUMN_IDS)
+  const isVis = (id: string) => visibleColumns.includes(id)
+  const leadingCount = ["sku_id", "depot_name", "product_name"].filter(isVis).length
+  const visibleCount = INVENTORY_COLUMN_IDS.filter(isVis).length
 
 
   // Drill-down modal
@@ -217,20 +244,35 @@ export default function InventoryPage() {
             <p className="text-sm text-slate-500">Stock levels by depot and SKU</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="gap-2 text-sm"
-        >
-          {isFetching ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
+        <div className="flex items-center gap-2">
+          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2 text-sm">
+                  <Settings2 className="h-4 w-4" />
+                  Columns
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[250px]">
+                <ColumnToggleContent columns={INVENTORY_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-          Refresh
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="gap-2 text-sm"
+          >
+            {isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* ── Filters ── */}
@@ -348,21 +390,21 @@ export default function InventoryPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="font-semibold text-slate-700 whitespace-nowrap">SKU ID</TableHead>
-                  <TableHead className="font-semibold text-slate-700 whitespace-nowrap">Depo Name</TableHead>
-                  <TableHead className="font-semibold text-slate-700 whitespace-nowrap">SKU Name</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Opening Qty</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Stock In</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Stock Out</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Production</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Sales</TableHead>
-                  <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Closing Stock</TableHead>
+                  {isVis("sku_id") && <TableHead className="font-semibold text-slate-700 whitespace-nowrap">SKU ID</TableHead>}
+                  {isVis("depot_name") && <TableHead className="font-semibold text-slate-700 whitespace-nowrap">Depo Name</TableHead>}
+                  {isVis("product_name") && <TableHead className="font-semibold text-slate-700 whitespace-nowrap">SKU Name</TableHead>}
+                  {isVis("openingQty") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Opening Qty</TableHead>}
+                  {isVis("stockIn") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Stock In</TableHead>}
+                  {isVis("stockOut") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Stock Out</TableHead>}
+                  {isVis("production") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Production</TableHead>}
+                  {isVis("sales") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Sales</TableHead>}
+                  {isVis("closingStock") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Closing Stock</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="py-16 text-center">
+                    <TableCell colSpan={Math.max(visibleCount, 1)} className="py-16 text-center">
                       <div className="flex flex-col items-center gap-2 text-slate-400">
                         <Warehouse className="h-10 w-10 opacity-30" />
                         <p className="text-sm font-medium">No inventory data found</p>
@@ -378,11 +420,14 @@ export default function InventoryPage() {
                   rows.map((row) => (
                     <TableRow key={row.key} className="hover:bg-slate-50/60 transition-colors">
                       {/* SKU ID */}
+                      {isVis("sku_id") && (
                       <TableCell className="font-mono text-xs text-slate-500 whitespace-nowrap">
                         {row.sku_id || "—"}
                       </TableCell>
+                      )}
 
                       {/* Depo Name */}
+                      {isVis("depot_name") && (
                       <TableCell className="whitespace-nowrap">
                         {row._skuWise ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 border border-amber-200">
@@ -392,13 +437,17 @@ export default function InventoryPage() {
                           <span className="font-medium text-slate-800">{row.depot_name}</span>
                         )}
                       </TableCell>
+                      )}
 
                       {/* SKU Name */}
+                      {isVis("product_name") && (
                       <TableCell className="text-slate-700 whitespace-nowrap">
                         {row.product_name}
                       </TableCell>
+                      )}
 
                       {/* Opening Qty */}
+                      {isVis("openingQty") && (
                       <TableCell className="text-center">
                         {row.openingQty !== 0 && !row._skuWise ? (
                           <button onClick={() => openDrillDown(row, 'openingQty')} className="text-sm font-semibold text-slate-700 underline decoration-dotted underline-offset-2 hover:text-slate-900 cursor-pointer">
@@ -408,8 +457,10 @@ export default function InventoryPage() {
                           <span className="text-sm font-semibold text-slate-700">{row.openingQty}</span>
                         )}
                       </TableCell>
+                      )}
 
                       {/* Stock In */}
+                      {isVis("stockIn") && (
                       <TableCell className="text-center">
                         {row.stockIn !== 0 && !row._skuWise ? (
                           <button onClick={() => openDrillDown(row, 'stockIn')} className="text-sm font-medium text-emerald-700 underline decoration-dotted underline-offset-2 hover:text-emerald-900 cursor-pointer">
@@ -419,8 +470,10 @@ export default function InventoryPage() {
                           <span className="text-sm font-medium text-emerald-700">{row.stockIn}</span>
                         )}
                       </TableCell>
+                      )}
 
                       {/* Stock Out */}
+                      {isVis("stockOut") && (
                       <TableCell className="text-center">
                         {row.stockOut !== 0 && !row._skuWise ? (
                           <button onClick={() => openDrillDown(row, 'stockOut')} className="text-sm font-medium text-orange-600 underline decoration-dotted underline-offset-2 hover:text-orange-800 cursor-pointer">
@@ -430,15 +483,19 @@ export default function InventoryPage() {
                           <span className="text-sm font-medium text-orange-600">{row.stockOut}</span>
                         )}
                       </TableCell>
+                      )}
 
                       {/* Production */}
+                      {isVis("production") && (
                       <TableCell className="text-center">
                         <span className={cn("text-sm font-medium", row.production > 0 ? "text-violet-700" : "text-slate-400")}>
                           {row.production}
                         </span>
                       </TableCell>
+                      )}
 
                       {/* Sales */}
+                      {isVis("sales") && (
                       <TableCell className="text-center">
                         {row.sales !== 0 && !row._skuWise ? (
                           <button onClick={() => openDrillDown(row, 'sales')} className="text-sm font-medium text-rose-600 underline decoration-dotted underline-offset-2 hover:text-rose-800 cursor-pointer">
@@ -448,8 +505,10 @@ export default function InventoryPage() {
                           <span className="text-sm font-medium text-rose-600">{row.sales}</span>
                         )}
                       </TableCell>
+                      )}
 
                       {/* Closing Stock */}
+                      {isVis("closingStock") && (
                       <TableCell className="text-center">
                         {row.closingStock !== 0 && !row._skuWise ? (
                           <button
@@ -467,6 +526,7 @@ export default function InventoryPage() {
                           </span>
                         )}
                       </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
@@ -476,30 +536,44 @@ export default function InventoryPage() {
               {rows.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-slate-200 bg-slate-50">
-                    <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-slate-600">
-                      Totals ({rows.length} row{rows.length !== 1 ? "s" : ""})
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-slate-700">
-                      {totals.openingQty}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-emerald-700">
-                      {totals.stockIn}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-orange-600">
-                      {totals.stockOut}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-slate-400">0</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-rose-600">
-                      {totals.sales}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-4 py-3 text-center text-sm font-bold",
-                        totals.closingStock >= 0 ? "text-emerald-700" : "text-rose-600"
-                      )}
-                    >
-                      {totals.closingStock}
-                    </td>
+                    {leadingCount > 0 && (
+                      <td colSpan={leadingCount} className="px-4 py-3 text-sm font-semibold text-slate-600">
+                        Totals ({rows.length} row{rows.length !== 1 ? "s" : ""})
+                      </td>
+                    )}
+                    {isVis("openingQty") && (
+                      <td className="px-4 py-3 text-center text-sm font-semibold text-slate-700">
+                        {totals.openingQty}
+                      </td>
+                    )}
+                    {isVis("stockIn") && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-emerald-700">
+                        {totals.stockIn}
+                      </td>
+                    )}
+                    {isVis("stockOut") && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-orange-600">
+                        {totals.stockOut}
+                      </td>
+                    )}
+                    {isVis("production") && (
+                      <td className="px-4 py-3 text-center text-sm font-semibold text-slate-400">0</td>
+                    )}
+                    {isVis("sales") && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-rose-600">
+                        {totals.sales}
+                      </td>
+                    )}
+                    {isVis("closingStock") && (
+                      <td
+                        className={cn(
+                          "px-4 py-3 text-center text-sm font-bold",
+                          totals.closingStock >= 0 ? "text-emerald-700" : "text-rose-600"
+                        )}
+                      >
+                        {totals.closingStock}
+                      </td>
+                    )}
                   </tr>
                 </tfoot>
               )}

@@ -269,11 +269,26 @@ export default function GateInPage() {
   }
 
   // Sorts pendingRecords by any field key
+  const getSortValue = (record: any, colId: string): string => {
+    if (colId === "vehicle_no") {
+      return String(record.draft_data?.vehicleNumber || "—")
+    }
+    if (colId === "driver_name") {
+      return String(record.draft_data?.driverName || "—")
+    }
+    if (colId === "saved_at") {
+      return record.saved_at ? new Date(record.saved_at).toISOString() : ""
+    }
+    const directVal = record[colId]
+    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
+    return "—"
+  }
+
   const sortedPendingRecords = useMemo(() => {
     if (!pendingSortField || !pendingRecords || pendingRecords.length === 0) return pendingRecords
     return [...pendingRecords].sort((a: any, b: any) => {
-      const aVal = String(a[pendingSortField] ?? "").toLowerCase()
-      const bVal = String(b[pendingSortField] ?? "").toLowerCase()
+      const aVal = getSortValue(a, pendingSortField).toLowerCase()
+      const bVal = getSortValue(b, pendingSortField).toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0

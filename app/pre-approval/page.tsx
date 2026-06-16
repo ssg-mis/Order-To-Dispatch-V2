@@ -1589,8 +1589,10 @@ export default function PreApprovalPage() {
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
-      const aVal = String((a as any)[pendingSortField] ?? "").toLowerCase()
-      const bVal = String((b as any)[pendingSortField] ?? "").toLowerCase()
+      const aRow = buildPendingDisplayRow(a)
+      const bRow = buildPendingDisplayRow(b)
+      const aVal = String(aRow[pendingSortField as keyof typeof aRow] ?? "").toLowerCase()
+      const bVal = String(bRow[pendingSortField as keyof typeof bRow] ?? "").toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0
@@ -1650,7 +1652,7 @@ export default function PreApprovalPage() {
     });
   }, [selectedItems, dialogNewProducts]);
 
-  const buildPendingDisplayRow = (rawOrder: any) => {
+  function buildPendingDisplayRow(rawOrder: any) {
     const CUSTOMER_MAP: Record<string, string> = {
       cust1: "Acme Corp",
       cust2: "Global Industries",

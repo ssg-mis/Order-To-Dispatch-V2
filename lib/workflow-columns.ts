@@ -94,3 +94,21 @@ export const ALL_WORKFLOW_COLUMNS = [
   { id: "invoiceNo", label: "Invoice No." },
   { id: "status", label: "Status" },
 ]
+
+const VEHICLE_DOC_COLUMN_IDS = new Set([
+  "vehicle_number",
+  "fitness",
+  "insurance",
+  "tax_copy",
+  "polution",
+  "permit1",
+  "permit2_out_state",
+  "fitness_end_date",
+  "insurance_end_date",
+  "tax_end_date",
+  "pollution_end_date",
+  "permit1_end_date",
+  "permit2_end_date"
+])
+
+export const WORKFLOW_STAGE_COLUMNS = ALL_WORKFLOW_COLUMNS.filter(c => !VEHICLE_DOC_COLUMN_IDS.has(c.id))

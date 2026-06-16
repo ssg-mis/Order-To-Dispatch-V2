@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { FileDown, Download, Loader2, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
+import { FileDown, Download, Loader2, ChevronDown, ChevronRight, Trash2, Eye } from "lucide-react"
 import { reportsApi, userApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 
@@ -171,6 +171,11 @@ const COLUMN_GROUPS: ColGroup[] = [
 
 const ALL_KEYS = COLUMN_GROUPS.flatMap(g => g.columns.map(c => c.key))
 
+// Only render this many rows in the on-screen preview — enough to confirm the
+// column layout/order/formatting without the cost of painting the whole dataset.
+// The full data is still kept in state and used for the actual download.
+const PREVIEW_LIMIT = 10
+
 const DEFAULT_SELECTED = new Set(
   COLUMN_GROUPS.flatMap(g => g.columns.filter(c => c.available).map(c => c.key))
 )
@@ -265,6 +270,11 @@ export function ExportPdfModal() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // ── Preview (on-screen snapshot of exactly what the CSV will contain) ───────
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewRows, setPreviewRows] = useState<any[]>([])
+  const [previewKeys, setPreviewKeys] = useState<string[]>([])
+
   // ── Format presets ────────────────────────────────────────────────────────
   const [formats, setFormats] = useState<Record<string, string[]>>({})
   const [activeFormat, setActiveFormat] = useState("")
@@ -353,10 +363,13 @@ export function ExportPdfModal() {
     setCollapsed(prev => ({ ...prev, [label]: !prev[label] }))
   }
 
-  const handleGenerate = useCallback(async () => {
+  // Fetch the report rows with the current filters. Shared by Download and View.
+  // `limit` caps the rows server-side — used by the preview so it loads fast;
+  // Download passes no limit so the export stays complete.
+  const fetchRows = useCallback(async (limit?: number): Promise<any[] | null> => {
     if (selected.size === 0) {
       setError("Please select at least one column.")
-      return
+      return null
     }
     setLoading(true)
     setError(null)
@@ -367,6 +380,7 @@ export function ExportPdfModal() {
       if (customerName) params.customer_name = customerName
       if (dispatchNo)   params.dispatch_no   = dispatchNo
       if (orderNo)      params.order_no      = orderNo
+      if (limit)        params.limit         = String(limit)
 
       const res = await reportsApi.getDispatchReport(Object.keys(params).length ? params : undefined)
       if (!res.success) throw new Error(res.message || "Failed to fetch data")
@@ -374,22 +388,38 @@ export function ExportPdfModal() {
       const rows: any[] = res.data || []
       if (rows.length === 0) {
         setError("No records found for the selected filters.")
-        return
+        return null
       }
-
-      const selectedKeys = ALL_KEYS.filter(k => selected.has(k))
-      generateCsv(rows, selectedKeys)
-      setOpen(false)
+      return rows
     } catch (e: any) {
       setError(e.message || "An error occurred.")
+      return null
     } finally {
       setLoading(false)
     }
   }, [selected, fromDate, toDate, customerName, dispatchNo, orderNo])
 
+  const handleGenerate = useCallback(async () => {
+    const rows = await fetchRows()
+    if (!rows) return
+    generateCsv(rows, ALL_KEYS.filter(k => selected.has(k)))
+    setOpen(false)
+  }, [fetchRows, selected])
+
+  // View: fetch only the first PREVIEW_LIMIT rows (fast) and render them with the
+  // exact same column selection / ordering / formatting the CSV uses.
+  const handlePreview = useCallback(async () => {
+    const rows = await fetchRows(PREVIEW_LIMIT)
+    if (!rows) return
+    setPreviewRows(rows)
+    setPreviewKeys(ALL_KEYS.filter(k => selected.has(k)))
+    setPreviewOpen(true)
+  }, [fetchRows, selected])
+
   const selectedCount = selected.size
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
@@ -641,6 +671,15 @@ export function ExportPdfModal() {
               Cancel
             </Button>
             <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl gap-1.5 font-bold hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-700"
+              onClick={handlePreview}
+              disabled={loading || selectedCount === 0}
+            >
+              <Eye className="h-3.5 w-3.5" /> View
+            </Button>
+            <Button
               size="sm"
               className="rounded-xl gap-1.5 font-bold"
               style={{ background: "oklch(0.42 0.18 265)" }}
@@ -656,5 +695,81 @@ export function ExportPdfModal() {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* ── Preview: exact on-screen snapshot of the CSV (same columns, order & formatting) ── */}
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent
+        className="max-w-[95vw] w-full p-0 gap-0 flex flex-col overflow-hidden"
+        style={{ maxHeight: "92vh" }}
+      >
+        <DialogHeader className="px-6 py-4 border-b shrink-0" style={{ background: "oklch(0.97 0.012 245)" }}>
+          <DialogTitle className="flex items-center gap-2 text-base font-black text-slate-900">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: "oklch(0.42 0.18 265 / 0.12)" }}>
+              <Eye className="h-4 w-4" style={{ color: "oklch(0.42 0.18 265)" }} />
+            </div>
+            Export Preview
+            <span className="ml-auto text-xs font-medium text-slate-400 normal-case">
+              {previewKeys.length} column{previewKeys.length !== 1 ? "s" : ""}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 min-h-0 overflow-auto">
+          <table className="border-collapse text-xs">
+            <thead className="sticky top-0 z-10">
+              <tr>
+                {previewKeys.map(k => (
+                  <th key={k}
+                    className="border border-slate-200 bg-slate-100 px-3 py-2 text-left font-black text-slate-700 whitespace-nowrap">
+                    {COL_MAP.get(k)!.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {previewRows.slice(0, PREVIEW_LIMIT).map((row, i) => (
+                <tr key={i} className={i % 2 ? "bg-slate-50/60" : "bg-white"}>
+                  {previewKeys.map(k => {
+                    const col = COL_MAP.get(k)!
+                    const val = fmtVal(row[k], k, col.available)
+                    return (
+                      <td key={k}
+                        className={`border border-slate-200 px-3 py-1.5 whitespace-nowrap ${col.available ? "text-slate-700" : "text-slate-400 italic"}`}>
+                        {val !== "" ? val : <span className="text-slate-300">—</span>}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-6 py-4 border-t shrink-0 flex items-center justify-between bg-white"
+          style={{ borderColor: "oklch(0.90 0.025 245)" }}>
+          <p className="text-xs text-slate-400 font-medium">
+            Sample preview ({PREVIEW_LIMIT} rows) — same columns, order and formatting. The download includes all rows.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setPreviewOpen(false)} disabled={loading}>
+              Back
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-xl gap-1.5 font-bold"
+              style={{ background: "oklch(0.42 0.18 265)" }}
+              onClick={async () => { await handleGenerate(); setPreviewOpen(false) }}
+              disabled={loading}
+            >
+              {loading
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Fetching…</>
+                : <><Download className="h-3.5 w-3.5" /> Download CSV</>
+              }
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
