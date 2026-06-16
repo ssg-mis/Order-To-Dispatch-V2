@@ -188,7 +188,7 @@ const ALL_MASTER_TABS = [
 
 export default function MasterPage() {
   const { toast } = useToast()
-  const { isReadOnly, user } = useAuth()
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState("customers")
 
   const visibleTabs = useMemo(() => {
@@ -202,9 +202,12 @@ export default function MasterPage() {
     })
   }, [user])
 
-  // Determine if the currently active tab is view-only based on master_tabs config
+  // Per-tab master_tabs access is authoritative here. The page-level "Master"
+  // view/modify setting no longer locks the page — access is granted by the key's
+  // presence in page_access (the sidebar gates that). Only the 'pc' role is a hard
+  // global read-only.
   const isMasterTabReadOnly = useMemo(() => {
-    if (isReadOnly) return true // global page-level read-only takes precedence
+    if (user?.role === 'pc') return true // 'pc' role is always read-only
     if (!user || user.role === 'super_admin' || user.role === 'admin') return false
     const masterTabsConfig = (user.features as any)?.master_tabs
     if (!masterTabsConfig || typeof masterTabsConfig !== 'object') return false
@@ -212,7 +215,7 @@ export default function MasterPage() {
     // old boolean true or new 'modify' → can modify; 'view_only' → read only
     if (val === 'view_only') return true
     return false
-  }, [user, activeTab, isReadOnly])
+  }, [user, activeTab])
 
   useEffect(() => {
     if (visibleTabs.length > 0 && !visibleTabs.includes(activeTab)) {
@@ -275,6 +278,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const isAdminOrSuper = user?.role === 'admin' || user?.role === 'super_admin'
   const canEditExisting = isAdminOrSuper && !isMasterTabReadOnly // non-admins can add but not edit existing records; view-only tab access also blocks edits
+  // Customers (pilot): users with 'modify' access can also edit existing records.
+  // Admins write directly; non-admin edits are staged and routed through the pending-approval flow.
+  // Deletes remain admin-only (no pending flow for deletes yet).
+  const canEditActiveTab = !isMasterTabReadOnly
 
   const { data: pendingDepotsData, refetch: refetchPendingDepots } = useQuery({ queryKey: ['pending-depots'], queryFn: async () => { const res = await depotApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'depots' })
   const { data: pendingBrokersData, refetch: refetchPendingBrokers } = useQuery({ queryKey: ['pending-brokers'], queryFn: async () => { const res = await brokerApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'brokers' })
@@ -346,7 +353,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         .map((t: any) => t.transporter_name?.trim())
         .filter((name: string | undefined): name is string => Boolean(name))
 
-      return Array.from(new Set(names)).sort((a, b) =>
+      return Array.from(new Set(names)).sort((a: any, b: string) =>
         a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
       )
     },
@@ -975,7 +982,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const openApprovalModal = (tab: string, item: any) => {
     setApprovalReviewModal({ tab, item })
-    setApprovalEditData({ ...item })
+    // For a staged edit, pre-fill the review form with the PROPOSED values
+    // (pending_changes layered over the live row) so the admin reviews the new values.
+    let pc = item?.pending_changes
+    if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+    setApprovalEditData(pc && item?.request_type === 'edit' ? { ...item, ...pc } : { ...item })
   }
 
   const handleReviewRecord = async (tab: string, id: any, action: 'approve' | 'reject', reason?: string, overrides?: Record<string, any>) => {
@@ -2179,7 +2190,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 <p className="text-xs text-slate-500">{item.customer_id}</p>
                               </div>
                               <div className="flex gap-1 shrink-0">
-                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                                 <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                               </div>
                             </div>
@@ -2189,7 +2200,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               <div className="col-span-2"><span className="font-medium text-slate-600">Email: </span>{item.email || "—"}</div>
                               <div><span className="font-medium text-slate-600">Phone: </span>{item.contact || "—"}</div>
                             </div>
-                            <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                              {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                            </div>
                           </div>
                         ))}
                         {isFetchingNextCustomer && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more customers...</span></div>}
@@ -2241,13 +2255,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                   </TableCell>
                                   <TableCell>{item.state ? `${item.state} (${item.pincode})` : "—"}</TableCell>
                                   <TableCell>
-                                    <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                      {item.status}
-                                    </Badge>
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                        {item.status}
+                                      </Badge>
+                                      {item.has_pending_edit && (
+                                        <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                          Edit pending
+                                        </Badge>
+                                      )}
+                                    </div>
                                   </TableCell>
                                   <TableCell className="text-right pr-6">
                                     <div className="flex justify-end gap-2">
-                                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Customer"}>
+                                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Customer"}>
                                         <Pencil className="h-4 w-4" />
                                       </Button>
                                       <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Customer"}>
@@ -2293,6 +2314,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
                           <TableRow className="hover:bg-transparent border-b">
                             <TableHead className="pl-6">ID</TableHead>
+                            <TableHead>Type</TableHead>
                             <TableHead>Customer Name</TableHead>
                             <TableHead>GSTIN</TableHead>
                             <TableHead>Location</TableHead>
@@ -2302,14 +2324,23 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {pendingCustomers.map(item => (
+                          {pendingCustomers.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
                             <TableRow key={item.id} className="hover:bg-amber-50/30 transition-colors border-b border-slate-50 h-16">
                               <TableCell className="font-medium pl-6 text-slate-500">{item.customer_id}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
                               <TableCell className="font-semibold text-slate-900">{item.customer_name}</TableCell>
                               <TableCell>{item.gstin || "—"}</TableCell>
                               <TableCell>{item.state ? `${item.state} (${item.pincode})` : "—"}</TableCell>
-                              <TableCell>{item.created_by_name || "—"}</TableCell>
-                              <TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
                                   <Button size="sm" onClick={() => openApprovalModal('customers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
@@ -2321,7 +2352,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                             </TableRow>
-                          ))}
+                          )})}
                         </TableBody>
                       </table>
                     )}
@@ -2359,11 +2390,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {depotSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingDepots.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Depot Name</TableHead><TableHead>State</TableHead><TableHead>Salesman/Broker</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingDepots.map(item => (<TableRow key={item.depot_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.depot_id}</TableCell><TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell><TableCell>{item.state || "—"}</TableCell><TableCell>{item.salesman_broker_name || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Depot Name</TableHead><TableHead>State</TableHead><TableHead>Salesman/Broker</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingDepots.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.depot_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.depot_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell><TableCell>{item.state || "—"}</TableCell><TableCell>{item.salesman_broker_name || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -2384,7 +2419,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.depot_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -2393,7 +2428,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           <div><span className="font-medium text-slate-600">State: </span>{item.state || "—"}</div>
                           <div><span className="font-medium text-slate-600">Salesman: </span>{item.salesman_broker_name || "—"}</div>
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextDepot && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more depots...</span></div>}
@@ -2440,13 +2478,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               <TableCell className="text-slate-600">{item.state || "—"}</TableCell>
                               <TableCell className="text-slate-600">{item.salesman_broker_name || "—"}</TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Depot"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Depot"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Depot"}>
@@ -2510,11 +2555,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {brokerSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingBrokers.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Name</TableHead><TableHead>Depot</TableHead><TableHead>Mobile</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingBrokers.map(item => (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.depot_name || "—"}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Depot</TableHead><TableHead>Mobile</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingBrokers.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.depot_name || "—"}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -2535,7 +2584,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.broker_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -2543,7 +2592,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           <div><span className="font-medium text-slate-600">Mobile: </span>{item.mobile_no || "—"}</div>
                           <div><span className="font-medium text-slate-600">Email: </span>{item.email_id || "—"}</div>
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextBroker && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more brokers...</span></div>}
@@ -2589,13 +2641,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Broker"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Broker"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Broker"}>
@@ -2659,11 +2718,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {salespersonSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingSalespersons.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>Email</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingSalespersons.map(item => (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.email_id || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>Email</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingSalespersons.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.broker_id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.broker_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.salesman_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.email_id || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -2684,7 +2747,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.broker_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -2692,7 +2755,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           <div><span className="font-medium text-slate-600">Mobile: </span>{item.mobile_no || "—"}</div>
                           <div><span className="font-medium text-slate-600">Email: </span>{item.email_id || "—"}</div>
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextSalesperson && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more salespersons...</span></div>}
@@ -2738,13 +2804,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Salesperson"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Salesperson"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Salesperson"}>
@@ -2808,11 +2881,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {skuSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingSkus.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">SKU Code</TableHead><TableHead>SKU Name</TableHead><TableHead>Main UOM</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingSkus.map(item => (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.sku_code}</TableCell><TableCell className="font-semibold text-slate-900">{item.sku_name}</TableCell><TableCell>{item.main_uom || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">SKU Code</TableHead><TableHead>Type</TableHead><TableHead>SKU Name</TableHead><TableHead>Main UOM</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingSkus.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.sku_code}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.sku_name}</TableCell><TableCell>{item.main_uom || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('sku_details', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'sku_details', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -2833,7 +2910,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.sku_code}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -2843,7 +2920,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           <div><span className="font-medium text-slate-600">Pack Wt: </span>{item.packing_weight}</div>
                           <div><span className="font-medium text-slate-600">Gross Wt: </span>{item.gross_weight}</div>
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextSku && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more SKUs...</span></div>}
@@ -2893,13 +2973,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               <TableCell className="text-slate-600 font-medium">{item.packing_weight}</TableCell>
                               <TableCell className="text-slate-600 font-medium">{item.gross_weight}</TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit SKU"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit SKU"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete SKU"}>
@@ -3111,11 +3198,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {vehicleSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingVehicles.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Reg No</TableHead><TableHead>Vehicle ID</TableHead><TableHead>Type</TableHead><TableHead>Transporter</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingVehicles.map(item => (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-semibold text-slate-900 pl-6">{item.registration_no}</TableCell><TableCell className="font-medium text-slate-500">{item.vehicle_master_id}</TableCell><TableCell>{item.vehicle_type || "—"}</TableCell><TableCell>{item.transporter || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Reg No</TableHead><TableHead>Type</TableHead><TableHead>Vehicle ID</TableHead><TableHead>Vehicle Type</TableHead><TableHead>Transporter</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingVehicles.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-semibold text-slate-900 pl-6">{item.registration_no}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-medium text-slate-500">{item.vehicle_master_id}</TableCell><TableCell>{item.vehicle_type || "—"}</TableCell><TableCell>{item.transporter || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('vehicle_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'vehicle_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -3136,7 +3227,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.vehicle_master_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -3152,7 +3243,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           {item.fitness_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.fitness_image, '_blank')}>Fit</Badge>}
                           {item.state_permit_image && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.state_permit_image, '_blank')}>Permit</Badge>}
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextVehicle && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more vehicles...</span></div>}
@@ -3212,13 +3306,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Vehicle"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Vehicle"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Vehicle"}>
@@ -3282,11 +3383,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {driverSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingDrivers.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Driver ID</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>DL No</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingDrivers.map(item => (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.driver_master_id}</TableCell><TableCell className="font-semibold text-slate-900">{item.driver_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.driving_licence_no || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">Driver ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Mobile</TableHead><TableHead>DL No</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingDrivers.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.driver_master_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.driver_name}</TableCell><TableCell>{item.mobile_no || "—"}</TableCell><TableCell>{item.driving_licence_no || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('driver_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'driver_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -3307,7 +3412,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.driver_master_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -3320,7 +3425,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           {item.aadhaar_no && <Badge variant="outline" className="text-[10px] bg-indigo-50 border-indigo-100 text-indigo-700">Aadhaar: {item.aadhaar_no.slice(-4)}</Badge>}
                           {item.pan_no && <Badge variant="outline" className="text-[10px] bg-slate-100">PAN: {item.pan_no}</Badge>}
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextDriver && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more drivers...</span></div>}
@@ -3379,13 +3487,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Driver"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Driver"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Driver"}>
@@ -3449,11 +3564,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {transportSubTab === 'pending' ? (
                 <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
                   {pendingTransporters.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
-                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Name</TableHead><TableHead>Contact</TableHead><TableHead>GSTIN</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>{pendingTransporters.map(item => (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
-                      <TableCell className="font-medium pl-6 text-slate-500">{item.transport_master_id}</TableCell><TableCell className="font-semibold text-slate-900">{item.transporter_name}</TableCell><TableCell>{item.contact_number || "—"}</TableCell><TableCell>{item.gstin || "—"}</TableCell><TableCell>{item.created_by_name || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                    <table className="w-full caption-bottom text-sm"><TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm"><TableRow className="hover:bg-transparent border-b"><TableHead className="pl-6">ID</TableHead><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Contact</TableHead><TableHead>GSTIN</TableHead><TableHead>Submitted By</TableHead><TableHead>Submitted On</TableHead><TableHead className="text-right pr-6">Actions</TableHead></TableRow></TableHeader>
+                    <TableBody>{pendingTransporters.map(item => {
+                      const isEdit = item.request_type === 'edit'
+                      const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                      const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                      return (<TableRow key={item.id} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                      <TableCell className="font-medium pl-6 text-slate-500">{item.transport_master_id}</TableCell><TableCell><Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>{isEdit ? "Edit" : "New"}</Badge></TableCell><TableCell className="font-semibold text-slate-900">{item.transporter_name}</TableCell><TableCell>{item.contact_number || "—"}</TableCell><TableCell>{item.gstin || "—"}</TableCell><TableCell>{submittedBy || "—"}</TableCell><TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="text-right pr-6"><div className="flex justify-end gap-2"><Button size="sm" onClick={() => openApprovalModal('transport_master', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button><Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'transport_master', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg"><X className="h-3.5 w-3.5 mr-1" />Reject</Button></div></TableCell>
-                    </TableRow>))}</TableBody></table>
+                    </TableRow>)})}</TableBody></table>
                   )}
                 </div></div>
               ) : (
@@ -3474,7 +3593,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             <p className="text-xs text-slate-500">{item.transport_master_id}</p>
                           </div>
                           <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
                             <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
                           </div>
                         </div>
@@ -3485,7 +3604,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           {item.pan && <div><span className="font-medium text-slate-600">PAN: </span>{item.pan}</div>}
                           {item.gstin && <div><span className="font-medium text-slate-600">GST: </span>{item.gstin}</div>}
                         </div>
-                        <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.has_pending_edit && <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Edit pending approval</Badge>}
+                        </div>
                       </div>
                     ))}
                     {isFetchingNextTransport && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more transporters...</span></div>}
@@ -3542,13 +3664,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                  {item.has_pending_edit && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50 whitespace-nowrap" title="An edit to this record is awaiting admin approval">
+                                      Edit pending
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Edit Transporter"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Transporter"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Transporter"}>
@@ -3625,6 +3754,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'customers' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { customer_name: 'Customer Name', status: 'Status', contact_person: 'Contact Person', contact: 'Mobile', email: 'Email', address_line_1: 'Address', address_line_2: 'Address 2', state: 'State', pincode: 'Pincode', pan: 'PAN', gstin: 'GSTIN', gst_registered: 'GST Registered' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing customer</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Customer Name</Label><Input value={approvalEditData.customer_name || ''} onChange={e => setApprovalEditData(p => ({...p, customer_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3648,6 +3802,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'depots' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { depot_name: 'Depot Name', status: 'Status', depot_address: 'Depot Address', state: 'State', salesman_broker_name: 'Salesman / Broker' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Depot Name</Label><Input value={approvalEditData.depot_name || ''} onChange={e => setApprovalEditData(p => ({...p, depot_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3662,6 +3841,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {(approvalReviewModal?.tab === 'brokers' || approvalReviewModal?.tab === 'salespersons') && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { salesman_name: 'Name', status: 'Status', mobile_no: 'Mobile', email_id: 'Email', depot_name: 'Depot' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Name</Label><Input value={approvalEditData.salesman_name || ''} onChange={e => setApprovalEditData(p => ({...p, salesman_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3676,6 +3880,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'sku_details' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM', hsn_code: 'HSN Code', gst_rate: 'GST Rate', status: 'Status' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">SKU Name</Label><Input value={approvalEditData.sku_name || ''} onChange={e => setApprovalEditData(p => ({...p, sku_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">SKU Code</Label><Input value={approvalEditData.sku_code || ''} onChange={e => setApprovalEditData(p => ({...p, sku_code: e.target.value}))} /></div>
@@ -3693,6 +3922,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'vehicle_master' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', rto: 'RTO', transporter: 'Transporter' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Registration No</Label><Input value={approvalEditData.registration_no || ''} onChange={e => setApprovalEditData(p => ({...p, registration_no: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3715,6 +3969,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'driver_master' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { driver_name: 'Driver Name', status: 'Status', mobile_no: 'Mobile', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto', rto: 'RTO' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Driver Name</Label><Input value={approvalEditData.driver_name || ''} onChange={e => setApprovalEditData(p => ({...p, driver_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3733,6 +4012,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
           {approvalReviewModal?.tab === 'transport_master' && (
             <div className="grid gap-3 py-2">
+              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
+                let pc = approvalReviewModal.item.pending_changes
+                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+                const labels: Record<string, string> = { transporter_name: 'Transporter Name', status: 'Status', contact_person: 'Contact Person', contact_number: 'Contact Number', gstin: 'GSTIN' }
+                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+                    {changed.length === 0 ? (
+                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {changed.map(k => (
+                          <div key={k} className="text-xs flex flex-wrap gap-1">
+                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
+                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">Transporter Name</Label><Input value={approvalEditData.transporter_name || ''} onChange={e => setApprovalEditData(p => ({...p, transporter_name: e.target.value}))} /></div>
                 <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
@@ -3745,9 +4049,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </div>
           )}
 
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-            Submitted by <span className="font-semibold">{approvalReviewModal?.item?.created_by_name || '—'}</span> on {approvalReviewModal?.item?.created_at ? new Date(approvalReviewModal.item.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-          </div>
+          {(() => {
+            const isEdit = approvalReviewModal?.item?.request_type === 'edit'
+            const by = isEdit ? (approvalReviewModal?.item?.pending_edit_by_name || approvalReviewModal?.item?.created_by_name) : approvalReviewModal?.item?.created_by_name
+            const on = isEdit ? approvalReviewModal?.item?.pending_edit_at : approvalReviewModal?.item?.created_at
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                {isEdit ? 'Edit submitted' : 'Submitted'} by <span className="font-semibold">{by || '—'}</span> on {on ? new Date(on).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+              </div>
+            )
+          })()}
 
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => { setApprovalReviewModal(null); setApprovalEditData({}) }}>Cancel</Button>

@@ -1,20 +1,19 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/hooks/use-toast"
 import { userApi, depotApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useAuthContext } from "@/contexts/auth-context"
-import { Plus, Pencil, Trash2, Loader2, RefreshCw, Users, Shield, Eye, EyeOff, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Pencil, Trash2, Loader2, RefreshCw, Settings, Shield, Eye, EyeOff, Search, Users, UserPlus } from "lucide-react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 import {
@@ -28,8 +27,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Separator } from "@/components/ui/separator"
-import { PageHeader } from "@/components/page-header"
 
 type AccessLevel = 'view_only' | 'modify'
 type PageAccessMap = Record<string, AccessLevel>
@@ -78,6 +75,9 @@ const PAGE_ACCESS_OPTIONS = [
   "Reports"
 ]
 
+// Pages that support per-page accessible depot/location selection
+const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Actual Dispatch", "Inventory"]
+
 const MASTER_TABS = [
   { key: "customers", label: "Customers" },
   { key: "depots", label: "Depots" },
@@ -89,7 +89,6 @@ const MASTER_TABS = [
   { key: "driver_master", label: "Drivers" },
   { key: "transport_master", label: "Transporters" },
 ]
-
 
 const STATUSES = ["active", "inactive"]
 
@@ -103,17 +102,16 @@ export default function SettingsPage() {
   const availableRoles = isSuperAdmin
     ? ["super_admin", "admin", "user", "guard", "pc"]
     : ["user", "guard", "pc"]
+
   const [searchQuery, setSearchQuery] = useState("")
-  const [sortField, setSortField] = useState<string>("id")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { ref: loadMoreRef, inView } = useInView()
 
-  // Dialog states
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  // Single dialog for create/edit (null selectedUser = create mode)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -150,8 +148,6 @@ export default function SettingsPage() {
     fetchDepots()
   }, [])
 
-  const [showPassword, setShowPassword] = useState(false)
-
   // User query with infinite pagination
   const {
     data: usersData,
@@ -166,7 +162,7 @@ export default function SettingsPage() {
       const response = await userApi.getAll({
         page: pageParam,
         limit: 20,
-        search: searchQuery // The API might not support search yet, but we'll pass it anyway
+        search: searchQuery
       });
       return response.success ? response.data : { users: [], pagination: { total: 0 } };
     },
@@ -187,25 +183,8 @@ export default function SettingsPage() {
     }
   }, [inView, hasNextPage, fetchNextPage]);
 
-  // Sort helper
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setSortField(field)
-      setSortDirection("asc")
-    }
-  }
-
-  const SortIcon = ({ field }: { field: string }) => {
-    if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return sortDirection === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Filter + Sort
-  const filteredAndSortedUsers = useMemo(() => {
+  // Filter (client-side, on top of server search)
+  const filteredUsers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
     let filtered = q
       ? users.filter(u =>
@@ -225,23 +204,11 @@ export default function SettingsPage() {
       )
     }
 
-    filtered.sort((a, b) => {
-      let aVal: any = (a as any)[sortField] ?? ""
-      let bVal: any = (b as any)[sortField] ?? ""
-      if (sortField === "id") {
-        aVal = Number(aVal); bVal = Number(bVal)
-      } else if (sortField === "created_at") {
-        aVal = new Date(aVal).getTime(); bVal = new Date(bVal).getTime()
-      } else {
-        aVal = String(aVal).toLowerCase(); bVal = String(bVal).toLowerCase()
-      }
-      if (aVal < bVal) return sortDirection === "asc" ? -1 : 1
-      if (aVal > bVal) return sortDirection === "asc" ? 1 : -1
-      return 0
-    })
+    // Always sort by ID (ascending)
+    filtered.sort((a, b) => Number(a.id) - Number(b.id))
 
     return filtered
-  }, [users, searchQuery, sortField, sortDirection])
+  }, [users, searchQuery, isSuperAdmin, currentUser?.id])
 
   // Reset form
   const resetForm = () => {
@@ -258,6 +225,22 @@ export default function SettingsPage() {
       master_tab_access: {} as MasterTabAccessMap
     })
     setShowPassword(false)
+  }
+
+  // Open create dialog
+  const openCreateDialog = () => {
+    resetForm()
+    setSelectedUser(null)
+    setIsDialogOpen(true)
+  }
+
+  // Submit (create or update based on selectedUser)
+  const handleSubmit = async () => {
+    if (selectedUser) {
+      await handleEditUser()
+    } else {
+      await handleAddUser()
+    }
   }
 
   // Handle add user
@@ -281,7 +264,7 @@ export default function SettingsPage() {
           description: "User created successfully",
         })
         refetchUsers()
-        setIsAddDialogOpen(false)
+        setIsDialogOpen(false)
         resetForm()
       }
     } catch (error: any) {
@@ -320,7 +303,7 @@ export default function SettingsPage() {
           title: "Success",
           description: "User updated successfully",
         })
-        setIsEditDialogOpen(false)
+        setIsDialogOpen(false)
         setSelectedUser(null)
         resetForm()
         refetchUsers()
@@ -442,7 +425,7 @@ export default function SettingsPage() {
       features: normalizedFeatures,
       master_tab_access: masterTabAccess
     })
-    setIsEditDialogOpen(true)
+    setIsDialogOpen(true)
   }
 
   // Open delete dialog
@@ -535,684 +518,250 @@ export default function SettingsPage() {
     return (formData.page_access as PageAccessMap)[page] || 'modify'
   }
 
-  // Helper: get readable page access for display in table
-  const getDisplayPageAccess = (user: User): { page: string; level: AccessLevel }[] => {
-    if (!user.page_access) return []
-    if (Array.isArray(user.page_access)) {
-      return user.page_access.map(p => ({ page: p, level: 'modify' as AccessLevel }))
+  // Helper: count enabled pages for display in table
+  const getPageAccessCount = (user: User): number => {
+    if (!user.page_access) return 0
+    let parsed: any = user.page_access
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed) } catch { return 0 }
     }
-    return Object.entries(user.page_access as PageAccessMap).map(([page, level]) => ({ page, level }))
+    if (Array.isArray(parsed)) return parsed.length
+    if (parsed && typeof parsed === 'object') return Object.keys(parsed).length
+    return 0
   }
 
+  const allPagesSelected = PAGE_ACCESS_OPTIONS.every(isPageEnabled)
+  // "Master" is excluded from page-wise view/modify: its access is binary (the checkbox
+  // grants access), and per-tab view/modify is controlled in the Accessible Master Tabs section.
+  const enabledPages = PAGE_ACCESS_OPTIONS.filter(p => p !== "Master" && isPageEnabled(p))
+  const enabledDepotPages = DEPOT_SCOPED_PAGES.filter(isPageEnabled)
+
+  const roleBadgeClass = (role: string) =>
+    role === "super_admin"
+      ? "border-purple-300 text-purple-700 bg-purple-50"
+      : role === "admin"
+        ? "border-blue-300 text-blue-700 bg-blue-50"
+        : "border-slate-200 text-slate-600 bg-slate-50"
+
   return (
-    <div className="p-4 md:p-8 max-w-[1600px] mx-auto min-h-screen space-y-8 animate-in fade-in duration-700">
-      {/* Header */}
-      <PageHeader
-        title="Settings"
-        description="Manage users, roles, and page access permissions"
-      >
-        <Button variant="outline" onClick={() => refetchUsers()} disabled={isUsersLoading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${isUsersLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-        <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
-          setIsAddDialogOpen(open)
-          if (!open) resetForm()
-        }}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary hover:bg-primary/90" disabled={isReadOnly} title={isReadOnly ? "View Only Access" : "Add User"}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add User
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px] max-h-[90dvh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>
-                Create a new user account with role and page access permissions.
-              </DialogDescription>
-            </DialogHeader>
-            {/* Inline form content to prevent re-mount on state change */}
-            <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-username">Username *</Label>
-                  <Input
-                    id="add-username"
-                    value={formData.username}
-                    onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder="Enter username"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-email">Email</Label>
-                  <Input
-                    id="add-email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="Enter email"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-password">Password *</Label>
-                  <div className="relative">
-                    <Input
-                      id="add-password"
-                      type={showPassword ? "text" : "password"}
-                      value={formData.password}
-                      onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                      placeholder="Enter password"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-phone">Phone Number</Label>
-                  <Input
-                    id="add-phone"
-                    value={formData.phone_no}
-                    onChange={(e) => setFormData(prev => ({ ...prev, phone_no: e.target.value }))}
-                    placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-role">Role *</Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, role: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRoles.map((role) => (
-                        <SelectItem key={role} value={role}>
-                          {role === 'super_admin' ? 'Super Admin' : role.charAt(0).toUpperCase() + role.slice(1)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-status">Status</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUSES.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status.charAt(0).toUpperCase() + status.slice(1)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Page Access</Label>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={selectAllPages}>
-                      Select All
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={deselectAllPages}>
-                      Deselect All
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-1.5 max-h-[260px] overflow-y-auto border rounded-lg p-3">
-                  {PAGE_ACCESS_OPTIONS.map((page) => (
-                    <div key={page} className="py-1 px-1 rounded hover:bg-slate-50 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`add-page-${page}`}
-                            checked={isPageEnabled(page)}
-                            onCheckedChange={() => togglePageAccess(page)}
-                          />
-                          <Label htmlFor={`add-page-${page}`} className="text-sm cursor-pointer font-normal">
-                            {page}
-                          </Label>
-                        </div>
-                        {isPageEnabled(page) && (
-                          <div className="flex rounded-md border overflow-hidden text-xs">
-                            <button
-                              type="button"
-                              onClick={() => setPageAccessLevel(page, 'view_only')}
-                              className={`px-2 py-0.5 font-medium transition-colors ${getPageLevel(page) === 'view_only'
-                                ? 'bg-amber-100 text-amber-700 border-amber-300'
-                                : 'bg-white text-slate-500 hover:bg-slate-50'
-                                }`}
-                            >
-                              View
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPageAccessLevel(page, 'modify')}
-                              className={`px-2 py-0.5 font-medium transition-colors border-l ${getPageLevel(page) === 'modify'
-                                ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                                : 'bg-white text-slate-500 hover:bg-slate-50'
-                                }`}
-                            >
-                              Modify
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {isPageEnabled(page) && (page === 'Dispatch Planning' || page === 'Actual Dispatch' || page === 'Order Punch' || page === 'Inventory') && (
-                        <div className="mt-2 ml-6 p-2 bg-slate-50 rounded-md border border-slate-100 space-y-2">
-                          <Label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Select Accessible Locations</Label>
-                          {isDepotsLoading ? (
-                            <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Fetching depots...
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-2 gap-2">
-                              {Array.isArray(depots) && depots.map((depo, idx) => (
-                                <div key={`${depo.depot_id || idx}-${page}`} className="flex items-center gap-2">
-                                  <Checkbox
-                                    id={`add-depo-${page}-${depo.depot_id}`}
-                                    checked={(formData.depo_access[page] || []).some(d => d.toLowerCase() === depo.depot_name.toLowerCase())}
-                                    onCheckedChange={() => toggleDepoAccess(page, depo.depot_name)}
-                                  />
-                                  <Label htmlFor={`add-depo-${page}-${depo.depot_id}`} className="text-xs font-normal cursor-pointer uppercase">{depo.depot_name}</Label>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {isPageEnabled('Master') && (
-                <div className="space-y-3 border rounded-xl p-4 bg-slate-50/50 mt-1">
-                  <div className="flex items-center justify-between border-b pb-2">
-                    <Label className="text-sm font-bold text-slate-800">Accessible Master Tabs</Label>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={selectAllMasterTabs} className="text-xs text-blue-600 hover:underline">All</button>
-                      <span className="text-xs text-slate-300">|</span>
-                      <button type="button" onClick={deselectAllMasterTabs} className="text-xs text-blue-600 hover:underline">None</button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    {MASTER_TABS.map(tab => {
-                      const tabEnabled = !!formData.master_tab_access[tab.key]
-                      const tabLevel = (formData.master_tab_access as MasterTabAccessMap)[tab.key] || 'modify'
-                      return (
-                        <div key={tab.key} className="py-1 px-1 rounded hover:bg-slate-100 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`add-master-${tab.key}`}
-                              checked={tabEnabled}
-                              onCheckedChange={() => toggleMasterTab(tab.key)}
-                            />
-                            <Label htmlFor={`add-master-${tab.key}`} className="text-xs font-normal cursor-pointer text-slate-700">{tab.label}</Label>
-                          </div>
-                          {tabEnabled && (
-                            <div className="flex rounded-md border overflow-hidden text-xs">
-                              <button
-                                type="button"
-                                onClick={() => setMasterTabLevel(tab.key, 'view_only')}
-                                className={`px-2 py-0.5 font-medium transition-colors ${
-                                  tabLevel === 'view_only'
-                                    ? 'bg-amber-100 text-amber-700 border-amber-300'
-                                    : 'bg-white text-slate-500 hover:bg-slate-50'
-                                }`}
-                              >
-                                View
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setMasterTabLevel(tab.key, 'modify')}
-                                className={`px-2 py-0.5 font-medium transition-colors border-l ${
-                                  tabLevel === 'modify'
-                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                                    : 'bg-white text-slate-500 hover:bg-slate-50'
-                                }`}
-                              >
-                                Modify
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+    <div className="space-y-6 p-4 md:p-6 max-w-[1400px] mx-auto">
+      {/* Gradient Header Banner */}
+      <div className="bg-gradient-to-br from-blue-100 via-purple-50 to-blue-50 rounded-xl border border-blue-100/60">
+        <div className="flex justify-between items-center p-5">
+          <div className="flex gap-3 items-center">
+            <div className="h-12 w-12 rounded-xl bg-white/70 border border-white flex items-center justify-center shadow-sm">
+              <Settings className="h-6 w-6 text-primary" />
             </div>
-
-            <div className="space-y-3">
-              <Label>Features</Label>
-              <div className="border rounded-lg p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="add-feature-can_reorder_columns"
-                    checked={!!formData.features.can_reorder_columns}
-                    onCheckedChange={(checked) =>
-                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_reorder_columns: !!checked } }))
-                    }
-                  />
-                  <Label htmlFor="add-feature-can_reorder_columns" className="text-sm cursor-pointer font-normal">
-                    Can reorder columns
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="add-feature-can_toggle_columns"
-                    checked={!!formData.features.can_toggle_columns}
-                    onCheckedChange={(checked) =>
-                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_toggle_columns: !!checked } }))
-                    }
-                  />
-                  <Label htmlFor="add-feature-can_toggle_columns" className="text-sm cursor-pointer font-normal">
-                    Can toggle columns
-                  </Label>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddUser} disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create User
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </PageHeader>
-
-      {/* User Management Card */}
-      <Card className="shadow-xl border-none rounded-2xl overflow-hidden bg-white">
-        <CardHeader className="border-b bg-slate-50/50 py-4 px-6">
-          <div className="flex flex-row items-center justify-between gap-4 flex-wrap">
             <div>
-              <CardTitle className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                User Management
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {filteredAndSortedUsers.length} of {users.length} user{users.length !== 1 ? 's' : ''} shown
-              </CardDescription>
-            </div>
-            {/* Search Box */}
-            <div className="relative w-full max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search by name, email, role..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-sm bg-white border-slate-200 focus:border-blue-400"
-              />
+              <h1 className="text-2xl font-bold text-primary">Settings</h1>
+              <p className="text-muted-foreground text-sm">Manage system configuration and user access</p>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {/* Mobile card view */}
-          <div className="md:hidden">
+          <SidebarTrigger />
+        </div>
+      </div>
+
+      {/* Toolbar: search + actions */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div className="relative w-full sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search by name, email, role..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <Button variant="outline" onClick={() => refetchUsers()} disabled={isUsersLoading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isUsersLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button
+            onClick={openCreateDialog}
+            disabled={isReadOnly}
+            title={isReadOnly ? "View Only Access" : "Create User"}
+          >
+            <UserPlus className="mr-2 h-4 w-4" />
+            Create User
+          </Button>
+        </div>
+      </div>
+
+      {/* Users Table */}
+      <ScrollArea className="rounded-md border bg-white h-[64dvh]">
+        <table className="w-full caption-bottom text-sm min-w-[760px]">
+          <thead className="[&_tr]:border-b">
+            <tr className="border-b bg-slate-50/70">
+              <th className="h-11 px-4 text-left align-middle font-semibold text-slate-600 w-[70px]">ID</th>
+              <th className="h-11 px-4 text-left align-middle font-semibold text-slate-600">Username</th>
+              <th className="h-11 px-4 text-left align-middle font-semibold text-slate-600">Email</th>
+              <th className="h-11 px-4 text-left align-middle font-semibold text-slate-600">Role</th>
+              <th className="h-11 px-4 text-center align-middle font-semibold text-slate-600">Status</th>
+              <th className="h-11 px-4 text-center align-middle font-semibold text-slate-600">Permissions</th>
+              <th className="h-11 px-4 text-center align-middle font-semibold text-slate-600 w-[120px]">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="[&_tr:last-child]:border-0">
             {isUsersLoading && users.length === 0 ? (
-              <div className="p-4 space-y-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="border border-slate-100 rounded-xl p-4 space-y-2 animate-pulse">
-                    <div className="h-4 w-32 bg-slate-200 rounded" />
-                    <div className="h-3 w-48 bg-slate-200 rounded" />
-                    <div className="h-3 w-24 bg-slate-200 rounded" />
-                  </div>
-                ))}
-              </div>
-            ) : users.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground py-16 px-4">
-                <Users className="h-12 w-12 text-slate-300" />
-                <div className="text-center">
-                  <p className="font-medium text-slate-600">No users found</p>
-                  <p className="text-sm text-slate-400">Click "Add User" to create one.</p>
-                </div>
-              </div>
-            ) : filteredAndSortedUsers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground py-16 px-4">
-                <Search className="h-10 w-10 text-slate-300" />
-                <p className="font-medium text-slate-600">No users match your search</p>
-                <p className="text-sm text-slate-400">Try a different keyword</p>
-              </div>
-            ) : (
-              <div className="p-3 space-y-3 overflow-auto" style={{ maxHeight: 600 }}>
-                {filteredAndSortedUsers.map((user) => {
-                  const pages = getDisplayPageAccess(user)
-                  const shown = pages.slice(0, 1)
-                  const rest = pages.length - 1
-                  return (
-                    <div key={user.id} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-slate-800 truncate">{user.username}</p>
-                          <p className="text-xs text-slate-500 truncate">{user.email || "—"}</p>
-                        </div>
-                        <div className="flex gap-1 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditDialog(user)}
-                            className="h-8 w-8 hover:bg-blue-50 hover:text-blue-600"
-                            disabled={isReadOnly}
-                            title={isReadOnly ? "View Only Access" : "Edit User"}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeleteDialog(user)}
-                            className="h-8 w-8 text-destructive hover:bg-red-50 hover:text-red-600"
-                            disabled={isReadOnly}
-                            title={isReadOnly ? "View Only Access" : "Delete User"}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 items-center">
-                        <Badge
-                          variant={user.status === "active" ? "default" : "secondary"}
-                          className={user.status === "active" ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : ""}
-                        >
-                          {user.status}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={user.role === "super_admin" ? "border-purple-500 text-purple-700 bg-purple-50" : user.role === "admin" ? "border-blue-500 text-blue-600 bg-blue-50" : "border-slate-300"}
-                        >
-                          <Shield className="h-3 w-3 mr-1" />
-                          {user.role}
-                        </Badge>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
-                        <div>
-                          <span className="font-medium text-slate-600">Phone: </span>
-                          {user.phone_no || "—"}
-                        </div>
-                        <div>
-                          <span className="font-medium text-slate-600">Created: </span>
-                          {new Date(user.created_at).toLocaleDateString("en-GB")}
-                        </div>
-                      </div>
-                      {pages.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {shown.map(({ page, level }) => (
-                            <Badge key={page} variant="secondary" className={`text-xs ${level === 'view_only' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>
-                              {page} {level === 'view_only' ? '👁' : ''}
-                            </Badge>
-                          ))}
-                          {rest > 0 && (
-                            <Badge variant="secondary" className="text-xs bg-slate-100">+{rest} more</Badge>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-                <div ref={loadMoreRef} className="py-4 flex justify-center">
-                  {isFetchingNextPage && (
-                    <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-xs tracking-widest">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>LOADING MORE USERS...</span>
-                    </div>
-                  )}
-                  {!hasNextPage && users.length > 0 && (
-                    <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest bg-white px-4 py-1.5 rounded-full border border-slate-100 italic">
-                      END OF USERS
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Desktop table view */}
-          <div className="hidden md:block overflow-auto rounded-b-2xl" style={{ maxHeight: 600 }}>
-            <table className="w-full caption-bottom text-sm">
-              <thead className="[&_tr]:border-b">
-                <tr>
-                  <th className="sticky top-0 left-0 z-30 bg-slate-50 w-[60px] pl-6 cursor-pointer whitespace-nowrap select-none border-r border-b border-slate-200 h-10 px-2 text-left align-middle font-medium text-sm" onClick={() => handleSort("id")}>
-                    ID <SortIcon field="id" />
-                  </th>
-                  <th className="sticky top-0 left-[60px] z-30 bg-slate-50 cursor-pointer whitespace-nowrap select-none border-r border-b border-slate-200 h-10 px-2 text-left align-middle font-medium text-sm" onClick={() => handleSort("username")}>
-                    Username <SortIcon field="username" />
-                  </th>
-                  <th className="sticky top-0 left-[120px] z-30 bg-slate-50 cursor-pointer whitespace-nowrap select-none border-r border-b border-slate-200 h-10 px-2 text-left align-middle font-medium text-sm" onClick={() => handleSort("email")}>
-                    Email <SortIcon field="email" />
-                  </th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 cursor-pointer whitespace-nowrap select-none h-10 px-2 text-left align-middle font-medium text-sm" onClick={() => handleSort("phone_no")}>
-                    Phone <SortIcon field="phone_no" />
-                  </th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 text-center cursor-pointer whitespace-nowrap select-none h-10 px-2 align-middle font-medium text-sm" onClick={() => handleSort("status")}>
-                    Status <SortIcon field="status" />
-                  </th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 text-center cursor-pointer whitespace-nowrap select-none h-10 px-2 align-middle font-medium text-sm" onClick={() => handleSort("role")}>
-                    Role <SortIcon field="role" />
-                  </th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 h-10 px-2 text-left align-middle font-medium text-sm">Page Access</th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 cursor-pointer whitespace-nowrap select-none h-10 px-2 text-left align-middle font-medium text-sm" onClick={() => handleSort("created_at")}>
-                    Created At <SortIcon field="created_at" />
-                  </th>
-                  <th className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 text-center w-[100px] pr-6 h-10 px-2 align-middle font-medium text-sm">Actions</th>
+              [...Array(6)].map((_, i) => (
+                <tr key={i} className="border-b">
+                  {[...Array(7)].map((_, j) => (
+                    <td key={j} className="px-4 py-3">
+                      <div className="h-4 w-full bg-slate-100 animate-pulse rounded" />
+                    </td>
+                  ))}
                 </tr>
-              </thead>
-              <tbody className="[&_tr:last-child]:border-0">
-                {isUsersLoading && users.length === 0 ? (
-                  [...Array(5)].map((_, i) => (
-                    <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
-                      <TableCell className="pl-6"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell><div className="h-4 w-24 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell><div className="h-4 w-40 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell><div className="h-4 w-24 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell className="text-center"><div className="h-5 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                      <TableCell className="text-center"><div className="h-5 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                      <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
-                      <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded mx-auto" /></TableCell>
-                    </TableRow>
-                  ))
-                ) : users.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="text-center py-16 p-2 align-middle">
-                      <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                        <Users className="h-12 w-12 text-slate-300" />
-                        <div>
-                          <p className="font-medium text-slate-600">No users found</p>
-                          <p className="text-sm text-slate-400">Click "Add User" to create one.</p>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredAndSortedUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="text-center py-16 p-2 align-middle">
-                      <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                        <Search className="h-10 w-10 text-slate-300" />
-                        <p className="font-medium text-slate-600">No users match your search</p>
-                        <p className="text-sm text-slate-400">Try a different keyword</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredAndSortedUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50/50 border-b transition-colors">
-                      <td className="sticky left-0 z-10 bg-white font-medium pl-6 p-2 align-middle whitespace-nowrap border-r border-slate-100">{user.id}</td>
-                      <td className="sticky left-[60px] z-10 bg-white font-semibold text-slate-800 p-2 align-middle whitespace-nowrap border-r border-slate-100">{user.username}</td>
-                      <td className="sticky left-[120px] z-10 bg-white text-slate-600 p-2 align-middle whitespace-nowrap border-r border-slate-100 max-w-[200px] truncate">{user.email}</td>
-                      <td className="text-slate-600 p-2 align-middle whitespace-nowrap">{user.phone_no || "—"}</td>
-                      <td className="text-center p-2 align-middle whitespace-nowrap">
-                        <Badge
-                          variant={user.status === "active" ? "default" : "secondary"}
-                          className={user.status === "active" ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : ""}
-                        >
-                          {user.status}
-                        </Badge>
-                      </td>
-                      <td className="text-center p-2 align-middle whitespace-nowrap">
-                        <Badge
-                          variant="outline"
-                          className={user.role === "super_admin" ? "border-purple-500 text-purple-700 bg-purple-50" : user.role === "admin" ? "border-blue-500 text-blue-600 bg-blue-50" : "border-slate-300"}
-                        >
-                          <Shield className="h-3 w-3 mr-1" />
-                          {user.role}
-                        </Badge>
-                      </td>
-                      <td className="p-2 align-middle">
-                        <div className="flex flex-wrap gap-1 max-w-[220px]">
-                          {(() => {
-                            const pages = getDisplayPageAccess(user)
-                            if (pages.length === 0) return <span className="text-muted-foreground text-sm">None</span>
-                            const shown = pages.slice(0, 1)
-                            const rest = pages.length - 1
-                            return (
-                              <>
-                                {shown.map(({ page, level }) => (
-                                  <Badge key={page} variant="secondary" className={`text-xs ${level === 'view_only' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
-                                    }`}>
-                                    {page} {level === 'view_only' ? '👁' : ''}
-                                  </Badge>
-                                ))}
-                                {rest > 0 && (
-                                  <Badge variant="secondary" className="text-xs bg-slate-100">
-                                    +{rest} more
-                                  </Badge>
-                                )}
-                              </>
-                            )
-                          })()}
-                        </div>
-                      </td>
-                      <td className="p-2 align-middle whitespace-nowrap text-sm text-slate-500">
-                        {new Date(user.created_at).toLocaleDateString("en-GB")}
-                      </td>
-                      <td className="pr-6 p-2 align-middle">
-                        <div className="flex justify-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditDialog(user)}
-                            className="h-8 w-8 hover:bg-blue-50 hover:text-blue-600"
-                            disabled={isReadOnly}
-                            title={isReadOnly ? "View Only Access" : "Edit User"}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeleteDialog(user)}
-                            className="h-8 w-8 text-destructive hover:bg-red-50 hover:text-red-600"
-                            disabled={isReadOnly}
-                            title={isReadOnly ? "View Only Access" : "Delete User"}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-            <div ref={loadMoreRef} className="py-4 flex justify-center border-t border-slate-50 bg-slate-50/30">
-              {isFetchingNextPage && (
-                <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-xs tracking-widest ">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>LOADING MORE USERS...</span>
-                </div>
-              )}
-              {!hasNextPage && users.length > 0 && (
-                <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest bg-white px-4 py-1.5 rounded-full border border-slate-100 italic">
-                  END OF USERS
-                </span>
-              )}
+              ))
+            ) : filteredUsers.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center py-20">
+                  <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                    <Users className="h-12 w-12 text-slate-300" />
+                    <div>
+                      <p className="font-semibold text-slate-600">No users found</p>
+                      <p className="text-sm text-slate-400">
+                        {searchQuery ? "Try a different keyword." : 'Click "Create User" to add one.'}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              filteredUsers.map((user) => (
+                <tr key={user.id} className="border-b hover:bg-slate-50/60 transition-colors">
+                  <td className="px-4 py-3 align-middle font-medium text-slate-500">{user.id}</td>
+                  <td className="px-4 py-3 align-middle font-semibold text-slate-800">{user.username}</td>
+                  <td className="px-4 py-3 align-middle text-slate-600 max-w-[220px] truncate">{user.email || "—"}</td>
+                  <td className="px-4 py-3 align-middle">
+                    <Badge variant="outline" className={`rounded-full ${roleBadgeClass(user.role)}`}>
+                      <Shield className="h-3 w-3 mr-1" />
+                      {user.role === 'super_admin' ? 'Super Admin' : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 align-middle text-center">
+                    <Badge
+                      variant={user.status === "active" ? "default" : "secondary"}
+                      className={`rounded-full ${user.status === "active" ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : ""}`}
+                    >
+                      {user.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <div className="grid place-items-center">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => openEditDialog(user)}
+                      >
+                        <Eye className="w-3 h-3 mr-1.5" />
+                        View Permissions
+                        <span className="ml-1.5 text-[10px] text-slate-500">({getPageAccessCount(user)})</span>
+                      </Button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <div className="flex items-center justify-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2"
+                        onClick={() => openEditDialog(user)}
+                        disabled={isReadOnly}
+                        title={isReadOnly ? "View Only Access" : "Edit User"}
+                      >
+                        <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => openDeleteDialog(user)}
+                        disabled={isReadOnly}
+                        title={isReadOnly ? "View Only Access" : "Delete User"}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        <div ref={loadMoreRef} className="py-4 flex justify-center">
+          {isFetchingNextPage && (
+            <div className="flex items-center gap-2 text-primary text-xs font-semibold">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Loading more users…</span>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
+          )}
+          {!hasNextPage && users.length > 0 && (
+            <span className="text-xs text-muted-foreground">All {users.length} users loaded</span>
+          )}
+        </div>
+      </ScrollArea>
 
       {/* Footer */}
-      <div className="flex items-center justify-center pt-12 border-t border-slate-100 opacity-100">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em] hover:text-primary transition-colors cursor-default">
+      <div className="flex items-center justify-center pt-6">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em]">
           Powered by Botivate
         </p>
       </div>
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
-        setIsEditDialogOpen(open)
+      {/* Create / Edit Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={(open) => {
+        setIsDialogOpen(open)
         if (!open) {
           resetForm()
           setSelectedUser(null)
         }
       }}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90dvh] flex flex-col">
+        <DialogContent className="w-full max-w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
+            <DialogTitle className="text-lg">
+              {selectedUser ? "Edit" : "Create"} User Access
+            </DialogTitle>
             <DialogDescription>
-              Update user details and permissions for {selectedUser?.username}.
+              {selectedUser
+                ? `Update details and permissions for ${selectedUser.username}.`
+                : "Create a new user account with role and page access permissions."}
             </DialogDescription>
           </DialogHeader>
-          {/* Inline form content to prevent re-mount on state change */}
-          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-            <div className="grid grid-cols-2 gap-4">
+
+          <div className="space-y-7 py-2">
+            {/* Basic details */}
+            <div className="grid md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-username">Username *</Label>
+                <Label htmlFor="user-username">Username *</Label>
                 <Input
-                  id="edit-username"
+                  id="user-username"
                   value={formData.username}
                   onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
                   placeholder="Enter username"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-email">Email</Label>
+                <Label htmlFor="user-email">Email</Label>
                 <Input
-                  id="edit-email"
+                  id="user-email"
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                   placeholder="Enter email"
                 />
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-password">Password</Label>
+                <Label htmlFor="user-password">Password {selectedUser ? "" : "*"}</Label>
                 <div className="relative">
                   <Input
-                    id="edit-password"
+                    id="user-password"
                     type={showPassword ? "text" : "password"}
                     value={formData.password}
                     onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="Leave blank to keep current"
+                    placeholder={selectedUser ? "Leave blank to keep current" : "Enter password"}
                   />
                   <Button
                     type="button"
@@ -1226,24 +775,21 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-phone">Phone Number</Label>
+                <Label htmlFor="user-phone">Phone Number</Label>
                 <Input
-                  id="edit-phone"
+                  id="user-phone"
                   value={formData.phone_no}
                   onChange={(e) => setFormData(prev => ({ ...prev, phone_no: e.target.value }))}
                   placeholder="Enter phone number"
                 />
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-role">Role *</Label>
+                <Label htmlFor="user-role">Role *</Label>
                 <Select
                   value={formData.role}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, role: value }))}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="user-role">
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1256,12 +802,12 @@ export default function SettingsPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-status">Status</Label>
+                <Label htmlFor="user-status">Status</Label>
                 <Select
                   value={formData.status}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="user-status">
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1275,133 +821,135 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Page Access</Label>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={selectAllPages}>
+            {/* Page Access */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-end">
+                <Label className="text-md">Page Access</Label>
+                <div className="flex items-center gap-2 pb-1">
+                  <Checkbox
+                    id="select-all-pages"
+                    checked={allPagesSelected}
+                    onCheckedChange={(checked) => (checked ? selectAllPages() : deselectAllPages())}
+                  />
+                  <label htmlFor="select-all-pages" className="text-sm font-bold cursor-pointer">
                     Select All
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={deselectAllPages}>
-                    Deselect All
-                  </Button>
+                  </label>
                 </div>
               </div>
-              <div className="space-y-1.5 max-h-[260px] overflow-y-auto border rounded-lg p-3">
+              <div className="grid md:grid-cols-3 gap-3 p-4 border rounded-md max-h-[260px] overflow-y-auto">
                 {PAGE_ACCESS_OPTIONS.map((page) => (
-                  <div key={page} className="py-1 px-1 rounded hover:bg-slate-50 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`edit-page-${page}`}
-                          checked={isPageEnabled(page)}
-                          onCheckedChange={() => togglePageAccess(page)}
-                        />
-                        <Label htmlFor={`edit-page-${page}`} className="text-sm cursor-pointer font-normal">
-                          {page}
-                        </Label>
-                      </div>
-                      {isPageEnabled(page) && (
-                        <div className="flex rounded-md border overflow-hidden text-xs">
-                          <button
-                            type="button"
-                            onClick={() => setPageAccessLevel(page, 'view_only')}
-                            className={`px-2 py-0.5 font-medium transition-colors ${getPageLevel(page) === 'view_only'
-                              ? 'bg-amber-100 text-amber-700 border-amber-300'
-                              : 'bg-white text-slate-500 hover:bg-slate-50'
-                              }`}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPageAccessLevel(page, 'modify')}
-                            className={`px-2 py-0.5 font-medium transition-colors border-l ${getPageLevel(page) === 'modify'
-                              ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                              : 'bg-white text-slate-500 hover:bg-slate-50'
-                              }`}
-                          >
-                            Modify
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    {isPageEnabled(page) && (page === 'Dispatch Planning' || page === 'Actual Dispatch' || page === 'Order Punch' || page === 'Inventory') && (
-                      <div className="mt-2 ml-6 p-2 bg-slate-50 rounded-md border border-slate-100 space-y-2">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Select Accessible Locations</Label>
-                        {isDepotsLoading ? (
-                          <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Fetching depots...
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-2">
-                            {Array.isArray(depots) && depots.map((depo, idx) => (
-                              <div key={`${depo.depot_id || idx}-${page}`} className="flex items-center gap-2">
-                                <Checkbox
-                                  id={`edit-depo-${page}-${depo.depot_id}`}
-                                  checked={(formData.depo_access[page] || []).some(d => d.toLowerCase() === depo.depot_name.toLowerCase())}
-                                  onCheckedChange={() => toggleDepoAccess(page, depo.depot_name)}
-                                />
-                                <Label htmlFor={`edit-depo-${page}-${depo.depot_id}`} className="text-xs font-normal cursor-pointer uppercase">{depo.depot_name}</Label>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  <div key={page} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`page-${page}`}
+                      checked={isPageEnabled(page)}
+                      onCheckedChange={() => togglePageAccess(page)}
+                    />
+                    <Label htmlFor={`page-${page}`} className="font-normal cursor-pointer text-sm">
+                      {page}
+                    </Label>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* Page-wise Access Level (View / Modify) */}
+            {enabledPages.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-md">Page-wise Access Level</Label>
+                <div className="grid md:grid-cols-2 gap-3 p-4 border rounded-md max-h-[240px] overflow-y-auto">
+                  {enabledPages.map((page) => (
+                    <div key={page} className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-light truncate">{page}</span>
+                      <Select
+                        value={getPageLevel(page)}
+                        onValueChange={(val) => setPageAccessLevel(page, val as AccessLevel)}
+                      >
+                        <SelectTrigger className="w-28 h-7 text-xs shrink-0">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="modify">Modify</SelectItem>
+                          <SelectItem value="view_only">View Only</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Location (Depot) Access */}
+            {enabledDepotPages.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-md">Location Access</Label>
+                <div className="space-y-4 p-4 border rounded-md max-h-[280px] overflow-y-auto">
+                  {enabledDepotPages.map((page) => (
+                    <div key={page} className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{page}</p>
+                      {isDepotsLoading ? (
+                        <div className="flex items-center gap-1 text-xs text-slate-400">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Fetching depots…
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {Array.isArray(depots) && depots.map((depo, idx) => (
+                            <div key={`${depo.depot_id || idx}-${page}`} className="flex items-center gap-2">
+                              <Checkbox
+                                id={`depo-${page}-${depo.depot_id}`}
+                                checked={(formData.depo_access[page] || []).some(d => d.toLowerCase() === depo.depot_name.toLowerCase())}
+                                onCheckedChange={() => toggleDepoAccess(page, depo.depot_name)}
+                              />
+                              <Label htmlFor={`depo-${page}-${depo.depot_id}`} className="text-xs font-normal cursor-pointer uppercase">
+                                {depo.depot_name}
+                              </Label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Master Tabs */}
             {isPageEnabled('Master') && (
-              <div className="space-y-3 border rounded-xl p-4 bg-slate-50/50 mt-1">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <Label className="text-sm font-bold text-slate-800">Accessible Master Tabs</Label>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={selectAllMasterTabs} className="text-xs text-blue-600 hover:underline">All</button>
+              <div className="space-y-2">
+                <div className="flex justify-between items-end">
+                  <Label className="text-md">Accessible Master Tabs</Label>
+                  <div className="flex gap-2 pb-1">
+                    <button type="button" onClick={selectAllMasterTabs} className="text-xs text-primary hover:underline">All</button>
                     <span className="text-xs text-slate-300">|</span>
-                    <button type="button" onClick={deselectAllMasterTabs} className="text-xs text-blue-600 hover:underline">None</button>
+                    <button type="button" onClick={deselectAllMasterTabs} className="text-xs text-primary hover:underline">None</button>
                   </div>
                 </div>
-                <div className="space-y-1.5">
+                <div className="grid md:grid-cols-2 gap-3 p-4 border rounded-md max-h-[260px] overflow-y-auto">
                   {MASTER_TABS.map(tab => {
                     const tabEnabled = !!formData.master_tab_access[tab.key]
                     const tabLevel = (formData.master_tab_access as MasterTabAccessMap)[tab.key] || 'modify'
                     return (
-                      <div key={tab.key} className="py-1 px-1 rounded hover:bg-slate-100 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div key={tab.key} className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                           <Checkbox
-                            id={`edit-master-${tab.key}`}
+                            id={`master-${tab.key}`}
                             checked={tabEnabled}
                             onCheckedChange={() => toggleMasterTab(tab.key)}
                           />
-                          <Label htmlFor={`edit-master-${tab.key}`} className="text-xs font-normal cursor-pointer text-slate-700">{tab.label}</Label>
+                          <Label htmlFor={`master-${tab.key}`} className="text-sm font-normal cursor-pointer truncate">{tab.label}</Label>
                         </div>
                         {tabEnabled && (
-                          <div className="flex rounded-md border overflow-hidden text-xs">
-                            <button
-                              type="button"
-                              onClick={() => setMasterTabLevel(tab.key, 'view_only')}
-                              className={`px-2 py-0.5 font-medium transition-colors ${
-                                tabLevel === 'view_only'
-                                  ? 'bg-amber-100 text-amber-700 border-amber-300'
-                                  : 'bg-white text-slate-500 hover:bg-slate-50'
-                              }`}
-                            >
-                              View
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setMasterTabLevel(tab.key, 'modify')}
-                              className={`px-2 py-0.5 font-medium transition-colors border-l ${
-                                tabLevel === 'modify'
-                                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                                  : 'bg-white text-slate-500 hover:bg-slate-50'
-                              }`}
-                            >
-                              Modify
-                            </button>
-                          </div>
+                          <Select
+                            value={tabLevel}
+                            onValueChange={(val) => setMasterTabLevel(tab.key, val as AccessLevel)}
+                          >
+                            <SelectTrigger className="w-28 h-7 text-xs shrink-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="modify">Modify</SelectItem>
+                              <SelectItem value="view_only">View Only</SelectItem>
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
                     )
@@ -1410,43 +958,45 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <div className="space-y-3">
-              <Label>Features</Label>
-              <div className="border rounded-lg p-3 space-y-2">
+            {/* Features */}
+            <div className="space-y-2">
+              <Label className="text-md">Features</Label>
+              <div className="grid md:grid-cols-2 gap-3 p-4 border rounded-md">
                 <div className="flex items-center gap-2">
                   <Checkbox
-                    id="edit-feature-can_reorder_columns"
+                    id="feature-can_reorder_columns"
                     checked={!!formData.features.can_reorder_columns}
                     onCheckedChange={(checked) =>
                       setFormData(prev => ({ ...prev, features: { ...prev.features, can_reorder_columns: !!checked } }))
                     }
                   />
-                  <Label htmlFor="edit-feature-can_reorder_columns" className="text-sm cursor-pointer font-normal">
+                  <Label htmlFor="feature-can_reorder_columns" className="text-sm cursor-pointer font-normal">
                     Can reorder columns
                   </Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox
-                    id="edit-feature-can_toggle_columns"
+                    id="feature-can_toggle_columns"
                     checked={!!formData.features.can_toggle_columns}
                     onCheckedChange={(checked) =>
                       setFormData(prev => ({ ...prev, features: { ...prev.features, can_toggle_columns: !!checked } }))
                     }
                   />
-                  <Label htmlFor="edit-feature-can_toggle_columns" className="text-sm cursor-pointer font-normal">
+                  <Label htmlFor="feature-can_toggle_columns" className="text-sm cursor-pointer font-normal">
                     Can toggle columns
                   </Label>
                 </div>
               </div>
             </div>
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Cancel
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              Close
             </Button>
-            <Button onClick={handleEditUser} disabled={isSubmitting}>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
+              {selectedUser ? "Save Changes" : "Create User"}
             </Button>
           </DialogFooter>
         </DialogContent>
