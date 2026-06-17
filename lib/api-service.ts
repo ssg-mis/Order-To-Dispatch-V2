@@ -20,6 +20,28 @@ export interface ApiError {
   timestamp: string;
 }
 
+/**
+ * Build a query string from params, omitting null/undefined/empty values.
+ * Avoids the URLSearchParams pitfall where `undefined` serializes to the
+ * literal string "undefined" (which would break server-side filters).
+ */
+function buildQuery(params?: Record<string, any>): string {
+  if (!params) return '';
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((v) => {
+        if (v !== undefined && v !== null && v !== '') sp.append(key, String(v));
+      });
+    } else {
+      sp.append(key, String(value));
+    }
+  });
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
+
 export interface OrderProduct {
   product_name: string;
   uom?: string;
@@ -419,12 +441,11 @@ export const actualDispatchApi = {
     search?: string;
     party_name?: string;
     depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/actual-dispatch/pending${queryString}`);
+    return request(`/actual-dispatch/pending${buildQuery(params)}`);
   },
 
   /**
@@ -436,12 +457,11 @@ export const actualDispatchApi = {
     search?: string;
     party_name?: string;
     depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/actual-dispatch/history${queryString}`);
+    return request(`/actual-dispatch/history${buildQuery(params)}`);
   },
 
   /**
@@ -644,13 +664,19 @@ export const securityGuardApprovalApi = {
     search?: string;
     customer_name?: string;
     depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
     let url = '/security-approval/pending?';
     if (params) {
-      const { page, limit, search, customer_name, depo_names } = params;
+      const { page, limit, search, customer_name, depo_names, manual_sauda_no, do_date_from, do_date_to } = params;
       if (page) url += `page=${page}&`;
       if (limit) url += `limit=${limit}&`;
       if (search) url += `search=${encodeURIComponent(search)}&`;
+      if (manual_sauda_no) url += `manual_sauda_no=${encodeURIComponent(manual_sauda_no)}&`;
+      if (do_date_from) url += `do_date_from=${encodeURIComponent(do_date_from)}&`;
+      if (do_date_to) url += `do_date_to=${encodeURIComponent(do_date_to)}&`;
       if (customer_name) url += `customer_name=${encodeURIComponent(customer_name)}&`;
       if (depo_names && depo_names.length > 0) {
         depo_names.forEach(d => url += `depo_names=${encodeURIComponent(d)}&`);
@@ -670,13 +696,19 @@ export const securityGuardApprovalApi = {
     depo_names?: string[];
     start_date?: string;
     end_date?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
     let url = '/security-approval/history?';
     if (params) {
-      const { page, limit, search, customer_name, depo_names, start_date, end_date } = params;
+      const { page, limit, search, customer_name, depo_names, start_date, end_date, manual_sauda_no, do_date_from, do_date_to } = params;
       if (page) url += `page=${page}&`;
       if (limit) url += `limit=${limit}&`;
       if (search) url += `search=${encodeURIComponent(search)}&`;
+      if (manual_sauda_no) url += `manual_sauda_no=${encodeURIComponent(manual_sauda_no)}&`;
+      if (do_date_from) url += `do_date_from=${encodeURIComponent(do_date_from)}&`;
+      if (do_date_to) url += `do_date_to=${encodeURIComponent(do_date_to)}&`;
       if (customer_name) url += `customer_name=${encodeURIComponent(customer_name)}&`;
       if (depo_names && depo_names.length > 0) {
         depo_names.forEach(d => url += `depo_names=${encodeURIComponent(d)}&`);
@@ -723,11 +755,11 @@ export const makeInvoiceApi = {
     so_no?: string;
     party_name?: string;
     search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/make-invoice/pending${queryString}`);
+    return request(`/make-invoice/pending${buildQuery(params)}`);
   },
 
   getHistory: async (params?: {
@@ -737,11 +769,11 @@ export const makeInvoiceApi = {
     so_no?: string;
     party_name?: string;
     search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/make-invoice/history${queryString}`);
+    return request(`/make-invoice/history${buildQuery(params)}`);
   },
 
   getById: async (id: number | string): Promise<ApiResponse> => {
@@ -766,11 +798,12 @@ export const checkInvoiceApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/check-invoice/pending${queryString}`);
+    return request(`/check-invoice/pending${buildQuery(params)}`);
   },
 
   getHistory: async (params?: {
@@ -779,11 +812,12 @@ export const checkInvoiceApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/check-invoice/history${queryString}`);
+    return request(`/check-invoice/history${buildQuery(params)}`);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -804,11 +838,12 @@ export const gateOutApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/gate-out/pending${queryString}`);
+    return request(`/gate-out/pending${buildQuery(params)}`);
   },
 
   getHistory: async (params?: {
@@ -817,11 +852,12 @@ export const gateOutApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/gate-out/history${queryString}`);
+    return request(`/gate-out/history${buildQuery(params)}`);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -843,11 +879,12 @@ export const confirmMaterialReceiptApi = {
     so_no?: string;
     party_name?: string;
     depo_names?: string[];
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/confirm-receipt/pending${queryString}`);
+    return request(`/confirm-receipt/pending${buildQuery(params)}`);
   },
 
   getHistory: async (params?: {
@@ -857,11 +894,12 @@ export const confirmMaterialReceiptApi = {
     so_no?: string;
     party_name?: string;
     depo_names?: string[];
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/confirm-receipt/history${queryString}`);
+    return request(`/confirm-receipt/history${buildQuery(params)}`);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -882,11 +920,12 @@ export const damageAdjustmentApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/damage-adjustment/pending${queryString}`);
+    return request(`/damage-adjustment/pending${buildQuery(params)}`);
   },
 
   getHistory: async (params?: {
@@ -895,11 +934,12 @@ export const damageAdjustmentApi = {
     d_sr_number?: string;
     so_no?: string;
     party_name?: string;
+    search?: string;
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/damage-adjustment/history${queryString}`);
+    return request(`/damage-adjustment/history${buildQuery(params)}`);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {

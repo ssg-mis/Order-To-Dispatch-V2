@@ -212,7 +212,8 @@ export default function GateOutPage() {
     startDate: "",
     endDate: "",
     partyName: "",
-    search: ""
+    search: "",
+    manualSaudaNo: ""
   })
   const [isProcessing, setIsProcessing] = useState(false)
   const formatDate = (dateStr: string) => {
@@ -275,7 +276,10 @@ export default function GateOutPage() {
       const response = await gateOutApi.getPending({
         page: pageParam,
         limit: 20,
-        so_no: filterValues.search,
+        search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
       return response.success ? response.data : { orders: [], pagination: { total: 0 } };
@@ -301,7 +305,10 @@ export default function GateOutPage() {
       const response = await gateOutApi.getHistory({
         page: pageParam,
         limit: 20,
-        so_no: filterValues.search,
+        search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
       return response.success ? response.data : { orders: [], pagination: { total: 0 } };
@@ -372,32 +379,9 @@ export default function GateOutPage() {
 
   /* Filter Logic */
 
-  const filteredPendingOrders = pendingOrders.filter(order => {
-    let matches = true
-
-    // Filter by Party Name
-    if (filterValues.partyName && filterValues.partyName !== "all" && order.party_name !== filterValues.partyName) {
-      matches = false
-    }
-
-    // Filter by Date Range
-    const orderDateStr = order.timestamp || order.planned_7
-    if (orderDateStr) {
-      const orderDate = new Date(orderDateStr)
-      if (filterValues.startDate) {
-        const start = new Date(filterValues.startDate)
-        start.setHours(0, 0, 0, 0)
-        if (orderDate < start) matches = false
-      }
-      if (filterValues.endDate) {
-        const end = new Date(filterValues.endDate)
-        end.setHours(23, 59, 59, 999)
-        if (orderDate > end) matches = false
-      }
-    }
-
-    return matches
-  })
+  // Search, Manual Sauda No., DO Date range and Party Name are all applied
+  // server-side (see getPending/getHistory params), so no client-side filtering here.
+  const filteredPendingOrders = pendingOrders
 
   /* Grouping Logic */
   const displayRows = useMemo(() => {
@@ -758,7 +742,10 @@ export default function GateOutPage() {
       stageLevel={8}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
-      showDateFilters={false}
+      showDateFilters={true}
+      showSaudaFilter={true}
+      dateLabel="DO Date"
+      searchPlaceholder="Search DO Number or Customer..."
       historyFooter={
         <div ref={historyEndRef} className="py-4 flex justify-center">
           {isFetchingNextHistory && (
@@ -831,8 +818,8 @@ export default function GateOutPage() {
                       if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
                       if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer<PendingSortIcon field="customerName" /></SortableTableHead>
                       if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number(s)<PendingSortIcon field="orderNo" /></SortableTableHead>
-                      if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls + " text-center"} onClick={() => handlePendingSort("actual1Date")}>Actual 1<PendingSortIcon field="actual1Date" /></SortableTableHead>
-                      if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Process ID<PendingSortIcon field="processid" /></SortableTableHead>
+                      if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls + " text-center"} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
+                      if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
                       if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No<PendingSortIcon field="invoiceNo" /></SortableTableHead>
                       if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No<PendingSortIcon field="vehicleNo" /></SortableTableHead>
                       if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
@@ -972,13 +959,13 @@ export default function GateOutPage() {
                     <div className="mt-4 grid grid-cols-2 gap-3 border-y border-slate-100 py-3">
                       {visibleColumns.includes("actual1Date") && (
                         <div>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Actual 1 Date</p>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dispatched Date</p>
                           <p className="text-xs font-bold text-blue-700">{group.actual1Date}</p>
                         </div>
                       )}
                       {visibleColumns.includes("processid") && (
                         <div>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Process ID</p>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Manual Sauda No.</p>
                           <p className="text-xs font-bold text-slate-700 break-words">{group.processId}</p>
                         </div>
                       )}

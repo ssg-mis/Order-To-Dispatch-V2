@@ -1,7 +1,7 @@
 export const ALL_WORKFLOW_COLUMNS = [
   { id: "products", label: "Items" },
   { id: "orderNo", label: "DO Number" },
-  { id: "actual1Date", label: "Actual 1 Date" },
+  { id: "actual1Date", label: "Dispatched Date" },
   { id: "orderPunchRemarks", label: "Order Punch Remarks" },
   { id: "deliveryPurpose", label: "ORDER TYPE (DELIVERY PURPOSE)" },
   { id: "customerType", label: "Customer Type" },
@@ -34,7 +34,7 @@ export const ALL_WORKFLOW_COLUMNS = [
   { id: "deliveryDate", label: "Expected Delivery Date" },
   { id: "qtyToDispatch", label: "Qty to Dispatch" },
   { id: "deliveryFrom", label: "Delivery From" },
-  { id: "processid", label: "Process ID" },
+  { id: "processid", label: "Manual Sauda No." },
   { id: "party_credit_status", label: "Party Credit Status" },
   { id: "dispatch_date_confirmed", label: "Dispatch Date Confirmed" },
   { id: "overall_status_of_order", label: "Overall Status Of Order" },

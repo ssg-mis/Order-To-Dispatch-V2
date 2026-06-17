@@ -88,7 +88,7 @@ async function compressImageForUpload(file: File): Promise<File> {
 const PAGE_COLUMNS = [
   { id: "partySoDate",       label: "DO Date" },
   { id: "doNumber",          label: "DO Number" },
-  { id: "processId",         label: "Process ID" },
+  { id: "processId",         label: "Manual Sauda No." },
   { id: "customerName",      label: "Customer Name" },
   { id: "products",          label: "Products" },
   { id: "invoiceNo",         label: "Invoice No." },
@@ -111,7 +111,8 @@ export default function MaterialReceiptPage() {
     startDate: "",
     endDate: "",
     partyName: "",
-    search: ""
+    search: "",
+    manualSaudaNo: ""
   })
   const [isProcessing, setIsProcessing] = useState(false)
 
@@ -164,12 +165,15 @@ export default function MaterialReceiptPage() {
     isLoading: isPendingLoading,
     refetch: refetchPending,
   } = useQuery({
-    queryKey: ["pending-material-receipt", filterValues.search, filterValues.partyName, user?.depo_access?.['Confirm Material Receipt'], pendingPage],
+    queryKey: ["pending-material-receipt", filterValues.search, filterValues.manualSaudaNo, filterValues.startDate, filterValues.endDate, filterValues.partyName, user?.depo_access?.['Confirm Material Receipt'], pendingPage],
     queryFn: async () => {
       const response = await confirmMaterialReceiptApi.getPending({
         page: pendingPage,
         limit: limit,
-        so_no: filterValues.search,
+        search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
         depo_names: user?.depo_access?.['Confirm Material Receipt'] || []
       });
@@ -185,12 +189,15 @@ export default function MaterialReceiptPage() {
     isLoading: isHistoryLoading,
     refetch: refetchHistory,
   } = useQuery({
-    queryKey: ["material-receipt-history", filterValues.search, filterValues.partyName, user?.depo_access?.[activeTab === "pending" ? 'Confirm Material Receipt' : 'Confirm Material Receipt'], historyPage],
+    queryKey: ["material-receipt-history", filterValues.search, filterValues.manualSaudaNo, filterValues.startDate, filterValues.endDate, filterValues.partyName, user?.depo_access?.[activeTab === "pending" ? 'Confirm Material Receipt' : 'Confirm Material Receipt'], historyPage],
     queryFn: async () => {
       const response = await confirmMaterialReceiptApi.getHistory({
         page: historyPage,
         limit: limit,
-        so_no: filterValues.search,
+        search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
         depo_names: user?.depo_access ? (user.depo_access['Confirm Material Receipt'] || []) : undefined
       });
@@ -584,7 +591,7 @@ export default function MaterialReceiptPage() {
       partyNames={customerNames}
       title="Stage 12: Confirm Material Receipt"
       description="Confirm material receipt and report any damages."
-      searchPlaceholder="Search DO Number, Customer, Invoice No..."
+      searchPlaceholder="Search DO Number or Customer..."
       pendingCount={pendingData?.pagination?.total || 0}
       historyData={historyOrders.map((order: any) => ({
         ...order,
@@ -601,7 +608,9 @@ export default function MaterialReceiptPage() {
       stageLevel={9}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
-      showDateFilters={false}
+      showDateFilters={true}
+      showSaudaFilter={true}
+      dateLabel="DO Date"
       historyFooter={
         <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between font-bold">
           <div className="text-[10px] sm:text-xs text-slate-400 uppercase tracking-widest leading-none text-center sm:text-left">
@@ -686,7 +695,7 @@ export default function MaterialReceiptPage() {
                     <p className="font-bold text-slate-600">{group.formattedPartySoDate}</p>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Process ID</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Manual Sauda No.</p>
                     <p className="break-words font-black text-blue-600">{group.processId}</p>
                   </div>
                   <div className="min-w-0">

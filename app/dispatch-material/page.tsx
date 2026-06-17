@@ -89,7 +89,7 @@ export default function DispatchMaterialPage() {
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
     { id: "soNo", label: "DO No." },
-    { id: "processId", label: "Process ID" },
+    { id: "processId", label: "Manual Sauda No." },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
     { id: "customerType", label: "Customer Type" },
@@ -972,7 +972,7 @@ export default function DispatchMaterialPage() {
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-black uppercase text-slate-400">Process ID</p>
+                      <p className="text-[10px] font-black uppercase text-slate-400">Manual Sauda No.</p>
                       <p className="mt-1 font-bold break-words">{display.processId}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">

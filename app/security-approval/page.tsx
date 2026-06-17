@@ -90,7 +90,7 @@ async function compressImageForUpload(file: File): Promise<File> {
 const PAGE_COLUMNS = [
   { id: "partySoDate",       label: "DO DATE" },
   { id: "doNumber",          label: "DO NUMBERS" },
-  { id: "processId",         label: "PROCESS ID" },
+  { id: "processId",         label: "MANUAL SAUDA NO." },
   { id: "customerName",      label: "CUSTOMER NAME" },
   { id: "itemCount",         label: "ITEM COUNT" },
   { id: "vehicleNo",         label: "VEHICLE NO." },
@@ -113,7 +113,8 @@ export default function SecurityApprovalPage() {
     startDate: "",
     endDate: "",
     partyName: "all",
-    search: ""
+    search: "",
+    manualSaudaNo: ""
   })
 
   const [filterOptions, setFilterOptions] = useState<{ customerNames: string[], depots: string[] }>({
@@ -224,6 +225,9 @@ export default function SecurityApprovalPage() {
         page: pendingPage,
         limit: 10,
         search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
       return response.success ? response.data : { approvals: [], pagination: { total: 0 } };
@@ -242,9 +246,10 @@ export default function SecurityApprovalPage() {
         page: historyPage,
         limit: 10,
         search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        start_date: filterValues.startDate,
-        end_date: filterValues.endDate,
       });
       return response.success ? response.data : { approvals: [], pagination: { total: 0 } };
     },
@@ -791,7 +796,10 @@ export default function SecurityApprovalPage() {
       stageLevel={5}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
-      showDateFilters={false}
+      showDateFilters={true}
+      showSaudaFilter={true}
+      dateLabel="DO Date"
+      searchPlaceholder="Search DO Number or Customer..."
     >
       <div className="space-y-4">
         <div className="flex justify-end gap-2">
@@ -984,7 +992,7 @@ export default function SecurityApprovalPage() {
                         <p className="text-xs font-bold text-slate-700">{group.vehicleNo}</p>
                       </div>
                       <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Process ID</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Manual Sauda No.</p>
                         <p className="text-xs font-bold text-slate-700">{group.processId}</p>
                       </div>
                     </div>

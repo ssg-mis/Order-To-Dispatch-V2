@@ -49,7 +49,7 @@ interface WorkflowStageShellProps {
   historyContent?: React.ReactNode
   partyNames?: string[]
   fetchPartyOptions?: (search: string, page: number) => Promise<{ options: any[]; hasMore: boolean }>
-  onFilterChange?: (filters: { search: string; status: string; startDate: string; endDate: string; partyName: string }) => void
+  onFilterChange?: (filters: { search: string; status: string; startDate: string; endDate: string; partyName: string; manualSaudaNo: string }) => void
   remarksColName?: string
   showStatusFilter?: boolean
   stageLevel?: number
@@ -58,6 +58,10 @@ interface WorkflowStageShellProps {
   isHistoryLoading?: boolean
   searchPlaceholder?: string
   showDateFilters?: boolean
+  /** Show the "Manual Sauda No." text filter (contains match). */
+  showSaudaFilter?: boolean
+  /** Label for the date-range filter. When set (e.g. "DO Date"), inputs read "<label> From"/"<label> To". */
+  dateLabel?: string
 }
 
 const FIELD_GROUPS: Record<string, number> = {
@@ -117,6 +121,24 @@ const FIELD_GROUPS: Record<string, number> = {
   credit_note_no: 10, actual_10: 10, planned_10: 10,
 }
 
+// Human-readable stage name for each FIELD_GROUPS level — drives the
+// section headers in the history "View" dialog so users can tell which
+// stage each field belongs to. Level 999 = fields not mapped to any stage.
+const STAGE_NAMES: Record<number, string> = {
+  0: "Order Punch",
+  1: "Pre-Approval",
+  2: "Approval of Order",
+  3: "Dispatch Planning",
+  4: "Material Load / Vehicle / Weighment",
+  5: "Security Approval",
+  6: "Make Invoice",
+  7: "Check Invoice",
+  8: "Gate Out",
+  9: "Material Receipt",
+  10: "Damage Adjustment",
+  999: "Other Details",
+}
+
 export function WorkflowStageShell({
   title,
   description,
@@ -135,13 +157,16 @@ export function WorkflowStageShell({
   fetchPartyOptions,
   searchPlaceholder = "Search DO Number, Customer...",
   showDateFilters = true,
+  showSaudaFilter = false,
+  dateLabel,
 }: WorkflowStageShellProps) {
   const [filters, setFilters] = React.useState({
     search: "",
     status: "",
     startDate: "",
     endDate: "",
-    partyName: ""
+    partyName: "",
+    manualSaudaNo: ""
   })
 
   const [selectedHistoryItem, setSelectedHistoryItem] = React.useState<any>(null)
@@ -194,6 +219,39 @@ export function WorkflowStageShell({
       return 0
     })
   }, [historyData, historySortField, historySortDir])
+
+  // Group the selected record's fields by stage so the "View" dialog shows
+  // section-wise history (which fields came from which stage) instead of one
+  // flat alphabetical dump. Mirrors the visibility + search filters below.
+  const groupedHistoryFields = React.useMemo(() => {
+    if (!selectedHistoryItem) return [] as { level: number; label: string; entries: [string, any][] }[]
+    const s = historySearch.toLowerCase()
+    const groups: Record<number, [string, any][]> = {}
+    Object.entries(selectedHistoryItem)
+      .filter(([key]) => !['rawData', '_rowKey', 'id'].includes(key))
+      .filter(([key]) => {
+        // Cumulative visibility filter
+        const fieldLevel = FIELD_GROUPS[key]
+        return fieldLevel === undefined || fieldLevel <= stageLevel
+      })
+      .filter(([key, value]) => {
+        if (!historySearch) return true
+        return key.toLowerCase().includes(s) || String(value).toLowerCase().includes(s)
+      })
+      .forEach(([key, value]) => {
+        const level = FIELD_GROUPS[key] ?? 999
+        if (!groups[level]) groups[level] = []
+        groups[level].push([key, value])
+      })
+    return Object.keys(groups)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map(level => ({
+        level,
+        label: STAGE_NAMES[level] || "Other Details",
+        entries: groups[level].sort(([a], [b]) => a.localeCompare(b)),
+      }))
+  }, [selectedHistoryItem, historySearch, stageLevel])
 
   const updateFilter = (key: keyof typeof filters, value: string) => {
     const newFilters = { ...filters, [key]: value }
@@ -285,10 +343,24 @@ export function WorkflowStageShell({
                 </div>
               )}
 
+              {/* Manual Sauda No. (contains) */}
+              {showSaudaFilter && (
+                <div className="space-y-1 w-full md:w-48">
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">Manual Sauda No.</Label>
+                  <Input
+                    type="text"
+                    placeholder="Manual Sauda No."
+                    className="w-full h-9 bg-background px-3 text-sm block"
+                    value={filters.manualSaudaNo}
+                    onChange={(e) => updateFilter("manualSaudaNo", e.target.value)}
+                  />
+                </div>
+              )}
+
               {/* Start Date */}
               {showDateFilters && (
                 <div className="space-y-1 w-full md:w-36">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">Start Date</Label>
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">{dateLabel ? `${dateLabel} From` : "Start Date"}</Label>
                   <Input
                     type="date"
                     className="w-full h-9 bg-background px-3 text-sm block"
@@ -301,7 +373,7 @@ export function WorkflowStageShell({
               {/* End Date */}
               {showDateFilters && (
                 <div className="space-y-1 w-full md:w-36">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">End Date</Label>
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">{dateLabel ? `${dateLabel} To` : "End Date"}</Label>
                   <Input
                     type="date"
                     className="w-full h-9 bg-background px-3 text-sm block"
@@ -405,7 +477,7 @@ export function WorkflowStageShell({
                   <Filter className="h-4 w-4" />
                 </Button>
                 <Button variant="outline" size="icon" className="bg-transparent h-9 w-9" onClick={() => {
-                  const reset = { search: "", status: "", startDate: "", endDate: "", partyName: "" };
+                  const reset = { search: "", status: "", startDate: "", endDate: "", partyName: "", manualSaudaNo: "" };
                   setFilters(reset);
                   if (onFilterChange) onFilterChange(reset);
                 }}>
@@ -592,41 +664,45 @@ export function WorkflowStageShell({
                 />
               </div>
 
-              <div className="border-2 border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                <Table>
-                  <TableHeader className="bg-slate-100/50">
-                    <TableRow>
-                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider w-1/3">Field Name</TableHead>
-                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Value</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedHistoryItem ? Object.entries(selectedHistoryItem)
-                      .filter(([key]) => !['rawData', '_rowKey', 'id'].includes(key))
-                      .filter(([key]) => {
-                        // Cumulative visibility filter
-                        const fieldLevel = FIELD_GROUPS[key]
-                        return fieldLevel === undefined || fieldLevel <= stageLevel
-                      })
-                      .filter(([key, value]) => {
-                        if (!historySearch) return true
-                        const s = historySearch.toLowerCase()
-                        return key.toLowerCase().includes(s) || String(value).toLowerCase().includes(s)
-                      })
-                      .sort(([a], [b]) => a.localeCompare(b))
-                      .map(([key, value]) => (
-                        <TableRow key={key} className="hover:bg-blue-50/30 transition-colors border-slate-100">
-                          <TableCell className="font-black text-slate-500 text-[10px] uppercase tracking-tight py-3">
-                            {formatKey(key)}
-                          </TableCell>
-                          <TableCell className="py-3 text-xs font-bold text-slate-800">
-                            {renderValue(value)}
-                          </TableCell>
-                        </TableRow>
-                      )) : null}
-                  </TableBody>
-                </Table>
-              </div>
+              {groupedHistoryFields.length > 0 ? (
+                <div className="space-y-5">
+                  {groupedHistoryFields.map((group) => (
+                    <div key={group.level} className="border-2 border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                      <div className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200">
+                        <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
+                        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-700">{group.label}</h3>
+                        <span className="ml-auto text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                          {group.entries.length} {group.entries.length === 1 ? "field" : "fields"}
+                        </span>
+                      </div>
+                      <Table>
+                        <TableHeader className="bg-slate-100/50">
+                          <TableRow>
+                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider w-1/3">Field Name</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Value</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {group.entries.map(([key, value]) => (
+                            <TableRow key={key} className="hover:bg-blue-50/30 transition-colors border-slate-100">
+                              <TableCell className="font-black text-slate-500 text-[10px] uppercase tracking-tight py-3">
+                                {formatKey(key)}
+                              </TableCell>
+                              <TableCell className="py-3 text-xs font-bold text-slate-800">
+                                {renderValue(value)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border-2 border-slate-200 rounded-2xl bg-white shadow-sm p-8 text-center text-muted-foreground text-sm font-medium">
+                  No matching fields found.
+                </div>
+              )}
             </div>
             <div className="p-4 bg-white border-t flex justify-end">
               <Button

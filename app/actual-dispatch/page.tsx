@@ -43,7 +43,8 @@ export default function ActualDispatchPage() {
     status: "",
     startDate: "",
     endDate: "",
-    partyName: ""
+    partyName: "",
+    manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
   const [selectedDepoTab, setSelectedDepoTab] = useState("")
@@ -300,7 +301,7 @@ export default function ActualDispatchPage() {
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
     { id: "soNo", label: "DO No." },
-    { id: "processId", label: "Process ID" },
+    { id: "processId", label: "Manual Sauda No." },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
     { id: "customerType", label: "Customer Type" },
@@ -366,6 +367,9 @@ export default function ActualDispatchPage() {
         page: pendingPage,
         limit,
         search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
         depo_names: user?.depo_access?.['Actual Dispatch'] || []
       });
@@ -387,6 +391,9 @@ export default function ActualDispatchPage() {
         page: historyPage,
         limit,
         search: filterValues.search,
+        manual_sauda_no: filterValues.manualSaudaNo,
+        do_date_from: filterValues.startDate,
+        do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
         depo_names: user?.depo_access ? (user.depo_access['Actual Dispatch'] || []) : undefined
       });
@@ -606,21 +613,7 @@ export default function ActualDispatchPage() {
       matches = false
     }
 
-    // Filter by Date Range
-    const orderDateStr = order.actualDispatchData?.confirmedAt || order.dispatchData?.dispatchDate || order.dispatchData?.dispatchedAt || order.timestamp
-    if (orderDateStr) {
-      const orderDate = new Date(orderDateStr)
-      if (filterValues.startDate) {
-        const start = new Date(filterValues.startDate)
-        start.setHours(0, 0, 0, 0)
-        if (orderDate < start) matches = false
-      }
-      if (filterValues.endDate) {
-        const end = new Date(filterValues.endDate)
-        end.setHours(23, 59, 59, 999)
-        if (orderDate > end) matches = false
-      }
-    }
+    // DO Date range is applied server-side (do_date_from/do_date_to), not here.
 
     // Filter by Status (On Time / Expire)
     if (filterValues.status) {
@@ -1054,7 +1047,7 @@ export default function ActualDispatchPage() {
                 <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Broker Name</span><span className="font-bold">{brokerName}</span></div>
                 <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Place</span><span className="font-bold">{place}</span></div>
                 <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Party Mo.</span><span className="font-bold">{partyMo}</span></div>
-                <div className="flex border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Process ID</span><span className="font-bold">{processId}</span></div>
+                <div className="flex border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Manual Sauda No.</span><span className="font-bold">{processId}</span></div>
                 <div className="flex p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center"></span></div>
               </div>
 
@@ -1225,7 +1218,7 @@ export default function ActualDispatchPage() {
             <div class="info-item"><span class="info-label">Broker Name</span><span class="info-value">${brokerName}</span></div>
             <div class="info-item"><span class="info-label">Place</span><span class="info-value">${place}</span></div>
             <div class="info-item"><span class="info-label">Party Mo.</span><span class="info-value">${partyMo}</span></div>
-            <div class="info-item"><span class="info-label">Process ID</span><span class="info-value">${processId}</span></div>
+            <div class="info-item"><span class="info-label">Manual Sauda No.</span><span class="info-value">${processId}</span></div>
             <div class="info-item"><span class="info-label"></span><span class="info-value"></span></div>
           </div>
 
@@ -1696,7 +1689,10 @@ export default function ActualDispatchPage() {
       showStatusFilter={true}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
-      showDateFilters={false}
+      showDateFilters={true}
+      showSaudaFilter={true}
+      dateLabel="DO Date"
+      searchPlaceholder="Search DO Number or Customer..."
       historyFooter={
         <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50/50 rounded-b-xl">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
