@@ -24,9 +24,12 @@ import { Upload, Settings2, FileText, ChevronUp, ChevronDown, Plus, X, Truck, Ex
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
+
+// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
+const TOGGLE_COLUMNS = getColumnsUpToStage("make-invoice")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { makeInvoiceApi, orderApi, skuDetailsApi, customerApi } from "@/lib/api-service"
+import { makeInvoiceApi, orderApi, skuDetailsApi, depotApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
@@ -74,18 +77,18 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
 
   const shippingState = extractState(shippingAddr) || ""
 
-  const billingSearchTerm = depoName ? `Shri Shyam ${depoName}` : "Shri Shyam"
+  // Company/billing state comes from the DEPOT master record's own address (state field)
   const { data: billingRes } = useQuery({
-    queryKey: ['billing-customer-state', billingSearchTerm],
-    queryFn: () => customerApi.getAll({ search: billingSearchTerm, all: "true" }),
-    enabled: true,
+    queryKey: ['billing-depot-state', depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
     staleTime: 10 * 60 * 1000,
   })
-  const billingCustomers: any[] = billingRes?.data?.customers || []
-  const billingCustomer = billingCustomers.find((c: any) =>
-    c.customer_name?.toLowerCase().includes("shri shyam")
-  )
-  const billingState = billingCustomer?.state || ""
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName.toLowerCase()
+  ) || billingDepots[0]
+  const billingState = billingDepot?.state || ""
 
   const totalTaxable = selProds.reduce((sum, p) => {
     const rate = Number(p.rate) || 0
@@ -871,7 +874,7 @@ export default function MakeInvoicePage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}

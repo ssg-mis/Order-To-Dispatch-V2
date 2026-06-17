@@ -21,7 +21,10 @@ import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
+
+// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
+const TOGGLE_COLUMNS = getColumnsUpToStage("damage-adjustment")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { damageAdjustmentApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -651,7 +654,7 @@ export default function DamageAdjustmentPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}

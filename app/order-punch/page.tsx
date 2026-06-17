@@ -778,22 +778,23 @@ export default function OrderPunchPage() {
     setProducts([{ id: Math.random().toString(36).substr(2, 9), productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" }])
   }
 
-  const billingSearchTerm = `Shri Shyam Oil Extractions Pvt Ltd ${depoName}`
+  // Company/billing state comes from the DEPOT master record's own address (state field)
   const { data: billingRes } = useQuery({
-    queryKey: ['billing-customer-state', billingSearchTerm],
-    queryFn: () => customerApi.getAll({ search: billingSearchTerm, all: "true" }),
+    queryKey: ['billing-depot-state', depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
     enabled: !!depoName,
     staleTime: 10 * 60 * 1000,
   })
-  const billingCustomers: any[] = billingRes?.data?.customers || []
-  const billingCustomer = billingCustomers.find((c: any) =>
-    c.customer_name?.toLowerCase().includes("shri shyam oil extractions")
-  )
-  const billingState = billingCustomer?.state || ""
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName.toLowerCase()
+  ) || billingDepots[0]
+  const billingState = billingDepot?.state || ""
 
+  // Customer/shipping state comes from the customer's billing address (customerAddress)
   const shippingState = extractState(customerAddress || "") || ""
 
-  console.log("[GST DEBUG] depoName:", depoName, "| billingCustomer:", billingCustomer?.customer_name, "| billingState:", billingState, "| shippingState:", shippingState)
+  console.log("[GST DEBUG] depoName:", depoName, "| billingDepot:", billingDepot?.depot_name, "| billingState:", billingState, "| shippingState:", shippingState)
 
   const totalTaxable = products.reduce((sum, p) => {
     const rate = parseFloat(p.rate) || 0
@@ -814,7 +815,11 @@ export default function OrderPunchPage() {
     gstType = "different"
     orderIgst = Math.round(totalTaxable * 0.05 * 100) / 100
   }
-  console.log("[GST DEBUG] gstType:", gstType, "| CGST:", orderCgst, "| SGST:", orderSgst, "| IGST:", orderIgst)
+  // Round Off = difference between the grand total rounded to the nearest rupee and the exact total
+  const orderRawTotal = totalTaxable + orderCgst + orderSgst + orderIgst
+  const orderRoundedTotal = Math.round(orderRawTotal)
+  const orderRoundOff = orderRoundedTotal - orderRawTotal
+  console.log("[GST DEBUG] gstType:", gstType, "| CGST:", orderCgst, "| SGST:", orderSgst, "| IGST:", orderIgst, "| RoundOff:", orderRoundOff)
 
   return (
     <div className="p-6 max-w-full space-y-6" suppressHydrationWarning>
@@ -1498,24 +1503,13 @@ export default function OrderPunchPage() {
                           <div className="flex justify-between items-center text-xs">
                             <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
                             <span className="font-mono font-bold text-slate-500">
-                              {(() => {
-                                const totalRoundOff = products.reduce((sum, p) => {
-                                  const rate = parseFloat(p.rate) || 0
-                                  const nos = parseFloat(p.nosPerMainUom) || 0
-                                  const qty = parseFloat(p.orderQty) || 0
-                                  const exact = (rate * nos) / 1.05
-                                  const rounded = parseFloat(exact.toFixed(2))
-                                  return sum + (rounded - exact) * qty
-                                }, 0)
-                                if (totalRoundOff === 0) return "—"
-                                return `${totalRoundOff > 0 ? "+" : ""}₹${totalRoundOff.toFixed(2)}`
-                              })()}
+                              {`${orderRoundOff >= 0 ? "+" : "-"}₹${Math.abs(orderRoundOff).toFixed(2)}`}
                             </span>
                           </div>
                           <div className="flex justify-between items-center border-t border-slate-200 pt-2">
                             <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
                             <span className="font-mono font-black text-blue-700 text-sm">
-                              ₹{(totalTaxable + orderCgst + orderSgst + orderIgst).toFixed(2)}
+                              ₹{orderRoundedTotal.toFixed(2)}
                             </span>
                           </div>
                         </div>

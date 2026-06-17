@@ -22,7 +22,10 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Settings2, Truck, Weight } from "lucide-react"
-import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
+
+// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
+const TOGGLE_COLUMNS = getColumnsUpToStage("material-load")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Checkbox } from "@/components/ui/checkbox"
 import { materialLoadApi } from "@/lib/api-service"
@@ -422,7 +425,7 @@ export default function MaterialLoadPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}

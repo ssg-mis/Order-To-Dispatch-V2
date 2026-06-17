@@ -112,3 +112,150 @@ const VEHICLE_DOC_COLUMN_IDS = new Set([
 ])
 
 export const WORKFLOW_STAGE_COLUMNS = ALL_WORKFLOW_COLUMNS.filter(c => !VEHICLE_DOC_COLUMN_IDS.has(c.id))
+
+/**
+ * Workflow stage order (matches the sidebar / dispatch flow).
+ * A stage's column toggle shows columns introduced at THIS stage + all earlier
+ * stages, and never columns that only become relevant at a later stage.
+ */
+export const WORKFLOW_STAGE_ORDER = [
+  "commitment-punch",
+  "order-punch",
+  "pre-approval",
+  "approval-of-order",
+  "dispatch-material",
+  "material-load",
+  "actual-dispatch",
+  "security-approval",
+  "make-invoice",
+  "check-invoice",
+  "gate-out",
+  "material-receipt",
+  "damage-adjustment",
+] as const
+
+export type WorkflowStageKey = typeof WORKFLOW_STAGE_ORDER[number]
+
+/**
+ * The stage at which each column first becomes relevant.
+ * Columns not listed here are treated as always-available (shown at every stage).
+ */
+const COLUMN_STAGE: Record<string, WorkflowStageKey> = {
+  // Order Punch — order creation, customer & product basics
+  products: "order-punch",
+  orderNo: "order-punch",
+  orderPunchRemarks: "order-punch",
+  deliveryPurpose: "order-punch",
+  customerType: "order-punch",
+  orderType: "order-punch",
+  soNo: "order-punch",
+  partySoDate: "order-punch",
+  customerName: "order-punch",
+  productName: "order-punch",
+  uom: "order-punch",
+  orderQty: "order-punch",
+  altUom: "order-punch",
+  altQty: "order-punch",
+  rate: "order-punch",
+  oilType: "order-punch",
+  rateOfMaterial: "order-punch",
+  transportType: "order-punch",
+  uploadSo: "order-punch",
+  contactPerson: "order-punch",
+  whatsapp: "order-punch",
+  address: "order-punch",
+  paymentTerms: "order-punch",
+  advanceTaken: "order-punch",
+  advanceAmount: "order-punch",
+  isBroker: "order-punch",
+  brokerName: "order-punch",
+  deliveryDate: "order-punch",
+  status: "order-punch",
+
+  // Pre Approval — approved rates
+  ratePerLtr: "pre-approval",
+  ratePer15Kg: "pre-approval",
+
+  // Approval of Order
+  itemConfirm: "approval-of-order",
+  party_credit_status: "approval-of-order",
+  dispatch_date_confirmed: "approval-of-order",
+  overall_status_of_order: "approval-of-order",
+  order_confirmation_with_customer: "approval-of-order",
+  actual_approval_qty: "approval-of-order",
+
+  // Dispatch Planning
+  qtyToDispatch: "dispatch-material",
+  deliveryFrom: "dispatch-material",
+  processid: "dispatch-material",
+  dispatch_from: "dispatch-material",
+  dispatch_planning_user: "dispatch-material",
+  revert_planning_remarks: "dispatch-material",
+
+  // Material Load — truck / driver / transporter / RST / weights
+  vehicleNo: "material-load",
+  truck_no: "material-load",
+  driver_name: "material-load",
+  driver_mobile_no: "material-load",
+  transporter_name: "material-load",
+  rst_no: "material-load",
+  gross_weight: "material-load",
+  tare_weight: "material-load",
+  net_weight: "material-load",
+  actual_qty: "material-load",
+  material_load_user: "material-load",
+  weightment_slip_copy: "material-load",
+  vehicle_no_plate_image: "material-load",
+
+  // Actual Dispatch
+  actual1Date: "actual-dispatch",
+  actual_qty_dispatch: "actual-dispatch",
+  product_name_1: "actual-dispatch",
+  actual_dispatch_user: "actual-dispatch",
+  extra_weight: "actual-dispatch",
+  reason_of_difference_in_weight_if_any_speacefic: "actual-dispatch",
+
+  // Security Guard Approval
+  bilty_no: "security-approval",
+  bilty_image: "security-approval",
+  vehicle_image_attachemrnt: "security-approval",
+  security_guard_status: "security-approval",
+  security_guard_user: "security-approval",
+  revert_security_remarks: "security-approval",
+
+  // Make Invoice
+  make_invoice_user: "make-invoice",
+  invoice_date: "make-invoice",
+  invoice_copy: "make-invoice",
+  bill_type: "make-invoice",
+  bill_amount: "make-invoice",
+  invoiceNo: "make-invoice",
+  totalWithGst: "make-invoice",
+
+  // Check Invoice
+  verification_status: "check-invoice",
+  check_status: "check-invoice",
+
+  // Gate Out
+  gate_pass_copy: "gate-out",
+
+  // Damage Adjustment
+  damage_qty: "damage-adjustment",
+  damage_status: "damage-adjustment",
+  credit_note_no: "damage-adjustment",
+}
+
+/**
+ * Returns the columns available at a given workflow stage: every column
+ * introduced at this stage or an earlier one, in canonical order, excluding
+ * vehicle-doc columns. Unknown stage keys fall back to the full list.
+ */
+export function getColumnsUpToStage(stageKey: WorkflowStageKey | string) {
+  const idx = WORKFLOW_STAGE_ORDER.indexOf(stageKey as WorkflowStageKey)
+  if (idx === -1) return WORKFLOW_STAGE_COLUMNS
+  const allowedStages = new Set(WORKFLOW_STAGE_ORDER.slice(0, idx + 1))
+  return WORKFLOW_STAGE_COLUMNS.filter(c => {
+    const stage = COLUMN_STAGE[c.id]
+    return stage ? allowedStages.has(stage) : true
+  })
+}

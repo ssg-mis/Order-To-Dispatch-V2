@@ -37,6 +37,9 @@ export function ColumnToggleContent({ columns, visibleColumns, setVisibleColumns
             placeholder="Search columns..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            // Stop keystrokes from reaching the dropdown's typeahead/focus handler,
+            // which would otherwise steal focus from this input as you type.
+            onKeyDown={(e) => e.stopPropagation()}
             className="h-8 pl-7 text-sm"
           />
         </div>

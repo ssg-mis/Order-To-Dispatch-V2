@@ -4738,7 +4738,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               {approvalReviewModal?.item?.request_type === 'edit' && (() => {
                 let pc = approvalReviewModal.item.pending_changes
                 if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', transporter: 'Transporter' }
+                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW', passing: 'Passing', state_permit_type: 'State Permit Type', road_tax: 'Road Tax', life_time_tax: 'Life Time Tax', pollution: 'Pollution', insurance: 'Insurance', fitness: 'Fitness', state_permit: 'State Permit', road_tax_image: 'Road Tax Image', life_time_tax_image: 'Life Time Tax Image', pollution_image: 'Pollution Image', insurance_image: 'Insurance Image', fitness_image: 'Fitness Image', state_permit_image: 'State Permit Image' }
                 const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
                 return (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
@@ -4776,6 +4776,47 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   searchPlaceholder="Search transporter..."
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1"><Label className="text-xs">RTO</Label><Input value={approvalEditData.rto || ''} onChange={e => setApprovalEditData(p => ({...p, rto: e.target.value}))} /></div>
+                <div className="space-y-1"><Label className="text-xs">Fuel Type</Label><Input value={approvalEditData.fuel_type || ''} onChange={e => setApprovalEditData(p => ({...p, fuel_type: e.target.value}))} /></div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1"><Label className="text-xs">GVW</Label><Input type="number" value={approvalEditData.gvw ?? ''} onChange={e => setApprovalEditData(p => ({...p, gvw: e.target.value}))} /></div>
+                <div className="space-y-1"><Label className="text-xs">ULW</Label><Input type="number" value={approvalEditData.ulw ?? ''} onChange={e => setApprovalEditData(p => ({...p, ulw: e.target.value}))} /></div>
+                <div className="space-y-1"><Label className="text-xs">Passing</Label><Input type="number" value={approvalEditData.passing ?? ''} readOnly className="bg-slate-100" /></div>
+              </div>
+              <div className="space-y-1"><Label className="text-xs">State Permit Type</Label><Input value={approvalEditData.state_permit_type || ''} onChange={e => setApprovalEditData(p => ({...p, state_permit_type: e.target.value}))} /></div>
+              {[
+                { key: 'road_tax', label: 'Road Tax' },
+                { key: 'life_time_tax', label: 'Life Time Tax' },
+                { key: 'pollution', label: 'Pollution' },
+                { key: 'insurance', label: 'Insurance' },
+                { key: 'fitness', label: 'Fitness' },
+                { key: 'state_permit', label: 'State Permit' },
+              ].map(doc => (
+                <div key={doc.key} className="grid grid-cols-2 gap-3 items-end">
+                  <div className="space-y-1">
+                    <Label className="text-xs">{doc.label}</Label>
+                    <Input type="date" value={String(approvalEditData[doc.key] || '').split('T')[0]} onChange={e => setApprovalEditData(p => ({...p, [doc.key]: e.target.value}))} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">{doc.label} Image</Label>
+                    {approvalEditData[`${doc.key}_image`] ? (
+                      <a href={approvalEditData[`${doc.key}_image`]} target="_blank" rel="noopener noreferrer" className="inline-block">
+                        <img
+                          src={approvalEditData[`${doc.key}_image`]}
+                          alt={`${doc.label} document`}
+                          className="h-16 w-24 object-cover rounded border border-slate-200 hover:opacity-80 transition-opacity cursor-pointer"
+                          onError={(e: any) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'inline'; }}
+                        />
+                        <span style={{ display: 'none' }} className="text-xs font-semibold text-blue-600 underline">View Document</span>
+                      </a>
+                    ) : (
+                      <p className="text-xs text-slate-400">No file</p>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 

@@ -17,13 +17,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
+
+// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
+const TOGGLE_COLUMNS = getColumnsUpToStage("gate-out")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { gateOutApi, orderApi, customerApi } from "@/lib/api-service"
+import { gateOutApi, orderApi, depotApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
@@ -121,18 +125,18 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
 
   const shippingState = extractState(shippingAddr) || ""
 
-  const billingSearchTerm = depoName ? `Shri Shyam ${depoName}` : "Shri Shyam"
+  // Company/billing state comes from the DEPOT master record's own address (state field)
   const { data: billingRes } = useQuery({
-    queryKey: ['billing-customer-state', billingSearchTerm],
-    queryFn: () => customerApi.getAll({ search: billingSearchTerm, all: "true" }),
-    enabled: true,
+    queryKey: ['billing-depot-state', depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
     staleTime: 10 * 60 * 1000,
   })
-  const billingCustomers: any[] = billingRes?.data?.customers || []
-  const billingCustomer = billingCustomers.find((c: any) =>
-    c.customer_name?.toLowerCase().includes("shri shyam")
-  )
-  const billingState = billingCustomer?.state || ""
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName.toLowerCase()
+  ) || billingDepots[0]
+  const billingState = billingDepot?.state || ""
 
   const totalTaxable = selProds.reduce((sum, p) => {
     const rate = Number(p.rate) || 0
@@ -783,7 +787,7 @@ export default function GateOutPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -1365,6 +1369,7 @@ export default function GateOutPage() {
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">TAXABLE AMOUNT</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">AMOUNT</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE NO</TableHead>
+                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE DATE</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE COPY</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">TRUCK NO</TableHead>
                                 </TableRow>
@@ -1388,6 +1393,7 @@ export default function GateOutPage() {
                                       <div className="flex flex-col">
                                         <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{product.specificOrderNo}</span>
+                                        <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                                       </div>
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
@@ -1399,7 +1405,21 @@ export default function GateOutPage() {
                                       </Badge>
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {product.rate ? `₹${product.rate.toFixed(2)}` : "—"}
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
+                                            {product.rate ? `₹${product.rate.toFixed(2)}` : "—"}
+                                          </span>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
+                                          <div className="space-y-1.5">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
+                                            <p className="text-sm font-black text-blue-700 leading-none">
+                                              {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
+                                            </p>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
                                       {product.rate ? `₹${(product.rate / 1.05).toFixed(2)}` : "—"}
@@ -1412,6 +1432,9 @@ export default function GateOutPage() {
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-green-700">
                                       {product.invoiceNo || "—"}
+                                    </TableCell>
+                                    <TableCell className="text-center p-2 text-xs font-black">
+                                      {product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}
                                     </TableCell>
                                     <TableCell className="text-center p-2">
                                       {product.invoice_copy ? (
@@ -1447,7 +1470,7 @@ export default function GateOutPage() {
                                   <TableCell className="text-center text-xs text-blue-700 font-black">
                                     ₹{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2)}
                                   </TableCell>
-                                  <TableCell colSpan={3} />
+                                  <TableCell colSpan={4} />
                                 </TableRow>
                               </TableBody>
                             </Table>
@@ -1476,6 +1499,7 @@ export default function GateOutPage() {
                                     <div className="min-w-0">
                                       <p className="text-xs font-black text-slate-800 uppercase leading-tight break-words">{product.productName}</p>
                                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{product.specificOrderNo}</p>
+                                      <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</p>
                                     </div>
                                     <Checkbox
                                       checked={selectedProducts.includes(product._rowKey)}
@@ -1500,7 +1524,19 @@ export default function GateOutPage() {
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.rate ? `₹${product.rate.toFixed(2)}` : "—"}</p>
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">{product.rate ? `₹${product.rate.toFixed(2)}` : "—"}</p>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
+                                          <div className="space-y-1.5">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
+                                            <p className="text-sm font-black text-blue-700 leading-none">
+                                              {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
+                                            </p>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
@@ -1517,6 +1553,10 @@ export default function GateOutPage() {
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Truck No</p>
                                       <p className="mt-1 font-mono font-bold text-slate-700">{(product.truckNo || "—").toUpperCase()}</p>
+                                    </div>
+                                    <div className="rounded-md bg-slate-50 p-2">
+                                      <p className="text-[10px] font-black uppercase text-slate-400">Invoice Date</p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}</p>
                                     </div>
                                     <div className="col-span-2 rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Invoice</p>

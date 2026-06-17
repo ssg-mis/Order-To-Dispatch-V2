@@ -19,12 +19,16 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
+
+// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
+const TOGGLE_COLUMNS = getColumnsUpToStage("material-receipt")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { confirmMaterialReceiptApi, orderApi } from "@/lib/api-service"
+import { confirmMaterialReceiptApi, orderApi, depotApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, ChevronLeft, ChevronRight, Settings2, CheckCircle, Upload, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
@@ -96,6 +100,119 @@ const PAGE_COLUMNS = [
   { id: "orderPunchRemarks", label: "Order Punch Remarks" },
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
+
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
+  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
+]
+
+function extractState(addr: string): string | null {
+  if (!addr) return null
+  const lower = addr.toLowerCase()
+  for (const s of INDIAN_STATES) {
+    if (lower.includes(s.toLowerCase())) return s
+  }
+  return null
+}
+
+// GST & Invoice summary — billing state from depot master, shipping state from customer address.
+// Taxable uses the same per-unit rate as the product table: (rate_of_material × nos + freight) ÷ 1.05 × qty.
+function InvoiceSummary({ selectedGroup, selectedProducts }: {
+  selectedGroup: any
+  selectedProducts: string[]
+}) {
+  const selProds = (selectedGroup?._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey))
+  const firstProd = selProds[0]
+  const depoName = (selectedGroup?.depoName && selectedGroup.depoName !== "—")
+    ? selectedGroup.depoName
+    : (firstProd?.depo_name || "")
+  const shippingAddr = firstProd?.customer_address || selectedGroup?.customerAddress || ""
+  const shippingState = extractState(shippingAddr) || ""
+
+  // Company/billing state comes from the DEPOT master record's own address (state field)
+  const { data: billingRes } = useQuery({
+    queryKey: ['billing-depot-state', depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
+    staleTime: 10 * 60 * 1000,
+  })
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName.toLowerCase()
+  ) || billingDepots[0]
+  const billingState = billingDepot?.state || ""
+
+  const totalTaxable = selProds.reduce((sum: number, p: any) => {
+    const rateOfMaterial = parseFloat(p.rate_of_material) || 0
+    const nos = parseFloat(p.nos_per_main_uom) || 1
+    const freight = parseFloat(p.freight_rate) || 0
+    const rateWoGst = parseFloat(((rateOfMaterial * nos + freight) / 1.05).toFixed(2))
+    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
+  }, 0)
+
+  const missingBilling = !billingState
+  const missingShipping = !shippingState
+  let gstType = "same"
+  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
+  let sgst = cgst
+  let igst = 0
+
+  if (missingBilling || missingShipping) {
+    gstType = "no_address"
+  } else if (billingState === shippingState) {
+    gstType = "same"
+  } else {
+    gstType = "different"
+    cgst = 0
+    sgst = 0
+    igst = Math.round(totalTaxable * 0.05 * 100) / 100
+  }
+
+  const rawTotal = totalTaxable + cgst + sgst + igst
+  const invoiceTotal = Math.round(rawTotal)
+  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+
+  return (
+    <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Invoice Summary</p>
+      </div>
+      <div className="p-4 max-w-sm ml-auto space-y-2">
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
+          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${cgst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${sgst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
+          <span className="font-mono font-bold text-slate-500">
+            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+          </span>
+        </div>
+        <div className="flex justify-between items-center border-t border-slate-200 pt-2">
+          <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
+          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function MaterialReceiptPage() {
   const router = useRouter()
@@ -556,14 +673,22 @@ export default function MaterialReceiptPage() {
   const customerNames = Array.from(new Set(pendingOrders.map((order: any) => order.party_name || "Unknown Customer"))) as string[]
 
   const totals = useMemo(() => {
-    if (!selectedGroup) return { billAmt: 0, actualQty: 0, netWt: 0 }
+    if (!selectedGroup) return { billAmt: 0, actualQty: 0, netWt: 0, taxable: 0 }
     return selectedGroup._allProducts
       .filter((p: any) => selectedProducts.includes(p._rowKey))
-      .reduce((acc: any, p: any) => ({
-        billAmt: acc.billAmt + (parseFloat(p.billAmount) || 0),
-        actualQty: acc.actualQty + (parseFloat(p.actualQty) || 0),
-        netWt: acc.netWt + (parseFloat(p.netWeight) || 0)
-      }), { billAmt: 0, actualQty: 0, netWt: 0 })
+      .reduce((acc: any, p: any) => {
+        const rateOfMaterial = parseFloat(p.rate_of_material) || 0;
+        const nos = parseFloat(p.nos_per_main_uom) || 1;
+        const freight = parseFloat(p.freight_rate) || 0;
+        const rateWoGst = parseFloat(((rateOfMaterial * nos + freight) / 1.05).toFixed(2));
+        const qty = parseFloat(p.actualQty) || 0;
+        return {
+          billAmt: acc.billAmt + (parseFloat(p.billAmount) || 0),
+          actualQty: acc.actualQty + (parseFloat(p.actualQty) || 0),
+          netWt: acc.netWt + (parseFloat(p.netWeight) || 0),
+          taxable: acc.taxable + (rateWoGst * qty),
+        }
+      }, { billAmt: 0, actualQty: 0, netWt: 0, taxable: 0 })
   }, [selectedGroup, selectedProducts])
 
   const dynamicColumns = visibleColumns.filter(
@@ -652,7 +777,7 @@ export default function MaterialReceiptPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -959,12 +1084,21 @@ export default function MaterialReceiptPage() {
                             onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
                           />
                         </div>
-                        {selectedGroup._allProducts.map((product: any) => (
+                        {selectedGroup._allProducts.map((product: any) => {
+                          const rateOfMaterial = parseFloat(product.rate_of_material) || 0;
+                          const nos = parseFloat(product.nos_per_main_uom) || 1;
+                          const freight = parseFloat(product.freight_rate) || 0;
+                          const netRate = rateOfMaterial * nos + freight;
+                          const rateWoGst = parseFloat((netRate / 1.05).toFixed(2));
+                          const qty = parseFloat(product.actualQty) || 0;
+                          const taxable = rateWoGst * qty;
+                          return (
                           <Card key={product._rowKey} className={cn("p-4 rounded-2xl border shadow-sm", selectedProducts.includes(product._rowKey) ? "border-blue-200 bg-blue-50/40" : "border-slate-100 bg-white")}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product</p>
                                 <p className="break-words text-xs font-black uppercase tracking-tighter text-slate-800">{product.productName}</p>
+                                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</p>
                               </div>
                               <Checkbox
                                 className="data-[state=checked]:bg-blue-600"
@@ -997,6 +1131,32 @@ export default function MaterialReceiptPage() {
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Net Wt</p>
                                 <p className="text-xs font-black text-slate-700">{product.netWeight}</p>
                               </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice Date</p>
+                                <p className="text-xs font-black text-slate-700">{product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}</p>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate (Inc. with taxes)</p>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <p className="cursor-pointer text-xs font-black text-slate-700">{netRate ? `₹${netRate.toFixed(2)}` : "—"}</p>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
+                                    <div className="space-y-1.5">
+                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
+                                      <p className="text-sm font-black text-blue-700 leading-none">{freight ? `₹${freight}` : "No Freight Rate Available"}</p>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate</p>
+                                <p className="text-xs font-black text-slate-700">{netRate ? `₹${rateWoGst.toFixed(2)}` : "—"}</p>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Taxable Amount</p>
+                                <p className="text-xs font-black text-slate-700">{taxable ? `₹${taxable.toFixed(2)}` : "—"}</p>
+                              </div>
                             </div>
                             {receiptData.hasDamage === "yes" && (
                               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1026,12 +1186,17 @@ export default function MaterialReceiptPage() {
                               </div>
                             )}
                           </Card>
-                        ))}
+                          );
+                          })}
                         <div className="rounded-2xl bg-slate-50 p-4">
                           <div className="grid grid-cols-3 gap-3 text-center">
                             <div>
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill</p>
                               <p className="break-words text-xs font-black text-blue-700">₹{totals.billAmt.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Taxable</p>
+                              <p className="break-words text-xs font-black text-blue-700">₹{totals.taxable.toFixed(2)}</p>
                             </div>
                             <div>
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Qty</p>
@@ -1057,7 +1222,11 @@ export default function MaterialReceiptPage() {
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Order No</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Product Name</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Invoice No</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Invoice Date</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Bill Amt</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Rate (Inc. with taxes)</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Rate</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Taxable Amount</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Actual Qty</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Truck No</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Net Wt</TableHead>
@@ -1070,7 +1239,15 @@ export default function MaterialReceiptPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {selectedGroup._allProducts.map((product: any) => (
+                          {selectedGroup._allProducts.map((product: any) => {
+                            const rateOfMaterial = parseFloat(product.rate_of_material) || 0;
+                            const nos = parseFloat(product.nos_per_main_uom) || 1;
+                            const freight = parseFloat(product.freight_rate) || 0;
+                            const netRate = rateOfMaterial * nos + freight;
+                            const rateWoGst = parseFloat((netRate / 1.05).toFixed(2));
+                            const qty = parseFloat(product.actualQty) || 0;
+                            const taxable = rateWoGst * qty;
+                            return (
                             <TableRow key={product._rowKey} className={cn("h-14 transition-colors", selectedProducts.includes(product._rowKey) ? "bg-blue-50/40" : "")}>
                               <TableCell className="text-center">
                                 <Checkbox
@@ -1080,9 +1257,34 @@ export default function MaterialReceiptPage() {
                                 />
                               </TableCell>
                               <TableCell className="text-xs font-black text-slate-500 uppercase tracking-tighter">{product.specificOrderNo}</TableCell>
-                              <TableCell className="text-xs font-black text-slate-800 uppercase tracking-tighter">{product.productName}</TableCell>
+                              <TableCell className="text-xs font-black text-slate-800 uppercase tracking-tighter">
+                                <div className="flex flex-col">
+                                  <span>{product.productName}</span>
+                                  <span className="text-[8px] font-black text-blue-500 normal-case tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
+                                </div>
+                              </TableCell>
                               <TableCell className="text-xs font-black text-blue-600 italic tracking-tighter">{product.invoiceNo}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">{product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}</TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">₹{product.billAmount}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
+                                      {netRate ? `₹${netRate.toFixed(2)}` : "—"}
+                                    </span>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
+                                    <div className="space-y-1.5">
+                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
+                                      <p className="text-sm font-black text-blue-700 leading-none">
+                                        {freight ? `₹${freight}` : "No Freight Rate Available"}
+                                      </p>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">{netRate ? `₹${rateWoGst.toFixed(2)}` : "—"}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">{taxable ? `₹${taxable.toFixed(2)}` : "—"}</TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">{product.actualQty}</TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-500">{product.truckNo}</TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">{product.netWeight}</TableCell>
@@ -1112,12 +1314,16 @@ export default function MaterialReceiptPage() {
                                 </>
                               )}
                             </TableRow>
-                          ))}
+                          );
+                          })}
                         </TableBody>
                         <TableFooter className="bg-slate-50/50">
                           <TableRow className="h-14 font-black text-xs border-none">
-                            <TableCell colSpan={4} className="text-right uppercase tracking-[0.2em] text-slate-400 px-8">Total</TableCell>
+                            <TableCell colSpan={5} className="text-right uppercase tracking-[0.2em] text-slate-400 px-8">Total</TableCell>
                             <TableCell className="text-center text-blue-700 underline underline-offset-4 decoration-2">₹{totals.billAmt.toFixed(2)}</TableCell>
+                            <TableCell />
+                            <TableCell />
+                            <TableCell className="text-center text-blue-700 underline underline-offset-4 decoration-2">₹{totals.taxable.toFixed(2)}</TableCell>
                             <TableCell className="text-center"><Badge className="bg-blue-600 text-white font-black px-4 py-1.5 rounded-full shadow-lg shadow-blue-100">{totals.actualQty}</Badge></TableCell>
                             <TableCell />
                             <TableCell className="text-center text-slate-600">{totals.netWt.toFixed(2)}</TableCell>
@@ -1126,6 +1332,9 @@ export default function MaterialReceiptPage() {
                         </TableFooter>
                       </Table>
                     </Card>
+
+                    {/* GST & Invoice Summary */}
+                    <InvoiceSummary selectedGroup={selectedGroup} selectedProducts={selectedProducts} />
                   </div>
 
                   {/* Section 3: Receipt Details */}

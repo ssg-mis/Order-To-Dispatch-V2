@@ -370,9 +370,9 @@ export default function DispatchMaterialPage() {
               dispatch_qty: dispatchQty,
               username: user?.username || null,
               transfer: dispatchDetails[rowKey]?.transfer || item.transfer || 'no',
-              bill_company_name: tData?.billTo?.company || item.bill_company_name || null,
+              bill_company_name: (tData?.billTo?.company ? tData.billTo.company.split('|')[0] : item.bill_company_name) || null,
               bill_address: tData?.billTo?.address || item.bill_address || null,
-              ship_company_name: tData?.shipTo?.company || item.ship_company_name || null,
+              ship_company_name: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
               ship_address: tData?.shipTo?.address || item.ship_address || null,
               freight_rate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0)
             };
@@ -1625,24 +1625,29 @@ export default function DispatchMaterialPage() {
                       const res = await customerApi.getAll({ search, page, limit: 20 });
                       const customers = res.data.customers || [];
                       return {
-                        options: customers.map((c: any) => ({ value: c.customer_name, label: c.customer_name })),
+                        options: customers.map((c: any) => ({ value: `${c.customer_name}|${c.gstin || ''}`, label: c.customer_name, dropdownLabel: `${c.customer_name}${c.gstin ? ' — ' + c.gstin : ''}`, original: c })),
                         hasMore: (customers.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}
                     onValueChange={async (val) => {
                       if (!currentTransferRowKey) return;
 
-                      // Fetch full customer details to get the address accurately
-                      let autoAddress = "";
+                      // Match the exact customer by name + GST, then use that record's address
+                      const [cleanName, gstinPart = ''] = val.split('|');
+                      let autoAddress: string | null = null;
                       try {
-                        const res = await customerApi.getByName(val);
-                        if (res.success && res.data) {
-                          const c = res.data;
+                        const res = await customerApi.getAll({ search: cleanName, all: "true" });
+                        const list = res.data?.customers || [];
+                        const match =
+                          list.find((c: any) => c.customer_name === cleanName && (c.gstin || '') === gstinPart) ||
+                          list.find((c: any) => c.customer_name === cleanName) ||
+                          list[0];
+                        if (match) {
                           autoAddress = [
-                            c.address_line_1,
-                            c.address_line_2,
-                            c.state,
-                            c.pincode
+                            match.address_line_1,
+                            match.address_line_2,
+                            match.state,
+                            match.pincode
                           ].filter(Boolean).join(", ");
                         }
                       } catch (error) {
@@ -1663,7 +1668,7 @@ export default function DispatchMaterialPage() {
                             ...rowDetail,
                             transferData: {
                               ...prevData,
-                              billTo: { ...prevData.billTo, company: val, address: autoAddress || prevData.billTo.address }
+                              billTo: { ...prevData.billTo, company: val, address: autoAddress !== null ? autoAddress : prevData.billTo.address }
                             }
                           }
                         };
@@ -1726,24 +1731,29 @@ export default function DispatchMaterialPage() {
                       const res = await customerApi.getAll({ search, page, limit: 20 });
                       const customers = res.data.customers || [];
                       return {
-                        options: customers.map((c: any) => ({ value: c.customer_name, label: c.customer_name })),
+                        options: customers.map((c: any) => ({ value: `${c.customer_name}|${c.gstin || ''}`, label: c.customer_name, dropdownLabel: `${c.customer_name}${c.gstin ? ' — ' + c.gstin : ''}`, original: c })),
                         hasMore: (customers.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}
                     onValueChange={async (val) => {
                       if (!currentTransferRowKey) return;
 
-                      // Fetch full customer details to get the address accurately
-                      let autoAddress = "";
+                      // Match the exact customer by name + GST, then use that record's address
+                      const [cleanName, gstinPart = ''] = val.split('|');
+                      let autoAddress: string | null = null;
                       try {
-                        const res = await customerApi.getByName(val);
-                        if (res.success && res.data) {
-                          const c = res.data;
+                        const res = await customerApi.getAll({ search: cleanName, all: "true" });
+                        const list = res.data?.customers || [];
+                        const match =
+                          list.find((c: any) => c.customer_name === cleanName && (c.gstin || '') === gstinPart) ||
+                          list.find((c: any) => c.customer_name === cleanName) ||
+                          list[0];
+                        if (match) {
                           autoAddress = [
-                            c.address_line_1,
-                            c.address_line_2,
-                            c.state,
-                            c.pincode
+                            match.address_line_1,
+                            match.address_line_2,
+                            match.state,
+                            match.pincode
                           ].filter(Boolean).join(", ");
                         }
                       } catch (error) {
@@ -1764,7 +1774,7 @@ export default function DispatchMaterialPage() {
                             ...rowDetail,
                             transferData: {
                               ...prevData,
-                              shipTo: { ...prevData.shipTo, company: val, address: autoAddress || prevData.shipTo.address }
+                              shipTo: { ...prevData.shipTo, company: val, address: autoAddress !== null ? autoAddress : prevData.shipTo.address }
                             }
                           }
                         };

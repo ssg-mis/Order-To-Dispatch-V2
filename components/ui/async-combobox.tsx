@@ -158,7 +158,11 @@ export function AsyncCombobox({
               }}
             />
           </div>
-          <CommandList className="max-h-[300px] overflow-y-auto">
+          <CommandList
+            className="max-h-[300px] overflow-y-auto"
+            onWheel={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+          >
             <CommandEmpty>
               {isLoading && page === 1 ? (
                 <div className="flex items-center justify-center py-6">
