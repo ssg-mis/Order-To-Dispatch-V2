@@ -713,6 +713,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     life_time_tax: '',
     life_time_tax_image: ''
   })
+  const [vehicleFormErrors, setVehicleFormErrors] = useState<{ registration_no?: string; vehicle_type?: string; transporter?: string }>({})
 
   const [driverForm, setDriverForm] = useState<Partial<Driver>>({
     driver_master_id: "",
@@ -882,6 +883,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       life_time_tax: '',
       life_time_tax_image: ''
     })
+    setVehicleFormErrors({})
     setRoadTaxType('expiry')
     setDriverForm({
       driver_master_id: "",
@@ -971,6 +973,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await skuSellingPriceApi.create(skuSellingPriceForm)
         }
       } else if (activeTab === "vehicle_master") {
+        // --- Mandatory field validation ---
+        const vErrors: { registration_no?: string; vehicle_type?: string; transporter?: string } = {}
+        if (!vehicleForm.registration_no?.trim()) vErrors.registration_no = 'Registration Number is required'
+        if (!vehicleForm.vehicle_type?.trim()) vErrors.vehicle_type = 'Vehicle Type is required'
+        if (!vehicleForm.transporter?.trim()) vErrors.transporter = 'Transporter is required'
+        // --- Duplicate registration number check (against already-loaded list) ---
+        const regNo = vehicleForm.registration_no?.trim().toUpperCase()
+        const duplicate = vehicles.find((v: any) =>
+          v.registration_no?.trim().toUpperCase() === regNo &&
+          v.id !== editingItem?.id   // exclude current record when editing
+        )
+        if (duplicate) vErrors.registration_no = `Registration Number "${regNo}" already exists (${duplicate.vehicle_master_id})`
+        if (Object.keys(vErrors).length > 0) {
+          setVehicleFormErrors(vErrors)
+          setIsSubmitting(false)
+          return
+        }
+        setVehicleFormErrors({})
         const payload = { ...vehicleForm }
         if (roadTaxType === 'expiry') {
           payload.life_time_tax = null
@@ -1010,16 +1030,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         toast({ title: "Success", description: res.message || (editingItem ? "Updated successfully" : "Created successfully") })
         setIsDialogOpen(false)
         resetForms()
-        // Refetch appropriate query
-        if (activeTab === "customers") refetchCustomer()
-        else if (activeTab === "depots") refetchDepot()
-        else if (activeTab === "brokers") refetchBroker()
-        else if (activeTab === "salespersons") refetchSalesperson()
-        else if (activeTab === "sku_details") refetchSku()
+        // Refetch appropriate query (also refresh pending list so admin sees new/edited record immediately)
+        if (activeTab === "customers") { refetchCustomer(); refetchPendingCustomers() }
+        else if (activeTab === "depots") { refetchDepot(); refetchPendingDepots() }
+        else if (activeTab === "brokers") { refetchBroker(); refetchPendingBrokers() }
+        else if (activeTab === "salespersons") { refetchSalesperson(); refetchPendingSalespersons() }
+        else if (activeTab === "sku_details") { refetchSku(); refetchPendingSku() }
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
-        else if (activeTab === "vehicle_master") refetchVehicle()
-        else if (activeTab === "driver_master") refetchDriver()
-        else if (activeTab === "transport_master") refetchTransport()
+        else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
+        else if (activeTab === "driver_master") { refetchDriver(); refetchPendingDrivers() }
+        else if (activeTab === "transport_master") { refetchTransport(); refetchPendingTransport() }
       }
     } catch (error: any) {
       toast({
@@ -1790,24 +1810,38 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Input value={vehicleForm.vehicle_master_id} readOnly className="bg-slate-100" />
           </div>
           <div className="space-y-2">
-            <Label>Registration No *</Label>
-            <Input value={vehicleForm.registration_no} onChange={e => setVehicleForm({...vehicleForm, registration_no: e.target.value})} placeholder="e.g. CG04JD1234" />
+            <Label>Registration No <span className="text-red-500">*</span></Label>
+            <Input
+              value={vehicleForm.registration_no}
+              onChange={e => { setVehicleForm({...vehicleForm, registration_no: e.target.value}); setVehicleFormErrors(prev => ({...prev, registration_no: undefined})) }}
+              placeholder="e.g. CG04JD1234"
+              className={vehicleFormErrors.registration_no ? 'border-red-500 focus-visible:ring-red-400' : ''}
+            />
+            {vehicleFormErrors.registration_no && <p className="text-xs text-red-500 mt-1">{vehicleFormErrors.registration_no}</p>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Vehicle Type</Label>
-            <Input value={vehicleForm.vehicle_type} onChange={e => setVehicleForm({...vehicleForm, vehicle_type: e.target.value})} placeholder="e.g. Truck" />
+            <Label>Vehicle Type <span className="text-red-500">*</span></Label>
+            <Input
+              value={vehicleForm.vehicle_type}
+              onChange={e => { setVehicleForm({...vehicleForm, vehicle_type: e.target.value}); setVehicleFormErrors(prev => ({...prev, vehicle_type: undefined})) }}
+              placeholder="e.g. Truck"
+              className={vehicleFormErrors.vehicle_type ? 'border-red-500 focus-visible:ring-red-400' : ''}
+            />
+            {vehicleFormErrors.vehicle_type && <p className="text-xs text-red-500 mt-1">{vehicleFormErrors.vehicle_type}</p>}
           </div>
           <div className="space-y-2">
-            <Label>Transporter</Label>
+            <Label>Transporter <span className="text-red-500">*</span></Label>
             <Combobox
               options={sortedVehicleTransporters.map(name => ({ value: name, label: name }))}
               value={vehicleForm.transporter}
-              onValueChange={val => setVehicleForm({...vehicleForm, transporter: val})}
+              onValueChange={val => { setVehicleForm({...vehicleForm, transporter: val}); setVehicleFormErrors(prev => ({...prev, transporter: undefined})) }}
               placeholder="Select transporter"
               searchPlaceholder="Search transporter..."
+              className={vehicleFormErrors.transporter ? 'border-red-500' : ''}
             />
+            {vehicleFormErrors.transporter && <p className="text-xs text-red-500 mt-1">{vehicleFormErrors.transporter}</p>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -2235,14 +2269,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             size="sm"
             className="h-9 md:h-10 rounded-xl px-3 md:px-4 border-slate-200 hover:bg-slate-50 transition-all"
             onClick={() => {
-              if (activeTab === "customers") refetchCustomer()
-              else if (activeTab === "depots") refetchDepot()
-              else if (activeTab === "brokers") refetchBroker()
-              else if (activeTab === "salespersons") refetchSalesperson()
-              else if (activeTab === "sku_details") refetchSku()
+              if (activeTab === "customers") { refetchCustomer(); refetchPendingCustomers() }
+              else if (activeTab === "depots") { refetchDepot(); refetchPendingDepots() }
+              else if (activeTab === "brokers") { refetchBroker(); refetchPendingBrokers() }
+              else if (activeTab === "salespersons") { refetchSalesperson(); refetchPendingSalespersons() }
+              else if (activeTab === "sku_details") { refetchSku(); refetchPendingSku() }
               else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
-              else if (activeTab === "vehicle_master") refetchVehicle()
-              else if (activeTab === "driver_master") refetchDriver()
+              else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
+              else if (activeTab === "driver_master") { refetchDriver(); refetchPendingDrivers() }
+              else if (activeTab === "transport_master") { refetchTransport(); refetchPendingTransport() }
             }}
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''} md:mr-2`} />
