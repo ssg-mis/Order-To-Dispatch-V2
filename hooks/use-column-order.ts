@@ -1,6 +1,18 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
+import { useColumnPrefsServer, debouncedSaveColumnPref } from "@/lib/column-prefs"
 
 const ORDER_PREFIX = "col_order_"
+
+/** Merge saved order with current defaults: keep saved order, append new columns, drop removed. */
+function mergeOrder(saved: string[], defaultOrder: string[]): string[] {
+  const defaultSet = new Set(defaultOrder)
+  const seen = new Set<string>()
+  // Dedupe while preserving order — duplicate ids would crash the column
+  // drag/sortable context (duplicate React keys).
+  const keptSaved = saved.filter((id) => defaultSet.has(id) && !seen.has(id) && seen.add(id))
+  const newCols = defaultOrder.filter((id) => !seen.has(id) && seen.add(id))
+  return [...keptSaved, ...newCols]
+}
 
 function readOrder(stageKey: string): string[] | null {
   if (typeof window === "undefined") return null
@@ -37,20 +49,35 @@ export function useColumnOrder(
   defaultOrder: string[]
 ): [string[], (order: string[]) => void] {
   const [columnOrder, setColumnOrderInternal] = useState<string[]>(() => {
+    // localStorage = instant cache; server value hydrates in just after.
     const saved = readOrder(stageKey)
-    if (!saved) return defaultOrder
-    // Merge: keep saved ordering, add any new columns at the end, drop removed ones
-    const defaultSet = new Set(defaultOrder)
-    const newCols = defaultOrder.filter(id => !new Set(saved).has(id))
-    return [...saved.filter(id => defaultSet.has(id)), ...newCols]
+    return saved ? mergeOrder(saved, defaultOrder) : defaultOrder
   })
+
+  // ── Hydrate from the logged-in user's server-saved prefs (once) ──────────
+  const { userId, prefs, isReady } = useColumnPrefsServer()
+  const hydratedRef = useRef(false)
+
+  useEffect(() => {
+    if (hydratedRef.current || !isReady) return
+    hydratedRef.current = true
+    const serverOrder = prefs?.[stageKey]?.order
+    if (Array.isArray(serverOrder) && serverOrder.length > 0) {
+      const merged = mergeOrder(serverOrder, defaultOrder)
+      setColumnOrderInternal(merged)
+      writeOrder(stageKey, merged)
+    }
+    // defaultOrder is conceptually constant per stage; hydration runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, prefs, stageKey])
 
   const setColumnOrder = useCallback(
     (order: string[]) => {
       setColumnOrderInternal(order)
       writeOrder(stageKey, order)
+      if (userId) debouncedSaveColumnPref(userId, stageKey, "order", order)
     },
-    [stageKey]
+    [stageKey, userId]
   )
 
   return [columnOrder, setColumnOrder]

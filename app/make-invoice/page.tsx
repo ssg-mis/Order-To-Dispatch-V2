@@ -527,7 +527,11 @@ export default function MakeInvoicePage() {
       actual1Date: formatDate(group._allProducts[0]?.lrc_actual_1 || group._allProducts[0]?.actual_1),
       uploadSo: group._allProducts[0]?.upload_so || group._allProducts[0]?.uploadSo || null,
       freightRate: group._allProducts[0]?.freight_rate || 0,
-      orderPunchRemarks: group._allProducts[0]?.order_punch_remarks || "—"
+      orderPunchRemarks: group._allProducts[0]?.order_punch_remarks || "—",
+      // Record sent back from Check Invoice with a reported issue (status_1='Issue').
+      // Surface the reviewer's remarks (remarks_2) so it can be corrected here.
+      isReverted: group._allProducts.some((p: any) => p.status_1 === "Issue"),
+      issueRemarks: group._allProducts.find((p: any) => p.status_1 === "Issue" && p.remarks_2)?.remarks_2 || "",
     }))
   }, [filteredPendingOrders])
 
@@ -933,7 +937,22 @@ export default function MakeInvoicePage() {
                       if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
                       if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600 font-medium">{group.orderPunchRemarks}</span></TableCell>
-                      if (id === "status") return <TableCell key={id} className="text-center"><Badge className="bg-cyan-100 text-cyan-700">Pending Invoice</Badge></TableCell>
+                      if (id === "status") return (
+                        <TableCell key={id} className="text-center">
+                          {group.isReverted ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Issue Reported</Badge>
+                              {group.issueRemarks && (
+                                <span className="text-[10px] text-red-600 font-medium italic max-w-[180px] leading-tight" title={group.issueRemarks}>
+                                  "{group.issueRemarks}"
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <Badge className="bg-cyan-100 text-cyan-700">Pending Invoice</Badge>
+                          )}
+                        </TableCell>
+                      )
                       if (id === "products") return (
                         <TableCell key={id} className="text-center">
                           <span className="text-[10px] font-black text-slate-700 uppercase leading-tight block max-w-[150px] mx-auto">
@@ -1032,7 +1051,16 @@ export default function MakeInvoicePage() {
                         })}
                       </div>
                     )}
-                    <Badge className="mt-3 bg-cyan-100 text-cyan-700 hover:bg-cyan-100">Pending Invoice</Badge>
+                    {group.isReverted ? (
+                      <div className="mt-3">
+                        <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Issue Reported</Badge>
+                        {group.issueRemarks && (
+                          <p className="mt-1 text-[11px] text-red-600 font-medium italic break-words">"{group.issueRemarks}"</p>
+                        )}
+                      </div>
+                    ) : (
+                      <Badge className="mt-3 bg-cyan-100 text-cyan-700 hover:bg-cyan-100">Pending Invoice</Badge>
+                    )}
                   </div>
                 )
               })
@@ -1097,6 +1125,15 @@ export default function MakeInvoicePage() {
                             </Button>
                           </div>
                         </div>
+
+                        {group.isReverted && (
+                          <div className="bg-red-50 border-b border-red-200 px-3 sm:px-5 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-red-600 mb-0.5">⚠ Issue Reported by Check Invoice</p>
+                            <p className="text-xs font-medium text-red-800 italic break-words">
+                              {group.issueRemarks ? `"${group.issueRemarks}"` : "No remarks were provided."}
+                            </p>
+                          </div>
+                        )}
 
                         {isExpanded && (
                           <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">

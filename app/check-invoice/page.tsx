@@ -277,6 +277,9 @@ export default function CheckInvoicePage() {
   const [selectedGroups, setSelectedGroups] = useState<any[]>([]) // Changed to array for multi-group support
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  // View-only mode: opened for issued/reverted records that are awaiting re-issue
+  // from Make Invoice. Details are visible but verification cannot be completed.
+  const [viewOnly, setViewOnly] = useState(false)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]) // State to manage expanded sections
 
   const [checkData, setCheckData] = useState({
@@ -560,11 +563,15 @@ export default function CheckInvoicePage() {
     )
   }
 
+  // Issued/reverted records are awaiting re-issue from Make Invoice and cannot be
+  // verified, so they are excluded from selection (view-only via the eye action).
+  const selectableRows = useMemo(() => displayRows.filter(r => !r.isReverted), [displayRows])
+
   const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length) {
+    if (selectableRows.length > 0 && selectedItems.length === selectableRows.length) {
       setSelectedItems([])
     } else {
-      setSelectedItems(displayRows.map(r => r._rowKey))
+      setSelectedItems(selectableRows.map(r => r._rowKey))
     }
   }
 
@@ -574,6 +581,7 @@ export default function CheckInvoicePage() {
     // Get all selected groups
     const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
     if (targets.length > 0) {
+      setViewOnly(false)
       setSelectedGroups(targets)
       // Select all products by default from all selected groups
       const allProdKeys = targets.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
@@ -585,6 +593,18 @@ export default function CheckInvoicePage() {
 
       setIsDialogOpen(true)
     }
+  }
+
+  // Open the details dialog in read-only mode for an issued/reverted record.
+  // The record is awaiting re-issue from Make Invoice and must not be re-verified
+  // here, but its details should remain viewable.
+  const handleViewGroup = (group: any) => {
+    setViewOnly(true)
+    setSelectedGroups([group])
+    setSelectedProducts(group._allProducts.map((p: any) => p._rowKey))
+    setCheckData({ status: "", remarks: "" })
+    setExpandedOrders([])
+    setIsDialogOpen(true)
   }
 
   const handleSubmit = async () => {
@@ -794,7 +814,7 @@ export default function CheckInvoicePage() {
             <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
               <TableRow>
                 <TableHead className="w-12 text-center">
-                  <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
+                  <Checkbox checked={selectableRows.length > 0 && selectedItems.length === selectableRows.length} onCheckedChange={toggleSelectAll} />
                 </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {orderedVisible.map(id => {
@@ -835,12 +855,22 @@ export default function CheckInvoicePage() {
                     className={`${selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""} ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
                   >
                     <TableCell className="text-center">
-                      <Checkbox
-                        checked={selectedItems.includes(group._rowKey)}
-                        onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        disabled={group.isReverted}
-                        title={group.isReverted ? "Reverted to Make Invoice stage — awaiting re-issue" : ""}
-                      />
+                      {group.isReverted ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-amber-600 hover:bg-amber-100"
+                          onClick={() => handleViewGroup(group)}
+                          title="Awaiting re-issue from Make Invoice — view details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Checkbox
+                          checked={selectedItems.includes(group._rowKey)}
+                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
+                        />
+                      )}
                     </TableCell>
                     {orderedVisible.map(id => {
                       if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
@@ -914,11 +944,22 @@ export default function CheckInvoicePage() {
                         {visibleColumns.includes("orderNo") && <p className="font-mono text-sm font-black text-blue-700 break-all">{display.doNumber}</p>}
                         {visibleColumns.includes("partySoDate") && <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>}
                       </div>
-                      <Checkbox
-                        checked={selected}
-                        onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        disabled={group.isReverted}
-                      />
+                      {group.isReverted ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-amber-600 hover:bg-amber-100"
+                          onClick={() => handleViewGroup(group)}
+                          title="Awaiting re-issue from Make Invoice — view details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Checkbox
+                          checked={selected}
+                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
+                        />
+                      )}
                     </div>
 
                     {visibleColumns.includes("customerName") && (
@@ -1016,12 +1057,12 @@ export default function CheckInvoicePage() {
       </div>
 
       {/* Split-View Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) setViewOnly(false) }}>
         <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 break-words">
-                Verify Invoices - {selectedGroups.length > 1 ? `${selectedGroups.length} Invoices Selected` : selectedGroups[0]?.invoiceNo}
+                {viewOnly ? "View Details" : "Verify Invoices"} - {selectedGroups.length > 1 ? `${selectedGroups.length} Invoices Selected` : selectedGroups[0]?.invoiceNo}
               </DialogTitle>
             </DialogHeader>
 
@@ -1591,7 +1632,25 @@ export default function CheckInvoicePage() {
               </div>
             )}
 
-            {/* Verification Form (Bottom) */}
+            {/* Verification Form (Bottom) — hidden while viewing an issued record */}
+            {viewOnly ? (
+              <div className="mt-8 space-y-3 border border-amber-200 rounded-lg p-4 sm:p-6 bg-amber-50/60 shadow-sm">
+                <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2 border-b border-amber-200 pb-2">
+                  <Eye className="h-4 w-4 text-amber-600" />
+                  Issue Reported — Awaiting Re-issue from Make Invoice
+                </h3>
+                <p className="text-xs text-amber-700 font-medium">
+                  This invoice was reported as an issue and sent back to the Make Invoice stage.
+                  It cannot be verified here until Make Invoice corrects and re-issues it. You can review the details above in the meantime.
+                </p>
+                {selectedGroups[0]?._allProducts?.[0]?.remarks_2 && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-500 mb-1">Reported Issue Remarks</p>
+                    <p className="text-xs font-medium text-amber-800 italic break-words">"{selectedGroups[0]._allProducts[0].remarks_2}"</p>
+                  </div>
+                )}
+              </div>
+            ) : (
             <div className="mt-8 space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                 <CheckCircle className="h-4 w-4 text-blue-600" />
@@ -1623,19 +1682,22 @@ export default function CheckInvoicePage() {
                 </div>
               </div>
             </div>
+            )}
 
             <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
+                {viewOnly ? "Close" : "Cancel"}
               </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || !checkData.status || isReadOnly}
-                className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-                title={isReadOnly ? "View Only Access" : "Complete Verification"}
-              >
-                {isProcessing ? "Processing..." : "Complete Verification"}
-              </Button>
+              {!viewOnly && (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isProcessing || !checkData.status || isReadOnly}
+                  className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
+                  title={isReadOnly ? "View Only Access" : "Complete Verification"}
+                >
+                  {isProcessing ? "Processing..." : "Complete Verification"}
+                </Button>
+              )}
             </DialogFooter>
           </div>
         </DialogContent>

@@ -1046,6 +1046,29 @@ export const userApi = {
       body: JSON.stringify({ formats }),
     });
   },
+
+  /**
+   * Get this user's per-stage column preferences
+   * (visibility + order), keyed by stage.
+   */
+  getColumnPrefs: async (id: number): Promise<ApiResponse> => {
+    return request(`/users/${id}/column-prefs`);
+  },
+
+  /**
+   * Deep-merge-save one stage's column preferences. Send only the slice you
+   * changed ({ visible } or { order }); the other is preserved server-side.
+   */
+  saveColumnPrefs: async (
+    id: number,
+    stageKey: string,
+    partial: { visible?: string[]; order?: string[] }
+  ): Promise<ApiResponse> => {
+    return request(`/users/${id}/column-prefs`, {
+      method: 'PUT',
+      body: JSON.stringify({ stageKey, ...partial }),
+    });
+  },
 };
 
 /**

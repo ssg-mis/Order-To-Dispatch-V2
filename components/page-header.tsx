@@ -16,12 +16,12 @@ export function PageHeader({ title, description, children }: PageHeaderProps) {
   const { user } = useAuth()
   
   return (
-    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4 md:pb-5 md:mb-5">
-      <div className="flex items-center gap-4 flex-1">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="h-6 hidden sm:block" />
-        <div className="mr-4">
-          <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900">
+    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4 md:pb-5 md:mb-5">
+      <div className="flex items-center gap-4 flex-1 min-w-0">
+        <SidebarTrigger className="-ml-1 shrink-0" />
+        <Separator orientation="vertical" className="h-6 hidden sm:block shrink-0" />
+        <div className="mr-4 min-w-0">
+          <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 whitespace-nowrap">
             {title}
           </h1>
           {description && (
@@ -33,8 +33,8 @@ export function PageHeader({ title, description, children }: PageHeaderProps) {
       </div>
       
       {/* User Profile and Actions Section */}
-      <div className="flex items-center justify-between lg:justify-end gap-3 md:gap-4 w-full lg:w-auto">
-        <div className="flex items-center gap-2 md:gap-4 flex-1 lg:flex-none justify-start lg:justify-end">
+      <div className="flex items-center justify-between xl:justify-end gap-3 md:gap-4 w-full xl:w-auto">
+        <div className="flex items-center flex-wrap gap-2 md:gap-4 flex-1 xl:flex-none justify-start xl:justify-end">
           {children}
         </div>
         

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, type ComponentType } from "react"
 import { matchesSearch } from "@/lib/search-utils"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -190,6 +190,18 @@ const ALL_MASTER_TABS = [
   "customers", "depots", "brokers", "salespersons",
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master"
 ]
+
+const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?: string }>; desc: string }> = {
+  customers: { label: "Customer", icon: Users, desc: "Manage your customer records and details" },
+  depots: { label: "Depots", icon: Warehouse, desc: "Manage your depot locations and details" },
+  brokers: { label: "Brokers", icon: Briefcase, desc: "Manage your broker records and details" },
+  salespersons: { label: "Salesperson", icon: Users, desc: "Manage your salesperson records and details" },
+  sku_details: { label: "SKU List", icon: Package, desc: "Manage your SKU list and product details" },
+  sku_selling_price: { label: "Pricing", icon: Package, desc: "Manage SKU selling prices and rates" },
+  vehicle_master: { label: "Vehicles", icon: Truck, desc: "Manage your vehicle database and documents" },
+  driver_master: { label: "Drivers", icon: User, desc: "Manage your driver records and documents" },
+  transport_master: { label: "Transporters", icon: Truck, desc: "Manage your transporter records and details" },
+}
 
 const formatDocDate = (dateStr?: string) => {
   if (!dateStr) return "—"
@@ -999,7 +1011,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           payload.road_tax = null
           payload.road_tax_image = null
         }
-        const isPermitEnabled = payload.gvw !== '' && Number(payload.gvw) < 3000;
+        const isPermitEnabled = payload.gvw !== '' && Number(payload.gvw) > 3000;
         if (!isPermitEnabled) {
           payload.state_permit = null;
           payload.state_permit_image = null;
@@ -1105,11 +1117,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const openApprovalModal = (tab: string, item: any) => {
     setApprovalReviewModal({ tab, item })
-    // For a staged edit, pre-fill the review form with the PROPOSED values
-    // (pending_changes layered over the live row) so the admin reviews the new values.
+    // Pre-fill the SAME Add/Edit form used on the main tab with the proposed values
+    // (pending_changes layered over the live row for edits), so the review modal is
+    // identical to the original add/edit modal. editingItem keeps IDs read-only.
     let pc = item?.pending_changes
     if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-    setApprovalEditData(pc && item?.request_type === 'edit' ? { ...item, ...pc } : { ...item })
+    const proposed = pc && item?.request_type === 'edit' ? { ...item, ...pc } : { ...item }
+    setEditingItem(item)
+    populateFormFromData(tab, proposed)
   }
 
   const handleReviewRecord = async (tab: string, id: any, action: 'approve' | 'reject', reason?: string, overrides?: Record<string, any>) => {
@@ -1144,6 +1159,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setRejectionReason("")
       setApprovalReviewModal(null)
       setApprovalEditData({})
+      resetForms()
     }
   }
 
@@ -1210,46 +1226,122 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     }
   }
 
-  const openEditDialog = async (item: any) => {
-    setEditingItem(item)
-    if (activeTab === "customers") {
-      setCustomerForm({ ...item })
-    } else if (activeTab === "depots") {
-      setDepotForm({ ...item })
-    } else if (activeTab === "brokers") {
-      setBrokerForm({ ...item })
-    } else if (activeTab === "salespersons") {
-      setSalespersonForm({ ...item })
-    } else if (activeTab === "sku_details") {
-      setSkuDetailsForm({ ...item })
+  // Populate the per-tab Add/Edit form state from a record. Shared by the Edit
+  // dialog and the pending-approval review modal so both render the identical form.
+  const populateFormFromData = async (tab: string, data: any) => {
+    if (tab === "customers") {
+      setCustomerForm({ ...data })
+    } else if (tab === "depots") {
+      setDepotForm({ ...data })
+    } else if (tab === "brokers") {
+      setBrokerForm({ ...data })
+    } else if (tab === "salespersons") {
+      setSalespersonForm({ ...data })
+    } else if (tab === "sku_details") {
+      setSkuDetailsForm({ ...data })
       setOpeningStockByDepot({})
       try {
         const res = await inventoryApi.getData()
         if (res.success) {
           const stockMap: Record<string, string> = {}
           res.data
-            .filter((row: any) => row.product_name?.toLowerCase() === item.sku_name?.toLowerCase())
+            .filter((row: any) => row.product_name?.toLowerCase() === data.sku_name?.toLowerCase())
             .forEach((row: any) => {
               if (row.opening_qty) stockMap[row.depot_name] = String(row.opening_qty)
             })
           setOpeningStockByDepot(stockMap)
         }
       } catch (_) {}
-    } else if (activeTab === "sku_selling_price") {
-      setSkuSellingPrice({ ...item })
-    } else if (activeTab === "vehicle_master") {
+    } else if (tab === "sku_selling_price") {
+      setSkuSellingPrice({ ...data })
+    } else if (tab === "vehicle_master") {
       setVehicleForm({
         state_permit_type: '',
         fuel_type: 'Diesel',
-        ...item
+        ...data
       })
-      setRoadTaxType(item.life_time_tax || item.life_time_tax_image ? 'lifetime' : 'expiry')
-    } else if (activeTab === "driver_master") {
-      setDriverForm({ ...item })
-    } else if (activeTab === "transport_master") {
-      setTransportForm({ ...item })
+      setRoadTaxType(data.life_time_tax || data.life_time_tax_image ? 'lifetime' : 'expiry')
+    } else if (tab === "driver_master") {
+      setDriverForm({ ...data })
+    } else if (tab === "transport_master") {
+      setTransportForm({ ...data })
     }
+  }
+
+  const openEditDialog = async (item: any) => {
+    setEditingItem(item)
+    await populateFormFromData(activeTab, item)
     setIsDialogOpen(true)
+  }
+
+  // Returns the current per-tab Add/Edit form state object (used when approving).
+  const getFormForTab = (tab: string): any => {
+    switch (tab) {
+      case 'customers': return customerForm
+      case 'depots': return depotForm
+      case 'brokers': return brokerForm
+      case 'salespersons': return salespersonForm
+      case 'sku_details': return skuDetailsForm
+      case 'vehicle_master': return vehicleForm
+      case 'driver_master': return driverForm
+      case 'transport_master': return transportForm
+      default: return {}
+    }
+  }
+
+  // Renders the exact same Add/Edit form used on the main tab, by tab key.
+  const renderFormForTab = (tab: string) => {
+    switch (tab) {
+      case 'customers': return renderCustomerForm()
+      case 'depots': return renderDepotForm()
+      case 'brokers': return renderBrokerForm()
+      case 'salespersons': return renderSalespersonForm()
+      case 'sku_details': return renderSkuDetailsForm()
+      case 'vehicle_master': return renderVehicleForm()
+      case 'driver_master': return renderDriverForm()
+      case 'transport_master': return renderTransportForm()
+      default: return null
+    }
+  }
+
+  const APPROVAL_FIELD_LABELS: Record<string, string> = {
+    customer_name: 'Customer Name', status: 'Status', contact_person: 'Contact Person', contact: 'Mobile',
+    email: 'Email', email_id: 'Email', address_line_1: 'Address', address_line_2: 'Address 2', state: 'State',
+    pincode: 'Pincode', pan: 'PAN', gstin: 'GSTIN', gst_registered: 'GST Registered',
+    depot_name: 'Depot Name', depot_address: 'Depot Address', salesman_broker_name: 'Salesman / Broker',
+    salesman_name: 'Name', mobile_no: 'Mobile', sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM',
+    hsn_code: 'HSN Code', gst_rate: 'GST Rate', registration_no: 'Registration No', vehicle_type: 'Vehicle Type',
+    transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW',
+    driver_name: 'Driver Name', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto',
+    transporter_name: 'Transporter Name', contact_number: 'Contact Number',
+  }
+
+  // Compact diff summary shown above the form for an "edit" approval request.
+  const renderProposedChanges = () => {
+    if (!approvalReviewModal || approvalReviewModal.item?.request_type !== 'edit') return null
+    let pc = approvalReviewModal.item.pending_changes
+    if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
+    if (!pc) return null
+    const changed = Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? ''))
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
+        <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
+        {changed.length === 0 ? (
+          <p className="text-xs text-blue-600">No field differs from the current record.</p>
+        ) : (
+          <div className="space-y-1">
+            {changed.map(k => (
+              <div key={k} className="text-xs flex flex-wrap gap-1">
+                <span className="font-medium text-slate-600">{APPROVAL_FIELD_LABELS[k] || k}:</span>
+                <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
+                <span className="text-slate-400">→</span>
+                <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   // --- Filter Logic ---
@@ -1535,7 +1627,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   )
 
   const renderSkuDetailsForm = () => (
-    <div className="grid gap-4 py-4 px-1 max-h-[70vh] overflow-y-auto">
+    <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_code">SKU Code *</Label>
@@ -1670,7 +1762,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   )
 
   const renderSkuSellingPriceForm = () => (
-    <div className="grid gap-4 py-4 px-1 max-h-[70vh] overflow-y-auto">
+    <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="packing_material">Packing Material *</Label>
@@ -1803,7 +1895,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderVehicleForm = () => {
     return (
-      <div className="grid gap-4 py-4 px-1 max-h-[70vh] overflow-y-auto">
+      <div className="grid gap-4 py-4 px-1">
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Vehicle ID *</Label>
@@ -1864,6 +1956,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <SelectItem value="Electrical">Electrical</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>RTO</Label>
+            <Input value={vehicleForm.rto || ''} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="RTO Office" />
           </div>
         </div>
 
@@ -1976,13 +2074,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <div className="space-y-2">
             <Label className="flex justify-between items-center">
               <span>State/National Permit Type</span>
-              {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000) && (
-                <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &lt; 3000 KGS)</span>
+              {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000) && (
+                <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &gt; 3000 KGS)</span>
               )}
             </Label>
             <Select 
               value={vehicleForm.state_permit_type || 'State'} 
-              disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+              disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
               onValueChange={(val: 'State' | 'National') => setVehicleForm({...vehicleForm, state_permit_type: val})}
             >
               <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
@@ -1998,7 +2096,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               <Label>Permit Expiry Date</Label>
               <Input 
                 type="date" 
-                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
                 value={vehicleForm.state_permit?.split('T')[0] || ''} 
                 onChange={e => setVehicleForm({...vehicleForm, state_permit: e.target.value})} 
               />
@@ -2006,7 +2104,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <div className="space-y-2">
               <FileUploadField
                 label="Permit Image"
-                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) < 3000)}
+                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
                 value={vehicleForm.state_permit_image}
                 helperText="Max file size: 20 MB"
@@ -2025,7 +2123,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               const gvw = e.target.value
               const ulw = vehicleForm.ulw
               const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
-              const clearPermit = gvw === '' || Number(gvw) >= 3000
+              const clearPermit = gvw === '' || Number(gvw) <= 3000
               setVehicleForm((prev: any) => ({
                 ...prev,
                 gvw,
@@ -2235,9 +2333,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto min-h-screen space-y-4 md:space-y-6 animate-in fade-in duration-700">
-      <PageHeader 
-        title="Master Data" 
-        description="Manage customers, depots, and brokers details"
+      <PageHeader
+        title="Master Data"
+        description={TAB_META[activeTab]?.desc || "Manage your master data records"}
       >
         <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full lg:w-auto">
           <div className="relative flex-1 min-w-[140px] max-w-full md:max-w-xs transition-all duration-300 focus-within:max-w-md">
@@ -2293,7 +2391,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <span className="hidden md:inline">Add {activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-xl">
+            <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingItem ? "Edit" : "Add New"} {activeTab === "sku_details" ? "SKU" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab.slice(0, -1)}</DialogTitle>
                 <DialogDescription>
@@ -2314,63 +2412,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </PageHeader>
 
       <Tabs value={activeTab} className="w-full space-y-6" onValueChange={setActiveTab}>
-        <div className="relative group/tabs flex items-center">
-          <TabsList className="flex w-full items-center justify-start gap-1 bg-transparent p-0 overflow-x-auto no-scrollbar scroll-smooth">
-            {visibleTabs.includes("customers") && (
-              <TabsTrigger value="customers" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Users className="h-3.5 w-3.5" />
-                Customer
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("depots") && (
-              <TabsTrigger value="depots" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Warehouse className="h-3.5 w-3.5" />
-                Depots
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("brokers") && (
-              <TabsTrigger value="brokers" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Briefcase className="h-3.5 w-3.5" />
-                Brokers
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("salespersons") && (
-              <TabsTrigger value="salespersons" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Users className="h-3.5 w-3.5" />
-                Salesperson
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("sku_details") && (
-              <TabsTrigger value="sku_details" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Package className="h-3.5 w-3.5" />
-                SKU List
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("sku_selling_price") && (
-              <TabsTrigger value="sku_selling_price" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Package className="h-3.5 w-3.5" />
-                Pricing
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("vehicle_master") && (
-              <TabsTrigger value="vehicle_master" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Truck className="h-3.5 w-3.5" />
-                Vehicles
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("driver_master") && (
-              <TabsTrigger value="driver_master" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <User className="h-3.5 w-3.5" />
-                Drivers
-              </TabsTrigger>
-            )}
-            {visibleTabs.includes("transport_master") && (
-              <TabsTrigger value="transport_master" className="flex items-center gap-2 px-5 py-2.5 rounded-xl whitespace-nowrap shrink-0 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300">
-                <Truck className="h-3.5 w-3.5" />
-                Transporters
-              </TabsTrigger>
-            )}
-          </TabsList>
+        <div className="flex items-center">
+          <Select value={activeTab} onValueChange={setActiveTab}>
+            <SelectTrigger className="w-full sm:w-72 h-12 rounded-xl bg-white shadow-sm border-slate-200 px-4 font-medium data-[state=open]:ring-2 data-[state=open]:ring-primary/20">
+              <SelectValue placeholder="Select master" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              {visibleTabs.map((tab) => {
+                const meta = TAB_META[tab]
+                if (!meta) return null
+                const Icon = meta.icon
+                return (
+                  <SelectItem key={tab} value={tab} className="rounded-lg cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-3.5 w-3.5 text-slate-500" />
+                      {meta.label}
+                    </span>
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
         </div>
 
         {visibleTabs.includes("customers") && (
@@ -4588,368 +4650,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </AlertDialog>
 
       {/* Approve with Review Dialog (shared for all tabs) */}
-      <Dialog open={!!approvalReviewModal} onOpenChange={(open) => { if (!open) { setApprovalReviewModal(null); setApprovalEditData({}) } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <Dialog open={!!approvalReviewModal} onOpenChange={(open) => { if (!open) { setApprovalReviewModal(null); setApprovalEditData({}); resetForms() } }}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Check className="h-5 w-5 text-emerald-600" />
               Review & Approve
             </DialogTitle>
             <DialogDescription>
-              Review the submitted values below. You can edit any field before approving — the final approved record will use these values.
+              Review the submitted values below. You can edit any field before approving. The final approved record will use these values.
             </DialogDescription>
           </DialogHeader>
 
-          {approvalReviewModal?.tab === 'customers' && (
+          {approvalReviewModal && (
             <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { customer_name: 'Customer Name', status: 'Status', contact_person: 'Contact Person', contact: 'Mobile', email: 'Email', address_line_1: 'Address', address_line_2: 'Address 2', state: 'State', pincode: 'Pincode', pan: 'PAN', gstin: 'GSTIN', gst_registered: 'GST Registered' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing customer</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Customer Name</Label><Input value={approvalEditData.customer_name || ''} onChange={e => setApprovalEditData(p => ({...p, customer_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Contact Person</Label><Input value={approvalEditData.contact_person || ''} onChange={e => setApprovalEditData(p => ({...p, contact_person: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Mobile</Label><Input value={approvalEditData.contact || ''} onChange={e => setApprovalEditData(p => ({...p, contact: e.target.value}))} /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Email</Label><Input value={approvalEditData.email || ''} onChange={e => setApprovalEditData(p => ({...p, email: e.target.value}))} /></div>
-              <div className="space-y-1"><Label className="text-xs">Address</Label><Input value={approvalEditData.address_line_1 || ''} onChange={e => setApprovalEditData(p => ({...p, address_line_1: e.target.value}))} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">State</Label><Input value={approvalEditData.state || ''} onChange={e => setApprovalEditData(p => ({...p, state: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Pincode</Label><Input value={approvalEditData.pincode || ''} onChange={e => setApprovalEditData(p => ({...p, pincode: e.target.value}))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">PAN</Label><Input value={approvalEditData.pan || ''} onChange={e => setApprovalEditData(p => ({...p, pan: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">GSTIN</Label><Input value={approvalEditData.gstin || ''} onChange={e => setApprovalEditData(p => ({...p, gstin: e.target.value}))} /></div>
-              </div>
+              {renderProposedChanges()}
+              {renderFormForTab(approvalReviewModal.tab)}
             </div>
           )}
-
-          {approvalReviewModal?.tab === 'depots' && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { depot_name: 'Depot Name', status: 'Status', depot_address: 'Depot Address', state: 'State', salesman_broker_name: 'Salesman / Broker' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Depot Name</Label><Input value={approvalEditData.depot_name || ''} onChange={e => setApprovalEditData(p => ({...p, depot_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Depot Address</Label><Input value={approvalEditData.depot_address || ''} onChange={e => setApprovalEditData(p => ({...p, depot_address: e.target.value}))} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">State</Label><Input value={approvalEditData.state || ''} onChange={e => setApprovalEditData(p => ({...p, state: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Salesman / Broker</Label><Input value={approvalEditData.salesman_broker_name || ''} onChange={e => setApprovalEditData(p => ({...p, salesman_broker_name: e.target.value}))} /></div>
-              </div>
-            </div>
-          )}
-
-          {(approvalReviewModal?.tab === 'brokers' || approvalReviewModal?.tab === 'salespersons') && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { salesman_name: 'Name', status: 'Status', mobile_no: 'Mobile', email_id: 'Email', depot_name: 'Depot' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Name</Label><Input value={approvalEditData.salesman_name || ''} onChange={e => setApprovalEditData(p => ({...p, salesman_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Mobile</Label><Input value={approvalEditData.mobile_no || ''} onChange={e => setApprovalEditData(p => ({...p, mobile_no: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Email</Label><Input value={approvalEditData.email_id || ''} onChange={e => setApprovalEditData(p => ({...p, email_id: e.target.value}))} /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Depot</Label><Input value={approvalEditData.depot_name || ''} onChange={e => setApprovalEditData(p => ({...p, depot_name: e.target.value}))} /></div>
-            </div>
-          )}
-
-          {approvalReviewModal?.tab === 'sku_details' && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM', hsn_code: 'HSN Code', gst_rate: 'GST Rate', status: 'Status' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">SKU Name</Label><Input value={approvalEditData.sku_name || ''} onChange={e => setApprovalEditData(p => ({...p, sku_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">SKU Code</Label><Input value={approvalEditData.sku_code || ''} onChange={e => setApprovalEditData(p => ({...p, sku_code: e.target.value}))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Main UOM</Label><Input value={approvalEditData.main_uom || ''} onChange={e => setApprovalEditData(p => ({...p, main_uom: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">HSN Code</Label><Input value={approvalEditData.hsn_code || ''} onChange={e => setApprovalEditData(p => ({...p, hsn_code: e.target.value}))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">GST Rate (%)</Label><Input type="number" value={approvalEditData.gst_rate || ''} onChange={e => setApprovalEditData(p => ({...p, gst_rate: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-            </div>
-          )}
-
-          {approvalReviewModal?.tab === 'vehicle_master' && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { registration_no: 'Registration No', status: 'Status', vehicle_type: 'Vehicle Type', transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW', passing: 'Passing', state_permit_type: 'State Permit Type', road_tax: 'Road Tax', life_time_tax: 'Life Time Tax', pollution: 'Pollution', insurance: 'Insurance', fitness: 'Fitness', state_permit: 'State Permit', road_tax_image: 'Road Tax Image', life_time_tax_image: 'Life Time Tax Image', pollution_image: 'Pollution Image', insurance_image: 'Insurance Image', fitness_image: 'Fitness Image', state_permit_image: 'State Permit Image' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Registration No</Label><Input value={approvalEditData.registration_no || ''} onChange={e => setApprovalEditData(p => ({...p, registration_no: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1 col-span-2"><Label className="text-xs">Vehicle Type</Label><Input value={approvalEditData.vehicle_type || ''} onChange={e => setApprovalEditData(p => ({...p, vehicle_type: e.target.value}))} /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">Transporter</Label>
-                <Combobox
-                  options={sortedVehicleTransporters.map(name => ({ value: name, label: name }))}
-                  value={approvalEditData.transporter || ''}
-                  onValueChange={v => setApprovalEditData(p => ({...p, transporter: v}))}
-                  placeholder="Select transporter"
-                  searchPlaceholder="Search transporter..."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">RTO</Label><Input value={approvalEditData.rto || ''} onChange={e => setApprovalEditData(p => ({...p, rto: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Fuel Type</Label><Input value={approvalEditData.fuel_type || ''} onChange={e => setApprovalEditData(p => ({...p, fuel_type: e.target.value}))} /></div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1"><Label className="text-xs">GVW</Label><Input type="number" value={approvalEditData.gvw ?? ''} onChange={e => setApprovalEditData(p => ({...p, gvw: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">ULW</Label><Input type="number" value={approvalEditData.ulw ?? ''} onChange={e => setApprovalEditData(p => ({...p, ulw: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Passing</Label><Input type="number" value={approvalEditData.passing ?? ''} readOnly className="bg-slate-100" /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">State Permit Type</Label><Input value={approvalEditData.state_permit_type || ''} onChange={e => setApprovalEditData(p => ({...p, state_permit_type: e.target.value}))} /></div>
-              {[
-                { key: 'road_tax', label: 'Road Tax' },
-                { key: 'life_time_tax', label: 'Life Time Tax' },
-                { key: 'pollution', label: 'Pollution' },
-                { key: 'insurance', label: 'Insurance' },
-                { key: 'fitness', label: 'Fitness' },
-                { key: 'state_permit', label: 'State Permit' },
-              ].map(doc => (
-                <div key={doc.key} className="grid grid-cols-2 gap-3 items-end">
-                  <div className="space-y-1">
-                    <Label className="text-xs">{doc.label}</Label>
-                    <Input type="date" value={String(approvalEditData[doc.key] || '').split('T')[0]} onChange={e => setApprovalEditData(p => ({...p, [doc.key]: e.target.value}))} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">{doc.label} Image</Label>
-                    {approvalEditData[`${doc.key}_image`] ? (
-                      <a href={approvalEditData[`${doc.key}_image`]} target="_blank" rel="noopener noreferrer" className="inline-block">
-                        <img
-                          src={approvalEditData[`${doc.key}_image`]}
-                          alt={`${doc.label} document`}
-                          className="h-16 w-24 object-cover rounded border border-slate-200 hover:opacity-80 transition-opacity cursor-pointer"
-                          onError={(e: any) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'inline'; }}
-                        />
-                        <span style={{ display: 'none' }} className="text-xs font-semibold text-blue-600 underline">View Document</span>
-                      </a>
-                    ) : (
-                      <p className="text-xs text-slate-400">No file</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {approvalReviewModal?.tab === 'driver_master' && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { driver_name: 'Driver Name', status: 'Status', mobile_no: 'Mobile', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto', rto: 'RTO' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Driver Name</Label><Input value={approvalEditData.driver_name || ''} onChange={e => setApprovalEditData(p => ({...p, driver_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Mobile</Label><Input value={approvalEditData.mobile_no || ''} onChange={e => setApprovalEditData(p => ({...p, mobile_no: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">DL Number</Label><Input value={approvalEditData.driving_licence_no || ''} onChange={e => setApprovalEditData(p => ({...p, driving_licence_no: e.target.value}))} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">DL Type</Label><Input value={approvalEditData.driving_licence_type || ''} onChange={e => setApprovalEditData(p => ({...p, driving_licence_type: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Valid Upto</Label><Input type="date" value={approvalEditData.valid_upto?.split('T')[0] || ''} onChange={e => setApprovalEditData(p => ({...p, valid_upto: e.target.value}))} /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">RTO</Label><Input value={approvalEditData.rto || ''} onChange={e => setApprovalEditData(p => ({...p, rto: e.target.value}))} /></div>
-            </div>
-          )}
-
-          {approvalReviewModal?.tab === 'transport_master' && (
-            <div className="grid gap-3 py-2">
-              {approvalReviewModal?.item?.request_type === 'edit' && (() => {
-                let pc = approvalReviewModal.item.pending_changes
-                if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
-                const labels: Record<string, string> = { transporter_name: 'Transporter Name', status: 'Status', contact_person: 'Contact Person', contact_number: 'Contact Number', gstin: 'GSTIN' }
-                const changed = pc ? Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? '')) : []
-                return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
-                    <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
-                    {changed.length === 0 ? (
-                      <p className="text-xs text-blue-600">No field differs from the current record.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {changed.map(k => (
-                          <div key={k} className="text-xs flex flex-wrap gap-1">
-                            <span className="font-medium text-slate-600">{labels[k] || k}:</span>
-                            <span className="text-red-600 line-through">{String(approvalReviewModal.item[k] ?? '—') || '—'}</span>
-                            <span className="text-slate-400">→</span>
-                            <span className="text-emerald-700 font-medium">{String(pc[k] ?? '—') || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Transporter Name</Label><Input value={approvalEditData.transporter_name || ''} onChange={e => setApprovalEditData(p => ({...p, transporter_name: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Status</Label><Select value={approvalEditData.status || ''} onValueChange={v => setApprovalEditData(p => ({...p, status: v}))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Contact Person</Label><Input value={approvalEditData.contact_person || ''} onChange={e => setApprovalEditData(p => ({...p, contact_person: e.target.value}))} /></div>
-                <div className="space-y-1"><Label className="text-xs">Contact Number</Label><Input value={approvalEditData.contact_number || ''} onChange={e => setApprovalEditData(p => ({...p, contact_number: e.target.value}))} /></div>
-              </div>
-              <div className="space-y-1"><Label className="text-xs">GSTIN</Label><Input value={approvalEditData.gstin || ''} onChange={e => setApprovalEditData(p => ({...p, gstin: e.target.value}))} /></div>
-            </div>
-          )}
-
-          {(() => {
-            const isEdit = approvalReviewModal?.item?.request_type === 'edit'
-            const by = isEdit ? (approvalReviewModal?.item?.pending_edit_by_name || approvalReviewModal?.item?.created_by_name) : approvalReviewModal?.item?.created_by_name
-            const on = isEdit ? approvalReviewModal?.item?.pending_edit_at : approvalReviewModal?.item?.created_at
-            return (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-                {isEdit ? 'Edit submitted' : 'Submitted'} by <span className="font-semibold">{by || '—'}</span> on {on ? new Date(on).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-              </div>
-            )
-          })()}
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setApprovalReviewModal(null); setApprovalEditData({}) }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setApprovalReviewModal(null); setApprovalEditData({}); resetForms() }}>Cancel</Button>
             <Button
               onClick={() => {
                 if (!approvalReviewModal) return
@@ -4963,7 +4684,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   driver_master: approvalReviewModal.item.id,
                   transport_master: approvalReviewModal.item.id,
                 }
-                handleReviewRecord(approvalReviewModal.tab, idMap[approvalReviewModal.tab], 'approve', undefined, approvalEditData)
+                // Submit the SAME per-tab Add/Edit form state the modal is bound to.
+                handleReviewRecord(approvalReviewModal.tab, idMap[approvalReviewModal.tab], 'approve', undefined, getFormForTab(approvalReviewModal.tab))
               }}
               disabled={isReviewing}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"

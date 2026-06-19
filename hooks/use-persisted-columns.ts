@@ -48,9 +48,24 @@
  *      Object.keys(localStorage).filter(k => k.startsWith("col_prefs_")).forEach(k => localStorage.removeItem(k))
  */
 
-import { useState, useCallback, Dispatch, SetStateAction } from "react"
+import { useState, useCallback, useEffect, useRef, Dispatch, SetStateAction } from "react"
+import { useColumnPrefsServer, debouncedSaveColumnPref } from "@/lib/column-prefs"
 
 const STORAGE_PREFIX = "col_prefs_"
+
+/**
+ * Reconcile a saved VISIBLE-column list with the current set of valid columns:
+ * keep exactly the user's saved choices, only dropping columns that no longer
+ * exist. We deliberately do NOT append "new default" columns here — otherwise a
+ * column the user intentionally unchecked would look identical to a brand-new
+ * column and get re-added, so hiding a default could never persist.
+ */
+function mergeVisible(saved: string[], defaultColumns: string[]): string[] {
+  const defaultSet = new Set(defaultColumns)
+  const seen = new Set<string>()
+  // Keep only valid, unique ids (dedupe guards downstream drag/sortable keys).
+  return saved.filter((id) => defaultSet.has(id) && !seen.has(id) && seen.add(id))
+}
 
 /**
  * Reads and validates a column preference array from localStorage.
@@ -103,26 +118,41 @@ export function usePersistedColumns(
   defaultColumns: string[]
 ): [string[], Dispatch<SetStateAction<string[]>>] {
   const [visibleColumns, setVisibleColumnsInternal] = useState<string[]>(() => {
+    // localStorage acts as an instant cache so there's no flash of defaults
+    // before the per-user server value hydrates.
     const saved = readFromStorage(stageKey)
-    if (!saved) return defaultColumns
-    
-    // Merge: keep saved visible preferences, but automatically add any newly introduced
-    // columns from defaultColumns, and remove any columns that no longer exist in defaultColumns.
-    const defaultSet = new Set(defaultColumns)
-    const newCols = defaultColumns.filter(id => !new Set(saved).has(id))
-    return [...saved.filter(id => defaultSet.has(id)), ...newCols]
+    return saved ? mergeVisible(saved, defaultColumns) : defaultColumns
   })
 
-  // Wrap the setter so every update is mirrored to localStorage
+  // ── Hydrate from the logged-in user's server-saved prefs (once) ──────────
+  const { userId, prefs, isReady } = useColumnPrefsServer()
+  const hydratedRef = useRef(false)
+
+  useEffect(() => {
+    if (hydratedRef.current || !isReady) return
+    hydratedRef.current = true
+    const serverVisible = prefs?.[stageKey]?.visible
+    if (Array.isArray(serverVisible) && serverVisible.length > 0) {
+      const merged = mergeVisible(serverVisible, defaultColumns)
+      setVisibleColumnsInternal(merged)
+      writeToStorage(stageKey, merged) // refresh the cache to match the server
+    }
+    // defaultColumns is conceptually constant per stage; hydration runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, prefs, stageKey])
+
+  // Wrap the setter so every update is mirrored to localStorage AND (debounced)
+  // to the user's server prefs.
   const setVisibleColumns: Dispatch<SetStateAction<string[]>> = useCallback(
     (value) => {
       setVisibleColumnsInternal((prev) => {
         const next = typeof value === "function" ? value(prev) : value
         writeToStorage(stageKey, next)
+        if (userId) debouncedSaveColumnPref(userId, stageKey, "visible", next)
         return next
       })
     },
-    [stageKey]
+    [stageKey, userId]
   )
 
   return [visibleColumns, setVisibleColumns]
