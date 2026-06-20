@@ -1282,7 +1282,25 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'brokers': return brokerForm
       case 'salespersons': return salespersonForm
       case 'sku_details': return skuDetailsForm
-      case 'vehicle_master': return vehicleForm
+      case 'vehicle_master': {
+        const payload = { ...vehicleForm }
+        if (roadTaxType === 'expiry') {
+          payload.life_time_tax = null
+          payload.life_time_tax_image = null
+        } else {
+          payload.road_tax = null
+          payload.road_tax_image = null
+        }
+        const isPermitEnabled = payload.gvw !== '' && Number(payload.gvw) > 3000
+        if (!isPermitEnabled) {
+          payload.state_permit = null
+          payload.state_permit_image = null
+          payload.state_permit_type = null
+        } else {
+          payload.state_permit_type = payload.state_permit_type || 'State'
+        }
+        return payload
+      }
       case 'driver_master': return driverForm
       case 'transport_master': return transportForm
       default: return {}
@@ -1311,7 +1329,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     depot_name: 'Depot Name', depot_address: 'Depot Address', salesman_broker_name: 'Salesman / Broker',
     salesman_name: 'Name', mobile_no: 'Mobile', sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM',
     hsn_code: 'HSN Code', gst_rate: 'GST Rate', registration_no: 'Registration No', vehicle_type: 'Vehicle Type',
-    transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW',
+    transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW', passing: 'Passing Weight',
+    road_tax: 'Road Tax Expiry', road_tax_image: 'Road Tax Certificate',
+    life_time_tax: 'Lifetime Tax', life_time_tax_image: 'Lifetime Tax Certificate',
+    pollution: 'Pollution Expiry', pollution_image: 'Pollution Certificate',
+    insurance: 'Insurance Expiry', insurance_image: 'Insurance Certificate',
+    fitness: 'Fitness Expiry', fitness_image: 'Fitness Certificate',
+    state_permit_type: 'Permit Type', state_permit: 'Permit Expiry', state_permit_image: 'Permit Certificate',
     driver_name: 'Driver Name', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto',
     transporter_name: 'Transporter Name', contact_number: 'Contact Number',
   }
@@ -1961,7 +1985,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>RTO</Label>
-            <Input value={vehicleForm.rto || ''} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="RTO Office" />
+            <Input value={vehicleForm.rto || ''} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="RTO" />
           </div>
         </div>
 
@@ -2073,7 +2097,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="border p-4 rounded-xl bg-slate-50/50 space-y-4">
           <div className="space-y-2">
             <Label className="flex justify-between items-center">
-              <span>State/National Permit Type</span>
+              <span>Permit Type</span>
               {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000) && (
                 <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &gt; 3000 KGS)</span>
               )}
@@ -2212,7 +2236,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label>RTO</Label>
-          <Input value={driverForm.rto} onChange={e => setDriverForm({...driverForm, rto: e.target.value})} placeholder="RTO Office" />
+          <Input value={driverForm.rto} onChange={e => setDriverForm({...driverForm, rto: e.target.value})} placeholder="RTO" />
         </div>
       </div>
 

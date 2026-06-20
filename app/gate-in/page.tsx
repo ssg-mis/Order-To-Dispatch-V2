@@ -155,14 +155,102 @@ function ImageUploadCard({ label, capture, value, fileName, isUploading, onFile,
 }
 
 const PAGE_COLUMNS = [
-  { id: "order_key",   label: "Order Key (DO No.)" },
-  { id: "vehicle_no",  label: "Vehicle No." },
-  { id: "driver_name", label: "Driver Name" },
-  { id: "saved_by",    label: "Saved By" },
-  { id: "saved_at",    label: "Saved At" },
-  { id: "products",    label: "Products" },
+  { id: "order_key",             label: "Order Key (DO No.)" },
+  { id: "vehicle_no",            label: "Vehicle No." },
+  { id: "driver_name",           label: "Driver Name" },
+  { id: "saved_by",              label: "Saved By" },
+  { id: "saved_at",              label: "Saved At" },
+  { id: "products",              label: "Products" },
+  // ── from Actual Dispatch ──────────────────────────────────────
+  { id: "partySoDate",           label: "DO Date" },
+  { id: "orderNo",               label: "DO Number" },
+  { id: "soNo",                  label: "DO No." },
+  { id: "processId",             label: "Manual Sauda No." },
+  { id: "deliveryPurpose",       label: "Order Type (Delivery Purpose)" },
+  { id: "orderType",             label: "Order Type" },
+  { id: "customerType",          label: "Customer Type" },
+  { id: "startDate",             label: "Start Date" },
+  { id: "endDate",               label: "End Date" },
+  { id: "deliveryDate",          label: "Delivery Date" },
+  { id: "customerName",          label: "Customer Name" },
+  { id: "oilType",               label: "Oil Type" },
+  { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
+  { id: "ratePerLtr",            label: "Rate Per Ltr." },
+  { id: "rateOfMaterial",        label: "Rate of Material" },
+  { id: "rate",                  label: "Rate" },
+  { id: "productName",           label: "Product Name" },
+  { id: "uom",                   label: "UOM" },
+  { id: "orderQty",              label: "Order Qty" },
+  { id: "altUom",                label: "Alt UOM" },
+  { id: "altQty",                label: "Alt Qty (Kg)" },
+  { id: "skuName",               label: "SKU Name" },
+  { id: "approvalQty",           label: "Approval Qty" },
+  { id: "qtyToDispatch",         label: "Qty to Dispatch" },
+  { id: "deliveryFrom",          label: "Delivery From" },
+  { id: "totalWithGst",          label: "Total Amount with GST" },
+  { id: "transportType",         label: "Type of Transporting" },
+  { id: "contactPerson",         label: "Customer Contact Person Name" },
+  { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
+  { id: "address",               label: "Customer Address" },
+  { id: "paymentTerms",          label: "Payment Terms" },
+  { id: "advanceTaken",          label: "Advance Payment to be Taken" },
+  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "isBroker",              label: "Is this order Through Broker" },
+  { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
+  { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
+  { id: "remark",                label: "Remark" },
+  { id: "revertSecurityRemarks", label: "Revert(Security-Guard) Remarks" },
+  { id: "revertDispatchRemarks", label: "Revert(Dispatch-Planning) Remarks" },
+  { id: "revertPlanningRemarks", label: "Revert(Pre-Approval) Remarks" },
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
+
+// Maps camelCase column IDs to the snake_case backend field names returned by the
+// gate-in pending API (via the LATERAL join with lrc + order_dispatch).
+const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
+  partySoDate:           "party_so_date",
+  orderNo:               "so_no",
+  soNo:                  "so_no",
+  processId:             "processid",
+  deliveryPurpose:       "order_type_delivery_purpose",
+  orderType:             "order_type",
+  customerType:          "customer_type",
+  startDate:             "start_date",
+  endDate:               "end_date",
+  deliveryDate:          "delivery_date",
+  customerName:          "party_name",
+  oilType:               "oil_type",
+  ratePer15Kg:           "rate_per_15kg",
+  ratePerLtr:            "rate_per_ltr",
+  rateOfMaterial:        "rate_of_material",
+  rate:                  "final_rate",
+  productName:           "product_name",
+  uom:                   "uom",
+  orderQty:              "order_quantity",
+  altUom:                "alternate_uom",
+  altQty:                "alternate_qty_kg",
+  skuName:               "sku_name",
+  approvalQty:           "approval_qty",
+  qtyToDispatch:         "qty_to_be_dispatched",
+  deliveryFrom:          "dispatch_from",
+  totalWithGst:          "total_amount_with_gst",
+  transportType:         "type_of_transporting",
+  contactPerson:         "customer_contact_person_name",
+  whatsapp:              "customer_contact_person_whatsapp_no",
+  address:               "customer_address",
+  paymentTerms:          "payment_terms",
+  advanceTaken:          "advance_payment_to_be_taken",
+  advanceAmount:         "advance_amount",
+  isBroker:              "is_order_through_broker",
+  brokerName:            "broker_name",
+  orderPunchRemarks:     "order_punch_remarks",
+  remark:                "remarks",
+  revertSecurityRemarks: "revert_security_remarks",
+  revertDispatchRemarks: "revert_dispatch_remarks",
+  revertPlanningRemarks: "revert_planning_remarks",
+}
+const DATE_COL_IDS = new Set<ColId>(["partySoDate", "startDate", "endDate", "deliveryDate"])
+const BOOL_COL_IDS = new Set<ColId>(["advanceTaken", "isBroker"])
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
@@ -309,7 +397,7 @@ export default function GateInPage() {
     return Array.from(groups.values())
   }, [sortedPendingRecords])
 
-  const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", PAGE_COLUMNS.map(c => c.id))
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", ["order_key", "vehicle_no", "driver_name", "saved_by", "saved_at", "products"])
   const [columnOrder, setColumnOrder] = useColumnOrder("gate-in", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = useMemo(() =>
     columnOrder
@@ -699,8 +787,18 @@ export default function GateInPage() {
                             return <TableCell key={col.id} className="text-center text-slate-500 text-xs">{group.date}</TableCell>
                           case "products":
                             return <TableCell key={col.id} className="text-center"><Badge variant="outline" className="text-xs font-bold">{totalProducts} item(s)</Badge></TableCell>
-                          default:
-                            return null
+                          default: {
+                            const fieldName = COL_FIELD_MAP[col.id as ColId]
+                            if (!fieldName) return null
+                            const val = first[fieldName]
+                            if (DATE_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="text-center text-slate-600 text-xs whitespace-nowrap">{formatDate(val)}</TableCell>
+                            }
+                            if (BOOL_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="text-center text-slate-600 text-xs">{val ? "Yes" : "No"}</TableCell>
+                            }
+                            return <TableCell key={col.id} className="text-center text-slate-600 text-xs">{val ?? "—"}</TableCell>
+                          }
                         }
                       })}
                       <TableCell className="text-right pr-6">
