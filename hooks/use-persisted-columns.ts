@@ -54,17 +54,24 @@ import { useColumnPrefsServer, debouncedSaveColumnPref } from "@/lib/column-pref
 const STORAGE_PREFIX = "col_prefs_"
 
 /**
- * Reconcile a saved VISIBLE-column list with the current set of valid columns:
- * keep exactly the user's saved choices, only dropping columns that no longer
- * exist. We deliberately do NOT append "new default" columns here — otherwise a
- * column the user intentionally unchecked would look identical to a brand-new
- * column and get re-added, so hiding a default could never persist.
+ * Reconcile a saved VISIBLE-column list: keep exactly the user's saved choices,
+ * only deduping (which guards downstream drag/sortable keys).
+ *
+ * We deliberately do NOT filter against `defaultColumns` (the default-VISIBLE
+ * set) — a stage's toggle menu offers a much wider universe than its default
+ * list (e.g. check-invoice defaults to ~8 columns but lets you toggle every
+ * column up to that stage). Filtering here would silently drop any non-default
+ * column the user enabled, so it would reappear correctly in-session but vanish
+ * on reload. The user can only ever save ids that exist in the toggle menu, and
+ * any id the current page can't render is already excluded at render time
+ * (visible ∩ columnOrder), so keeping the saved ids as-is is both safe and
+ * correct. We also do NOT append "new default" columns — otherwise a column the
+ * user intentionally unchecked would get re-added, so hiding a default could
+ * never persist.
  */
-function mergeVisible(saved: string[], defaultColumns: string[]): string[] {
-  const defaultSet = new Set(defaultColumns)
+function mergeVisible(saved: string[]): string[] {
   const seen = new Set<string>()
-  // Keep only valid, unique ids (dedupe guards downstream drag/sortable keys).
-  return saved.filter((id) => defaultSet.has(id) && !seen.has(id) && seen.add(id))
+  return saved.filter((id) => typeof id === "string" && !seen.has(id) && seen.add(id))
 }
 
 /**
@@ -121,7 +128,7 @@ export function usePersistedColumns(
     // localStorage acts as an instant cache so there's no flash of defaults
     // before the per-user server value hydrates.
     const saved = readFromStorage(stageKey)
-    return saved ? mergeVisible(saved, defaultColumns) : defaultColumns
+    return saved ? mergeVisible(saved) : defaultColumns
   })
 
   // ── Hydrate from the logged-in user's server-saved prefs (once) ──────────
@@ -133,7 +140,7 @@ export function usePersistedColumns(
     hydratedRef.current = true
     const serverVisible = prefs?.[stageKey]?.visible
     if (Array.isArray(serverVisible) && serverVisible.length > 0) {
-      const merged = mergeVisible(serverVisible, defaultColumns)
+      const merged = mergeVisible(serverVisible)
       setVisibleColumnsInternal(merged)
       writeToStorage(stageKey, merged) // refresh the cache to match the server
     }
