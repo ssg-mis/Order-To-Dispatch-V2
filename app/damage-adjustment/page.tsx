@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -15,11 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
 
@@ -140,6 +141,7 @@ export default function DamageAdjustmentPage() {
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false)
 
   // Adjustment Form State
   const [isUploading, setIsUploading] = useState<boolean>(false)
@@ -293,6 +295,7 @@ export default function DamageAdjustmentPage() {
           contactWhatsapp: order.customer_contact_person_whatsapp_no || "—",
           customerAddress: order.customer_address || "—",
           isBroker: order.is_order_through_broker || false,
+          isOrderThrough: order.is_order_through || "—",
           brokerName: order.broker_name || "—",
           advanceAmount: order.advance_amount || 0,
           paymentTerms: order.payment_terms || "—",
@@ -491,6 +494,7 @@ export default function DamageAdjustmentPage() {
         creditNoteCopyName: "",
       })
 
+      setIsDetailsExpanded(false)
       setIsDialogOpen(true)
     }
   }
@@ -895,260 +899,145 @@ export default function DamageAdjustmentPage() {
 
       {/* Split-View Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
-          <div className="p-3 sm:p-6">
-            <DialogHeader>
-              <DialogTitle className="text-base sm:text-xl font-bold text-slate-900 leading-tight">
-                Damage Adjustment - Invoice: {selectedGroup?.invoiceNo} <span className="text-sm font-medium text-slate-500">({selectedGroup?.customerName})</span>
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 border-none rounded-2xl sm:rounded-[2.5rem] shadow-2xl bg-slate-50 [overflow-wrap:anywhere]">
+          <div className="p-3 sm:p-8 space-y-6 sm:space-y-8">
+            <DialogHeader className="border-b-2 border-slate-100 pb-4 sm:pb-6 -mx-3 sm:-mx-8 px-3 sm:px-8 bg-white rounded-t-2xl sm:rounded-t-[2.5rem]">
+              <DialogTitle className="text-base sm:text-2xl font-black text-slate-900 tracking-tight flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>Damage Adjustment - Invoice: <span className="text-blue-600 italic uppercase">{selectedGroup?.invoiceNo}</span></span>
+                <span className="w-fit text-[10px] sm:text-sm font-black text-slate-300 uppercase tracking-widest sm:ml-4 ring-2 ring-slate-100 px-3 sm:px-4 py-1.5 rounded-full italic">[{selectedGroup?.customerName}]</span>
               </DialogTitle>
+              <DialogDescription className="hidden" />
             </DialogHeader>
 
             {selectedGroup && (
-              <div className="space-y-4 sm:space-y-6 mt-4">
-                {/* Order Details Top Section */}
-                <div className="border rounded-lg p-3 sm:p-4 bg-muted/30">
-                  <h3 className="text-sm font-semibold mb-3 text-primary">Order & Logistics Details</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4 text-xs">
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Delivery Purpose</Label>
-                      <p className="font-medium break-words">{selectedGroup.deliveryPurpose}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Order Type</Label>
-                      <p className="font-medium break-words">{selectedGroup.orderType}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Start Date / End Date</Label>
-                      <p className="font-medium break-words">{selectedGroup.startDate} / {selectedGroup.endDate}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Delivery Date</Label>
-                      <p className="font-medium break-words">{selectedGroup.deliveryDate}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">DO Date</Label>
-                      <p className="font-medium break-words">{selectedGroup.partySoDate || "—"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Transport Type</Label>
-                      <p className="font-medium break-words">{selectedGroup.transportType}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Contact Person</Label>
-                      <p className="font-medium break-words">{selectedGroup.contactPerson} ({selectedGroup.contactWhatsapp})</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Broker / Advance</Label>
-                      <p className="font-medium text-blue-600 break-words">{selectedGroup.brokerName} / ₹{selectedGroup.advanceAmount}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Credit Status</Label>
-                      <p className={cn("font-black break-words", selectedGroup.partyCredit === "Good" ? "text-green-700" : "text-red-600")}>{selectedGroup.partyCredit || "—"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Customer Address</Label>
-                      <p className="font-medium break-words" title={selectedGroup.customerAddress}>{selectedGroup.customerAddress}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Invoice No / Date</Label>
-                      <p className="font-medium text-blue-600 break-words">{selectedGroup.invoiceNo} / {selectedGroup.invoiceDate}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Order Punch Remarks</Label>
-                      <p className="font-medium text-amber-600 italic break-words">"{selectedGroup.orderPunchRemarks || "No special instructions provided."}"</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">PO Copy (SO Upload)</Label>
-                      {selectedGroup.uploadSo ? (
-                        <a 
-                          href={selectedGroup.uploadSo} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
-                        >
-                          <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
-                          <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
-                          <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </a>
-                      ) : (
-                        <p className="text-[10px] font-black text-slate-400 leading-none mt-1 uppercase">NOT UPLOADED</p>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Bilty No</Label>
-                      <p className="font-medium break-words">{selectedGroup.biltyNo}</p>
+              <div className="space-y-8 sm:space-y-10 animate-in fade-in zoom-in-95 duration-500">
+                {/* Section 1: Order & Logistics Details */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
+                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Order & Logistics Details</h3>
+                  </div>
+
+                  <div className="border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm min-w-0">
+                    <div 
+                      className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" 
+                      onClick={() => setIsDetailsExpanded(prev => !prev)}
+                    >
+                      <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                        <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
+                          DETAILS FOR INVOICE {selectedGroup.invoiceNo}
+                        </Badge>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-blue-100 font-bold leading-none">
+                            Logistics, Vehicle & Driver Information
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
+                        <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2 leading-none cursor-pointer">
+                          {isDetailsExpanded ? 'HIDE DETAILS ▲' : 'SHOW DETAILS ▼'}
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/20 rounded-full">
+                          {isDetailsExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Truck No</Label>
-                      <p className="font-medium break-words">{(selectedGroup.truckNo || "—").toUpperCase()}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Transporter</Label>
-                      <p className="font-medium break-words" title={selectedGroup.transporterName}>{selectedGroup.transporterName}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Vehicle Type</Label>
-                      <p className="font-medium break-words">{selectedGroup.vehicleType}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">RTO</Label>
-                      <p className="font-medium break-words">{selectedGroup.rto}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Passing Weight</Label>
-                      <p className="font-medium break-words">{selectedGroup.passingWeight}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Road Tax</Label>
-                      <p className="font-medium break-words">{selectedGroup.roadTax}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">GVW</Label>
-                      <p className="font-medium break-words">{selectedGroup.gvw}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">ULW</Label>
-                      <p className="font-medium break-words">{selectedGroup.ulw}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Driver Name</Label>
-                      <p className="font-medium break-words">{selectedGroup.driverName}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Driver Contact</Label>
-                      <p className="font-medium break-words">{selectedGroup.driverContact}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">License No</Label>
-                      <p className="font-medium break-words">{selectedGroup.driverLicense}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">DL Valid Upto</Label>
-                      <p className="font-medium break-words">{selectedGroup.dlValidUpto ? new Date(selectedGroup.dlValidUpto).toLocaleDateString("en-IN") : "—"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">RST No</Label>
-                      {selectedGroup.weightmentSlip ? (
-                        <a href={selectedGroup.weightmentSlip} target="_blank" rel="noopener noreferrer" className="block text-blue-600 hover:text-blue-800 underline font-black break-words">
-                          #{selectedGroup.rstNo}
-                        </a>
-                      ) : (
-                        <p className="font-medium break-words">#{selectedGroup.rstNo}</p>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Gross / Tare / Net</Label>
-                      <p className="font-medium text-slate-900 leading-tight break-words">
-                        {selectedGroup.grossWeight || "0"} / {selectedGroup.tareWeight || "0"} / <span className="text-blue-600 font-black">{((Number(selectedGroup.grossWeight || 0) - Number(selectedGroup.tareWeight || 0)) || "0").toString()}</span>
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Weight Diff</Label>
-                      <p className="font-black text-amber-600 break-words">{selectedGroup.weightDiff || "0"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-xs text-muted-foreground">Extra Weight</Label>
-                      <p className="font-black text-purple-600 break-words">{selectedGroup.extraWeight || "0"}</p>
-                    </div>
-                    {selectedGroup.diffReason && selectedGroup.diffReason !== "—" && (
-                      <div className="min-w-0">
-                        <Label className="text-xs text-muted-foreground">Diff Reason</Label>
-                        <p className="font-medium text-red-500 italic break-words">{selectedGroup.diffReason}</p>
+                    {isDetailsExpanded && (
+                      <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                        <Card className="p-4 sm:p-8 border-none shadow-xl rounded-2xl sm:rounded-[2rem] bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 lg:gap-x-12 gap-y-5 sm:gap-y-8">
+                          {[
+                            { label: "Delivery Purpose", value: selectedGroup.deliveryPurpose },
+                            { label: "Order Type", value: selectedGroup.orderType },
+                            { label: "Start Date / End Date", value: `${selectedGroup.startDate} / ${selectedGroup.endDate}`, color: "text-blue-600" },
+                            { label: "Delivery Date", value: selectedGroup.deliveryDate },
+                            { label: "DO Date", value: selectedGroup.partySoDate, color: "text-blue-600" },
+                            { label: "Transport Type", value: selectedGroup.transportType },
+                            { label: "Contact Person", value: `${selectedGroup.contactPerson} — (${selectedGroup.contactWhatsapp})` },
+                            { label: "Broker / Advance", value: `${(selectedGroup.isOrderThrough === "Direct" || (selectedGroup.isOrderThrough === "—" && !selectedGroup.isBroker)) ? "No" : selectedGroup.brokerName} / ₹${selectedGroup.advanceAmount}`, color: "text-blue-600" },
+                            { label: "Credit Status", value: selectedGroup.partyCredit, color: selectedGroup.partyCredit === "Good" ? "text-green-700" : "text-red-600" },
+                            { label: "Customer Address", value: selectedGroup.customerAddress },
+                            { label: "Invoice No / Date", value: `${selectedGroup.invoiceNo} / ${selectedGroup.invoiceDate}`, color: "text-blue-600" },
+                            { label: "Order Punch Remarks", value: selectedGroup.orderPunchRemarks, color: "text-amber-600 italic" },
+                            { label: "Bilty No", value: selectedGroup.biltyNo },
+                            { label: "Truck No", value: selectedGroup.truckNo, color: "text-blue-600" },
+                            { label: "Transporter", value: selectedGroup.transporterName },
+                            { label: "Vehicle Type", value: selectedGroup.vehicleType },
+                            { label: "RTO", value: selectedGroup.rto },
+                            { label: "Passing Weight", value: selectedGroup.passingWeight },
+                            { label: "Road Tax", value: selectedGroup.roadTax },
+                            { label: "GVW", value: selectedGroup.gvw },
+                            { label: "ULW", value: selectedGroup.ulw },
+                            { label: "Driver Name", value: selectedGroup.driverName },
+                            { label: "Driver Contact", value: selectedGroup.driverContact },
+                            { label: "License No", value: selectedGroup.driverLicense },
+                            { label: "DL Valid Upto", value: selectedGroup.dlValidUpto ? new Date(selectedGroup.dlValidUpto).toLocaleDateString("en-IN") : "—" },
+                            { label: "RST No", value: `#${selectedGroup.rstNo}`, color: "text-blue-600" },
+                            { label: "Gross / Tare / Net", value: `${selectedGroup.grossWeight} / ${selectedGroup.tareWeight} / ${selectedGroup.netWeight}`, color: "text-[#3b82f6]" },
+                            { label: "Weight Diff", value: selectedGroup.weightDiff, color: "text-orange-500" },
+                            { label: "Extra Weight", value: selectedGroup.extraWeight, color: "text-[#d946ef]" },
+                          ].map((item, idx) => (
+                            <div key={idx} className="space-y-1.5 min-w-0">
+                              <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.1em] block leading-none">{item.label}</Label>
+                              <p className={cn("break-words text-xs font-black tracking-tight leading-snug", item.color || "text-slate-800")}>{item.value || "—"}</p>
+                            </div>
+                          ))}
+                          <div className="space-y-1.5 sm:col-span-2 min-w-0">
+                            <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.1em] block leading-none">PO Copy (SO Upload)</Label>
+                            {selectedGroup.uploadSo ? (
+                              <a 
+                                href={selectedGroup.uploadSo} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
+                              >
+                                <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
+                                <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
+                                <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </a>
+                            ) : (
+                              <p className="text-[10px] font-black text-slate-400 leading-none">NOT UPLOADED</p>
+                            )}
+                          </div>
+                        </Card>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Product List Table (Middle) */}
-                <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-muted/50 px-4 py-2 border-b">
-                    <h3 className="text-sm font-semibold text-primary">Products ({selectedProducts.length}/{selectedGroup._productCount} selected)</h3>
+                {/* Section 2: Products */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
+                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Products ({selectedProducts.length}/{selectedGroup._productCount} selected)</h3>
                   </div>
-                  <div className="md:hidden p-3 space-y-3">
-                    <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Select All</span>
-                      <Checkbox
-                        checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedProducts(selectedGroup._allProducts.map((p: any) => p._rowKey))
-                          } else {
-                            setSelectedProducts([])
-                          }
-                        }}
-                      />
-                    </div>
-                    {selectedGroup._allProducts.map((product: any) => (
-                      <Card key={product._rowKey} className={cn("p-4 rounded-2xl border shadow-sm", selectedProducts.includes(product._rowKey) ? "border-red-200 bg-red-50/20" : "border-slate-100 bg-white")}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product</p>
-                            <p className="break-words text-xs font-bold text-slate-900">{product.productName}</p>
-                          </div>
-                          <Checkbox
-                            checked={selectedProducts.includes(product._rowKey)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedProducts(prev => [...prev, product._rowKey])
-                              } else {
-                                setSelectedProducts(prev => prev.filter(k => k !== product._rowKey))
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order No</p>
-                            <p className="break-words font-medium text-slate-500">{product.specificOrderNo || "—"}</p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Inv Qty</p>
-                            <p className="font-medium text-slate-700">{product.actualQty || "—"}</p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Damage Qty</p>
-                            <p className="font-bold text-red-600">{product.damageQty || 0}</p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Status</p>
-                            <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
-                              {product.damageStatus || "Pending"}
-                            </Badge>
-                          </div>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                  <div className="hidden md:block overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <Checkbox
-                              checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedProducts(selectedGroup._allProducts.map((p: any) => p._rowKey))
-                                } else {
-                                  setSelectedProducts([])
-                                }
-                              }}
-                            />
-                          </TableHead>
-                          <TableHead>Order No</TableHead>
-                          <TableHead>Product Name</TableHead>
-                          <TableHead>Inv Qty</TableHead>
-                          <TableHead>Damage Qty</TableHead>
-                          <TableHead>Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedGroup._allProducts.map((product: any) => (
-                          <TableRow key={product._rowKey} className={selectedProducts.includes(product._rowKey) ? "bg-red-50/20" : ""}>
-                            <TableCell>
+
+                  <Card className="border-none shadow-xl rounded-2xl sm:rounded-[2rem] overflow-hidden bg-white">
+                    <div className="md:hidden p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3 rounded-xl bg-blue-600 px-3 py-3 text-white">
+                        <span className="text-[10px] font-black uppercase tracking-widest">Select All</span>
+                        <Checkbox
+                          className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-blue-600"
+                          checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
+                          onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
+                        />
+                      </div>
+                      {selectedGroup._allProducts.map((product: any) => {
+                        const selected = selectedProducts.includes(product._rowKey);
+                        return (
+                          <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-red-200 bg-red-50/20")}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
+                                <p className="text-sm font-black text-slate-800 uppercase tracking-tight break-words">{product.productName}</p>
+                                <div className="mt-1 flex flex-col gap-1">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest break-all">{product.specificOrderNo}</span>
+                                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</span>
+                                </div>
+                              </div>
                               <Checkbox
-                                checked={selectedProducts.includes(product._rowKey)}
+                                className="data-[state=checked]:bg-red-600"
+                                checked={selected}
                                 onCheckedChange={(checked) => {
                                   if (checked) {
                                     setSelectedProducts(prev => [...prev, product._rowKey])
@@ -1157,78 +1046,182 @@ export default function DamageAdjustmentPage() {
                                   }
                                 }}
                               />
-                            </TableCell>
-                            <TableCell className="font-medium text-xs text-slate-500">{product.specificOrderNo || "—"}</TableCell>
-                            <TableCell className="font-medium">{product.productName}</TableCell>
-                            <TableCell>{product.actualQty || "—"}</TableCell>
-                            <TableCell className="font-bold text-red-600">{product.damageQty || 0}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
-                                {product.damageStatus || "Pending"}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                              <div className="rounded-md bg-slate-50 p-2">
+                                <p className="text-[10px] font-black uppercase text-slate-400">Inv Qty</p>
+                                  <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                              </div>
+                              <div className="rounded-md bg-slate-50 p-2">
+                                <p className="text-[10px] font-black uppercase text-slate-400">Damage Qty</p>
+                                <p className="mt-1 font-mono font-black text-red-600">{product.damageQty || 0}</p>
+                              </div>
+                              <div className="rounded-md bg-slate-50 p-2 col-span-2">
+                                <p className="text-[10px] font-black uppercase text-slate-400">Status</p>
+                                <Badge variant="outline" className="mt-1 border-red-200 text-red-700 bg-red-50 text-[10px] uppercase font-black tracking-wider w-fit">
+                                  {product.damageStatus || "Pending"}
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      <div className="rounded-xl border bg-slate-50 p-3 text-xs space-y-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Inv Qty</p>
+                            <p className="mt-1 font-black text-blue-700">
+                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Damaged Qty</p>
+                            <p className="mt-1 font-black text-red-600">
+                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Table className="hidden md:table">
+                      <TableHeader className="bg-slate-50">
+                        <TableRow className="border-none">
+                          <TableHead className="w-12 text-center h-10">
+                            <Checkbox
+                              checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
+                              onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
+                            />
+                          </TableHead>
+                          <TableHead className="text-[10px] font-black uppercase tracking-wider h-10">PRODUCT INFO</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">INV QTY</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">DAMAGE QTY</TableHead>
+                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">STATUS</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedGroup._allProducts.map((product: any) => {
+                          const selected = selectedProducts.includes(product._rowKey);
+                          return (
+                            <TableRow key={product._rowKey} className={cn("h-14 transition-colors", selected ? "bg-red-50/10" : "")}>
+                              <TableCell className="text-center">
+                                <Checkbox
+                                  className="data-[state=checked]:bg-red-600"
+                                  checked={selected}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedProducts(prev => [...prev, product._rowKey])
+                                    } else {
+                                      setSelectedProducts(prev => prev.filter(k => k !== product._rowKey))
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell className="p-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
+                                  <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
+                                  {product.actualQty || "0"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center font-black text-xs text-red-600">
+                                {product.damageQty || 0}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50 text-[9px] font-black uppercase tracking-wider">
+                                  {product.damageStatus || "Pending"}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
+                      <TableFooter className="bg-slate-50/50">
+                        <TableRow className="h-14 font-black text-xs border-none">
+                          <TableCell />
+                          <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
+                          <TableCell className="text-center">
+                            <Badge className="bg-blue-600 text-white font-black text-xs px-3">
+                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge className="bg-red-600 text-white font-black text-xs px-3">
+                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                      </TableFooter>
                     </Table>
-                  </div>
+                  </Card>
                 </div>
 
-                {/* Adjustment Form (Bottom) */}
-                <div className="space-y-6 border rounded-lg p-3 sm:p-6 bg-white shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                    <FileText className="h-4 w-4 text-blue-600" />
-                    Credit Note & Adjustment Details
-                  </h3>
+                {/* Section 3: Credit Note Details */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
+                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Credit Note & Adjustment Details</h3>
+                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <Label>Credit Note Date <span className="text-red-500">*</span></Label>
+                  <Card className="p-4 sm:p-10 border-none shadow-xl rounded-2xl sm:rounded-[2rem] bg-white grid grid-cols-1 md:grid-cols-3 gap-6 relative overflow-hidden">
+                    <div className="space-y-4">
+                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Credit Note Date <span className="text-red-500">*</span></Label>
                       <Input
                         type="date"
+                        className="h-12 sm:h-16 border-2 border-slate-50 bg-slate-50/30 rounded-2xl px-4 sm:px-8 font-black text-slate-700 text-sm sm:text-lg focus:bg-white focus:border-blue-100 transition-all shadow-inner"
                         value={adjustmentData.creditNoteDate}
                         onChange={(e) => setAdjustmentData({ ...adjustmentData, creditNoteDate: e.target.value })}
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Credit Note No <span className="text-red-500">*</span></Label>
+                    <div className="space-y-4">
+                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Credit Note No <span className="text-red-500">*</span></Label>
                       <Input
+                        className="h-12 sm:h-16 border-2 border-slate-50 bg-slate-50/30 rounded-2xl px-4 sm:px-8 font-black text-slate-700 text-sm sm:text-lg focus:bg-white focus:border-blue-100 transition-all shadow-inner"
                         value={adjustmentData.creditNoteNo}
                         onChange={(e) => setAdjustmentData({ ...adjustmentData, creditNoteNo: e.target.value })}
                         placeholder="e.g. CN-2023-001"
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-4">
+                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Upload CN Copy</Label>
                       <FileUploadField
-                        label="Upload CN Copy"
                         accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                        value={null}
                         fileName={adjustmentData.creditNoteCopyName}
                         variant="dropzone"
                         helperText="Max file size: 20 MB"
                         uploading={isUploading}
-                        buttonText="Select Copy"
+                        buttonText="Click to Select Copy"
                         onFilesSelected={(files) => files[0] && handleFileUpload(files[0])}
                       />
                     </div>
-                  </div>
+                  </Card>
                 </div>
               </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 flex flex-col gap-3 sm:flex-row">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || isReadOnly}
-                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 min-w-37.5"
-                title={isReadOnly ? "View Only Access" : "Complete Adjustment"}
-              >
-                {isProcessing ? "Processing..." : "Complete Adjustment"}
-              </Button>
+            <DialogFooter className="mt-8 sm:mt-12 pt-5 sm:pt-8 border-t-2 border-slate-100 -mx-3 sm:-mx-8 px-3 sm:px-12 bg-white rounded-b-2xl sm:rounded-b-[2.5rem]">
+              <div className="grid w-full grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
+                <Button variant="ghost" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-12 sm:h-14 w-full sm:w-auto px-6 sm:px-10 font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl">Cancel</Button>
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isProcessing || isReadOnly || !adjustmentData.creditNoteDate || !adjustmentData.creditNoteNo}
+                  className="h-12 sm:h-16 w-full sm:w-auto px-6 sm:px-16 bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-100 rounded-2xl text-sm sm:text-xl font-black italic tracking-tighter uppercase transition-all duration-500"
+                >
+                  {isProcessing ? <Loader2 className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 animate-spin" /> : <CheckCircle className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />}
+                  Complete Adjustment
+                </Button>
+              </div>
             </DialogFooter>
           </div>
         </DialogContent>

@@ -125,13 +125,9 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Invoice Summary</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
       <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
-        </div>
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
           <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${cgst.toFixed(2)}` : "—"}</span>
@@ -1386,8 +1382,7 @@ export default function CheckInvoicePage() {
                                 const skuWt = parseFloat(skuWtStr || "") || 0;
                                 const totalWt = skuWt * qty;
                                 if (!totalWt) return "—";
-                                const totalWtStr = totalWt.toFixed(4);
-                                return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                                return totalWt.toFixed(4);
                               })()}
                             </TableCell>
                             <TableCell className="text-center p-2">
@@ -1452,8 +1447,7 @@ export default function CheckInvoicePage() {
                                   const q = parseFloat(p.actualQty) || 0;
                                   return sum + (skuWt * q);
                                 }, 0);
-                              const totalWtStr = totalSelectedWt.toFixed(4);
-                              return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                              return totalSelectedWt.toFixed(4);
                             })()}
                           </Badge>
                         </TableCell>
@@ -1537,8 +1531,7 @@ export default function CheckInvoicePage() {
                                   const skuWt = parseFloat(skuWtStr || "") || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  const totalWtStr = totalWt.toFixed(4);
-                                  return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                                  return totalWt.toFixed(4);
                                 })()}
                               </p>
                             </div>
@@ -1615,8 +1608,7 @@ export default function CheckInvoicePage() {
                                 const q = parseFloat(p.actualQty) || 0;
                                 return sum + (skuWt * q);
                               }, 0);
-                            const totalWtStr = totalSelectedWt.toFixed(4);
-                            return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                            return totalSelectedWt.toFixed(4);
                           })()}
                         </p>
                       </div>

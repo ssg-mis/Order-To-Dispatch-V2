@@ -361,12 +361,10 @@ export const dispatchPlanningApi = {
     customer_name?: string;
     start_date?: string;
     end_date?: string;
+    manual_sauda_no?: string;
+    depo_names?: string[];
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/dispatch-planning/pending${queryString}`);
+    return request(`/dispatch-planning/pending${buildQuery(params)}`);
   },
 
   /**
@@ -379,12 +377,10 @@ export const dispatchPlanningApi = {
     customer_name?: string;
     start_date?: string;
     end_date?: string;
+    manual_sauda_no?: string;
+    depo_names?: string[];
   }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/dispatch-planning/history${queryString}`);
+    return request(`/dispatch-planning/history${buildQuery(params)}`);
   },
 
   /**

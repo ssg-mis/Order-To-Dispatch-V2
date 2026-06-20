@@ -180,13 +180,9 @@ function InvoiceSummary({ selectedGroup, selectedProducts }: {
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Invoice Summary</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
       <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
-        </div>
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
           <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${cgst.toFixed(2)}` : "—"}</span>
@@ -1092,148 +1088,165 @@ export default function MaterialReceiptPage() {
                           const rateWoGst = parseFloat((netRate / 1.05).toFixed(2));
                           const qty = parseFloat(product.actualQty) || 0;
                           const taxable = rateWoGst * qty;
+                          const selected = selectedProducts.includes(product._rowKey);
                           return (
-                          <Card key={product._rowKey} className={cn("p-4 rounded-2xl border shadow-sm", selectedProducts.includes(product._rowKey) ? "border-blue-200 bg-blue-50/40" : "border-slate-100 bg-white")}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Product</p>
-                                <p className="break-words text-xs font-black uppercase tracking-tighter text-slate-800">{product.productName}</p>
-                                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</p>
-                              </div>
-                              <Checkbox
-                                className="data-[state=checked]:bg-blue-600"
-                                checked={selectedProducts.includes(product._rowKey)}
-                                onCheckedChange={(checked) => setSelectedProducts(p => checked ? [...p, product._rowKey] : p.filter(k => k !== product._rowKey))}
-                              />
-                            </div>
-                            <div className="mt-4 grid grid-cols-2 gap-3">
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order No</p>
-                                <p className="break-words text-xs font-black text-slate-500">{product.specificOrderNo}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</p>
-                                <p className="break-words text-xs font-black italic text-blue-600">{product.invoiceNo}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill Amt</p>
-                                <p className="text-xs font-black text-slate-700">₹{product.billAmount}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Actual Qty</p>
-                                <p className="text-xs font-black text-slate-700">{product.actualQty}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Truck No</p>
-                                <p className="break-words text-xs font-black text-slate-500">{product.truckNo}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Net Wt</p>
-                                <p className="text-xs font-black text-slate-700">{product.netWeight}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice Date</p>
-                                <p className="text-xs font-black text-slate-700">{product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate (Inc. with taxes)</p>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <p className="cursor-pointer text-xs font-black text-slate-700">{netRate ? `₹${netRate.toFixed(2)}` : "—"}</p>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                    <div className="space-y-1.5">
-                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                      <p className="text-sm font-black text-blue-700 leading-none">{freight ? `₹${freight}` : "No Freight Rate Available"}</p>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate</p>
-                                <p className="text-xs font-black text-slate-700">{netRate ? `₹${rateWoGst.toFixed(2)}` : "—"}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Taxable Amount</p>
-                                <p className="text-xs font-black text-slate-700">{taxable ? `₹${taxable.toFixed(2)}` : "—"}</p>
-                              </div>
-                            </div>
-                            {receiptData.hasDamage === "yes" && (
-                              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <div className="space-y-1.5">
-                                  <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Damage Qty</Label>
-                                  <Input
-                                    className="h-10 text-[11px] font-black border-2 border-slate-100 rounded-lg focus:border-blue-300 w-full transition-all"
-                                    type="number"
-                                    placeholder="0"
-                                    value={productDamageData[product._rowKey]?.damageQty || ""}
-                                    onChange={(e) => setProductDamageData(prev => ({ ...prev, [product._rowKey]: { ...prev[product._rowKey], damageQty: e.target.value } }))}
-                                  />
+                            <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
+                                  <p className="text-sm font-black text-slate-800 uppercase tracking-tight break-words">{product.productName}</p>
+                                  <div className="mt-1 flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest break-all">{product.specificOrderNo}</span>
+                                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</span>
+                                  </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                  <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Image</Label>
-                                  <FileUploadField
-                                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-                                    value={null}
-                                    fileName={productDamageData[product._rowKey]?.damageImageName || ""}
-                                    variant="dropzone"
-                                    helperText="Max file size: 20 MB"
-                                    uploading={isUploading === `damage-${product._rowKey}`}
-                                    buttonText="Select"
-                                    onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'damage', product._rowKey)}
-                                  />
+                                <Checkbox
+                                  className="data-[state=checked]:bg-blue-600"
+                                  checked={selected}
+                                  onCheckedChange={(checked) => setSelectedProducts(p => checked ? [...p, product._rowKey] : p.filter(k => k !== product._rowKey))}
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">WEIGHT(KGS)</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">
+                                    {product.netWeight ? (parseFloat(product.netWeight) || 0).toFixed(4) : "—"}
+                                  </p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
+                                  <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">
+                                        {netRate ? `₹${netRate.toFixed(2)}` : "—"}
+                                      </p>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
+                                      <div className="space-y-1.5">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
+                                        <p className="text-sm font-black text-blue-700 leading-none">
+                                          {freight ? `₹${freight}` : "No Freight Rate Available"}
+                                        </p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">
+                                    {netRate ? `₹${rateWoGst.toFixed(2)}` : "—"}
+                                  </p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">{taxable ? `₹${taxable.toFixed(2)}` : "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-green-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-green-700">Invoice No</p>
+                                  {product.invoice_copy ? (
+                                    <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="mt-1 block font-bold text-green-700 underline break-words">
+                                      {product.invoiceNo || "View Invoice"}
+                                    </a>
+                                  ) : (
+                                    <p className="mt-1 font-bold text-green-700 break-words">{product.invoiceNo || "—"}</p>
+                                  )}
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Invoice Date</p>
+                                  <p className="mt-1 font-bold">
+                                    {product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}
+                                  </p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Truck No</p>
+                                  <p className="mt-1 font-bold">{(product.truckNo || "—").toUpperCase()}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2 col-span-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Bill Amt</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">₹{product.billAmount}</p>
                                 </div>
                               </div>
-                            )}
-                          </Card>
+
+                              {receiptData.hasDamage === "yes" && (
+                                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Damage Qty</Label>
+                                    <Input
+                                      className="h-10 text-[11px] font-black border-2 border-slate-100 rounded-lg focus:border-blue-300 w-full transition-all"
+                                      type="number"
+                                      placeholder="0"
+                                      value={productDamageData[product._rowKey]?.damageQty || ""}
+                                      onChange={(e) => setProductDamageData(prev => ({ ...prev, [product._rowKey]: { ...prev[product._rowKey], damageQty: e.target.value } }))}
+                                    />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Image</Label>
+                                    <FileUploadField
+                                      accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                                      value={null}
+                                      fileName={productDamageData[product._rowKey]?.damageImageName || ""}
+                                      variant="dropzone"
+                                      helperText="Max file size: 20 MB"
+                                      uploading={isUploading === `damage-${product._rowKey}`}
+                                      buttonText="Select"
+                                      onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'damage', product._rowKey)}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           );
-                          })}
-                        <div className="rounded-2xl bg-slate-50 p-4">
-                          <div className="grid grid-cols-3 gap-3 text-center">
+                        })}
+
+                        <div className="rounded-xl border bg-slate-50 p-3 text-xs space-y-2">
+                          <div className="grid grid-cols-2 gap-3">
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bill</p>
-                              <p className="break-words text-xs font-black text-blue-700">₹{totals.billAmt.toFixed(2)}</p>
+                              <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
+                              <p className="mt-1 font-black text-blue-700">{totals.actualQty}</p>
                             </div>
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Taxable</p>
-                              <p className="break-words text-xs font-black text-blue-700">₹{totals.taxable.toFixed(2)}</p>
+                              <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
+                              <p className="mt-1 font-black text-blue-700">{totals.netWt.toFixed(4)}</p>
                             </div>
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Qty</p>
-                              <p className="text-xs font-black text-slate-700">{totals.actualQty}</p>
+                              <p className="text-[9px] uppercase font-black text-slate-500">Total Taxable</p>
+                              <p className="mt-1 font-black text-blue-700">₹{totals.taxable.toFixed(2)}</p>
                             </div>
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Net Wt</p>
-                              <p className="text-xs font-black text-slate-700">{totals.netWt.toFixed(2)}</p>
+                              <p className="text-[9px] uppercase font-black text-slate-500">Total Bill</p>
+                              <p className="mt-1 font-black text-blue-700">₹{totals.billAmt.toFixed(2)}</p>
                             </div>
                           </div>
                         </div>
                       </div>
-                      <Table className="hidden md:table">
-                        <TableHeader className="bg-blue-600">
-                          <TableRow className="hover:bg-blue-600 border-none">
-                            <TableHead className="w-12 text-center h-12">
+                                                 <Table className="hidden md:table">
+                        <TableHeader className="bg-slate-50">
+                          <TableRow className="border-none">
+                            <TableHead className="w-12 text-center h-10">
                               <Checkbox
-                                className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-blue-600"
                                 checked={selectedProducts.length === selectedGroup._allProducts.length}
                                 onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
                               />
                             </TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Order No</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Product Name</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12">Invoice No</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Invoice Date</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Bill Amt</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Rate (Inc. with taxes)</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Rate</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Taxable Amount</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Actual Qty</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Truck No</TableHead>
-                            <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Net Wt</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase tracking-wider h-10">PRODUCT INFO</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">WEIGHT(KGS)</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">ACTUAL QTY</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">RATE (INC. WITH TAXES)</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">RATE</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">TAXABLE AMOUNT</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">INVOICE NO</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">INVOICE DATE</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">TRUCK NO</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">BILL AMT</TableHead>
                             {receiptData.hasDamage === "yes" && (
                               <>
-                                <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Damage Qty</TableHead>
-                                <TableHead className="text-[10px] font-black uppercase text-blue-50 tracking-widest h-12 text-center">Image</TableHead>
+                                <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">Damage Qty</TableHead>
+                                <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">Image</TableHead>
                               </>
                             )}
                           </TableRow>
@@ -1256,16 +1269,21 @@ export default function MaterialReceiptPage() {
                                   onCheckedChange={(checked) => setSelectedProducts(p => checked ? [...p, product._rowKey] : p.filter(k => k !== product._rowKey))}
                                 />
                               </TableCell>
-                              <TableCell className="text-xs font-black text-slate-500 uppercase tracking-tighter">{product.specificOrderNo}</TableCell>
-                              <TableCell className="text-xs font-black text-slate-800 uppercase tracking-tighter">
+                              <TableCell className="p-2">
                                 <div className="flex flex-col">
-                                  <span>{product.productName}</span>
-                                  <span className="text-[8px] font-black text-blue-500 normal-case tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
+                                  <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
+                                  <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="text-xs font-black text-blue-600 italic tracking-tighter">{product.invoiceNo}</TableCell>
-                              <TableCell className="text-center font-black text-xs text-slate-700">{product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}</TableCell>
-                              <TableCell className="text-center font-black text-xs text-slate-700">₹{product.billAmount}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">
+                                {product.netWeight ? (parseFloat(product.netWeight) || 0).toFixed(4) : "—"}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
+                                  {product.actualQty || "0"}
+                                </Badge>
+                              </TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">
                                 <Popover>
                                   <PopoverTrigger asChild>
@@ -1285,9 +1303,18 @@ export default function MaterialReceiptPage() {
                               </TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">{netRate ? `₹${rateWoGst.toFixed(2)}` : "—"}</TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">{taxable ? `₹${taxable.toFixed(2)}` : "—"}</TableCell>
-                              <TableCell className="text-center font-black text-xs text-slate-700">{product.actualQty}</TableCell>
-                              <TableCell className="text-center font-black text-xs text-slate-500">{product.truckNo}</TableCell>
-                              <TableCell className="text-center font-black text-xs text-slate-700">{product.netWeight}</TableCell>
+                              <TableCell className="text-center text-xs font-bold text-green-700">
+                                {product.invoice_copy ? (
+                                  <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline font-black">
+                                    {product.invoiceNo}
+                                  </a>
+                                ) : (
+                                  <span className="font-black">{product.invoiceNo}</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">{product.invoice_date ? new Date(product.invoice_date).toLocaleDateString("en-GB") : "—"}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-500">{(product.truckNo || "—").toUpperCase()}</TableCell>
+                              <TableCell className="text-center font-black text-xs text-slate-700">₹{product.billAmount}</TableCell>
                               {receiptData.hasDamage === "yes" && (
                                 <>
                                   <TableCell className="px-2">
@@ -1319,14 +1346,29 @@ export default function MaterialReceiptPage() {
                         </TableBody>
                         <TableFooter className="bg-slate-50/50">
                           <TableRow className="h-14 font-black text-xs border-none">
-                            <TableCell colSpan={5} className="text-right uppercase tracking-[0.2em] text-slate-400 px-8">Total</TableCell>
-                            <TableCell className="text-center text-blue-700 underline underline-offset-4 decoration-2">₹{totals.billAmt.toFixed(2)}</TableCell>
+                            <TableCell />
+                            <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
+                            <TableCell className="text-center">
+                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
+                                {totals.netWt.toFixed(4)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
+                                {totals.actualQty}
+                              </Badge>
+                            </TableCell>
                             <TableCell />
                             <TableCell />
-                            <TableCell className="text-center text-blue-700 underline underline-offset-4 decoration-2">₹{totals.taxable.toFixed(2)}</TableCell>
-                            <TableCell className="text-center"><Badge className="bg-blue-600 text-white font-black px-4 py-1.5 rounded-full shadow-lg shadow-blue-100">{totals.actualQty}</Badge></TableCell>
+                            <TableCell className="text-center text-xs text-blue-700 font-black">
+                              ₹{totals.taxable.toFixed(2)}
+                            </TableCell>
                             <TableCell />
-                            <TableCell className="text-center text-slate-600">{totals.netWt.toFixed(2)}</TableCell>
+                            <TableCell />
+                            <TableCell />
+                            <TableCell className="text-center text-xs text-blue-700 font-black">
+                              ₹{totals.billAmt.toFixed(2)}
+                            </TableCell>
                             {receiptData.hasDamage === "yes" && <TableCell colSpan={2} />}
                           </TableRow>
                         </TableFooter>

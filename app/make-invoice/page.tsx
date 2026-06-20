@@ -1598,8 +1598,7 @@ export default function MakeInvoicePage() {
                                   const qty = parseFloat(product.qtyToDispatch) || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  const totalWtStr = totalWt.toFixed(4);
-                                  return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                                  return totalWt.toFixed(4);
                                 })()}
                               </p>
                             </div>
@@ -1695,8 +1694,7 @@ export default function MakeInvoicePage() {
                                 const qty = parseFloat(p.qtyToDispatch) || 0;
                                 return sum + (skuWt * qty);
                               }, 0);
-                            const totalWtStr = totalSelectedWt.toFixed(4);
-                            return totalWtStr.endsWith(".0000") ? totalWtStr.slice(0, -5) : totalWtStr;
+                            return totalSelectedWt.toFixed(4);
                           })()}
                         </p>
                       </div>

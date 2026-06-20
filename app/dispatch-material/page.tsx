@@ -2,7 +2,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
@@ -21,11 +21,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { dispatchPlanningApi, customerApi, depotApi } from "@/lib/api-service"
+import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-service"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery } from "@tanstack/react-query"
-import { Loader2, ChevronLeft, ChevronRight, XCircle, FileText, ExternalLink } from "lucide-react"
+import { Loader2, ChevronLeft, ChevronRight, XCircle, FileText, ExternalLink, Printer, Download } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -45,7 +46,8 @@ export default function DispatchMaterialPage() {
     status: "",
     startDate: "",
     endDate: "",
-    partyName: ""
+    partyName: "",
+    manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
   const [selectedDepoTab, setSelectedDepoTab] = useState("")
@@ -83,7 +85,296 @@ export default function DispatchMaterialPage() {
   const [precloseDialogProduct, setPrecloseDialogProduct] = useState<any | null>(null)
   const [precloseAction, setPrecloseAction] = useState<"commitment" | "close">("close")
   const [precloseRemarks, setPrecloseRemarks] = useState("")
+  const [skus, setSkus] = useState<any[]>([])
+  const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false)
   const isSavingTransferRef = useRef(false)
+
+  const getSkuWeight = (productName: string): number => {
+    if (!productName || skus.length === 0) return 0
+    const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim()
+    const norm = normalize(productName)
+    const sku = skus.find(s => s.sku_name?.toUpperCase() === productName.toUpperCase())
+      || skus.find(s => normalize(s.sku_name || '') === norm)
+      || skus.find(s => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) })
+    return sku?.sku_weight ? parseFloat(sku.sku_weight) : 0
+  }
+
+  const getSkuGrossWeight = (productName: string): number => {
+    if (!productName || skus.length === 0) return 0
+    const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim()
+    const norm = normalize(productName)
+    const sku = skus.find(s => s.sku_name?.toUpperCase() === productName.toUpperCase())
+      || skus.find(s => normalize(s.sku_name || '') === norm)
+      || skus.find(s => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) })
+    return sku?.sku_gross_weight ? parseFloat(sku.sku_gross_weight) : 0
+  }
+
+  const calculateWeight = (productName: string, qty: string | number): number => {
+    const quantity = typeof qty === 'string' ? parseFloat(qty) || 0 : qty
+    return getSkuWeight(productName) * quantity
+  }
+
+  const calculateGrossWeight = (productName: string, qty: string | number): number => {
+    const quantity = typeof qty === 'string' ? parseFloat(qty) || 0 : qty
+    return getSkuGrossWeight(productName) * quantity
+  }
+
+  const getProductQty = (prod: any) => {
+    const rowKey = prod._rowKey
+    return dispatchDetails[rowKey]?.qty !== undefined
+      ? dispatchDetails[rowKey].qty
+      : (prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty)
+  }
+
+  const renderSlipContent = () => {
+    if (selectedItems.length === 0 || dialogSelectedProducts.length === 0) return null
+    const productsForSlip = selectedItems.flatMap((g: any) =>
+      (g._allProducts || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+    )
+    const partyGroups: Record<string, any[]> = {}
+    productsForSlip.forEach((p: any) => {
+      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party"
+      if (!partyGroups[pName]) partyGroups[pName] = []
+      partyGroups[pName].push(p)
+    })
+    return (
+      <div className="space-y-8">
+        {Object.entries(partyGroups).map(([party, partyProducts]) => {
+          const firstProd = partyProducts[0]
+          const date = new Date().toLocaleDateString('en-GB')
+          const commitmentNo = firstProd.orderNo || "—"
+          const isBroker = firstProd.isBroker || firstProd.is_order_through_broker
+          const brokerName = isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—"
+          const place = firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—"
+          const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—"
+          const processId = firstProd.processid || firstProd.process_id || firstProd.processId || "—"
+          const categories: Record<string, any[]> = { "RICE OIL": [], "SOYA OIL": [], "PALM OIL": [], "OTHERS": [] }
+          partyProducts.forEach((prod: any) => {
+            const name = (prod.productName || "").toUpperCase()
+            const qty = parseFloat(String(getProductQty(prod) || "0"))
+            const unit = prod.uom || "PCS"
+            const item = { name: prod.productName, unit, qty, weight: calculateWeight(prod.productName, qty), grossWeight: calculateGrossWeight(prod.productName, qty) }
+            if (name.includes("RBO") || name.includes("RICE")) categories["RICE OIL"].push(item)
+            else if (name.includes("SBO") || name.includes("SOYA")) categories["SOYA OIL"].push(item)
+            else if (name.includes("PALM")) categories["PALM OIL"].push(item)
+            else categories["OTHERS"].push(item)
+          })
+          return (
+            <div key={party} className="border-2 border-black p-4 bg-white text-black mb-8 last:mb-0">
+              <div className="text-center border-b-4 border-double border-black pb-4 mb-6">
+                <h1 className="text-2xl font-black">SHRI SHYAM OIL EXTRACTION PVT LTD.</h1>
+                <p className="text-xs font-bold uppercase">VILL- BANARI, POST-BANARI, DISTT.- JANJGIR-CHAMPA</p>
+                <div className="text-xl font-bold underline mt-2 tracking-widest uppercase">OIL DISPATCH VOUCHER</div>
+              </div>
+              <div className="grid grid-cols-2 border border-black mb-6">
+                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Commitment No</span><span className="font-bold">{commitmentNo}</span></div>
+                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Date</span><span className="font-bold">{date}</span></div>
+                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Party Name</span><span className="font-bold">{party}</span></div>
+                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Broker Name</span><span className="font-bold">{brokerName}</span></div>
+                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Place</span><span className="font-bold">{place}</span></div>
+                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Party Mo.</span><span className="font-bold">{partyMo}</span></div>
+                <div className="flex border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Manual Sauda No.</span><span className="font-bold">{processId}</span></div>
+                <div className="flex p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center"></span></div>
+              </div>
+              <table className="w-full border-collapse border-2 border-black mb-6">
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-black p-2 text-left text-[10px] uppercase">Item Name</th>
+                    <th className="border border-black p-2 text-left text-[10px] uppercase">Unit</th>
+                    <th className="border border-black p-2 text-left text-[10px] uppercase">Qty</th>
+                    <th className="border border-black p-2 text-left text-[10px] uppercase">Net Weight</th>
+                    <th className="border border-black p-2 text-left text-[10px] uppercase">Gross Weight</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(categories).map(([category, items]) => {
+                    if (items.length === 0) return null
+                    const catQty = items.reduce((s: number, i: any) => s + i.qty, 0)
+                    const catWeight = items.reduce((s: number, i: any) => s + i.weight, 0)
+                    const catGross = items.reduce((s: number, i: any) => s + i.grossWeight, 0)
+                    return (
+                      <Fragment key={category}>
+                        <tr className="bg-slate-200 font-bold text-center"><td colSpan={5} className="border border-black p-1 uppercase text-xs">{category}</td></tr>
+                        {items.map((item: any, idx: number) => (
+                          <tr key={idx}>
+                            <td className="border border-black p-2 text-xs font-bold">{item.name}</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.unit}</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.qty}</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.weight.toFixed(4)} KG</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.grossWeight.toFixed(4)} KG</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-slate-50 font-black">
+                          <td colSpan={2} className="border border-black p-2 text-xs">TOTAL {category}</td>
+                          <td className="border border-black p-2 text-xs">{catQty}</td>
+                          <td className="border border-black p-2 text-xs">{catWeight.toFixed(4)} KG</td>
+                          <td className="border border-black p-2 text-xs">{catGross.toFixed(4)} KG</td>
+                        </tr>
+                      </Fragment>
+                    )
+                  })}
+                  <tr className="bg-black text-white font-bold">
+                    <td colSpan={2} className="border border-black p-2 text-sm uppercase">Grand Total</td>
+                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s: number, p: any) => s + parseFloat(String(getProductQty(p) || "0")), 0)}</td>
+                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s: number, p: any) => s + calculateWeight(p.productName, getProductQty(p)), 0).toFixed(4)} KG</td>
+                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s: number, p: any) => s + calculateGrossWeight(p.productName, getProductQty(p)), 0).toFixed(4)} KG</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="flex justify-between mt-8 pb-4">
+                <div className="border-t-2 border-black w-48 text-center pt-2 text-[10px] font-black uppercase">Receiver's Signature</div>
+                <div className="border-t-2 border-black w-48 text-center pt-2 text-[10px] font-black uppercase">Authorized Signatory</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const buildSlipParties = () => {
+    const productsForSlip = selectedItems.flatMap((g: any) =>
+      (g._allProducts || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+    )
+    const partyGroups: Record<string, any[]> = {}
+    productsForSlip.forEach((p: any) => {
+      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party"
+      if (!partyGroups[pName]) partyGroups[pName] = []
+      partyGroups[pName].push(p)
+    })
+    return Object.entries(partyGroups).map(([party, partyProducts]) => {
+      const firstProd = partyProducts[0]
+      const isBroker = firstProd.isBroker || firstProd.is_order_through_broker
+      return {
+        party,
+        commitmentNo: firstProd.orderNo || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        brokerName: isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—",
+        place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
+        partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
+        processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
+        products: partyProducts.map((prod: any) => {
+          const qty = parseFloat(String(getProductQty(prod) || "0"))
+          return {
+            productName: prod.productName || "—",
+            uom: prod.uom || "PCS",
+            qty,
+            weight: calculateWeight(prod.productName, qty),
+            grossWeight: calculateGrossWeight(prod.productName, qty),
+          }
+        }),
+      }
+    })
+  }
+
+  const handleDownloadSlip = () => {
+    if (selectedItems.length === 0 || dialogSelectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to download slip", variant: "destructive" })
+      return
+    }
+    generateDispatchSlipPdf(buildSlipParties(), "dispatch-slip.pdf")
+  }
+
+  const handlePrintSlip = () => {
+    if (selectedItems.length === 0 || dialogSelectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to print slip", variant: "destructive" })
+      return
+    }
+    const parties = buildSlipParties()
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+    let fullHtml = `
+      <html>
+        <head>
+          <title>Dispatch Slips</title>
+          <style>
+            @page { size: A4; margin: 10mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 0; color: #1a1a1a; line-height: 1.4; background: #fff; }
+            .slip-container { padding: 15px; border: 2px solid #000; margin-bottom: 20px; page-break-inside: avoid; position: relative; display: flex; flex-direction: column; }
+            .header { text-align: center; border-bottom: 3px double #000; padding-bottom: 12px; margin-bottom: 20px; }
+            .company-name { font-size: 26px; font-weight: 900; margin: 0; letter-spacing: 1px; color: #000; }
+            .company-address { font-size: 13px; margin: 6px 0; font-weight: 600; color: #444; }
+            .voucher-title { font-size: 20px; font-weight: 800; text-decoration: underline; margin-top: 12px; letter-spacing: 2px; }
+            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 25px; border: 1.5px solid #000; }
+            .info-item { display: flex; border: 0.5px solid #000; padding: 8px 12px; align-items: center; }
+            .info-label { font-weight: 800; width: 140px; text-transform: uppercase; font-size: 11px; color: #000; border-right: 1.5px solid #000; margin-right: 12px; height: 100%; display: flex; align-items: center; }
+            .info-value { font-weight: 700; font-size: 13px; flex: 1; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #000; }
+            th, td { border: 1px solid #000; padding: 10px 8px; text-align: left; font-size: 12px; font-weight: 700; }
+            th { background-color: #f0f0f0; text-transform: uppercase; font-weight: 900; border-bottom: 2px solid #000; }
+            .category-row { background-color: #e5e7eb; font-weight: 900; text-align: center; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+            .total-row { font-weight: 900; background-color: #f3f4f6; border-top: 1.5px solid #000; }
+            .footer { margin-top: auto; display: flex; justify-content: space-between; padding: 40px 20px 20px; }
+            .signature { border-top: 2px solid #000; width: 220px; text-align: center; padding-top: 8px; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+            .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 100px; color: rgba(0,0,0,0.03); font-weight: 900; pointer-events: none; white-space: nowrap; }
+            @media print { body { -webkit-print-color-adjust: exact; } .slip-container { border: 2px solid #000; height: auto; } }
+          </style>
+        </head>
+        <body>
+    `
+    parties.forEach(({ party, commitmentNo, date, brokerName, place, partyMo, processId, products }) => {
+      const categories: Record<string, typeof products> = { "RICE OIL": [], "SOYA OIL": [], "PALM OIL": [], "OTHERS": [] }
+      products.forEach(prod => {
+        const name = (prod.productName || "").toUpperCase()
+        if (name.includes("RBO") || name.includes("RICE")) categories["RICE OIL"].push(prod)
+        else if (name.includes("SBO") || name.includes("SOYA")) categories["SOYA OIL"].push(prod)
+        else if (name.includes("PALM")) categories["PALM OIL"].push(prod)
+        else categories["OTHERS"].push(prod)
+      })
+      fullHtml += `
+        <div class="slip-container">
+          <div class="watermark">SHRI SHYAM OIL</div>
+          <div class="header">
+            <h1 class="company-name">SHRI SHYAM OIL EXTRACTION PVT LTD.</h1>
+            <p class="company-address">VILL- BANARI, POST-BANARI, DISTT.- JANJGIR-CHAMPA</p>
+            <div class="voucher-title">OIL DISPATCH VOUCHER</div>
+          </div>
+          <div class="info-grid">
+            <div class="info-item"><span class="info-label">Commitment No</span><span class="info-value">${commitmentNo}</span></div>
+            <div class="info-item"><span class="info-label">Date</span><span class="info-value">${date}</span></div>
+            <div class="info-item"><span class="info-label">Party Name</span><span class="info-value">${party}</span></div>
+            <div class="info-item"><span class="info-label">Broker Name</span><span class="info-value">${brokerName}</span></div>
+            <div class="info-item"><span class="info-label">Place</span><span class="info-value">${place}</span></div>
+            <div class="info-item"><span class="info-label">Party Mo.</span><span class="info-value">${partyMo}</span></div>
+            <div class="info-item"><span class="info-label">Manual Sauda No.</span><span class="info-value">${processId}</span></div>
+            <div class="info-item"><span class="info-label"></span><span class="info-value"></span></div>
+          </div>
+          <table>
+            <thead><tr>
+              <th style="width:35%">Item Name</th><th style="width:10%">Unit</th>
+              <th style="width:15%">Qty</th><th style="width:20%">Net Weight</th><th style="width:20%">Gross Weight</th>
+            </tr></thead>
+            <tbody>
+              ${Object.entries(categories).map(([cat, items]) => {
+                if (items.length === 0) return ''
+                const cQty = items.reduce((s, i) => s + i.qty, 0)
+                const cWt = items.reduce((s, i) => s + i.weight, 0)
+                const cGr = items.reduce((s, i) => s + i.grossWeight, 0)
+                return `
+                  <tr class="category-row"><td colspan="5" style="text-align:center;">${cat}</td></tr>
+                  ${items.map(i => `<tr><td>${i.productName}</td><td>${i.uom}</td><td>${i.qty}</td><td>${i.weight.toFixed(4)} KG</td><td>${i.grossWeight.toFixed(4)} KG</td></tr>`).join('')}
+                  <tr class="total-row"><td colspan="2">TOTAL ${cat}</td><td>${cQty}</td><td>${cWt.toFixed(4)} KG</td><td>${cGr.toFixed(4)} KG</td></tr>
+                `
+              }).join('')}
+              <tr class="total-row" style="background-color:#000;color:#fff;font-size:15px;">
+                <td colspan="2">GRAND TOTAL</td>
+                <td>${products.reduce((s, p) => s + p.qty, 0)}</td>
+                <td>${products.reduce((s, p) => s + p.weight, 0).toFixed(4)} KG</td>
+                <td>${products.reduce((s, p) => s + p.grossWeight, 0).toFixed(4)} KG</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="footer" style="page-break-inside:avoid;">
+            <div class="signature">Receiver's Signature</div>
+            <div class="signature">Authorized Signatory</div>
+          </div>
+        </div>
+      `
+    })
+    fullHtml += `<script>window.onload=()=>{window.print();setTimeout(()=>window.close(),500);}</script></body></html>`
+    printWindow.document.write(fullHtml)
+    printWindow.document.close()
+  }
 
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
@@ -152,13 +443,14 @@ export default function DispatchMaterialPage() {
   } = useQuery({
     queryKey: ["dispatch-pending", filterValues, user?.depo_access?.['Dispatch Planning'], pendingPage, selectedDepoTab],
     queryFn: async () => {
-      const response = await (dispatchPlanningApi.getPending as any)({
+      const response = await dispatchPlanningApi.getPending({
         page: pendingPage,
         limit: limit,
         order_no: filterValues.search,
         start_date: filterValues.startDate,
         end_date: filterValues.endDate,
         customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
+        manual_sauda_no: filterValues.manualSaudaNo || undefined,
         depo_names: selectedDepoTab ? [selectedDepoTab] : (user?.depo_access?.['Dispatch Planning'] || [])
       });
       return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
@@ -176,12 +468,13 @@ export default function DispatchMaterialPage() {
   } = useQuery({
     queryKey: ["dispatch-history", filterValues, user?.depo_access?.['Dispatch Planning'], historyPage],
     queryFn: async () => {
-      const response = await (dispatchPlanningApi.getHistory as any)({
+      const response = await dispatchPlanningApi.getHistory({
         page: historyPage,
         limit: limit,
         order_no: filterValues.search,
         start_date: filterValues.startDate,
         end_date: filterValues.endDate,
+        manual_sauda_no: filterValues.manualSaudaNo || undefined,
         depo_names: user?.depo_access ? (user.depo_access['Dispatch Planning'] || []) : undefined
       });
       return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
@@ -244,9 +537,22 @@ export default function DispatchMaterialPage() {
     }
   };
 
+  const fetchSkus = async () => {
+    try {
+      const response = await skuApi.getAll({ limit: 1000 })
+      let skuArray: any[] = []
+      if (response?.data) {
+        if (Array.isArray(response.data)) skuArray = response.data
+        else skuArray = response.data.skus || response.data.items || []
+      }
+      setSkus(skuArray)
+    } catch {}
+  }
+
   useEffect(() => {
     fetchCustomers();
     fetchDepots();
+    fetchSkus();
   }, [user?.depo_access])
 
   const availableDepos = useMemo(() => {
@@ -782,7 +1088,9 @@ export default function DispatchMaterialPage() {
       stageLevel={3}
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
-      showDateFilters={false}
+      showDateFilters={true}
+      showSaudaFilter={true}
+      dateLabel="DO Date"
       historyFooter={
         <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -1576,8 +1884,41 @@ export default function DispatchMaterialPage() {
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsSlipDialogOpen(true)}
+                disabled={dialogSelectedProducts.length === 0}
+                className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black w-full sm:w-auto"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Slip
+              </Button>
               <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto">
                 {isProcessing ? "Processing..." : `Dispatch ${dialogSelectedProducts.length} Item(s)`}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Slip Dialog */}
+      <Dialog open={isSlipDialogOpen} onOpenChange={setIsSlipDialogOpen}>
+        <DialogContent className="max-w-4xl sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Dispatch Slip Preview</DialogTitle>
+            <DialogDescription>Review the dispatch slip details below.</DialogDescription>
+          </DialogHeader>
+          <div className="bg-slate-50 p-4 rounded-lg overflow-x-auto">
+            {renderSlipContent()}
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setIsSlipDialogOpen(false)} className="sm:order-first">Close</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
+                <Printer className="mr-2 h-4 w-4" /> Print Slip
+              </Button>
+              <Button onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700">
+                <Download className="mr-2 h-4 w-4" /> Download PDF
               </Button>
             </div>
           </DialogFooter>

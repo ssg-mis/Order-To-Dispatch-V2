@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { actualDispatchApi, vehicleDetailsApi, materialLoadApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
@@ -561,7 +562,7 @@ export default function ActualDispatchPage() {
   // Auto-fill Gross Weight from calculated total packing weight
   useEffect(() => {
     if (totalPackingWeightFromSku > 0 && !loadData.grossWeight) {
-      setLoadData(p => ({ ...p, grossWeight: totalPackingWeightFromSku.toFixed(2) }))
+      setLoadData(p => ({ ...p, grossWeight: totalPackingWeightFromSku.toFixed(4) }))
     }
   }, [totalPackingWeightFromSku])
 
@@ -578,7 +579,7 @@ export default function ActualDispatchPage() {
 
     setLoadData(prev => ({
       ...prev,
-      differanceWeight: (loadData.netWeightPacking || totalCombinedWeight > 0) ? diff.toFixed(2) : ""
+      differanceWeight: (loadData.netWeightPacking || totalCombinedWeight > 0) ? diff.toFixed(4) : ""
     }))
   }, [loadData.netWeightPacking, totalCombinedWeight])
 
@@ -1075,15 +1076,15 @@ export default function ActualDispatchPage() {
                             <td className="border border-black p-2 text-xs font-bold">{item.name}</td>
                             <td className="border border-black p-2 text-xs font-bold">{item.unit}</td>
                             <td className="border border-black p-2 text-xs font-bold">{item.qty}</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.weight.toFixed(2)} KG</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.grossWeight.toFixed(2)} KG</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.weight.toFixed(4)} KG</td>
+                            <td className="border border-black p-2 text-xs font-bold">{item.grossWeight.toFixed(4)} KG</td>
                           </tr>
                         ))}
                         <tr className="bg-slate-50 font-black">
                           <td colSpan={2} className="border border-black p-2 text-xs">TOTAL {category}</td>
                           <td className="border border-black p-2 text-xs">{catQty}</td>
-                          <td className="border border-black p-2 text-xs">{catWeight.toFixed(2)} KG</td>
-                          <td className="border border-black p-2 text-xs">{catGrossWeight.toFixed(2)} KG</td>
+                          <td className="border border-black p-2 text-xs">{catWeight.toFixed(4)} KG</td>
+                          <td className="border border-black p-2 text-xs">{catGrossWeight.toFixed(4)} KG</td>
                         </tr>
                       </React.Fragment>
                     )
@@ -1091,8 +1092,8 @@ export default function ActualDispatchPage() {
                   <tr className="bg-black text-white font-bold">
                     <td colSpan={2} className="border border-black p-2 text-sm uppercase">Grand Total</td>
                     <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
-                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(2)} KG</td>
-                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(2)} KG</td>
+                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
+                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
                   </tr>
                 </tbody>
               </table>
@@ -1108,13 +1109,56 @@ export default function ActualDispatchPage() {
     );
   };
 
+  const buildSlipParties = () => {
+    const productsForSlip = selectedGroups.flatMap((group: any) =>
+      group._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+    );
+    const partyGroups: Record<string, any[]> = {};
+    productsForSlip.forEach((p: any) => {
+      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party";
+      if (!partyGroups[pName]) partyGroups[pName] = [];
+      partyGroups[pName].push(p);
+    });
+    return Object.entries(partyGroups).map(([party, partyProducts]) => {
+      const firstProd = partyProducts[0];
+      const isBroker = firstProd.isBroker || firstProd.is_order_through_broker;
+      return {
+        party,
+        commitmentNo: firstProd.orderNo || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        brokerName: isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—",
+        place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
+        partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
+        processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
+        products: partyProducts.map((prod: any) => {
+          const qty = parseFloat(confirmDetails[prod._rowKey]?.qty || prod.qtyToDispatch || "0");
+          return {
+            productName: prod.productName || "—",
+            uom: prod.uom || "PCS",
+            qty,
+            weight: calculateWeight(prod.productName, qty),
+            grossWeight: calculateGrossWeight(prod.productName, qty),
+          };
+        }),
+      };
+    });
+  };
+
   const handleDownloadSlip = () => {
     if (selectedGroups.length === 0 || dialogSelectedProducts.length === 0) {
       toast({ title: "Error", description: "Please select products to download slip", variant: "destructive" });
       return;
     }
+    generateDispatchSlipPdf(buildSlipParties(), "dispatch-slip.pdf");
+  };
 
-    const productsForSlip = selectedGroups.flatMap(group =>
+  const handlePrintSlip = () => {
+    if (selectedGroups.length === 0 || dialogSelectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to print slip", variant: "destructive" });
+      return;
+    }
+
+    const productsForSlip = selectedGroups.flatMap((group: any) =>
       group._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
     );
 
@@ -1246,23 +1290,23 @@ export default function ActualDispatchPage() {
                       <td>${item.name}</td>
                       <td>${item.unit}</td>
                       <td>${item.qty}</td>
-                      <td>${item.weight.toFixed(2)} KG</td>
-                      <td>${item.grossWeight.toFixed(2)} KG</td>
+                      <td>${item.weight.toFixed(4)} KG</td>
+                      <td>${item.grossWeight.toFixed(4)} KG</td>
                     </tr>
                   `).join('')}
                   <tr class="total-row">
                     <td colspan="2">TOTAL ${category}</td>
                     <td>${catQty}</td>
-                    <td>${catWeight.toFixed(2)} KG</td>
-                    <td>${catGrossWeight.toFixed(2)} KG</td>
+                    <td>${catWeight.toFixed(4)} KG</td>
+                    <td>${catGrossWeight.toFixed(4)} KG</td>
                   </tr>
                 `;
       }).join('')}
               <tr class="total-row" style="background-color: #000; color: #fff; font-size: 15px;">
                 <td colspan="2">GRAND TOTAL</td>
                 <td>${partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
-                <td>${partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(2)} KG</td>
-                <td>${partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(2)} KG</td>
+                <td>${partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
+                <td>${partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
               </tr>
             </tbody>
           </table>
@@ -2351,7 +2395,7 @@ export default function ActualDispatchPage() {
                               </TableCell>
                               <TableCell className="p-3 text-center">
                                 <div className="font-black text-sm text-purple-700">
-                                  {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(2)} kg
+                                  {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(4)} kg
                                 </div>
                               </TableCell>
                               <TableCell className="p-3 text-center">
@@ -2401,7 +2445,7 @@ export default function ActualDispatchPage() {
                                   .reduce((total, prod) => {
                                     const rowKey = prod._rowKey
                                     return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                  }, 0).toFixed(2)} kg
+                                  }, 0).toFixed(4)} kg
                               </div>
                             </div>
                           </TableCell>
@@ -2488,7 +2532,7 @@ export default function ActualDispatchPage() {
                               </div>
                               <div className="bg-purple-50 p-2 rounded-lg">
                                 <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-center">Weight</p>
-                                <p className="text-[10px] font-black text-purple-700 text-center">{weight.toFixed(2)} kg</p>
+                                <p className="text-[10px] font-black text-purple-700 text-center">{weight.toFixed(4)} kg</p>
                               </div>
                             </div>
                           </div>
@@ -2513,7 +2557,7 @@ export default function ActualDispatchPage() {
                                 .reduce((total, prod) => {
                                   const rowKey = prod._rowKey
                                   return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                }, 0).toFixed(1)} <span className="text-[10px]">kg</span>
+                                }, 0).toFixed(4)} <span className="text-[10px]">kg</span>
                             </p>
                           </div>
                         </div>
@@ -2934,7 +2978,7 @@ export default function ActualDispatchPage() {
                       <div className="pt-4 border-t-2 border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total packing weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(2)} />
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(4)} />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Extra packing material weight</Label>
@@ -2944,7 +2988,7 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(2)} />
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(4)} />
                         </div>
                       </div>
 
@@ -3177,7 +3221,7 @@ export default function ActualDispatchPage() {
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={handleDownloadSlip}
+                onClick={handlePrintSlip}
                 className="border-blue-600 text-blue-600 hover:bg-blue-50"
               >
                 <Printer className="mr-2 h-4 w-4" /> Print Slip
