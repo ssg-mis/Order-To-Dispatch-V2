@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { gateInApi, orderApi, vehicleMasterApi } from "@/lib/api-service"
+import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi } from "@/lib/api-service"
 import { useQuery } from "@tanstack/react-query"
 import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
@@ -155,53 +155,49 @@ function ImageUploadCard({ label, capture, value, fileName, isUploading, onFile,
 }
 
 const PAGE_COLUMNS = [
-  { id: "order_key",             label: "Order Key (DO No.)" },
-  { id: "vehicle_no",            label: "Vehicle No." },
-  { id: "driver_name",           label: "Driver Name" },
-  { id: "saved_by",              label: "Saved By" },
-  { id: "saved_at",              label: "Saved At" },
-  { id: "products",              label: "Products" },
-  // ── from Actual Dispatch ──────────────────────────────────────
-  { id: "partySoDate",           label: "DO Date" },
-  { id: "orderNo",               label: "DO Number" },
-  { id: "soNo",                  label: "DO No." },
-  { id: "processId",             label: "Manual Sauda No." },
-  { id: "deliveryPurpose",       label: "Order Type (Delivery Purpose)" },
-  { id: "orderType",             label: "Order Type" },
-  { id: "customerType",          label: "Customer Type" },
-  { id: "startDate",             label: "Start Date" },
-  { id: "endDate",               label: "End Date" },
-  { id: "deliveryDate",          label: "Delivery Date" },
-  { id: "customerName",          label: "Customer Name" },
-  { id: "oilType",               label: "Oil Type" },
-  { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
-  { id: "ratePerLtr",            label: "Rate Per Ltr." },
-  { id: "rateOfMaterial",        label: "Rate of Material" },
-  { id: "rate",                  label: "Rate" },
-  { id: "productName",           label: "Product Name" },
-  { id: "uom",                   label: "UOM" },
-  { id: "orderQty",              label: "Order Qty" },
-  { id: "altUom",                label: "Alt UOM" },
+  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "advanceTaken",          label: "Advance Payment to be Taken" },
   { id: "altQty",                label: "Alt Qty (Kg)" },
-  { id: "skuName",               label: "SKU Name" },
+  { id: "altUom",                label: "Alt UOM" },
   { id: "approvalQty",           label: "Approval Qty" },
-  { id: "qtyToDispatch",         label: "Qty to Dispatch" },
-  { id: "deliveryFrom",          label: "Delivery From" },
-  { id: "totalWithGst",          label: "Total Amount with GST" },
-  { id: "transportType",         label: "Type of Transporting" },
+  { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
+  { id: "address",               label: "Customer Address" },
   { id: "contactPerson",         label: "Customer Contact Person Name" },
   { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
-  { id: "address",               label: "Customer Address" },
-  { id: "paymentTerms",          label: "Payment Terms" },
-  { id: "advanceTaken",          label: "Advance Payment to be Taken" },
-  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "customerName",          label: "Customer Name" },
+  { id: "customerType",          label: "Customer Type" },
+  { id: "deliveryDate",          label: "Delivery Date" },
+  { id: "deliveryFrom",          label: "Delivery From" },
+  { id: "partySoDate",           label: "DO Date" },
+  { id: "soNo",                  label: "DO No." },
+  { id: "orderNo",               label: "DO Number" },
+  { id: "driver_name",           label: "Driver Name" },
+  { id: "endDate",               label: "End Date" },
   { id: "isBroker",              label: "Is this order Through Broker" },
-  { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
+  { id: "processId",             label: "Manual Sauda No." },
+  { id: "oilType",               label: "Oil Type" },
+  { id: "order_key",             label: "Order Key (DO No.)" },
   { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
+  { id: "orderQty",              label: "Order Qty" },
+  { id: "orderType",             label: "Order Type" },
+  { id: "deliveryPurpose",       label: "Order Type (Delivery Purpose)" },
+  { id: "paymentTerms",          label: "Payment Terms" },
+  { id: "productName",           label: "Product Name" },
+  { id: "products",              label: "Products" },
+  { id: "qtyToDispatch",         label: "Qty to Dispatch" },
+  { id: "rate",                  label: "Rate" },
+  { id: "rateOfMaterial",        label: "Rate of Material" },
+  { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
+  { id: "ratePerLtr",            label: "Rate Per Ltr." },
   { id: "remark",                label: "Remark" },
-  { id: "revertSecurityRemarks", label: "Revert(Security-Guard) Remarks" },
-  { id: "revertDispatchRemarks", label: "Revert(Dispatch-Planning) Remarks" },
-  { id: "revertPlanningRemarks", label: "Revert(Pre-Approval) Remarks" },
+  { id: "saved_at",              label: "Saved At" },
+  { id: "saved_by",              label: "Saved By" },
+  { id: "skuName",               label: "SKU Name" },
+  { id: "startDate",             label: "Start Date" },
+  { id: "totalWithGst",          label: "Total Amount with GST" },
+  { id: "transportType",         label: "Type of Transporting" },
+  { id: "uom",                   label: "UOM" },
+  { id: "vehicle_no",            label: "Vehicle No." },
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
 
@@ -245,12 +241,108 @@ const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
   brokerName:            "broker_name",
   orderPunchRemarks:     "order_punch_remarks",
   remark:                "remarks",
-  revertSecurityRemarks: "revert_security_remarks",
-  revertDispatchRemarks: "revert_dispatch_remarks",
-  revertPlanningRemarks: "revert_planning_remarks",
 }
 const DATE_COL_IDS = new Set<ColId>(["partySoDate", "startDate", "endDate", "deliveryDate"])
 const BOOL_COL_IDS = new Set<ColId>(["advanceTaken", "isBroker"])
+
+// ─── GST helpers ─────────────────────────────────────────────────────────────
+
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
+  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
+]
+
+function extractState(addr: string): string | null {
+  if (!addr) return null
+  const lower = addr.toLowerCase()
+  for (const s of INDIAN_STATES) {
+    if (lower.includes(s.toLowerCase())) return s
+  }
+  return null
+}
+
+function GateInGSTSummary({ records }: { records: any[] }) {
+  const depoName = records[0]?.depo_name || ""
+  const shippingState = extractState(records[0]?.customer_address || "") || ""
+
+  const { data: billingRes } = useQuery({
+    queryKey: ["billing-depot-state", depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
+    staleTime: 10 * 60 * 1000,
+  })
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName.toLowerCase()
+  ) || billingDepots[0]
+  const billingState = billingDepot?.state || ""
+
+  const totalTaxable = records.reduce((sum, r) => {
+    const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
+    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
+    const qty = parseFloat(r.qty_to_be_dispatched) || 0
+    return sum + rateWoGst * qty
+  }, 0)
+
+  let gstType = "same"
+  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
+  let sgst = cgst
+  let igst = 0
+
+  if (!billingState || !shippingState) {
+    gstType = "no_address"
+  } else if (billingState !== shippingState) {
+    gstType = "different"
+    cgst = 0
+    sgst = 0
+    igst = Math.round(totalTaxable * 0.05 * 100) / 100
+  }
+
+  const rawTotal = totalTaxable + cgst + sgst + igst
+  const invoiceTotal = Math.round(rawTotal)
+  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+
+  return (
+    <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Estimate)</p>
+      </div>
+      <div className="p-4 max-w-sm ml-auto space-y-2">
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">Taxable Amount</span>
+          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${cgst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${sgst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
+          <span className="font-mono font-bold text-slate-500">
+            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+          </span>
+        </div>
+        <div className="flex justify-between items-center border-t border-slate-200 pt-2">
+          <span className="font-black uppercase text-slate-800 text-[11px]">Estimated Invoice Amount</span>
+          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
@@ -267,6 +359,7 @@ export default function GateInPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<any>(null)
   const [selectedGroupKeys, setSelectedGroupKeys] = useState<string[]>([])
+  const [selectedGroupRecords, setSelectedGroupRecords] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
 
   // Vehicle master state
@@ -321,6 +414,27 @@ export default function GateInPage() {
 
   const pendingRecords: any[] = pendingResult?.records || []
   const historyRecords: any[] = historyResult?.records || []
+
+  // ── SKU weight lookup ──────────────────────────────────────────────────────
+  const { data: skuDetailsData } = useQuery({
+    queryKey: ["sku-details-all"],
+    queryFn: async () => {
+      const res = await skuDetailsApi.getAll({ all: "true" })
+      return res.success ? res.data?.skuDetails ?? [] : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const skuWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          map.set(sku.sku_name.trim().toLowerCase(), sku.sku_weight ? String(sku.sku_weight) : "")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
 
   // ── History shape for WorkflowStageShell ──────────────────────────────────
   const historyData = useMemo(() =>
@@ -430,9 +544,10 @@ export default function GateInPage() {
   }
 
   // ── Open dialog ────────────────────────────────────────────────────────────
-  const handleOpenDialog = (record: any, groupKeys: string[] = [record.order_key]) => {
+  const handleOpenDialog = (record: any, groupKeys: string[] = [record.order_key], groupRecords: any[] = [record]) => {
     setSelectedRecord(record)
     setSelectedGroupKeys(groupKeys)
+    setSelectedGroupRecords(groupRecords)
     setFrontVehicleImage("")
     setFrontVehicleFileName("")
     setFrontVehicleFile(null)
@@ -692,7 +807,7 @@ export default function GateInPage() {
                     <Button
                       size="sm"
                       disabled={isReadOnly}
-                      onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key))}
+                      onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key), group.records)}
                       className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm"
                     >
                       Gate In
@@ -805,7 +920,7 @@ export default function GateInPage() {
                         <Button
                           size="sm"
                           disabled={isReadOnly}
-                          onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key))}
+                          onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key), group.records)}
                           className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm"
                         >
                           Gate In
@@ -903,6 +1018,168 @@ export default function GateInPage() {
                   </div>
 
                 </div>
+
+                {/* ── Product Table & GST Breakdown ── */}
+                {selectedGroupRecords.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Products</p>
+                      </div>
+
+                      {/* Desktop table */}
+                      <Table className="hidden md:table">
+                        <TableHeader className="bg-slate-50">
+                          <TableRow>
+                            <TableHead className="text-[10px] uppercase font-black h-10 pl-4">PRODUCT NAME</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT (KGS)</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY DISPATCH</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
+                            <TableHead className="text-[10px] uppercase font-black text-center h-10 pr-4">TAXABLE AMOUNT</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedGroupRecords.map((record: any, idx: number) => {
+                            const rate = ((parseFloat(record.rate_of_material) || 0) * (parseFloat(record.nos_per_main_uom) || 1)) + (parseFloat(record.freight_rate) || 0)
+                            const rateWoGst = rate ? parseFloat((rate / 1.05).toFixed(2)) : 0
+                            const qty = parseFloat(record.qty_to_be_dispatched) || 0
+                            const taxableAmount = rateWoGst * qty
+                            const skuWt = parseFloat(skuWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0
+                            const totalWt = skuWt * qty
+                            return (
+                              <TableRow key={idx} className="h-14">
+                                <TableCell className="p-2 pl-4">
+                                  <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</span>
+                                </TableCell>
+                                <TableCell className="text-center p-2 text-xs font-mono font-bold text-slate-700">
+                                  {totalWt ? totalWt.toFixed(4) : "—"}
+                                </TableCell>
+                                <TableCell className="text-center p-2">
+                                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
+                                    {qty || "—"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                                  {rate ? `₹${rate.toFixed(2)}` : "—"}
+                                </TableCell>
+                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                                  {rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}
+                                </TableCell>
+                                <TableCell className="text-center p-2 pr-4 text-xs font-bold text-slate-700">
+                                  {taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                          <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
+                            <TableCell className="text-[10px] uppercase font-black text-slate-900 pl-4">Total</TableCell>
+                            <TableCell className="text-center">
+                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
+                                {(() => {
+                                  const total = selectedGroupRecords.reduce((sum, r) => {
+                                    const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                    return sum + skuWt * qty
+                                  }, 0)
+                                  return total.toFixed(4)
+                                })()}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
+                                {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell />
+                            <TableCell />
+                            <TableCell className="text-center pr-4 text-xs text-blue-700 font-black">
+                              ₹{selectedGroupRecords.reduce((sum, r) => {
+                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
+                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
+                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                return sum + rateWoGst * qty
+                              }, 0).toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+
+                      {/* Mobile cards */}
+                      <div className="space-y-3 p-3 md:hidden">
+                        {selectedGroupRecords.map((record: any, idx: number) => {
+                          const rate = ((parseFloat(record.rate_of_material) || 0) * (parseFloat(record.nos_per_main_uom) || 1)) + (parseFloat(record.freight_rate) || 0)
+                          const rateWoGst = rate ? parseFloat((rate / 1.05).toFixed(2)) : 0
+                          const qty = parseFloat(record.qty_to_be_dispatched) || 0
+                          const taxableAmount = rateWoGst * qty
+                          const skuWt = parseFloat(skuWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0
+                          const totalWt = skuWt * qty
+                          return (
+                            <div key={idx} className="rounded-xl border bg-white p-3 space-y-3">
+                              <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</p>
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">{totalWt ? totalWt.toFixed(4) : "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
+                                  <p className="mt-1 font-mono font-bold text-blue-700">{qty || "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">{rate ? `₹${rate.toFixed(2)}` : "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">{rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2 col-span-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount</p>
+                                  <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div className="grid grid-cols-3 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
+                          <div>
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
+                            <p className="mt-1 font-black text-blue-700">
+                              {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
+                            <p className="mt-1 font-black text-blue-700">
+                              {(() => {
+                                const total = selectedGroupRecords.reduce((sum, r) => {
+                                  const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+                                  const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                  return sum + skuWt * qty
+                                }, 0)
+                                return total.toFixed(4)
+                              })()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase font-black text-slate-500">Taxable Amount</p>
+                            <p className="mt-1 font-black text-blue-700">
+                              ₹{selectedGroupRecords.reduce((sum, r) => {
+                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
+                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
+                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                return sum + rateWoGst * qty
+                              }, 0).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <GateInGSTSummary records={selectedGroupRecords} />
+                  </div>
+                )}
 
                 {/* ── Vehicle Master Details ── */}
                 <div className="bg-blue-50 rounded-2xl border border-blue-200 p-6">
