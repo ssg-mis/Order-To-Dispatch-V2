@@ -432,7 +432,7 @@ export function ExportPdfModal() {
       </DialogTrigger>
 
       <DialogContent
-        className="max-w-4xl w-full p-0 gap-0 flex flex-col overflow-hidden"
+        className="w-[92vw] max-w-[92vw] sm:max-w-6xl p-0 gap-0 flex flex-col overflow-hidden"
         style={{ maxHeight: "90vh" }}
       >
         {/* Header */}
@@ -699,7 +699,7 @@ export function ExportPdfModal() {
     {/* ── Preview: exact on-screen snapshot of the CSV (same columns, order & formatting) ── */}
     <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
       <DialogContent
-        className="max-w-[95vw] w-full p-0 gap-0 flex flex-col overflow-hidden"
+        className="w-[95vw] max-w-[95vw] sm:max-w-[95vw] p-0 gap-0 flex flex-col overflow-hidden"
         style={{ maxHeight: "92vh" }}
       >
         <DialogHeader className="px-6 py-4 border-b shrink-0" style={{ background: "oklch(0.97 0.012 245)" }}>

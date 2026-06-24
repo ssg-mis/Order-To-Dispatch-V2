@@ -131,6 +131,59 @@ export default function ReportsPage() {
     setPagination(prev => ({ ...prev, pageIndex: 0 }))
   }, [filterOrderNo, filterCompany, filterOilType, filterSku, filterFrom, filterTo])
 
+  // Shared pagination bar for the Order Summary & Stage Timeline tabs (both driven
+  // by the same `summaryTable` instance + `pagination` state). Builds a correct
+  // page-number window: always shows first & last page, a ±1 window around the
+  // current page, and a single "…" for each collapsed gap.
+  const renderPaginationBar = () => {
+    if (isLoading || orderTimeline.length <= pagination.pageSize) return null
+    const pageCount = summaryTable.getPageCount()
+    const current = pagination.pageIndex
+
+    const items: (number | "ellipsis")[] = []
+    for (let i = 0; i < pageCount; i++) {
+      if (i === 0 || i === pageCount - 1 || Math.abs(i - current) <= 1) {
+        items.push(i)
+      } else if (items[items.length - 1] !== "ellipsis") {
+        items.push("ellipsis")
+      }
+    }
+
+    const from = Math.min(orderTimeline.length, current * pagination.pageSize + 1)
+    const to = Math.min(orderTimeline.length, (current + 1) * pagination.pageSize)
+
+    return (
+      <div className="px-6 py-3 border-t bg-slate-50/50 flex items-center justify-between" style={{ borderColor: "oklch(0.90 0.025 245)" }}>
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+          Showing <span className="text-slate-900 mx-1">{from}</span>
+          to <span className="text-slate-900 mx-1">{to}</span>
+          of <span className="text-slate-900 mx-1">{orderTimeline.length}</span> orders
+        </div>
+        <div className="flex items-center gap-1.5 font-black">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
+            onClick={() => summaryTable.previousPage()} disabled={!summaryTable.getCanPreviousPage()}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          {items.map((item, idx) =>
+            item === "ellipsis" ? (
+              <span key={`ellipsis-${idx}`} className="px-1 text-slate-400 opacity-50">…</span>
+            ) : (
+              <Button key={item} variant={current === item ? "default" : "outline"} size="icon"
+                className="h-8 w-8 rounded-lg text-xs" style={current === item ? { background: "oklch(0.42 0.18 265)" } : {}}
+                onClick={() => summaryTable.setPageIndex(item)}>
+                {item + 1}
+              </Button>
+            )
+          )}
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
+            onClick={() => summaryTable.nextPage()} disabled={!summaryTable.getCanNextPage()}>
+            <ChevronRightIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   // Chart data for top SKUs — full names for tooltip, short label for Y axis
   const chartData = topSkus.slice(0, 10).map(s => ({
     name: s.sku.length > 18 ? s.sku.slice(0, 18) + "…" : s.sku,
@@ -338,8 +391,8 @@ export default function ReportsPage() {
                 <span className="text-slate-400 text-xs">({orderTimeline.length} orders)</span>
               </div>
             </div>
-            <ScrollArea style={{ height: "540px" }}>
-              <Table>
+            <div className="[&_[data-slot=table-container]]:max-h-[540px] [&_[data-slot=table-container]]:overflow-auto">
+              <Table className="min-w-[1000px]">
                 <TableHeader style={{ background: "oklch(0.98 0.01 245)", position: "sticky", top: 0, zIndex: 1 }}>
                   <TableRow style={{ borderColor: "oklch(0.90 0.025 245)" }}>
                     {["Order No.", "Customer", "Oil Type", "SKU / Product", "Order Qty", "Order QTY (KG)", "UOM", "Delivery Date", "Status"].map(h => (
@@ -402,40 +455,10 @@ export default function ReportsPage() {
                   )}
                 </TableBody>
               </Table>
-            </ScrollArea>
+            </div>
 
             {/* Pagination Controls */}
-            {!isLoading && orderTimeline.length > pagination.pageSize && (
-              <div className="px-6 py-3 border-t bg-slate-50/50 flex items-center justify-between" style={{ borderColor: "oklch(0.90 0.025 245)" }}>
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Showing <span className="text-slate-900 mx-1">{Math.min(orderTimeline.length, pagination.pageIndex * pagination.pageSize + 1)}</span>
-                  to <span className="text-slate-900 mx-1">{Math.min(orderTimeline.length, (pagination.pageIndex + 1) * pagination.pageSize)}</span>
-                  of <span className="text-slate-900 mx-1">{orderTimeline.length}</span> orders
-                </div>
-                <div className="flex items-center gap-1.5 font-black">
-                  <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                    onClick={() => summaryTable.previousPage()} disabled={!summaryTable.getCanPreviousPage()}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  {Array.from({ length: summaryTable.getPageCount() }).map((_, i) => {
-                    // Only show 5 pages around current
-                    if (Math.abs(i - pagination.pageIndex) > 2 && i !== 0 && i !== summaryTable.getPageCount() - 1) return null
-                    if (Math.abs(i - pagination.pageIndex) === 3) return <span key={i} className="px-1 text-slate-400 opacity-50">...</span>
-                    return (
-                      <Button key={i} variant={pagination.pageIndex === i ? "default" : "outline"} size="icon"
-                        className="h-8 w-8 rounded-lg text-xs" style={pagination.pageIndex === i ? { background: "oklch(0.42 0.18 265)" } : {}}
-                        onClick={() => summaryTable.setPageIndex(i)}>
-                        {i + 1}
-                      </Button>
-                    )
-                  })}
-                  <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                    onClick={() => summaryTable.nextPage()} disabled={!summaryTable.getCanNextPage()}>
-                    <ChevronRightIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
+            {renderPaginationBar()}
           </div>
         )}
 
@@ -617,37 +640,7 @@ export default function ReportsPage() {
             </ScrollArea>
 
             {/* Pagination Controls */}
-            {!isLoading && orderTimeline.length > pagination.pageSize && (
-              <div className="px-6 py-3 border-t bg-slate-50/50 flex items-center justify-between" style={{ borderColor: "oklch(0.90 0.025 245)" }}>
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Showing <span className="text-slate-900 mx-1">{Math.min(orderTimeline.length, pagination.pageIndex * pagination.pageSize + 1)}</span>
-                  to <span className="text-slate-900 mx-1">{Math.min(orderTimeline.length, (pagination.pageIndex + 1) * pagination.pageSize)}</span>
-                  of <span className="text-slate-900 mx-1">{orderTimeline.length}</span> orders
-                </div>
-                <div className="flex items-center gap-1.5 font-black">
-                  <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                    onClick={() => summaryTable.previousPage()} disabled={!summaryTable.getCanPreviousPage()}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  {Array.from({ length: summaryTable.getPageCount() }).map((_, i) => {
-                    // Only show 5 pages around current
-                    if (Math.abs(i - pagination.pageIndex) > 2 && i !== 0 && i !== summaryTable.getPageCount() - 1) return null
-                    if (Math.abs(i - pagination.pageIndex) === 3) return <span key={i} className="px-1 text-slate-400 opacity-50">...</span>
-                    return (
-                      <Button key={i} variant={pagination.pageIndex === i ? "default" : "outline"} size="icon"
-                        className="h-8 w-8 rounded-lg text-xs" style={pagination.pageIndex === i ? { background: "oklch(0.42 0.18 265)" } : {}}
-                        onClick={() => summaryTable.setPageIndex(i)}>
-                        {i + 1}
-                      </Button>
-                    )
-                  })}
-                  <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg"
-                    onClick={() => summaryTable.nextPage()} disabled={!summaryTable.getCanNextPage()}>
-                    <ChevronRightIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
+            {renderPaginationBar()}
           </div>
         )}
 

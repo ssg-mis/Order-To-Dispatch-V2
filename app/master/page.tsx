@@ -128,6 +128,7 @@ interface Vehicle {
   vehicle_type: string
   transporter: string
   rto: string
+  rc_image?: string
   road_tax?: string
   road_tax_image?: string
   pollution?: string
@@ -139,6 +140,8 @@ interface Vehicle {
   state_permit?: string
   state_permit_image?: string
   state_permit_type?: string
+  national_permit?: string
+  national_permit_image?: string
   fuel_type?: string
   gvw?: number
   ulw?: number
@@ -206,7 +209,11 @@ const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?
 const formatDocDate = (dateStr?: string) => {
   if (!dateStr) return "—"
   const d = new Date(dateStr)
-  return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  if (isNaN(d.getTime())) return dateStr
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
 }
 
 const renderDocBadge = (label: string, image?: string, expiry?: string) => {
@@ -252,14 +259,15 @@ const renderDocCell = (expiry?: string, image?: string, type?: string) => {
             {type} Permit
           </span>
         )}
-        <span className="text-slate-700 font-medium">{formatDocDate(expiry)}</span>
-        {image && (
-          <button 
-            onClick={() => window.open(image, '_blank')} 
-            className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold text-left w-fit"
+        {image ? (
+          <button
+            onClick={() => window.open(image, '_blank')}
+            className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-left w-fit"
           >
-            View Image
+            {formatDocDate(expiry)}
           </button>
+        ) : (
+          <span className="text-slate-700 font-medium">{formatDocDate(expiry)}</span>
         )}
       </div>
     </TableCell>
@@ -434,9 +442,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         .map((t: any) => t.transporter_name?.trim())
         .filter((name: any): name is string => typeof name === "string" && name.length > 0)
 
-      return Array.from(new Set<string>(names)).sort((a, b) =>
+      const sorted = Array.from(new Set<string>(names)).sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
       )
+
+      // Always offer the two built-in options at the top, ahead of the transporter
+      // master list (matches the Transporter dropdown on the Actual Dispatch stage).
+      const builtIns = ["Company Vehicle", "Party Vehicle"]
+      const rest = sorted.filter((n) => !builtIns.includes(n))
+      return [...builtIns, ...rest]
     },
     [activeTransporters]
   )
@@ -707,6 +721,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     transporter: '',
     rto: '',
     status: 'Active',
+    rc_image: '',
     road_tax: '',
     road_tax_image: '',
     pollution: '',
@@ -718,6 +733,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     state_permit: '',
     state_permit_image: '',
     state_permit_type: '',
+    national_permit: '',
+    national_permit_image: '',
     fuel_type: 'Diesel',
     gvw: '',
     ulw: '',
@@ -725,7 +742,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     life_time_tax: '',
     life_time_tax_image: ''
   })
-  const [vehicleFormErrors, setVehicleFormErrors] = useState<{ registration_no?: string; vehicle_type?: string; transporter?: string }>({})
+  const [vehicleFormErrors, setVehicleFormErrors] = useState<{ registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string }>({})
 
   const [driverForm, setDriverForm] = useState<Partial<Driver>>({
     driver_master_id: "",
@@ -877,6 +894,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       transporter: '',
       rto: '',
       status: 'Active',
+      rc_image: '',
       road_tax: '',
       road_tax_image: '',
       pollution: '',
@@ -888,6 +906,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       state_permit: '',
       state_permit_image: '',
       state_permit_type: '',
+      national_permit: '',
+      national_permit_image: '',
       fuel_type: 'Diesel',
       gvw: '',
       ulw: '',
@@ -986,10 +1006,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
       } else if (activeTab === "vehicle_master") {
         // --- Mandatory field validation ---
-        const vErrors: { registration_no?: string; vehicle_type?: string; transporter?: string } = {}
+        const vErrors: { registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string } = {}
         if (!vehicleForm.registration_no?.trim()) vErrors.registration_no = 'Registration Number is required'
         if (!vehicleForm.vehicle_type?.trim()) vErrors.vehicle_type = 'Vehicle Type is required'
         if (!vehicleForm.transporter?.trim()) vErrors.transporter = 'Transporter is required'
+        // State permit document is compulsory when the permit section applies (GVW > 3000)
+        const permitApplies = vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000
+        if (permitApplies && !vehicleForm.state_permit_image) vErrors.state_permit_image = 'State Permit document is required'
         // --- Duplicate registration number check (against already-loaded list) ---
         const regNo = vehicleForm.registration_no?.trim().toUpperCase()
         const duplicate = vehicles.find((v: any) =>
@@ -1016,8 +1039,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           payload.state_permit = null;
           payload.state_permit_image = null;
           payload.state_permit_type = null;
-        } else {
-          payload.state_permit_type = payload.state_permit_type || 'State';
+          payload.national_permit = null;
+          payload.national_permit_image = null;
         }
         if (editingItem) {
           res = await vehicleMasterApi.update(editingItem.id, payload)
@@ -1296,8 +1319,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           payload.state_permit = null
           payload.state_permit_image = null
           payload.state_permit_type = null
-        } else {
-          payload.state_permit_type = payload.state_permit_type || 'State'
+          payload.national_permit = null
+          payload.national_permit_image = null
         }
         return payload
       }
@@ -1329,13 +1352,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     depot_name: 'Depot Name', depot_address: 'Depot Address', salesman_broker_name: 'Salesman / Broker',
     salesman_name: 'Name', mobile_no: 'Mobile', sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM',
     hsn_code: 'HSN Code', gst_rate: 'GST Rate', registration_no: 'Registration No', vehicle_type: 'Vehicle Type',
-    transporter: 'Transporter', rto: 'RTO', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW', passing: 'Passing Weight',
+    transporter: 'Transporter', rto: 'RTO', rc_image: 'RC (Registration Certificate)', fuel_type: 'Fuel Type', gvw: 'GVW', ulw: 'ULW', passing: 'Passing Weight',
     road_tax: 'Road Tax Expiry', road_tax_image: 'Road Tax Certificate',
     life_time_tax: 'Lifetime Tax', life_time_tax_image: 'Lifetime Tax Certificate',
     pollution: 'Pollution Expiry', pollution_image: 'Pollution Certificate',
     insurance: 'Insurance Expiry', insurance_image: 'Insurance Certificate',
     fitness: 'Fitness Expiry', fitness_image: 'Fitness Certificate',
-    state_permit_type: 'Permit Type', state_permit: 'Permit Expiry', state_permit_image: 'Permit Certificate',
+    state_permit_type: 'Permit Type', state_permit: 'State Permit Expiry', state_permit_image: 'State Permit Certificate',
+    national_permit: 'National Permit Expiry', national_permit_image: 'National Permit Certificate',
     driver_name: 'Driver Name', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto',
     transporter_name: 'Transporter Name', contact_number: 'Contact Number',
   }
@@ -1987,6 +2011,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Label>RTO</Label>
             <Input value={vehicleForm.rto || ''} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="RTO" />
           </div>
+          <div className="space-y-2">
+            <FileUploadField
+              label="RC (Registration Certificate)"
+              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+              value={vehicleForm.rc_image}
+              helperText="Max file size: 20 MB"
+              uploading={false}
+              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "rc_image")}
+            />
+          </div>
         </div>
 
         <Separator className="my-2" />
@@ -2026,7 +2060,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               <>
                 <div className="space-y-2">
                   <Label>Life time tax Date</Label>
-                  <Input type="date" value={vehicleForm.life_time_tax?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, life_time_tax: e.target.value})} />
+                  <Input type="date" value="" disabled placeholder="No expiry for lifetime tax" />
                 </div>
                 <div className="space-y-2">
                   <FileUploadField
@@ -2095,46 +2129,69 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
 
         <div className="border p-4 rounded-xl bg-slate-50/50 space-y-4">
+          <Label className="flex justify-between items-center">
+            <span>Permits</span>
+            {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000) && (
+              <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &gt; 3000 KGS)</span>
+            )}
+          </Label>
+
+          {/* State Permit (document compulsory) */}
           <div className="space-y-2">
-            <Label className="flex justify-between items-center">
-              <span>Permit Type</span>
-              {!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000) && (
-                <span className="text-[10px] text-slate-400 font-normal">Disabled (GVW must be &gt; 3000 KGS)</span>
-              )}
-            </Label>
-            <Select 
-              value={vehicleForm.state_permit_type || 'State'} 
-              disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
-              onValueChange={(val: 'State' | 'National') => setVehicleForm({...vehicleForm, state_permit_type: val})}
-            >
-              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="State">State Permit</SelectItem>
-                <SelectItem value="National">National Permit</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Permit Expiry Date</Label>
-              <Input 
-                type="date" 
-                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
-                value={vehicleForm.state_permit?.split('T')[0] || ''} 
-                onChange={e => setVehicleForm({...vehicleForm, state_permit: e.target.value})} 
-              />
+            <p className="text-xs font-semibold text-slate-600">State Permit <span className="text-red-500">*</span></p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>State Permit Expiry Date</Label>
+                <Input
+                  type="date"
+                  disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
+                  value={vehicleForm.state_permit?.split('T')[0] || ''}
+                  onChange={e => setVehicleForm({...vehicleForm, state_permit: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <FileUploadField
+                  label="State Permit Image"
+                  disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
+                  accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                  value={vehicleForm.state_permit_image}
+                  helperText="Max file size: 20 MB"
+                  uploading={false}
+                  onFilesSelected={(files) => {
+                    if (files[0]) { handleFileUpload(files[0], "state_permit_image"); setVehicleFormErrors(prev => ({ ...prev, state_permit_image: undefined })) }
+                  }}
+                />
+                {vehicleFormErrors.state_permit_image && (
+                  <p className="text-[11px] text-red-500">{vehicleFormErrors.state_permit_image}</p>
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              <FileUploadField
-                label="Permit Image"
-                disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
-                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-                value={vehicleForm.state_permit_image}
-                helperText="Max file size: 20 MB"
-                uploading={false}
-                onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "state_permit_image")}
-              />
+          </div>
+
+          {/* National Permit (optional) */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-600">National Permit</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>National Permit Expiry Date</Label>
+                <Input
+                  type="date"
+                  disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
+                  value={vehicleForm.national_permit?.split('T')[0] || ''}
+                  onChange={e => setVehicleForm({...vehicleForm, national_permit: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <FileUploadField
+                  label="National Permit Image"
+                  disabled={!(vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000)}
+                  accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                  value={vehicleForm.national_permit_image}
+                  helperText="Max file size: 20 MB"
+                  uploading={false}
+                  onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "national_permit_image")}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -2152,9 +2209,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 ...prev,
                 gvw,
                 passing,
-                ...(clearPermit 
-                  ? { state_permit: '', state_permit_image: '', state_permit_type: '' } 
-                  : { state_permit_type: prev.state_permit_type || 'State' })
+                ...(clearPermit
+                  ? { state_permit: '', state_permit_image: '', state_permit_type: '', national_permit: '', national_permit_image: '' }
+                  : {})
               }))
             }} />
           </div>
@@ -3951,81 +4008,85 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                             {(item.road_tax || item.road_tax_image) && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
                                 <span className="font-medium text-slate-500">Road Tax Expiry</span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.road_tax)}
-                                  {item.road_tax_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.road_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                {item.road_tax_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.road_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.road_tax)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.road_tax)}</span>
+                                )}
                               </div>
                             )}
                             {(item.life_time_tax || item.life_time_tax_image) && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
-                                <span className="font-medium text-slate-500">Lifetime Tax Date</span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.life_time_tax)}
-                                  {item.life_time_tax_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.life_time_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                <span className="font-medium text-slate-500">Lifetime Tax</span>
+                                {item.life_time_tax_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.life_time_tax_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-semibold">
+                                    LTT
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700 font-semibold">LTT</span>
+                                )}
                               </div>
                             )}
                             {(item.pollution || item.pollution_image) && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
                                 <span className="font-medium text-slate-500">Pollution Expiry</span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.pollution)}
-                                  {item.pollution_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.pollution_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                {item.pollution_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.pollution_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.pollution)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.pollution)}</span>
+                                )}
                               </div>
                             )}
                             {(item.insurance || item.insurance_image) && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
                                 <span className="font-medium text-slate-500">Insurance Expiry</span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.insurance)}
-                                  {item.insurance_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.insurance_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                {item.insurance_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.insurance_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.insurance)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.insurance)}</span>
+                                )}
                               </div>
                             )}
                             {(item.fitness || item.fitness_image) && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
                                 <span className="font-medium text-slate-500">Fitness Expiry</span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.fitness)}
-                                  {item.fitness_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.fitness_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                {item.fitness_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.fitness_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.fitness)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.fitness)}</span>
+                                )}
                               </div>
                             )}
-                            {(item.state_permit || item.state_permit_image || item.state_permit_type) && (
+                            {(item.state_permit || item.state_permit_image) && (
                               <div className="flex items-center justify-between py-0.5">
-                                <span className="font-medium text-slate-500">
-                                  {item.state_permit_type ? `${item.state_permit_type} Permit` : 'State Permit'} Expiry
-                                </span>
-                                <span className="text-slate-700 flex items-center gap-1.5">
-                                  {formatDocDate(item.state_permit)}
-                                  {item.state_permit_image && (
-                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.state_permit_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold">
-                                      [View]
-                                    </button>
-                                  )}
-                                </span>
+                                <span className="font-medium text-slate-500">State Permit Expiry</span>
+                                {item.state_permit_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.state_permit_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.state_permit)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.state_permit)}</span>
+                                )}
+                              </div>
+                            )}
+                            {(item.national_permit || item.national_permit_image) && (
+                              <div className="flex items-center justify-between py-0.5">
+                                <span className="font-medium text-slate-500">National Permit Expiry</span>
+                                {item.national_permit_image ? (
+                                  <button onClick={(e) => { e.stopPropagation(); window.open(item.national_permit_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                    {formatDocDate(item.national_permit)}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-700">{formatDocDate(item.national_permit)}</span>
+                                )}
                               </div>
                             )}
                           </div>
@@ -4050,12 +4111,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('registration_no', vehicleSort, setVehicleSort)}>Reg No <SortIcon col="registration_no" sort={vehicleSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('transporter', vehicleSort, setVehicleSort)}>Transporter <SortIcon col="transporter" sort={vehicleSort} /></TableHead>
                         <TableHead>Type</TableHead>
-                        <TableHead>Road Tax</TableHead>
-                        <TableHead>Lifetime Tax</TableHead>
-                        <TableHead>Pollution</TableHead>
-                        <TableHead>Insurance</TableHead>
-                        <TableHead>Fitness</TableHead>
-                        <TableHead>State Permit</TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('road_tax', vehicleSort, setVehicleSort)}>Road Tax <SortIcon col="road_tax" sort={vehicleSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('pollution', vehicleSort, setVehicleSort)}>Pollution <SortIcon col="pollution" sort={vehicleSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('insurance', vehicleSort, setVehicleSort)}>Insurance <SortIcon col="insurance" sort={vehicleSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('fitness', vehicleSort, setVehicleSort)}>Fitness <SortIcon col="fitness" sort={vehicleSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('state_permit', vehicleSort, setVehicleSort)}>State Permit <SortIcon col="state_permit" sort={vehicleSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('national_permit', vehicleSort, setVehicleSort)}>National Permit <SortIcon col="national_permit" sort={vehicleSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', vehicleSort, setVehicleSort)}>Status <SortIcon col="status" sort={vehicleSort} /></TableHead>
                         <TableHead className="text-right pr-6">Actions</TableHead>
                       </TableRow>
@@ -4079,7 +4140,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           </TableRow>
                         ))
                       ) : vehicles.length === 0 ? (
-                        <TableRow><TableCell colSpan={12} className="text-center py-20 text-slate-400">No vehicles found</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={13} className="text-center py-20 text-slate-400">No vehicles found</TableCell></TableRow>
                       ) : (
                         <>
                           {sortedVehicles.map(item => (
@@ -4090,12 +4151,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               <TableCell>
                                 <span className="font-medium text-slate-700 text-sm">{item.vehicle_type || "—"}</span>
                               </TableCell>
-                              {renderDocCell(item.road_tax, item.road_tax_image)}
-                              {renderDocCell(item.life_time_tax, item.life_time_tax_image)}
+                              {(item.life_time_tax || item.life_time_tax_image) ? (
+                                <TableCell className="text-xs">
+                                  {item.life_time_tax_image ? (
+                                    <button onClick={() => window.open(item.life_time_tax_image, '_blank')} className="text-blue-600 hover:text-blue-800 hover:underline font-semibold text-left w-fit" title="Lifetime Tax — open certificate">LTT</button>
+                                  ) : (
+                                    <span className="text-slate-700 font-semibold" title="Lifetime Tax">LTT</span>
+                                  )}
+                                </TableCell>
+                              ) : (
+                                renderDocCell(item.road_tax, item.road_tax_image)
+                              )}
                               {renderDocCell(item.pollution, item.pollution_image)}
                               {renderDocCell(item.insurance, item.insurance_image)}
                               {renderDocCell(item.fitness, item.fitness_image)}
-                              {renderDocCell(item.state_permit, item.state_permit_image, item.state_permit_type)}
+                              {renderDocCell(item.state_permit, item.state_permit_image)}
+                              {renderDocCell(item.national_permit, item.national_permit_image)}
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
@@ -4283,9 +4354,23 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           <div><span className="font-medium text-slate-600">Licence No: </span>{item.driving_licence_no || "—"}</div>
                           <div><span className="font-medium text-slate-600">Licence Type: </span>{item.driving_licence_type || "—"}</div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {item.aadhaar_no && <Badge variant="outline" className="text-[10px] bg-indigo-50 border-indigo-100 text-indigo-700">Aadhaar: {item.aadhaar_no.slice(-4)}</Badge>}
-                          {item.pan_no && <Badge variant="outline" className="text-[10px] bg-slate-100">PAN: {item.pan_no}</Badge>}
+                        <div className="flex flex-wrap items-center gap-1 text-xs">
+                          <span className="font-medium text-slate-600">DL Upto: </span>
+                          {item.valid_upto ? (
+                            item.dl_upload ? (
+                              <button
+                                onClick={() => window.open(item.dl_upload, '_blank')}
+                                className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                title="View Driving Licence document"
+                              >
+                                {new Date(item.valid_upto.split('T')[0]).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </button>
+                            ) : (
+                              <span className="text-slate-700">{new Date(item.valid_upto.split('T')[0]).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                            )
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
@@ -4306,8 +4391,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('driver_master_id', driverSort, setDriverSort)}>ID <SortIcon col="driver_master_id" sort={driverSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('driver_name', driverSort, setDriverSort)}>Driver Name <SortIcon col="driver_name" sort={driverSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('mobile_no', driverSort, setDriverSort)}>Mobile <SortIcon col="mobile_no" sort={driverSort} /></TableHead>
-                        <TableHead>Licence Info</TableHead>
-                        <TableHead>Aadhaar/PAN</TableHead>
+                        <TableHead>Licence No.</TableHead>
+                        <TableHead>DL Upto</TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', driverSort, setDriverSort)}>Status <SortIcon col="status" sort={driverSort} /></TableHead>
                         <TableHead className="text-right pr-6">Actions</TableHead>
                       </TableRow>
@@ -4341,12 +4426,21 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <div className="flex flex-wrap gap-1">
-                                  {item.aadhaar_no && <Badge variant="outline" className="text-[10px] bg-indigo-50 border-indigo-100 text-indigo-700">Aadhaar: {item.aadhaar_no.slice(-4)}</Badge>}
-                                  {item.aadhaar_upload && <Badge variant="outline" className="text-[10px] bg-blue-50 cursor-pointer" onClick={() => window.open(item.aadhaar_upload, '_blank')}>View Art</Badge>}
-                                  {item.dl_upload && <Badge variant="outline" className="text-[10px] bg-amber-50 border-amber-200 text-amber-700 cursor-pointer" onClick={() => window.open(item.dl_upload, '_blank')}>View DL</Badge>}
-                                  {item.pan_no && <Badge variant="outline" className="text-[10px] bg-slate-100">PAN: {item.pan_no}</Badge>}
-                                </div>
+                                {item.valid_upto ? (
+                                  item.dl_upload ? (
+                                    <button
+                                      onClick={() => window.open(item.dl_upload, '_blank')}
+                                      className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                      title="View Driving Licence document"
+                                    >
+                                      {new Date(item.valid_upto.split('T')[0]).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs text-slate-700">{new Date(item.valid_upto.split('T')[0]).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">
