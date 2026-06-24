@@ -980,124 +980,179 @@ export default function PreApprovalPage() {
       const successfulApprovals: any[] = []
       const failedApprovals: any[] = []
 
-      // Pre-calculate total new SKU budget per (DO + Oil Category) to avoid double-deduction
+      // Pre-calculate total budget to deduct from non-approved orders per (DO + Oil Category).
+      // Includes: new SKU qtys + any excess approval qty on existing orders (over their own order_quantity).
       const newSkuBudgetMap: Record<string, number> = {};
       itemsToApprove.forEach(item => {
-        if (item._product._isNew) {
-          const p = item._product;
-          const cat = normalizeType(p.oilType || productRates[item._rowKey]?.productName || "");
-          const key = `${p._baseDo}_${cat}`;
+        const p = item._product;
+        const cat = normalizeType(p.oilType || productRates[item._rowKey]?.productName || "");
+        const key = `${p._baseDo}_${cat}`;
+        if (p._isNew) {
+          // New SKU: entire qty comes from existing orders' budget
           newSkuBudgetMap[key] = (newSkuBudgetMap[key] || 0) + (parseFloat(productRates[item._rowKey]?.approvalQty || "0") || 0);
+        } else {
+          // Existing order: only the excess beyond its own qty needs cascading
+          const approvalQty = parseFloat(productRates[item._rowKey]?.approvalQty || "0") || 0;
+          const _ownR = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _ownQ = parseFloat(p.order_quantity || p.orderQty || "0") || 0; const ownQty = _ownR > 0 ? Math.min(_ownR, _ownQ) : _ownQ;
+          const excess = Math.max(0, approvalQty - ownQty);
+          if (excess > 0) {
+            newSkuBudgetMap[key] = (newSkuBudgetMap[key] || 0) + excess;
+          }
         }
       });
 
-      console.log("[DEBUG] New SKU Budget Map:", newSkuBudgetMap);
+      console.log("[DEBUG] Cascade Budget Map:", newSkuBudgetMap);
 
-      // Submit each approval to backend
+      // Server-side-safe budget guard: recompute group totals at submission time.
+      // Budget = ALL existing orders in the group (selected + non-selected).
+      // Approved = sum of approval qtys for items being submitted now.
+      const submissionBudgetCheck: Record<string, { budget: number; approved: number }> = {};
+      // Count budget from every existing order in scope (selected or not)
+      allProductsFromSelectedOrders.forEach((p: any) => {
+        if (p._isNew) return;
+        const cat = normalizeType(p.oilType || p.productName || "");
+        const key = `${p._baseDo}_${cat}`;
+        if (!submissionBudgetCheck[key]) submissionBudgetCheck[key] = { budget: 0, approved: 0 };
+        { const _br = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _bq = parseFloat(p.order_quantity || p.orderQty || "0") || 0; submissionBudgetCheck[key].budget += _br > 0 ? Math.min(_br, _bq) : _bq; }
+      });
+      // Count total approval being requested now
       for (const item of itemsToApprove) {
+        const p = item._product;
+        const cat = normalizeType(p.oilType || productRates[item._rowKey]?.productName || "");
+        const key = `${p._baseDo}_${cat}`;
+        if (!submissionBudgetCheck[key]) submissionBudgetCheck[key] = { budget: 0, approved: 0 };
+        submissionBudgetCheck[key].approved += parseFloat(productRates[item._rowKey]?.approvalQty || "0") || 0;
+      }
+      for (const [key, { budget, approved }] of Object.entries(submissionBudgetCheck)) {
+        if (approved > budget) {
+          const oilCat = key.split('_').slice(1).join('_');
+          toast({
+            title: "Over Budget",
+            description: `Total approval qty (${approved}) exceeds available order qty (${budget}) for ${oilCat}. Please correct the quantities.`,
+            variant: "destructive"
+          });
+          setIsApproving(false);
+          return;
+        }
+      }
+
+      // Phase 1: Handle new SKU creations separately (they use orderApi.create, not submitBatch)
+      for (const item of itemsToApprove.filter((i: any) => i._product._isNew)) {
         try {
           const product = item._product
-          const productKey = item._rowKey
-          const rateData: any = productRates[productKey]
-
-          if (product._isNew) {
-            // Use orderApi.create for new products
-            const orderData = {
-              ...product._orderData,
-              order_no: product._originalOrderId,
-              products: [{
-                product_name: rateData?.skuName || rateData?.productName,
-                oil_type: product.oilType || "",
-                uom: product.uom,
-                order_quantity: parseFloat(rateData?.approvalQty || "0"),
-                rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
-                approval_qty: parseFloat(rateData?.approvalQty || "0"),
-                rate_per_ltr: parseFloat(rateData?.ratePerLtr || "0"),
-                final_rate: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
-                remark: rateData?.remark || "",
-                sku_name: rateData?.skuName,
-                username: user?.username || null
-              }]
-            };
-
-            const mappedOrderData: any = {
-              planned_1: new Date().toISOString(),
-              actual_1: new Date().toISOString()
-            };
-            Object.entries(orderData).forEach(([key, val]) => {
-              if (key === 'customerName') mappedOrderData.customer_name = val;
-              else if (key === 'orderType') mappedOrderData.order_type = val;
-              else if (key === 'orderPurpose') mappedOrderData.order_type_delivery_purpose = val;
-              else if (key === 'startDate') mappedOrderData.start_date = val;
-              else if (key === 'endDate') mappedOrderData.end_date = val;
-              else if (key === 'deliveryDate') mappedOrderData.delivery_date = val;
-              else if (key === 'soDate') mappedOrderData.party_so_date = val;
-              else if (key === 'contactPerson') mappedOrderData.customer_contact_person_name = val;
-              else if (key === 'whatsappNo') mappedOrderData.customer_contact_person_whatsapp_no = val;
-              else if (key === 'customerAddress') mappedOrderData.customer_address = val;
-              else if (key === 'paymentTerms') mappedOrderData.payment_terms = val;
-              else if (key === 'advancePaymentTaken') mappedOrderData.advance_payment_to_be_taken = val;
-              else if (key === 'advanceAmount') mappedOrderData.advance_amount = val;
-              else if (key === 'isBrokerOrder') mappedOrderData.is_order_through_broker = val;
-              else if (key === 'brokerName') mappedOrderData.broker_name = val;
-              else if (key === 'transportType') mappedOrderData.type_of_transporting = val;
-              else if (key === 'depoName') mappedOrderData.depo_name = val;
-              else if (key === 'orderPunchRemarks') mappedOrderData.order_punch_remarks = val;
-              else if (key === 'customerType') mappedOrderData.customer_type = val;
-              else if (key === 'totalWithGst') mappedOrderData.total_amount_with_gst = val;
-              else mappedOrderData[key] = val;
-            });
-
-            const { orderApi } = await import('@/lib/api-service');
-            await orderApi.create(mappedOrderData);
-          } else {
-            const currentOilCategory = normalizeType(product.oilType || product.productName);
-            const budgetKey = `${product._baseDo}_${currentOilCategory}`;
-
-            console.log(`Processing existing row ${product._originalOrderId}, category: ${currentOilCategory}`);
-
-            const originalQty = parseFloat(product.order_quantity || product.orderQty || "0") || 0;
-            const remainingToSubtract = newSkuBudgetMap[budgetKey] || 0;
-
-            const deduction = Math.min(originalQty, remainingToSubtract);
-            const residualOrderQty = Math.max(0, originalQty - deduction);
-
-            newSkuBudgetMap[budgetKey] = Math.max(0, remainingToSubtract - deduction);
-
-            console.log(`  Original Budget: ${originalQty}, Deduction: ${deduction}, Residual: ${residualOrderQty}, Remaining to deduct from others: ${newSkuBudgetMap[budgetKey]}`);
-
-            const submissionData = {
+          const rateData: any = productRates[item._rowKey]
+          const orderData = {
+            ...product._orderData,
+            order_no: product._originalOrderId,
+            products: [{
+              product_name: rateData?.skuName || rateData?.productName,
+              oil_type: product.oilType || "",
+              uom: product.uom,
+              order_quantity: parseFloat(rateData?.approvalQty || "0"),
+              rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
+              approval_qty: parseFloat(rateData?.approvalQty || "0"),
+              rate_per_ltr: parseFloat(rateData?.ratePerLtr || "0"),
+              final_rate: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
+              remark: rateData?.remark || "",
               sku_name: rateData?.skuName,
-              product_name: rateData?.productName || rateData?.skuName,
-              order_quantity: residualOrderQty,
-              approval_qty: rateData?.approvalQty ? parseFloat(rateData.approvalQty) : null,
-              remaining_dispatch_qty: rateData?.approvalQty ? parseFloat(rateData.approvalQty) : null,
-              rate_per_ltr: (rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) ? parseFloat(rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) : null,
-              final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-              rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-              remark: rateData?.remark || null,
-              username: user?.username || null,
-            }
-            await preApprovalApi.submit(product.id, submissionData)
-          }
-
+              username: user?.username || null
+            }]
+          };
+          const mappedOrderData: any = {
+            planned_1: new Date().toISOString(),
+            actual_1: new Date().toISOString()
+          };
+          Object.entries(orderData).forEach(([key, val]) => {
+            if (key === 'customerName') mappedOrderData.customer_name = val;
+            else if (key === 'orderType') mappedOrderData.order_type = val;
+            else if (key === 'orderPurpose') mappedOrderData.order_type_delivery_purpose = val;
+            else if (key === 'startDate') mappedOrderData.start_date = val;
+            else if (key === 'endDate') mappedOrderData.end_date = val;
+            else if (key === 'deliveryDate') mappedOrderData.delivery_date = val;
+            else if (key === 'soDate') mappedOrderData.party_so_date = val;
+            else if (key === 'contactPerson') mappedOrderData.customer_contact_person_name = val;
+            else if (key === 'whatsappNo') mappedOrderData.customer_contact_person_whatsapp_no = val;
+            else if (key === 'customerAddress') mappedOrderData.customer_address = val;
+            else if (key === 'paymentTerms') mappedOrderData.payment_terms = val;
+            else if (key === 'advancePaymentTaken') mappedOrderData.advance_payment_to_be_taken = val;
+            else if (key === 'advanceAmount') mappedOrderData.advance_amount = val;
+            else if (key === 'isBrokerOrder') mappedOrderData.is_order_through_broker = val;
+            else if (key === 'brokerName') mappedOrderData.broker_name = val;
+            else if (key === 'transportType') mappedOrderData.type_of_transporting = val;
+            else if (key === 'depoName') mappedOrderData.depo_name = val;
+            else if (key === 'orderPunchRemarks') mappedOrderData.order_punch_remarks = val;
+            else if (key === 'customerType') mappedOrderData.customer_type = val;
+            else if (key === 'totalWithGst') mappedOrderData.total_amount_with_gst = val;
+            else mappedOrderData[key] = val;
+          });
+          const { orderApi } = await import('@/lib/api-service');
+          await orderApi.create(mappedOrderData);
           successfulApprovals.push(item)
-
-          const historyEntry = {
-            orderNo: item._displayDo,
-            customerName: item.customerName || "Unknown",
-            stage: "Pre-Approval",
-            status: "Completed" as const,
-            processedBy: "Current User",
-            timestamp: new Date().toISOString(),
-            remarks: rateData?.remark || "-",
-            orderType: item.orderType || "pre-approval"
-          }
-          // saveWorkflowHistory(historyEntry) - Removed as per user request to disable localStorage history
-
         } catch (error: any) {
-          console.error(`Failed to approve:`, error)
+          console.error(`Failed to create new SKU:`, error)
           failedApprovals.push({ item, error: error?.message || "Unknown error" })
+        }
+      }
+
+      // Phase 2: Build approvals + cascade deductions payload, submit atomically
+      const approvalPayloads: Array<{ id: number;[key: string]: any }> = [];
+      for (const item of itemsToApprove.filter((i: any) => !i._product._isNew)) {
+        const product = item._product
+        const rateData: any = productRates[item._rowKey]
+        const originalQty = parseFloat(product.order_quantity || product.orderQty || "0") || 0;
+        const approvalQtyForThis = rateData?.approvalQty ? parseFloat(rateData.approvalQty) : 0;
+        const isOverOwnQty = approvalQtyForThis > originalQty;
+        const effectiveOrderQty = isOverOwnQty ? approvalQtyForThis : originalQty;
+        approvalPayloads.push({
+          id: product.id,
+          sku_name: rateData?.skuName,
+          product_name: rateData?.productName || rateData?.skuName,
+          order_quantity: effectiveOrderQty,
+          approval_qty: approvalQtyForThis || null,
+          remaining_dispatch_qty: approvalQtyForThis || null,
+          rate_per_ltr: (rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) ? parseFloat(rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) : null,
+          final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
+          rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
+          remark: rateData?.remark || null,
+          username: user?.username || null,
+        });
+      }
+
+      // Build cascade budget array — backend distributes this AFTER splits are created,
+      // so it correctly targets split remainders that didn't exist on the frontend yet.
+      const cascadeBudgetByKey: Record<string, { base_do: string; oil_type: string; qty: number }> = {};
+      for (const item of itemsToApprove) {
+        const p = item._product;
+        const cat = normalizeType(p.oilType || productRates[item._rowKey]?.productName || "");
+        const key = `${p._baseDo}_${cat}`;
+        const rawOilType = p.oilType || productRates[item._rowKey]?.productName || "";
+        let budgetQty = 0;
+        if (p._isNew) {
+          budgetQty = parseFloat(productRates[item._rowKey]?.approvalQty || "0") || 0;
+        } else {
+          const approvalQty = parseFloat(productRates[item._rowKey]?.approvalQty || "0") || 0;
+          const _ownR = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0;
+          const _ownQ = parseFloat(p.order_quantity || p.orderQty || "0") || 0;
+          const ownQty = _ownR > 0 ? Math.min(_ownR, _ownQ) : _ownQ;
+          budgetQty = Math.max(0, approvalQty - ownQty);
+        }
+        if (budgetQty <= 0) continue;
+        if (!cascadeBudgetByKey[key]) cascadeBudgetByKey[key] = { base_do: p._baseDo, oil_type: rawOilType, qty: 0 };
+        cascadeBudgetByKey[key].qty += budgetQty;
+      }
+      const cascadeBudgets = Object.values(cascadeBudgetByKey).filter(b => b.qty > 0);
+
+      console.log("[DEBUG] Cascade Budgets (server-side):", cascadeBudgets);
+
+      if (approvalPayloads.length > 0 || cascadeBudgets.length > 0) {
+        try {
+          await preApprovalApi.submitBatch({ approvals: approvalPayloads, cascadeBudgets });
+          itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) => successfulApprovals.push(i));
+        } catch (error: any) {
+          console.error('Batch submission failed — all approvals and deductions rolled back:', error)
+          itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) =>
+            failedApprovals.push({ item: i, error: error?.message || "Batch failed" })
+          )
         }
       }
 
@@ -1729,15 +1784,22 @@ export default function PreApprovalPage() {
     // Budget = order qty of EXISTING products of this oil type only (new SKUs draw from it).
     const groupBudget = groupRows
       .filter(p => !p._isNew)
-      .reduce((sum, p) => sum + (parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || p.order_quantity || p.orderQty || "0") || 0), 0)
+      .reduce((sum, p) => { const _gr = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _gq = parseFloat(p.order_quantity || p.orderQty || "0") || 0; return sum + (_gr > 0 ? Math.min(_gr, _gq) : _gq); }, 0)
 
     const groupApproved = groupRows.reduce((sum, p) => sum + apprOf(p), 0)
     const overBudget = groupApproved > groupBudget
     const sharedGroup = groupRows.length > 1
     const groupKeys = new Set(groupRows.map(p => p._rowKey))
 
+    // For existing orders: how much this approval exceeds the order's own qty (cascade territory).
+    const ownQty = !product._isNew
+      ? (() => { const _or = parseFloat(product.remaining_dispatch_qty || product.remainingDispatchQty || "0") || 0; const _oq = parseFloat(product.order_quantity || product.orderQty || "0") || 0; return _or > 0 ? Math.min(_or, _oq) : _oq; })()
+      : null
+    const enteredQty = parseFloat(value) || 0
+    const cascadeNeeded = ownQty !== null ? Math.max(0, enteredQty - ownQty) : 0
+
     // Recompute error for EVERY row in the group so siblings never keep a stale message.
-    // When over budget, flag every contributing row (qty > 0); otherwise clear the group.
+    // Only hard-block when the group total exceeds the group budget (no qty exists anywhere).
     setQtyValidationErrors(prev => {
       const next = { ...prev }
       groupRows.forEach(p => {
@@ -1752,13 +1814,46 @@ export default function PreApprovalPage() {
       return next
     })
 
-    // Recompute notice for every group row too. Show the shared-budget hint only when
-    // the group is valid and genuinely shared by more than one row.
+    // Simulate cascade across other visible products to show exactly where qty will come from.
+    // avail = own order qty MINUS any approval qty already entered for that row in this batch.
+    const otherSources = groupRows
+      .filter(gp => !gp._isNew && gp._rowKey !== rowKey)
+      .map(gp => {
+        const _r = parseFloat(gp.remaining_dispatch_qty || gp.remainingDispatchQty || "0") || 0;
+        const _q = parseFloat(gp.order_quantity || gp.orderQty || "0") || 0;
+        const ownQty = _r > 0 ? Math.min(_r, _q) : _q;
+        const alreadyApproved = parseFloat(productRates[gp._rowKey]?.approvalQty || "0") || 0;
+        const avail = Math.max(0, ownQty - alreadyApproved);
+        return { name: gp.productName || gp.product_name || "Product", orderNo: gp._originalOrderId || gp.orderNo || gp.order_no || "", avail };
+      })
+      .filter(s => s.avail > 0);
+
+    const buildCascadeStr = (need: number) => {
+      let rem = need;
+      const parts: string[] = [];
+      for (const src of otherSources) {
+        if (rem <= 0) break;
+        const take = Math.min(src.avail, rem);
+        parts.push(`${src.orderNo || "Order"} (${take})`);
+        rem -= take;
+      }
+      return parts.length > 0 ? parts.join(', ') : `other ${oilLabel} orders`;
+    };
+
+    // Recompute notice for every group row.
     setQtyInfoNotices(prev => {
       const next = { ...prev }
       groupRows.forEach(p => {
         const a = apprOf(p)
-        if (sharedGroup && !overBudget && a > 0) {
+        if (p._rowKey === rowKey && !overBudget) {
+          if (product._isNew && enteredQty > 0) {
+            next[p._rowKey] = `New SKU: ${enteredQty} taken from ${buildCascadeStr(enteredQty)}`;
+          } else if (cascadeNeeded > 0) {
+            next[p._rowKey] = `${ownQty} own + ${cascadeNeeded} taken from ${buildCascadeStr(cascadeNeeded)}`;
+          } else {
+            delete next[p._rowKey];
+          }
+        } else if (sharedGroup && !overBudget && a > 0) {
           next[p._rowKey] = `Using ${a} of ${groupBudget} ${oilLabel} budget (${groupBudget - groupApproved} left)`
         } else if (groupKeys.has(p._rowKey)) {
           delete next[p._rowKey]
@@ -2132,8 +2227,8 @@ export default function PreApprovalPage() {
                                             const orderQty = parseFloat(product.order_quantity || product.orderQty || "0") || 0;
                                             const remainingDispatchQty = parseFloat(product.remaining_dispatch_qty || product.remainingDispatchQty || "0") || 0;
 
-                                            // Fix: Use the available remaining chunk size directly (falling back to initial order quantity if missing)
-                                            const calculatedOrderQty = parseFloat(product.remaining_dispatch_qty || product.remainingDispatchQty || product.order_quantity || product.orderQty || "0") || 0;
+                                            // Use remaining_dispatch_qty capped at order_quantity to guard against stale remaining > order_qty
+                                            const calculatedOrderQty = remainingDispatchQty > 0 ? Math.min(remainingDispatchQty, orderQty) : orderQty;
                                             const maxQty = isNew ? (parseFloat(productRates[rowKey]?.orderQty || "0") || 0) : calculatedOrderQty;
 
                                             return (
@@ -2498,7 +2593,7 @@ export default function PreApprovalPage() {
                                                 {[...orderDetails._products, ...(dialogNewProducts[baseDo] || [])].reduce((sum: number, p: any) => {
                                                   // Only count original products, not new SKUs
                                                   if (p._isNew) return sum;
-                                                  const calculatedQty = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || p.order_quantity || p.orderQty || "0") || 0;
+                                                  const _r = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _q = parseFloat(p.order_quantity || p.orderQty || "0") || 0; const calculatedQty = _r > 0 ? Math.min(_r, _q) : _q;
                                                   return sum + calculatedQty;
                                                 }, 0)}
                                               </Badge>
@@ -2523,7 +2618,9 @@ export default function PreApprovalPage() {
                                         const isSelected = selectedProductRows.includes(rowKey)
                                         const hasError = qtyValidationErrors[rowKey]
                                         const isNew = product._isNew
-                                        const calculatedOrderQty = parseFloat(product.remaining_dispatch_qty || product.remainingDispatchQty || product.order_quantity || product.orderQty || "0") || 0
+                                        const _rem2 = parseFloat(product.remaining_dispatch_qty || product.remainingDispatchQty || "0") || 0
+                                        const _oq2 = parseFloat(product.order_quantity || product.orderQty || "0") || 0
+                                        const calculatedOrderQty = _rem2 > 0 ? Math.min(_rem2, _oq2) : _oq2
                                         const maxQty = isNew ? (parseFloat(productRates[rowKey]?.orderQty || "0") || 0) : calculatedOrderQty
                                         const dynamicCost = computeDynamicLandingCost(productRates[rowKey]?.skuName, product.oilType || product.productName || "", orderDetails.soDate || "")
                                         const maxRate = dynamicCost && !dynamicCost.noVarCalc && dynamicCost.landingCost > 0
@@ -2742,7 +2839,7 @@ export default function PreApprovalPage() {
                                           <Badge variant="secondary" className="mt-1 bg-blue-100 text-blue-800 font-black px-2 shadow-sm border-blue-200">
                                             {sectionProducts.reduce((sum: number, p: any) => {
                                               if (p._isNew) return sum
-                                              const calculatedQty = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || p.order_quantity || p.orderQty || "0") || 0
+                                              const _sqr = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _sqq = parseFloat(p.order_quantity || p.orderQty || "0") || 0; const calculatedQty = _sqr > 0 ? Math.min(_sqr, _sqq) : _sqq
                                               return sum + calculatedQty
                                             }, 0)}
                                           </Badge>

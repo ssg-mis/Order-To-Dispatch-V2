@@ -278,6 +278,33 @@ export const preApprovalApi = {
       body: JSON.stringify(data || {}),
     });
   },
+
+  /**
+   * Deduct qty from an existing pending order without advancing it in the workflow.
+   * Used when a new SKU consumes budget from existing orders.
+   * qty = 0 → backend sets planned_1 = NULL (audit-only row).
+   */
+  deductBudget: async (id: number, data: { order_quantity: number }): Promise<ApiResponse> => {
+    return request(`/pre-approval/deduct-budget/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Atomically submit approvals + cascade deductions in one DB transaction.
+   * Prevents totals from going out of sync if deductions fail after approvals succeed.
+   */
+  submitBatch: async (payload: {
+    approvals: Array<{ id: number;[key: string]: any }>;
+    cascadeBudgets?: Array<{ base_do: string; oil_type: string; qty: number }>;
+    deductions?: Array<{ id: number; order_quantity: number }>;
+  }): Promise<ApiResponse> => {
+    return request(`/pre-approval/submit-batch`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 /**
