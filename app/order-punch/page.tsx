@@ -102,7 +102,7 @@ export default function OrderPunchPage() {
   const fetchCustomers = async () => {
     try {
       setIsLoadingCustomers(true)
-      const response = await customerApi.getAll()
+      const response = await customerApi.getAll({ all: "true" })
       if (response.success) {
         // Correctly extract customers array from paginated response
         const customerData = response.data.customers || (Array.isArray(response.data) ? response.data : [])
@@ -124,7 +124,7 @@ export default function OrderPunchPage() {
   const fetchDepots = async () => {
     try {
       setIsLoadingDepots(true)
-      const response = await depotApi.getAll()
+      const response = await depotApi.getAll({ all: "true" })
       if (response.success) {
         // Correctly extract depots array from paginated response
         const depotData = response.data.depots || (Array.isArray(response.data) ? response.data : [])
@@ -146,7 +146,7 @@ export default function OrderPunchPage() {
   const fetchSkus = async () => {
     try {
       setIsLoadingSkus(true)
-      const response = await skuDetailsApi.getAll()
+      const response = await skuDetailsApi.getAll({ all: "true" })
       if (response.success) {
         const skuData = response.data.skuDetails || (Array.isArray(response.data) ? response.data : [])
         skuData.forEach((s: any) => { if (s.sku_name) skuRegistryRef.current[s.sku_name] = s })
@@ -168,7 +168,7 @@ export default function OrderPunchPage() {
   const fetchBrokers = async () => {
     try {
       setIsLoadingBrokers(true)
-      const response = await brokerApi.getAll()
+      const response = await brokerApi.getAll({ all: "true" })
       if (response.success) {
         // Correctly extract brokers array from paginated response
         const brokerData = response.data.brokers || (Array.isArray(response.data) ? response.data : [])
@@ -190,7 +190,7 @@ export default function OrderPunchPage() {
   const fetchSalespersons = async () => {
     try {
       setIsLoadingSalespersons(true)
-      const response = await salespersonApi.getAll()
+      const response = await salespersonApi.getAll({ all: "true" })
       if (response.success) {
         // Correctly extract salespersons array from paginated response
         const salespersonData = response.data.salespersons || (Array.isArray(response.data) ? response.data : [])
