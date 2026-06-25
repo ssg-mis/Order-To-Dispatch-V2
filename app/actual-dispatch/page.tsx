@@ -362,8 +362,13 @@ export default function ActualDispatchPage() {
     isLoading: isPendingLoading,
     refetch: refetchPending,
   } = useQuery({
-    queryKey: ["actual-dispatch-pending", filterValues, pendingPage, user?.depo_access?.['Actual Dispatch']],
+    queryKey: ["actual-dispatch-pending", filterValues, pendingPage, selectedDepoTab, user?.depo_access?.['Actual Dispatch']],
     queryFn: async () => {
+      // Paginate within the selected depot tab so a depot's rows aren't pushed off
+      // the page by newer rows from other accessible depots. Falls back to the full
+      // access list before a tab is chosen. selectedDepoTab is always within the
+      // allowed set, so this still respects permissions.
+      const allowedDepots = user?.depo_access?.['Actual Dispatch'] || []
       const response = await actualDispatchApi.getPending({
         page: pendingPage,
         limit,
@@ -372,7 +377,7 @@ export default function ActualDispatchPage() {
         do_date_from: filterValues.startDate,
         do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        depo_names: user?.depo_access?.['Actual Dispatch'] || []
+        depo_names: selectedDepoTab ? [selectedDepoTab] : allowedDepots
       });
       return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
     },
@@ -386,8 +391,10 @@ export default function ActualDispatchPage() {
     isLoading: isHistoryLoading,
     refetch: refetchHistory,
   } = useQuery({
-    queryKey: ["actual-dispatch-history", filterValues, historyPage, user?.depo_access?.['Actual Dispatch']],
+    queryKey: ["actual-dispatch-history", filterValues, historyPage, selectedDepoTab, user?.depo_access?.['Actual Dispatch']],
     queryFn: async () => {
+      // Paginate within the selected depot tab (see pending query note above).
+      const allowedDepots = user?.depo_access ? (user.depo_access['Actual Dispatch'] || []) : undefined
       const response = await actualDispatchApi.getHistory({
         page: historyPage,
         limit,
@@ -396,7 +403,7 @@ export default function ActualDispatchPage() {
         do_date_from: filterValues.startDate,
         do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        depo_names: user?.depo_access ? (user.depo_access['Actual Dispatch'] || []) : undefined
+        depo_names: selectedDepoTab ? [selectedDepoTab] : allowedDepots
       });
       return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
     },

@@ -313,25 +313,28 @@ export function WorkflowStageShell({
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex flex-col gap-2 bg-card p-3 rounded-xl border shadow-sm mb-4">
-            <div className="flex flex-col md:flex-row md:items-end gap-3">
-              {/* Search Block */}
-              <div className="relative flex-1">
+          <div className="flex flex-col gap-3 bg-card p-3 rounded-xl border shadow-sm mb-4">
+            {/* Search Block — full width, on its own row */}
+            <div className="space-y-1">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">Search</Label>
+              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder={searchPlaceholder}
-                  className="pl-9 bg-transparent h-9"
+                  className="w-full pl-9 bg-background h-10 text-sm text-foreground block"
                   value={filters.search}
                   onChange={(e) => updateFilter("search", e.target.value)}
                 />
               </div>
+            </div>
 
+            <div className="flex flex-col md:flex-row md:items-end gap-3">
               {/* Status Select */}
               {showStatusFilter && (
                 <div className="space-y-1 w-full md:w-36">
                   <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">Status</Label>
                   <Select value={filters.status} onValueChange={(val) => updateFilter("status", val)}>
-                    <SelectTrigger className="w-full h-9 bg-background px-3 text-sm">
+                    <SelectTrigger className="w-full h-10 bg-background px-3 text-sm">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -350,7 +353,7 @@ export function WorkflowStageShell({
                   <Input
                     type="text"
                     placeholder="Manual Sauda No."
-                    className="w-full h-9 bg-background px-3 text-sm block"
+                    className="w-full h-10 bg-background px-3 text-sm text-foreground block"
                     value={filters.manualSaudaNo}
                     onChange={(e) => updateFilter("manualSaudaNo", e.target.value)}
                   />
@@ -363,7 +366,7 @@ export function WorkflowStageShell({
                   <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">{dateLabel ? `${dateLabel} From` : "Start Date"}</Label>
                   <Input
                     type="date"
-                    className="w-full h-9 bg-background px-3 text-sm block"
+                    className="w-full h-10 bg-background px-3 text-sm text-foreground block"
                     value={filters.startDate}
                     onChange={(e) => updateFilter("startDate", e.target.value)}
                   />
@@ -376,7 +379,7 @@ export function WorkflowStageShell({
                   <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 ml-1">{dateLabel ? `${dateLabel} To` : "End Date"}</Label>
                   <Input
                     type="date"
-                    className="w-full h-9 bg-background px-3 text-sm block"
+                    className="w-full h-10 bg-background px-3 text-sm text-foreground block"
                     value={filters.endDate}
                     onChange={(e) => updateFilter("endDate", e.target.value)}
                   />
@@ -393,7 +396,7 @@ export function WorkflowStageShell({
                         variant="outline"
                         role="combobox"
                         aria-expanded={partySearchOpen}
-                        className="w-full h-9 justify-between bg-background px-3 text-xs font-medium border-slate-200"
+                        className="w-full h-10 justify-between bg-background px-3 text-sm font-medium border-slate-200"
                       >
                         <span className="truncate">
                           {filters.partyName === "all" || !filters.partyName
