@@ -1698,6 +1698,12 @@ export const reportsApi = {
       : '';
     return request(`${API_ENDPOINTS.reports.dispatchReport}${queryString}`);
   },
+  getPendingSauda: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.pendingSauda}${queryString}`);
+  },
 };
 
 // ============================================================

@@ -68,5 +68,6 @@ export const API_ENDPOINTS = {
   reports: {
     get: '/reports',
     dispatchReport: '/reports/dispatch-report',
+    pendingSauda: '/reports/pending-sauda',
   },
 };

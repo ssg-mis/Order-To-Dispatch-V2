@@ -29,6 +29,9 @@ import {
 import { reportsApi } from "@/lib/api-service"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ExportPdfModal } from "@/components/export-pdf-modal"
+import { generatePendingSaudaPdf } from "@/lib/pending-sauda-pdf"
+import { FileText } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5002/api/v1"
 
@@ -72,8 +75,27 @@ function downloadCSV(data: any[], filename: string) {
 
 // ─── Main Report Page ──────────────────────────────────────────────────────
 export default function ReportsPage() {
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<"summary" | "skus" | "timeline">("summary")
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
+  const [pendingSaudaLoading, setPendingSaudaLoading] = useState(false)
+
+  const handlePendingSaudaPdf = useCallback(async () => {
+    setPendingSaudaLoading(true)
+    try {
+      const res = await reportsApi.getPendingSauda()
+      if (!res.success || !res.data) throw new Error(res.message || "Failed to fetch report")
+      if (!res.data.count) {
+        toast({ title: "No pending saudas", description: "No DOs are currently stuck in dispatch planning." })
+        return
+      }
+      generatePendingSaudaPdf(res.data)
+    } catch (e: any) {
+      toast({ title: "Could not generate PDF", description: e?.message || "An error occurred.", variant: "destructive" })
+    } finally {
+      setPendingSaudaLoading(false)
+    }
+  }, [toast])
 
   // Filters
   const [filterOrderNo, setFilterOrderNo] = useState("")
@@ -262,6 +284,11 @@ export default function ReportsPage() {
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
           <ExportPdfModal />
+          <Button variant="outline" size="sm" className="rounded-xl text-xs font-bold gap-1.5 hover:bg-amber-50 hover:border-amber-400 hover:text-amber-700 transition-colors"
+            onClick={handlePendingSaudaPdf} disabled={pendingSaudaLoading}>
+            <FileText className={`h-3.5 w-3.5 ${pendingSaudaLoading ? "animate-pulse" : ""}`} />
+            {pendingSaudaLoading ? "Generating…" : "Pending Sauda PDF"}
+          </Button>
           <Button size="sm" className="rounded-xl text-xs font-bold gap-1.5" style={{ background: "oklch(0.42 0.18 265)" }}
             onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
