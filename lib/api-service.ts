@@ -1716,6 +1716,12 @@ export const reportsApi = {
       : '';
     return request(`${API_ENDPOINTS.reports.pendingSaudaDetailed}${queryString}`);
   },
+  getPendingSaudaSku: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.pendingSaudaSku}${queryString}`);
+  },
   getOilDispatchVoucher: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()

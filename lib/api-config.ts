@@ -71,6 +71,7 @@ export const API_ENDPOINTS = {
     pendingSauda: '/reports/pending-sauda',
     pendingSaudaCustomer: '/reports/pending-sauda-customer',
     pendingSaudaDetailed: '/reports/pending-sauda-detailed',
+    pendingSaudaSku: '/reports/pending-sauda-sku',
     oilDispatchVoucher: '/reports/oil-dispatch-voucher',
     dailyDispatch: '/reports/daily-dispatch',
   },
