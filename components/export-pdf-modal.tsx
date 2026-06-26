@@ -255,9 +255,11 @@ function generateCsv(rows: any[], selectedKeys: string[]): void {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ExportPdfModal() {
+export function ExportPdfModal({ triggerClassName, open: openProp, onOpenChange, hideTrigger }: { triggerClassName?: string; open?: boolean; onOpenChange?: (o: boolean) => void; hideTrigger?: boolean } = {}) {
   const { user } = useAuth()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp !== undefined ? openProp : internalOpen
+  const setOpen = onOpenChange || setInternalOpen
 
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
@@ -421,15 +423,17 @@ export function ExportPdfModal() {
   return (
     <>
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="rounded-xl text-xs font-bold gap-1.5 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 transition-colors"
-        >
-          <FileDown className="h-3.5 w-3.5" /> Export CSV
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={`rounded-xl text-xs font-bold gap-1.5 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 transition-colors ${triggerClassName || ""}`}
+          >
+            <FileDown className="h-3.5 w-3.5" /> Export CSV
+          </Button>
+        </DialogTrigger>
+      )}
 
       <DialogContent
         className="w-[92vw] max-w-[92vw] sm:max-w-6xl p-0 gap-0 flex flex-col overflow-hidden"

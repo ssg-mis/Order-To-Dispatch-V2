@@ -69,5 +69,9 @@ export const API_ENDPOINTS = {
     get: '/reports',
     dispatchReport: '/reports/dispatch-report',
     pendingSauda: '/reports/pending-sauda',
+    pendingSaudaCustomer: '/reports/pending-sauda-customer',
+    pendingSaudaDetailed: '/reports/pending-sauda-detailed',
+    oilDispatchVoucher: '/reports/oil-dispatch-voucher',
+    dailyDispatch: '/reports/daily-dispatch',
   },
 };

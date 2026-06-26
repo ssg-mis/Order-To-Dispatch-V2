@@ -1704,6 +1704,30 @@ export const reportsApi = {
       : '';
     return request(`${API_ENDPOINTS.reports.pendingSauda}${queryString}`);
   },
+  getPendingSaudaCustomer: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.pendingSaudaCustomer}${queryString}`);
+  },
+  getPendingSaudaDetailed: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.pendingSaudaDetailed}${queryString}`);
+  },
+  getOilDispatchVoucher: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.oilDispatchVoucher}${queryString}`);
+  },
+  getDailyDispatch: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.dailyDispatch}${queryString}`);
+  },
 };
 
 // ============================================================

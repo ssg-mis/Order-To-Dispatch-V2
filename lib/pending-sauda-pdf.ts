@@ -204,5 +204,7 @@ export function generatePendingSaudaPdf(report: PendingSaudaReport) {
     },
   })
 
-  doc.save(`CP Pending Sauda Report upto ${uptoStr}.pdf`)
+  // Open in a new tab for preview; the browser's PDF viewer handles download/print.
+  doc.setProperties({ title: `CP Pending Sauda Report upto ${uptoStr}` })
+  window.open(doc.output("bloburl") as unknown as string, "_blank")
 }

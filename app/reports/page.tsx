@@ -30,8 +30,13 @@ import { reportsApi } from "@/lib/api-service"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ExportPdfModal } from "@/components/export-pdf-modal"
 import { generatePendingSaudaPdf } from "@/lib/pending-sauda-pdf"
-import { FileText } from "lucide-react"
+import { CustomerWiseSaudaModal } from "@/components/customer-wise-sauda-modal"
+import { CustomerWiseDetailedModal } from "@/components/customer-wise-detailed-modal"
+import { OilDispatchVoucherModal } from "@/components/oil-dispatch-voucher-modal"
+import { DailyDispatchModal } from "@/components/daily-dispatch-modal"
+import { FileText, FileDown, Users, FileSpreadsheet, Receipt, CalendarDays } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5002/api/v1"
 
@@ -79,6 +84,15 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<"summary" | "skus" | "timeline">("summary")
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [pendingSaudaLoading, setPendingSaudaLoading] = useState(false)
+
+  // Export & Reports menu + the dialogs it opens (kept outside the popover so closing
+  // the popover doesn't unmount an open dialog)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [csvColsOpen, setCsvColsOpen] = useState(false)
+  const [custSummaryOpen, setCustSummaryOpen] = useState(false)
+  const [custDetailedOpen, setCustDetailedOpen] = useState(false)
+  const [voucherOpen, setVoucherOpen] = useState(false)
+  const [dailyOpen, setDailyOpen] = useState(false)
 
   const handlePendingSaudaPdf = useCallback(async () => {
     setPendingSaudaLoading(true)
@@ -224,8 +238,9 @@ export default function ReportsPage() {
     return "#94a3b8"
   }
 
-  // CSV export datasets
-  const summaryExportData = [{
+  // CSV export datasets — memoized so unrelated re-renders (e.g. opening the export
+  // menu) don't rebuild these large arrays. timelineExportData alone is ~orders×stages.
+  const summaryExportData = useMemo(() => [{
     "Total Received": summary.totalReceived || 0,
     "Total Received (KG)": fmt(summary.totalReceivedKg),
     "Pending Count": summary.totalPendingCount || 0,
@@ -235,17 +250,17 @@ export default function ReportsPage() {
     "Completed Count": summary.totalCompletedCount || 0,
     "Completed (KG)": fmt(summary.totalCompletedKg),
     "Remaining (KG)": fmt(summary.totalRemainingKg),
-  }]
+  }], [summary])
 
-  const skuExportData = topSkus.map(s => ({
+  const skuExportData = useMemo(() => topSkus.map(s => ({
     "Oil Type": normalizeOilType(s.oil_type),
     "SKU / Product": s.sku,
     "Total KG": Math.round(s.total_kg),
     "SKU Qty (Box)": Math.round(s.total_qty) || 0,
     "Order Count": s.count,
-  }))
+  })), [topSkus])
 
-  const timelineExportData = orderTimeline.flatMap(o =>
+  const timelineExportData = useMemo(() => orderTimeline.flatMap(o =>
     o.stages.map((s: any) => ({
       "Order No.": o.order_no,
       "Customer": o.customer_name,
@@ -257,7 +272,7 @@ export default function ReportsPage() {
       "Actual Date": fmtDate(s.actual),
       "Delay (Days)": s.delayDays ?? "",
     }))
-  )
+  ), [orderTimeline])
 
   return (
     <div className="min-h-screen" style={{ background: "oklch(0.97 0.012 245)" }}>
@@ -274,26 +289,76 @@ export default function ReportsPage() {
           <h1 className="text-xl font-black tracking-tight text-slate-900">Reports &amp; Analytics</h1>
         </div>
 
-        {/* Export buttons */}
+        {/* Export & Reports */}
         <div className="flex items-center gap-2 print:hidden">
-          <Button variant="outline" size="sm" className="rounded-xl text-xs font-bold gap-1.5 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 transition-colors"
-            onClick={() => {
-              const exportData = activeTab === "skus" ? skuExportData : activeTab === "timeline" ? timelineExportData : summaryExportData
-              downloadCSV(exportData, `oms-report-${activeTab}`)
-            }}>
-            <Download className="h-3.5 w-3.5" /> CSV
-          </Button>
-          <ExportPdfModal />
-          <Button variant="outline" size="sm" className="rounded-xl text-xs font-bold gap-1.5 hover:bg-amber-50 hover:border-amber-400 hover:text-amber-700 transition-colors"
-            onClick={handlePendingSaudaPdf} disabled={pendingSaudaLoading}>
-            <FileText className={`h-3.5 w-3.5 ${pendingSaudaLoading ? "animate-pulse" : ""}`} />
-            {pendingSaudaLoading ? "Generating…" : "Pending Sauda PDF"}
-          </Button>
+          <Popover open={exportMenuOpen} onOpenChange={setExportMenuOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="rounded-xl text-xs font-bold gap-1.5">
+                <Download className="h-3.5 w-3.5" /> Export &amp; Reports
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-2 rounded-2xl space-y-0.5"
+              style={{ borderColor: "oklch(0.88 0.025 245)" }}>
+              <div className="px-2 pt-1 pb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Spreadsheet</div>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700"
+                onClick={() => {
+                  const exportData = activeTab === "skus" ? skuExportData : activeTab === "timeline" ? timelineExportData : summaryExportData
+                  downloadCSV(exportData, `oms-report-${activeTab}`)
+                  setExportMenuOpen(false)
+                }}>
+                <Download className="h-3.5 w-3.5" /> Quick CSV (current view)
+              </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700"
+                onClick={() => { setExportMenuOpen(false); setCsvColsOpen(true) }}>
+                <FileDown className="h-3.5 w-3.5" /> Export CSV (choose columns)
+              </Button>
+
+              <div className="my-1 h-px bg-slate-100" />
+              <div className="px-2 pt-1 pb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">PDF Reports</div>
+              <Button variant="ghost" size="sm" disabled={pendingSaudaLoading}
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-amber-50 hover:text-amber-700"
+                onClick={() => { setExportMenuOpen(false); handlePendingSaudaPdf() }}>
+                <FileText className={`h-3.5 w-3.5 ${pendingSaudaLoading ? "animate-pulse" : ""}`} />
+                {pendingSaudaLoading ? "Generating…" : "Pending Sauda"}
+              </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700"
+                onClick={() => { setExportMenuOpen(false); setCustSummaryOpen(true) }}>
+                <Users className="h-3.5 w-3.5" /> Customer-wise (Summary)
+              </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-violet-50 hover:text-violet-700"
+                onClick={() => { setExportMenuOpen(false); setCustDetailedOpen(true) }}>
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Customer-wise (Detailed)
+              </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-rose-50 hover:text-rose-700"
+                onClick={() => { setExportMenuOpen(false); setVoucherOpen(true) }}>
+                <Receipt className="h-3.5 w-3.5" /> Oil Dispatch Voucher
+              </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-teal-50 hover:text-teal-700"
+                onClick={() => { setExportMenuOpen(false); setDailyOpen(true) }}>
+                <CalendarDays className="h-3.5 w-3.5" /> Daily Dispatch Report
+              </Button>
+            </PopoverContent>
+          </Popover>
+
           <Button size="sm" className="rounded-xl text-xs font-bold gap-1.5" style={{ background: "oklch(0.42 0.18 265)" }}
             onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
             {isFetching ? "Loading…" : "Apply Filters"}
           </Button>
+
+          {/* Dialogs (controlled, rendered outside the popover) */}
+          <ExportPdfModal hideTrigger open={csvColsOpen} onOpenChange={setCsvColsOpen} />
+          <CustomerWiseSaudaModal hideTrigger open={custSummaryOpen} onOpenChange={setCustSummaryOpen} />
+          <CustomerWiseDetailedModal hideTrigger open={custDetailedOpen} onOpenChange={setCustDetailedOpen} />
+          <OilDispatchVoucherModal hideTrigger open={voucherOpen} onOpenChange={setVoucherOpen} />
+          <DailyDispatchModal hideTrigger open={dailyOpen} onOpenChange={setDailyOpen} />
         </div>
       </div>
 
