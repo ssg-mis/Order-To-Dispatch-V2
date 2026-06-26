@@ -88,11 +88,7 @@ export function generateDailyDispatchReportPdf(report: DailyDispatchReport, file
   })
 
   // ── Day footer: notes + Packing/RST/Diff ──
-  const notes = [
-    "(same date & same vehicle no.)",
-    "(through RST slip, Net weight = gross wt. (-) tare wt.)",
-    "(RST wt. (-) Packing Wt.) also show with (-) sign if negative result",
-  ]
+  const notes = ["", "", ""]
   const wtLabels = [["Packing Wt:", n3(report.packing_wt)], ["RST Wt:", n3(report.rst_wt)], ["Diff:", diffStr(report.diff)]]
   notes.forEach((note, i) => {
     push([
