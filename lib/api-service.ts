@@ -143,10 +143,13 @@ async function request<T = any>(
 
     return data;
   } catch (error: any) {
-    if (error?.message !== undefined && !error?.success) {
-      // Already formatted API error — rethrow as-is
+    // Expected, already-formatted API errors (validation failures, business rules)
+    // are handled by callers via toast — don't pollute the console with them.
+    if (error?.success === false || error?.message !== undefined) {
+      throw error;
     }
-    console.error('API Error:', error);
+    // Only log genuinely unexpected failures (network/parse errors)
+    console.error('API request failed:', error);
     throw error;
   }
 }

@@ -374,6 +374,19 @@ export default function OrderPunchPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    // Customer must be selected/entered before anything else
+    const enteredCustomerName = customerType === "existing"
+      ? (customerName.split('|')[0] || "").trim()
+      : customerName.trim()
+    if (!enteredCustomerName) {
+      toast({
+        title: "Customer Required",
+        description: "Please select a customer before submitting the order.",
+        variant: "destructive",
+      })
+      return
+    }
+
     // Validate based on Order Type
     if (orderType === "regular" || orderType === "pre-approval") {
       // For regular and pre-approval, validate products
@@ -500,6 +513,7 @@ export default function OrderPunchPage() {
 
       // Add products array for backend (for regular and pre-approval order types)
       if ((orderType === "regular" || orderType === "pre-approval") && products.length > 0) {
+        const missingRateProducts: string[] = []
         orderData.products = products.map(p => {
           let rate15kg = p.ratePer15Kg ? parseFloat(p.ratePer15Kg) : null
           let rateLtr = p.ratePerLtr ? parseFloat(p.ratePerLtr) : null
@@ -529,6 +543,11 @@ export default function OrderPunchPage() {
             }
           }
 
+          // Pre-approval: flag products whose detected oil type has no matching rate
+          if (orderType === "pre-approval" && (rate15kg == null || rateLtr == null)) {
+            missingRateProducts.push(oilTypeVal || p.productName || "Unnamed product")
+          }
+
           return {
             product_name: p.productName,
             uom: p.uom || "Ltr",
@@ -541,6 +560,18 @@ export default function OrderPunchPage() {
             alternate_qty_kg: p.altQty ? parseFloat(p.altQty) : null,
           }
         })
+
+        // Block submission if any pre-approval product is missing its rate,
+        // otherwise it would save null and show blank in the WhatsApp message
+        if (missingRateProducts.length > 0) {
+          setIsSubmitting(false)
+          toast({
+            title: "Missing Pre-Approval Rate",
+            description: `No Pre-Approval rate found for: ${[...new Set(missingRateProducts)].join(", ")}. Add the matching oil-type rate in the Pre-Approval section before submitting.`,
+            variant: "destructive",
+          })
+          return
+        }
       }
 
       // Call backend API
@@ -612,9 +643,12 @@ export default function OrderPunchPage() {
       }
 
     } catch (error: any) {
-      console.error('Error submitting order:', error)
-
       let errorMessage = error.message || "Failed to save order to database. Please try again."
+
+      // Surface a specific field-level message if the backend returned one
+      if (Array.isArray(error?.errors) && error.errors.length > 0 && error.errors[0]?.message) {
+        errorMessage = error.errors[0].message
+      }
 
       if (errorMessage.includes("too long for type character varying")) {
         errorMessage = "One or more fields exceed maximum length. Check: WhatsApp number (max 20 chars), Payment Terms, Transport Type."
@@ -725,9 +759,7 @@ export default function OrderPunchPage() {
   }
 
   const removePreApprovalProduct = (id: string) => {
-    if (preApprovalProducts.length > 1) {
-      setPreApprovalProducts(preApprovalProducts.filter((p) => p.id !== id))
-    }
+    setPreApprovalProducts(preApprovalProducts.filter((p) => p.id !== id))
   }
 
   const updatePreApprovalProduct = (id: string, field: keyof PreApprovalProduct, value: string) => {
