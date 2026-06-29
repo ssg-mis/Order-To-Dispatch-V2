@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react"
 import { usePathname } from "next/navigation"
 import { API_CONFIG } from "@/lib/api-config"
 
@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const pathname = usePathname()
+  const justLoggedInRef = useRef(false)
 
   const fetchMe = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
@@ -101,12 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Background refresh on navigation (no loading spinner)
   useEffect(() => {
     if (!isLoading) {
+      if (justLoggedInRef.current) {
+        justLoggedInRef.current = false
+        return
+      }
       fetchMe(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
 
   const login = useCallback((userData: AuthUser) => {
+    justLoggedInRef.current = true
     setUser(normalizeUser(userData))
   }, [])
 

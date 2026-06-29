@@ -129,9 +129,9 @@ async function request<T = any>(
     const response = await fetch(url, config);
     const data = await response.json();
 
-    // Token expired or invalid — force logout
+    // Token expired or invalid — force logout (skip redirect if already on login page)
     if (response.status === 401) {
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
       throw data;
