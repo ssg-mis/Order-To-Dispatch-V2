@@ -1042,6 +1042,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           payload.national_permit = null;
           payload.national_permit_image = null;
         }
+        const dateFields = ['rto', 'road_tax', 'life_time_tax', 'pollution', 'insurance', 'fitness', 'state_permit', 'national_permit'] as const;
+        dateFields.forEach(f => { if (payload[f] === '') payload[f] = null; });
         if (editingItem) {
           res = await vehicleMasterApi.update(editingItem.id, payload)
         } else {
@@ -1322,6 +1324,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           payload.national_permit = null
           payload.national_permit_image = null
         }
+        const dateFields = ['rto', 'road_tax', 'life_time_tax', 'pollution', 'insurance', 'fitness', 'state_permit', 'national_permit'] as const;
+        dateFields.forEach(f => { if (payload[f] === '') payload[f] = null; });
         return payload
       }
       case 'driver_master': return driverForm
