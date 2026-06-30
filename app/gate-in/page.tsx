@@ -646,23 +646,45 @@ export default function GateInPage() {
         uploadSelectedImage(gatepassPhotoFile, "gatepass"),
       ])
 
-      const res = await gateInApi.submit({
-        orderKey: selectedRecord.order_key,
-        username: user?.username || "system",
-        frontVehicleImage: uploadedFrontVehicleImage,
-        backVehicleImage: uploadedBackVehicleImage,
-        driverPhoto: uploadedDriverPhoto,
-        gatepassPhoto: uploadedGatepassPhoto,
-      })
+      const results = await Promise.allSettled(
+        selectedGroupKeys.map(orderKey =>
+          gateInApi.submit({
+            orderKey,
+            username: user?.username || "system",
+            frontVehicleImage: uploadedFrontVehicleImage,
+            backVehicleImage: uploadedBackVehicleImage,
+            driverPhoto: uploadedDriverPhoto,
+            gatepassPhoto: uploadedGatepassPhoto,
+          }).then(res => {
+            if (!res.success) throw new Error(res.message)
+            return orderKey
+          })
+        )
+      )
 
-      if (!res.success) throw new Error(res.message)
+      const failed = results
+        .map((r, i) => r.status === "rejected" ? selectedGroupKeys[i] : null)
+        .filter(Boolean) as string[]
+      const succeeded = results
+        .map((r, i) => r.status === "fulfilled" ? selectedGroupKeys[i] : null)
+        .filter(Boolean) as string[]
 
-      toast({ title: "Gate-In Submitted", description: `Order ${selectedRecord.order_key} gate-in recorded.` })
-      setIsDialogOpen(false)
-      setSelectedRows([])
       await refetchPending()
       await refetchHistory()
+
+      if (failed.length > 0) {
+        const failMsg = failed.length === selectedGroupKeys.length
+          ? "All gate-in submissions failed. Please try again."
+          : `Partial failure — submitted: ${succeeded.join(", ")}. Failed: ${failed.join(", ")}. Please retry the failed orders.`
+        toast({ title: "Gate-In Incomplete", description: failMsg, variant: "destructive" })
+        return
+      }
+
+      toast({ title: "Gate-In Submitted", description: `${succeeded.length > 1 ? `Orders ${succeeded.join(", ")}` : `Order ${succeeded[0]}`} gate-in recorded.` })
+      setIsDialogOpen(false)
+      setSelectedRows([])
     } catch (err: any) {
+      await refetchPending()
       toast({ title: "Submission Failed", description: err?.message || "Could not submit gate-in.", variant: "destructive" })
     } finally {
       setIsProcessing(false)
