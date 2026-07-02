@@ -786,11 +786,19 @@ export default function DispatchMaterialPage() {
       }
 
       if (failedReverts.length > 0) {
+        // Surface the real reason (e.g. a stale-write conflict from another user)
+        // instead of a generic count, so the user knows to refresh.
+        const messages = Array.from(new Set(failedReverts.map((f) => f.message).filter(Boolean)));
         toast({
-          title: "Partial Revert Failure",
-          description: `Failed to revert ${failedReverts.length} item(s).`,
+          title: successfulReverts.length > 0 ? "Partial Revert Failure" : "Revert Failed",
+          description: messages[0] || `Failed to revert ${failedReverts.length} item(s).`,
           variant: "destructive",
         });
+        // Refresh so rows already reverted/moved by another user drop off the stale list.
+        if (successfulReverts.length === 0) {
+          await refetchPending();
+          await refetchHistory();
+        }
       }
     } catch (error: any) {
       toast({
