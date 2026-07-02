@@ -127,7 +127,21 @@ async function request<T = any>(
 
   try {
     const response = await fetch(url, config);
-    const data = await response.json();
+
+    // Not every response is JSON. A reverse proxy (nginx) rejecting an
+    // oversized upload returns a 413 with an HTML/text body — calling
+    // response.json() on that throws a SyntaxError and masks the real
+    // cause. Parse defensively and fall back to a meaningful message.
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      if (response.status === 413) {
+        data = { success: false, message: 'File too large — the server rejected the upload. Please use a smaller file.' };
+      } else {
+        data = { success: false, message: `Request failed (${response.status} ${response.statusText || 'error'})` };
+      }
+    }
 
     // Token expired or invalid — force logout (skip redirect if already on login page)
     if (response.status === 401) {
