@@ -557,7 +557,9 @@ export default function InventoryPage() {
                       </td>
                     )}
                     {isVis("production") && (
-                      <td className="px-4 py-3 text-center text-sm font-semibold text-slate-400">0</td>
+                      <td className="px-4 py-3 text-center text-sm font-semibold text-violet-700">
+                        {totals.production}
+                      </td>
                     )}
                     {isVis("sales") && (
                       <td className="px-4 py-3 text-center text-sm font-bold text-rose-600">
