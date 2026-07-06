@@ -670,7 +670,7 @@ export default function GateOutPage() {
         const submitData = {
           gate_pass: gatePassFileUrl || "",
           vehicle_image: vehicleLoadedImageUrl || "",
-          username: user?.username || null // Add username for tracking
+          user_id: user?.id || null // Track acting user's login id
         };
 
         try {

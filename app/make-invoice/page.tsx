@@ -727,7 +727,7 @@ export default function MakeInvoicePage() {
           qty: invoiceData.qty || null,
           bill_amount: invoiceType === 'independent' ? invoiceData.billAmount : null,
           invoice_copy: invoiceData.invoiceFile || null,
-          username: user?.username || null, // Add username for tracking
+          user_id: user?.id || null, // Track acting user's login id
           cd_amount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
         };
 

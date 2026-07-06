@@ -74,7 +74,7 @@ const FIELD_GROUPS: Record<string, number> = {
   rate_per_ltr: 0, rate_per_15kg: 0, rate_of_material: 0, remark: 0, pre_approval_user: 1,
   party_so_date: 0, start_date: 0, end_date: 0, depo_name: 0, futureperioddate: 0,
   upload_so: 0, customer_contact_person_name: 0, customer_contact_person_whatsapp_no: 0,
-  customer_name: 0,
+  customer_name: 0, order_punch_user: 0,
 
   // Level 1: Pre-Approval
   d_sr_number: 1, pre_approval_qty: 1, pre_approval_remarks: 1, timestamp_1: 1, status_1: 1, planned_1: 1, actual_1: 1,
@@ -109,16 +109,16 @@ const FIELD_GROUPS: Record<string, number> = {
   make_invoice_user: 6, actual_5: 6, planned_5: 6,
 
   // Level 7: Check Invoice (Stage 11)
-  verification_status: 7, actual_7: 7, planned_7: 7,
+  verification_status: 7, actual_7: 7, planned_7: 7, check_invoice_user: 7,
 
   // Level 8: Gate Out (Stage 12)
-  gate_pass_copy: 8, actual_8: 8, planned_8: 8,
+  gate_pass_copy: 8, actual_8: 8, planned_8: 8, gate_out_user: 8,
 
   // Level 9: Material Receipt (Stage 13)
-  damage_qty: 9, damage_status: 9, actual_9: 9, planned_9: 9,
+  damage_qty: 9, damage_status: 9, actual_9: 9, planned_9: 9, material_receipt_user: 9,
 
   // Level 10: Damage Adjustment
-  credit_note_no: 10, actual_10: 10, planned_10: 10,
+  credit_note_no: 10, actual_10: 10, planned_10: 10, damage_adjustment_user: 10,
 }
 
 // Human-readable stage name for each FIELD_GROUPS level — drives the
@@ -137,6 +137,16 @@ const STAGE_NAMES: Record<number, string> = {
   9: "Material Receipt",
   10: "Damage Adjustment",
   999: "Other Details",
+}
+
+// Within each stage group, order fields as: Planned -> Actual -> Time Delay ->
+// Doer (whoever performed the stage, e.g. *_user columns) -> everything else.
+const fieldOrderPriority = (key: string): number => {
+  if (/^planned_\d+$/.test(key)) return 0
+  if (/^actual_\d+$/.test(key)) return 1
+  if (/^delay_\d+$/.test(key)) return 2
+  if (/_user$/.test(key)) return 3
+  return 4
 }
 
 export function WorkflowStageShell({
@@ -249,7 +259,12 @@ export function WorkflowStageShell({
       .map(level => ({
         level,
         label: STAGE_NAMES[level] || "Other Details",
-        entries: groups[level].sort(([a], [b]) => a.localeCompare(b)),
+        entries: groups[level].sort(([a], [b]) => {
+          const pa = fieldOrderPriority(a)
+          const pb = fieldOrderPriority(b)
+          if (pa !== pb) return pa - pb
+          return a.localeCompare(b)
+        }),
       }))
   }, [selectedHistoryItem, historySearch, stageLevel])
 
@@ -644,13 +659,16 @@ export function WorkflowStageShell({
 
         {/* History Detail Dialog */}
         <Dialog open={!!selectedHistoryItem} onOpenChange={(open) => !open && setSelectedHistoryItem(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-3xl border-none shadow-2xl">
+          <DialogContent className="max-w-6xl! w-full max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-3xl border-none shadow-2xl">
             <DialogHeader className="p-6 pb-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
               <div className="flex justify-between items-start">
                 <div>
+                  <Badge className="bg-white/15 hover:bg-white/15 text-white border-white/30 text-xs font-black uppercase tracking-widest px-3 py-1 mb-2">
+                    DO No: {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || "—"}
+                  </Badge>
                   <DialogTitle className="text-2xl font-black uppercase tracking-tight italic">Record Details</DialogTitle>
                   <DialogDescription className="text-blue-100 font-bold mt-1 uppercase text-[10px] tracking-widest">
-                    Comprehensive audit trail for {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || "Order"}
+                    Comprehensive audit trail
                   </DialogDescription>
                 </div>
               </div>

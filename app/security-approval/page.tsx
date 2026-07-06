@@ -384,7 +384,7 @@ export default function SecurityApprovalPage() {
               bilty_image: biltyImageUrl,
               vehicle_image_attachemrnt: vehicleImageUrls.length > 0 ? vehicleImageUrls.join(',') : null,
               verdict_status: uploadData.verdict, // Adding verdict to API 
-              username: user?.username || null, // Add username for tracking
+              user_id: user?.id || null, // Track acting user's login id
               remarks: uploadData.verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
             };
 

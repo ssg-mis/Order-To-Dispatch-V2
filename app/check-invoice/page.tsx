@@ -645,7 +645,7 @@ export default function CheckInvoicePage() {
         const submitData = {
           status_1: checkData.status,
           remarks_2: checkData.remarks,
-          username: user?.username || null // Add username for tracking
+          user_id: user?.id || null // Track acting user's login id
         };
 
         try {

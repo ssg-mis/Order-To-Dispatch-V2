@@ -1594,7 +1594,7 @@ export default function ActualDispatchPage() {
             cash_bank: parseFloat(loadData.cash_bank) || 0,
             diesel_advance: parseFloat(loadData.diesel_advance) || 0,
             bhada: parseFloat(loadData.bhada) || 0,
-            username: user?.username || null // Add username for tracking
+            user_id: user?.id || null // Track acting user's login id
           };
 
           const res = await actualDispatchApi.submit(dsrNumber, payload);
@@ -2343,8 +2343,6 @@ export default function ActualDispatchPage() {
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">PLANNED QTY</TableHead>
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">DELIVERY FROM</TableHead>
                           <TableHead className="w-45 text-[10px] uppercase font-black text-slate-500 tracking-wider">ACTUAL QTY DISPATCHED</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">RATE</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">AMOUNT</TableHead>
                           <TableHead className="w-30 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">GROSS WEIGHT (KG)</TableHead>
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">STATUS</TableHead>
                         </TableRow>
@@ -2408,12 +2406,6 @@ export default function ActualDispatchPage() {
                                 />
                               </TableCell>
                               <TableCell className="p-3 text-center">
-                                <div className="font-black text-[11px] text-slate-700">₹{parseFloat(prod.rate || 0).toFixed(2)}</div>
-                              </TableCell>
-                              <TableCell className="p-3 text-center">
-                                <div className="font-black text-[11px] text-green-700">₹{(parseFloat(prod.rate || 0) * parseFloat(confirmDetails[rowKey]?.qty || prod.qtyToDispatch || 0)).toFixed(2)}</div>
-                              </TableCell>
-                              <TableCell className="p-3 text-center">
                                 <div className="font-black text-sm text-purple-700">
                                   {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(4)} kg
                                 </div>
@@ -2440,22 +2432,6 @@ export default function ActualDispatchPage() {
                               {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}
                             </div>
                           </TableCell>
-                          <TableCell />
-                          <TableCell className="p-4 text-center">
-                            <div className="flex flex-col items-center">
-                              <span className="text-[9px] font-black text-green-400 uppercase tracking-tighter mb-1">TOTAL AMOUNT</span>
-                              <div className="font-black text-sm text-green-700">
-                                ₹{selectedGroups.flatMap(g => g._allProducts)
-                                  .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
-                                  .reduce((total, prod) => {
-                                    const rowKey = prod._rowKey
-                                    const qty = parseFloat(confirmDetails[rowKey]?.qty || prod.qtyToDispatch || 0)
-                                    const rate = parseFloat(prod.rate || 0)
-                                    return total + (qty * rate)
-                                  }, 0).toFixed(2)}
-                              </div>
-                            </div>
-                          </TableCell>
                           <TableCell className="p-4 text-center">
                             <div className="flex flex-col items-center">
                               <span className="text-[9px] font-black text-purple-400 uppercase tracking-tighter mb-1">TOTAL PACKING WEIGHT</span>
@@ -2480,7 +2456,6 @@ export default function ActualDispatchPage() {
                         const rowKey = prod._rowKey;
                         const isSelected = dialogSelectedProducts.includes(rowKey);
                         const currentQty = confirmDetails[rowKey]?.qty || prod.qtyToDispatch || 0;
-                        const amount = parseFloat(prod.rate || 0) * parseFloat(currentQty);
                         const weight = calculateGrossWeight(prod.productName, currentQty);
 
                         return (
@@ -2541,15 +2516,7 @@ export default function ActualDispatchPage() {
                               />
                             </div>
 
-                            <div className="grid grid-cols-1 min-[380px]:grid-cols-3 gap-2 pt-2">
-                              <div className="bg-slate-50 p-2 rounded-lg">
-                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5 text-center">Rate</p>
-                                <p className="text-[10px] font-black text-slate-700 text-center">₹{parseFloat(prod.rate || 0).toFixed(2)}</p>
-                              </div>
-                              <div className="bg-green-50 p-2 rounded-lg">
-                                <p className="text-[8px] font-black text-green-400 uppercase tracking-widest mb-0.5 text-center">Amount</p>
-                                <p className="text-[10px] font-black text-green-700 text-center">₹{amount.toFixed(2)}</p>
-                              </div>
+                            <div className="grid grid-cols-1 gap-2 pt-2">
                               <div className="bg-purple-50 p-2 rounded-lg">
                                 <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-center">Weight</p>
                                 <p className="text-[10px] font-black text-purple-700 text-center">{weight.toFixed(4)} kg</p>
@@ -2580,19 +2547,6 @@ export default function ActualDispatchPage() {
                                 }, 0).toFixed(4)} <span className="text-[10px]">kg</span>
                             </p>
                           </div>
-                        </div>
-                        <div className="bg-green-600 p-4 rounded-2xl shadow-sm">
-                          <p className="text-[9px] font-black text-white/70 uppercase tracking-widest mb-1">Grand Total Amount</p>
-                          <p className="text-xl font-black text-white italic">
-                            ₹{selectedGroups.flatMap(g => g._allProducts)
-                              .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
-                              .reduce((total, prod) => {
-                                const rowKey = prod._rowKey
-                                const qty = parseFloat(confirmDetails[rowKey]?.qty || prod.qtyToDispatch || 0)
-                                const rate = parseFloat(prod.rate || 0)
-                                return total + (qty * rate)
-                              }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </p>
                         </div>
                       </div>
                     </div>
@@ -2735,12 +2689,12 @@ export default function ActualDispatchPage() {
                       <div className="pt-4 border-t border-slate-200">
                         <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest leading-none">Digital Documents (STAGE 6)</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Fitness {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.fitness_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.fitness_file_name})</span>}
+                                Fitness {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.fitness && vehicleData.fitness !== 'pending' ? vehicleData.fitness : null}
                                 fileName={vehicleData.fitness_file_name}
@@ -2759,12 +2713,12 @@ export default function ActualDispatchPage() {
                               readOnly
                             />
                           </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Insurance {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.insurance_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.insurance_file_name})</span>}
+                                Insurance {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.insurance && vehicleData.insurance !== 'pending' ? vehicleData.insurance : null}
                                 fileName={vehicleData.insurance_file_name}
@@ -2783,12 +2737,12 @@ export default function ActualDispatchPage() {
                               readOnly
                             />
                           </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Tax Copy {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.tax_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.tax_file_name})</span>}
+                                Tax Copy {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.tax_copy && vehicleData.tax_copy !== 'pending' ? vehicleData.tax_copy : null}
                                 fileName={vehicleData.tax_file_name}
@@ -2807,12 +2761,12 @@ export default function ActualDispatchPage() {
                               readOnly
                             />
                           </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Pollution {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.pollution_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.pollution_file_name})</span>}
+                                Pollution {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.polution && vehicleData.polution !== 'pending' ? vehicleData.polution : null}
                                 fileName={vehicleData.pollution_file_name}
@@ -2832,17 +2786,17 @@ export default function ActualDispatchPage() {
                             />
                           </div>
                           <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors",
+                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
                             !(Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
                           )}>
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className={cn(
                                 "text-[10px] font-black uppercase transition-colors break-words",
                                 Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
                               )}>
-                                State Permit {Number(vehicleData.gvw) > 3000 ? (selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>) : <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>} {vehicleData.permit1_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit1_file_name})</span>}
+                                State Permit {Number(vehicleData.gvw) > 3000 ? (selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>) : <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.permit1 && vehicleData.permit1 !== 'pending' ? vehicleData.permit1 : null}
                                 fileName={vehicleData.permit1_file_name}
@@ -2866,17 +2820,17 @@ export default function ActualDispatchPage() {
                             />
                           </div>
                           <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors",
+                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
                             !(isInterState && Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
                           )}>
-                            <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
+                            <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className={cn(
                                 "text-[10px] font-black uppercase transition-colors break-words",
                                 isInterState && Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
                               )}>
-                                National / Other State Permit {isInterState && Number(vehicleData.gvw) > 3000 ? <span className="text-red-500">*</span> : (Number(vehicleData.gvw) <= 3000 && <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>)} {vehicleData.permit2_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit2_file_name})</span>}
+                                National / Other State Permit {isInterState && Number(vehicleData.gvw) > 3000 ? <span className="text-red-500">*</span> : (Number(vehicleData.gvw) <= 3000 && <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>)}
                               </span>
-                              <FileUploadField
+                              <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                                 value={vehicleData.permit2_out_state && vehicleData.permit2_out_state !== 'pending' ? vehicleData.permit2_out_state : null}
                                 fileName={vehicleData.permit2_file_name}

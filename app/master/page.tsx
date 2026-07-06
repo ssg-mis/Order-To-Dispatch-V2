@@ -2028,6 +2028,40 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
 
         <Separator className="my-2" />
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label>GVW (KGS)</Label>
+            <Input type="number" value={vehicleForm.gvw} onChange={e => {
+              const gvw = e.target.value
+              const ulw = vehicleForm.ulw
+              const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
+              const clearPermit = gvw === '' || Number(gvw) <= 3000
+              setVehicleForm((prev: any) => ({
+                ...prev,
+                gvw,
+                passing,
+                ...(clearPermit
+                  ? { state_permit: '', state_permit_image: '', state_permit_type: '', national_permit: '', national_permit_image: '' }
+                  : {})
+              }))
+            }} />
+          </div>
+          <div className="space-y-2">
+            <Label>ULW (KGS)</Label>
+            <Input type="number" value={vehicleForm.ulw} onChange={e => {
+              const ulw = e.target.value
+              const gvw = vehicleForm.gvw
+              const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
+              setVehicleForm({...vehicleForm, ulw, passing})
+            }} />
+          </div>
+          <div className="space-y-2">
+            <Label>Passing (KGS)</Label>
+            <Input type="number" value={vehicleForm.passing} readOnly className="bg-slate-100" />
+          </div>
+        </div>
+
+        <Separator className="my-2" />
         <h3 className="text-sm font-semibold text-slate-500">Document Details & Images</h3>
         
         <div className="border p-4 rounded-xl bg-slate-50/50 space-y-4">
@@ -2197,40 +2231,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 />
               </div>
             </div>
-          </div>
-        </div>
-
-        <Separator className="my-2" />
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>GVW (KGS)</Label>
-            <Input type="number" value={vehicleForm.gvw} onChange={e => {
-              const gvw = e.target.value
-              const ulw = vehicleForm.ulw
-              const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
-              const clearPermit = gvw === '' || Number(gvw) <= 3000
-              setVehicleForm((prev: any) => ({
-                ...prev,
-                gvw,
-                passing,
-                ...(clearPermit
-                  ? { state_permit: '', state_permit_image: '', state_permit_type: '', national_permit: '', national_permit_image: '' }
-                  : {})
-              }))
-            }} />
-          </div>
-          <div className="space-y-2">
-            <Label>ULW (KGS)</Label>
-            <Input type="number" value={vehicleForm.ulw} onChange={e => {
-              const ulw = e.target.value
-              const gvw = vehicleForm.gvw
-              const passing = gvw !== '' && ulw !== '' ? String(Number(gvw) - Number(ulw)) : ''
-              setVehicleForm({...vehicleForm, ulw, passing})
-            }} />
-          </div>
-          <div className="space-y-2">
-            <Label>Passing (KGS)</Label>
-            <Input type="number" value={vehicleForm.passing} readOnly className="bg-slate-100" />
           </div>
         </div>
       </div>

@@ -506,7 +506,7 @@ export default function OrderPunchPage() {
         remark: null,
         futureperioddate: futurePeriodDate || null, // Add future period date
         upload_so: uploadedSoUrl, // Add uploaded SO copy URL
-        username: user?.username || null, // Add username for tracking
+        user_id: user?.id || null, // Track acting user's login id
         order_category: orderCategory,
         gst: gst || null, // Add GST number
       }

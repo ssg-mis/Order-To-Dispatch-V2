@@ -674,7 +674,7 @@ export default function DispatchMaterialPage() {
             const dispatchData = {
               dispatch_from: deliveryVal,
               dispatch_qty: dispatchQty,
-              username: user?.username || null,
+              user_id: user?.id || null,
               transfer: dispatchDetails[rowKey]?.transfer || item.transfer || 'no',
               bill_company_name: (tData?.billTo?.company ? tData.billTo.company.split('|')[0] : item.bill_company_name) || null,
               bill_address: tData?.billTo?.address || item.bill_address || null,

@@ -731,7 +731,7 @@ export default function PreApprovalPage() {
             final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
             rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
             remark: rateData?.remark || null, // Use individual remark
-            username: user?.username || null, // Add username for tracking
+            user_id: user?.id || null, // Track acting user's login id
           }
 
           // Call backend API to submit pre-approval
@@ -1055,7 +1055,7 @@ export default function PreApprovalPage() {
               final_rate: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
               remark: rateData?.remark || "",
               sku_name: rateData?.skuName,
-              username: user?.username || null
+              user_id: user?.id || null
             }]
           };
           const mappedOrderData: any = {
@@ -1114,7 +1114,7 @@ export default function PreApprovalPage() {
           final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
           rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
           remark: rateData?.remark || null,
-          username: user?.username || null,
+          user_id: user?.id || null,
         });
       }
 

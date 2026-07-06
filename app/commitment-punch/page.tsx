@@ -533,6 +533,7 @@ export default function CommitmentPunchPage() {
             upload_copy: uploadedCopyUrl,
             remarks: processRemarks || null,
             order_category: processOrderCategory,
+            user_id: user?.id || null, // Track acting user's login id (stamps order_punch_user)
           }
           const res = await commitmentPunchApi.processCommitment(id, payload)
           if (res.success) {

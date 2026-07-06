@@ -34,7 +34,7 @@ import { useAuth } from "@/hooks/use-auth"
 export default function MaterialLoadPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
+  const { user, isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const [pendingOrders, setPendingOrders] = useState<any[]>([])
   const [historyOrders, setHistoryOrders] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -328,6 +328,7 @@ export default function MaterialLoadPage() {
               vehicle_no_plate_image: loadData.vehicleNoPlateImage || null,
               check_status: loadData.checkStatus || null,
               remarks: loadData.remarks || null,
+              user_id: user?.id || null, // Track acting user's login id
             };
 
             console.log('[MATERIAL LOAD] Submitting material load for ID:', recordId, submitData);

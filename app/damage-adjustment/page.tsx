@@ -541,7 +541,7 @@ export default function DamageAdjustmentPage() {
           net_banalce: 0,
           status_2: "Completed",
           credit_note_copy: creditNoteCopyUrl,
-          username: user?.username || null // Add username for tracking
+          user_id: user?.id || null // Track acting user's login id
         };
 
         try {

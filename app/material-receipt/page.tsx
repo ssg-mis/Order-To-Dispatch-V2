@@ -645,7 +645,7 @@ export default function MaterialReceiptPage() {
           damage_image: isItemDamaged ? damageImageUrl : null,
           remarks_3: receiptData.remarks || null,
           bill_amount: product.billAmount ? parseFloat(product.billAmount) : null,
-          username: user?.username || null
+          user_id: user?.id || null
         };
 
         const response = await confirmMaterialReceiptApi.submit(product.id, submitData);

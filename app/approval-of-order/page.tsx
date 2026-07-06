@@ -375,7 +375,7 @@ export default function CommitmentReviewPage() {
               overall_status_of_order: !hasRejection && checklistValues.overall === "approve",
               order_confirmation_with_customer: checklistValues.confirm === "approve",
               processid: processId || null, // Add Process ID to the submission
-              username: user?.username || null // Add username for tracking
+              user_id: user?.id || null // Track acting user's login id
             };
 
             console.log('[APPROVAL] Submitting to API:', {
