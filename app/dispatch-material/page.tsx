@@ -140,6 +140,16 @@ export default function DispatchMaterialPage() {
     const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" }
     const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" }
     const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    const fmtDT = (s: any) => {
+      if (!s) return ""
+      const d = new Date(s)
+      if (isNaN(d.getTime())) return ""
+      const pad = (n: number) => String(n).padStart(2, "0")
+      let h = d.getHours()
+      const ampm = h >= 12 ? "PM" : "AM"
+      h = h % 12 || 12
+      return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(2)} ${pad(h)}:${pad(d.getMinutes())} ${ampm}`
+    }
     return (
       <div className="space-y-8">
         {Object.entries(partyGroups).map(([party, partyProducts]) => {
@@ -151,6 +161,12 @@ export default function DispatchMaterialPage() {
           const place = firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—"
           const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—"
           const processId = firstProd.processid || firstProd.process_id || firstProd.processId || "—"
+          const punchBy = firstProd.order_punch_user || "—"
+          const punchAt = firstProd.created_at || null
+          const preApproveBy = firstProd.pre_approval_user || "—"
+          const preApproveAt = firstProd.actual_1 || null
+          const approveBy = firstProd.order_approval_user || "—"
+          const approveAt = firstProd.actual_2 || null
           const categories: Record<string, any[]> = { "RICE OIL": [], "SOYA OIL": [], "PALM OIL": [], "OTHERS": [] }
           partyProducts.forEach((prod: any) => {
             const name = (prod.productName || "").toUpperCase()
@@ -223,8 +239,13 @@ export default function DispatchMaterialPage() {
                     <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s: number, p: any) => s + calculateGrossWeight(p.productName, getProductQty(p)), 0))} KGS</td>
                   </tr>
                   <tr>
-                    <td colSpan={3} className="border border-black p-1.5 pt-10 text-center text-xs font-bold align-bottom">Receiver's Signature</td>
-                    <td colSpan={2} className="border border-black p-1.5 pt-10 text-center text-xs font-bold align-bottom">Authorized Signatory</td>
+                    <td colSpan={5} className="border border-black p-2 align-top">
+                      <div className="flex justify-between gap-2 text-[11px]">
+                        <div className="text-center flex-1"><span className="underline">Order Punch By: {punchBy}</span><br />({fmtDT(punchAt)})</div>
+                        <div className="text-center flex-1"><span className="underline">Pre-Approve By: {preApproveBy}</span><br />({fmtDT(preApproveAt)})</div>
+                        <div className="text-center flex-1"><span className="underline">Approve By: {approveBy}</span><br />({fmtDT(approveAt)})</div>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -256,6 +277,12 @@ export default function DispatchMaterialPage() {
         place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
         partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
         processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
+        punchBy: firstProd.order_punch_user || "—",
+        punchAt: firstProd.created_at || null,
+        preApproveBy: firstProd.pre_approval_user || "—",
+        preApproveAt: firstProd.actual_1 || null,
+        approveBy: firstProd.order_approval_user || "—",
+        approveAt: firstProd.actual_2 || null,
         products: partyProducts.map((prod: any) => {
           const qty = parseFloat(String(getProductQty(prod) || "0"))
           return {

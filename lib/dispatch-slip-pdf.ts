@@ -20,6 +20,12 @@ export interface SlipPartyData {
   partyMo: string
   processId: string
   products: SlipProduct[]
+  punchBy?: string
+  punchAt?: string | null
+  preApproveBy?: string
+  preApproveAt?: string | null
+  approveBy?: string
+  approveAt?: string | null
 }
 
 const WHITE: [number, number, number] = [255, 255, 255]
@@ -43,6 +49,17 @@ function oilKey(name: string): string {
 }
 
 const wt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+
+const pad = (n: number) => String(n).padStart(2, "0")
+const fmtDateTime = (s: string | null | undefined) => {
+  if (!s) return ""
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return ""
+  let h = d.getHours()
+  const ampm = h >= 12 ? "PM" : "AM"
+  h = h % 12 || 12
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(2)} ${pad(h)}:${pad(d.getMinutes())} ${ampm}`
+}
 
 export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
@@ -76,10 +93,14 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
     })
     push([{ content: "Grand Total", styles: { halign: "center", fontStyle: "bold" } }, String(grandQty), "", wt(grandNet), "KGS", wt(grandGross), "KGS"], { type: "grand" })
 
-    // Footer: signature blocks (stage pages have no punch/approve trail)
+    // Footer: Punch / Pre-Approve / Approve (same as the Oil Dispatch Voucher report)
+    const punch = `Order Punch By: ${party.punchBy || "—"}\n(${fmtDateTime(party.punchAt)})`
+    const preApp = `Pre-Approve By: ${party.preApproveBy || "—"}\n(${fmtDateTime(party.preApproveAt)})`
+    const app = `Approve By: ${party.approveBy || "—"}\n(${fmtDateTime(party.approveAt)})`
     push([
-      { content: "Receiver's Signature", colSpan: 4, styles: { halign: "center", valign: "bottom", fontStyle: "bold", fontSize: 8, minCellHeight: 16 } },
-      { content: "Authorized Signatory", colSpan: 3, styles: { halign: "center", valign: "bottom", fontStyle: "bold", fontSize: 8, minCellHeight: 16 } },
+      { content: punch, colSpan: 3, styles: { halign: "center", valign: "top", fontStyle: "normal", fontSize: 8, minCellHeight: 13 } },
+      { content: preApp, colSpan: 2, styles: { halign: "center", valign: "top", fontStyle: "normal", fontSize: 8, minCellHeight: 13 } },
+      { content: app, colSpan: 2, styles: { halign: "center", valign: "top", fontStyle: "normal", fontSize: 8, minCellHeight: 13 } },
     ], { type: "footer" })
 
     const head = [
@@ -135,6 +156,20 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
         else if (meta.type === "total") { data.cell.styles.fillColor = OIL_FILL[meta.oil!]; data.cell.styles.fontStyle = "bold" }
         else if (meta.type === "grand") { data.cell.styles.fillColor = BLACK; data.cell.styles.textColor = WHITE; data.cell.styles.fontStyle = "bold" }
         else { data.cell.styles.fillColor = WHITE }
+      },
+      didDrawCell: (data: any) => {
+        // Underline the first line ("X By: Name") of each footer cell, like the report.
+        if (data.section !== "body" || rowMeta[data.row.index]?.type !== "footer") return
+        const firstLine = String(data.cell.raw?.content ?? "").split("\n")[0]
+        if (!firstLine) return
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(8)
+        const tw = doc.getTextWidth(firstLine)
+        const cx = data.cell.x + data.cell.width / 2
+        const yLine = data.cell.y + 1.4 + 3.2 // padding-top + first-line height
+        doc.setDrawColor(0, 0, 0)
+        doc.setLineWidth(0.2)
+        doc.line(cx - tw / 2, yLine, cx + tw / 2, yLine)
       },
     })
   })
