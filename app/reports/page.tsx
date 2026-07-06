@@ -33,9 +33,8 @@ import { generatePendingSaudaPdf } from "@/lib/pending-sauda-pdf"
 import { CustomerWiseSaudaModal } from "@/components/customer-wise-sauda-modal"
 import { CustomerWiseDetailedModal } from "@/components/customer-wise-detailed-modal"
 import { SkuCustomerWisePendingModal } from "@/components/sku-customer-wise-pending-modal"
-import { OilDispatchVoucherModal } from "@/components/oil-dispatch-voucher-modal"
 import { DailyDispatchModal } from "@/components/daily-dispatch-modal"
-import { FileText, FileDown, Users, FileSpreadsheet, Receipt, CalendarDays, Boxes } from "lucide-react"
+import { FileText, FileDown, Users, FileSpreadsheet, CalendarDays, Boxes } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -93,7 +92,6 @@ export default function ReportsPage() {
   const [custSummaryOpen, setCustSummaryOpen] = useState(false)
   const [custDetailedOpen, setCustDetailedOpen] = useState(false)
   const [custSkuOpen, setCustSkuOpen] = useState(false)
-  const [voucherOpen, setVoucherOpen] = useState(false)
   const [dailyOpen, setDailyOpen] = useState(false)
 
   const handlePendingSaudaPdf = useCallback(async () => {
@@ -342,11 +340,6 @@ export default function ReportsPage() {
                 <Boxes className="h-3.5 w-3.5" /> SKU &amp; Customer-wise
               </Button>
               <Button variant="ghost" size="sm"
-                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-rose-50 hover:text-rose-700"
-                onClick={() => { setExportMenuOpen(false); setVoucherOpen(true) }}>
-                <Receipt className="h-3.5 w-3.5" /> Oil Dispatch Voucher
-              </Button>
-              <Button variant="ghost" size="sm"
                 className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-teal-50 hover:text-teal-700"
                 onClick={() => { setExportMenuOpen(false); setDailyOpen(true) }}>
                 <CalendarDays className="h-3.5 w-3.5" /> Daily Dispatch Report
@@ -365,7 +358,6 @@ export default function ReportsPage() {
           <CustomerWiseSaudaModal hideTrigger open={custSummaryOpen} onOpenChange={setCustSummaryOpen} />
           <CustomerWiseDetailedModal hideTrigger open={custDetailedOpen} onOpenChange={setCustDetailedOpen} />
           <SkuCustomerWisePendingModal hideTrigger open={custSkuOpen} onOpenChange={setCustSkuOpen} />
-          <OilDispatchVoucherModal hideTrigger open={voucherOpen} onOpenChange={setVoucherOpen} />
           <DailyDispatchModal hideTrigger open={dailyOpen} onOpenChange={setDailyOpen} />
         </div>
       </div>

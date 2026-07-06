@@ -1005,6 +1005,10 @@ export default function ActualDispatchPage() {
       partyGroups[pName].push(p);
     });
 
+    const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" };
+    const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" };
+    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
     return (
       <div className="space-y-8">
         {Object.entries(partyGroups).map(([party, partyProducts]) => {
@@ -1041,32 +1045,30 @@ export default function ActualDispatchPage() {
           });
 
           return (
-            <div key={party} className="border-2 border-black p-4 bg-white text-black mb-8 last:mb-0">
-              <div className="text-center border-b-4 border-double border-black pb-4 mb-6">
-                <h1 className="text-2xl font-black">SHRI SHYAM OIL EXTRACTION PVT LTD.</h1>
-                <p className="text-xs font-bold uppercase">VILL- BANARI, POST-BANARI, DISTT.- JANJGIR-CHAMPA</p>
-                <div className="text-xl font-bold underline mt-2 tracking-widest uppercase">OIL DISPATCH VOUCHER</div>
+            <div key={party} className="border border-black bg-white text-black mb-8 last:mb-0">
+              <div className="text-center px-2 pt-3 pb-2">
+                <h1 className="text-xl font-black">SHRI SHYAM OIL EXTRACTIONS PVT LTD</h1>
+                <p className="text-[11px] text-gray-500">Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)</p>
+                <div className="text-base font-bold mt-1">Oil Dispatch Voucher</div>
               </div>
 
-              <div className="grid grid-cols-2 border border-black mb-6">
-                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Commitment No</span><span className="font-bold">{commitmentNo}</span></div>
-                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Date</span><span className="font-bold">{date}</span></div>
-                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Party Name</span><span className="font-bold">{party}</span></div>
-                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Broker Name</span><span className="font-bold">{brokerName}</span></div>
-                <div className="flex border-b border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Place</span><span className="font-bold">{place}</span></div>
-                <div className="flex border-b border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Party Mo.</span><span className="font-bold">{partyMo}</span></div>
-                <div className="flex border-r border-black p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center">Manual Sauda No.</span><span className="font-bold">{processId}</span></div>
-                <div className="flex p-2"><span className="w-32 font-bold uppercase text-[10px] border-r border-black mr-2 pr-2 h-full flex items-center"></span></div>
+              <div className="grid grid-cols-2 text-xs border-t border-black">
+                <div className="border-b border-r border-black p-1.5 font-bold">DO no.: {commitmentNo}</div>
+                <div className="border-b border-black p-1.5 font-bold">DO Date: {date}</div>
+                <div className="border-b border-r border-black p-1.5 font-bold">Customer: {party}</div>
+                <div className="border-b border-black p-1.5 font-bold">Broker: {brokerName}</div>
+                <div className="border-b border-r border-black p-1.5">Address: {place}</div>
+                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}<br />Manual Sauda No.: {processId}</div>
               </div>
 
-              <table className="w-full border-collapse border-2 border-black mb-6">
+              <table className="w-full border-collapse">
                 <thead>
-                  <tr className="bg-slate-100">
-                    <th className="border border-black p-2 text-left text-[10px] uppercase">Item Name</th>
-                    <th className="border border-black p-2 text-left text-[10px] uppercase">Unit</th>
-                    <th className="border border-black p-2 text-left text-[10px] uppercase">Qty</th>
-                    <th className="border border-black p-2 text-left text-[10px] uppercase">Net Weight</th>
-                    <th className="border border-black p-2 text-left text-[10px] uppercase">Gross Weight</th>
+                  <tr style={{ background: "#A6A6A6" }}>
+                    <th className="border border-black border-t-0 p-1.5 text-left text-xs">Item Name</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">QTY</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">UOM</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Net Wt.</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Gross Wt.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1077,38 +1079,39 @@ export default function ActualDispatchPage() {
                     const catGrossWeight = items.reduce((s, i) => s + i.grossWeight, 0);
                     return (
                       <React.Fragment key={category}>
-                        <tr className="bg-slate-200 font-bold text-center"><td colSpan={5} className="border border-black p-1 uppercase text-xs">{category}</td></tr>
+                        <tr style={{ background: OIL_COLORS[category] }} className="font-bold text-center"><td colSpan={5} className="border border-black p-1 text-sm">{OIL_TITLES[category]}</td></tr>
                         {items.map((item, idx) => (
                           <tr key={idx}>
-                            <td className="border border-black p-2 text-xs font-bold">{item.name}</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.unit}</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.qty}</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.weight.toFixed(4)} KG</td>
-                            <td className="border border-black p-2 text-xs font-bold">{item.grossWeight.toFixed(4)} KG</td>
+                            <td className="border border-black p-1.5 text-xs">{item.name}</td>
+                            <td className="border border-black p-1.5 text-xs text-center">{item.qty}</td>
+                            <td className="border border-black p-1.5 text-xs text-center">{item.unit}</td>
+                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.weight)} KGS</td>
+                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.grossWeight)} KGS</td>
                           </tr>
                         ))}
-                        <tr className="bg-slate-50 font-black">
-                          <td colSpan={2} className="border border-black p-2 text-xs">TOTAL {category}</td>
-                          <td className="border border-black p-2 text-xs">{catQty}</td>
-                          <td className="border border-black p-2 text-xs">{catWeight.toFixed(4)} KG</td>
-                          <td className="border border-black p-2 text-xs">{catGrossWeight.toFixed(4)} KG</td>
+                        <tr style={{ background: OIL_COLORS[category] }} className="font-bold">
+                          <td className="border border-black p-1.5 text-xs text-right">Total {OIL_TITLES[category]}</td>
+                          <td className="border border-black p-1.5 text-xs text-center">{catQty}</td>
+                          <td className="border border-black p-1.5 text-xs"></td>
+                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catWeight)} KGS</td>
+                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catGrossWeight)} KGS</td>
                         </tr>
                       </React.Fragment>
                     )
                   })}
                   <tr className="bg-black text-white font-bold">
-                    <td colSpan={2} className="border border-black p-2 text-sm uppercase">Grand Total</td>
-                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
-                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
-                    <td className="border border-black p-2 text-sm">{partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
+                    <td className="border border-black p-1.5 text-xs text-center">Grand Total</td>
+                    <td className="border border-black p-1.5 text-xs text-center">{partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
+                    <td className="border border-black p-1.5 text-xs"></td>
+                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={3} className="border border-black p-1.5 pt-10 text-center text-xs font-bold align-bottom">Receiver's Signature</td>
+                    <td colSpan={2} className="border border-black p-1.5 pt-10 text-center text-xs font-bold align-bottom">Authorized Signatory</td>
                   </tr>
                 </tbody>
               </table>
-
-              <div className="flex justify-between mt-8 pb-4">
-                <div className="border-t-2 border-black w-48 text-center pt-2 text-[10px] font-black uppercase">Receiver's Signature</div>
-                <div className="border-t-2 border-black w-48 text-center pt-2 text-[10px] font-black uppercase">Authorized Signatory</div>
-              </div>
             </div>
           )
         })}
@@ -1164,183 +1167,7 @@ export default function ActualDispatchPage() {
       toast({ title: "Error", description: "Please select products to print slip", variant: "destructive" });
       return;
     }
-
-    const productsForSlip = selectedGroups.flatMap((group: any) =>
-      group._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-    );
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    let fullHtml = `
-      <html>
-        <head>
-          <title>Dispatch Slips</title>
-          <style>
-            @page { size: A4; margin: 10mm; }
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 0; color: #1a1a1a; line-height: 1.4; background: #fff; }
-            .slip-container { padding: 15px; border: 2px solid #000; margin-bottom: 20px; page-break-inside: avoid; position: relative; display: flex; flex-direction: column; }
-            .header { text-align: center; border-bottom: 3px double #000; padding-bottom: 12px; margin-bottom: 20px; }
-            .company-name { font-size: 26px; font-weight: 900; margin: 0; letter-spacing: 1px; color: #000; }
-            .company-address { font-size: 13px; margin: 6px 0; font-weight: 600; color: #444; }
-            .voucher-title { font-size: 20px; font-weight: 800; text-decoration: underline; margin-top: 12px; letter-spacing: 2px; }
-            
-            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-bottom: 25px; border: 1.5px solid #000; }
-            .info-item { display: flex; border: 0.5px solid #000; padding: 8px 12px; align-items: center; }
-            .info-label { font-weight: 800; width: 140px; text-transform: uppercase; font-size: 11px; color: #000; border-right: 1.5px solid #000; margin-right: 12px; height: 100%; display: flex; align-items: center; }
-            .info-value { font-weight: 700; font-size: 13px; flex: 1; }
-
-            table { width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #000; }
-            th, td { border: 1px solid #000; padding: 10px 8px; text-align: left; font-size: 12px; font-weight: 700; }
-            th { background-color: #f0f0f0; text-transform: uppercase; font-weight: 900; border-bottom: 2px solid #000; }
-            .category-row { background-color: #e5e7eb; font-weight: 900; text-align: center; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
-            .total-row { font-weight: 900; background-color: #f3f4f6; border-top: 1.5px solid #000; }
-            
-            .footer { margin-top: auto; display: flex; justify-content: space-between; padding: 40px 20px 20px; }
-            .signature { border-top: 2px solid #000; width: 220px; text-align: center; padding-top: 8px; font-size: 12px; font-weight: 900; text-transform: uppercase; }
-            
-            .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 100px; color: rgba(0,0,0,0.03); font-weight: 900; pointer-events: none; white-space: nowrap; }
-
-            @media print {
-              body { -webkit-print-color-adjust: exact; }
-              .no-print { display: none; }
-              .slip-container { border: 2px solid #000; height: auto; }
-            }
-          </style>
-        </head>
-        <body>
-    `;
-
-    const partyGroups: Record<string, any[]> = {};
-    productsForSlip.forEach(p => {
-      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party";
-      if (!partyGroups[pName]) partyGroups[pName] = [];
-      partyGroups[pName].push(p);
-    });
-
-    Object.entries(partyGroups).forEach(([party, partyProducts]) => {
-      const firstProd = partyProducts[0];
-      const date = new Date().toLocaleDateString('en-GB');
-      const commitmentNo = firstProd.orderNo || "—";
-      const isBroker = firstProd.isBroker || firstProd.is_order_through_broker;
-      const brokerName = isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—";
-
-      const rawAddress = firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "";
-      const place = rawAddress || "—";
-
-      const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—";
-      const processId = firstProd.processid || firstProd.process_id || firstProd.processId || "—";
-
-      const categories: Record<string, any[]> = {
-        "RICE OIL": [],
-        "SOYA OIL": [],
-        "PALM OIL": [],
-        "OTHERS": []
-      };
-
-      partyProducts.forEach(prod => {
-        const name = (prod.productName || "").toUpperCase();
-        const qty = parseFloat(confirmDetails[prod._rowKey]?.qty || prod.qtyToDispatch || "0");
-        const unit = prod.uom || "PCS";
-        const weight = calculateWeight(prod.productName, qty);
-        const grossWeight = calculateGrossWeight(prod.productName, qty);
-
-        const item = { name: prod.productName, unit, qty, weight, grossWeight };
-
-        if (name.includes("RBO") || name.includes("RICE")) categories["RICE OIL"].push(item);
-        else if (name.includes("SBO") || name.includes("SOYA")) categories["SOYA OIL"].push(item);
-        else if (name.includes("PALM")) categories["PALM OIL"].push(item);
-        else categories["OTHERS"].push(item);
-      });
-
-      fullHtml += `
-        <div class="slip-container">
-          <div class="watermark">SHRI SHYAM OIL</div>
-          <div class="header">
-            <h1 class="company-name">SHRI SHYAM OIL EXTRACTION PVT LTD.</h1>
-            <p class="company-address">VILL- BANARI, POST-BANARI, DISTT.- JANJGIR-CHAMPA</p>
-            <div class="voucher-title">OIL DISPATCH VOUCHER</div>
-          </div>
-
-          <div class="info-grid">
-            <div class="info-item"><span class="info-label">Commitment No</span><span class="info-value">${commitmentNo}</span></div>
-            <div class="info-item"><span class="info-label">Date</span><span class="info-value">${date}</span></div>
-            <div class="info-item"><span class="info-label">Party Name</span><span class="info-value">${party}</span></div>
-            <div class="info-item"><span class="info-label">Broker Name</span><span class="info-value">${brokerName}</span></div>
-            <div class="info-item"><span class="info-label">Place</span><span class="info-value">${place}</span></div>
-            <div class="info-item"><span class="info-label">Party Mo.</span><span class="info-value">${partyMo}</span></div>
-            <div class="info-item"><span class="info-label">Manual Sauda No.</span><span class="info-value">${processId}</span></div>
-            <div class="info-item"><span class="info-label"></span><span class="info-value"></span></div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 35%">Item Name</th>
-                <th style="width: 10%">Unit</th>
-                <th style="width: 15%">Qty</th>
-                <th style="width: 20%">Net Weight</th>
-                <th style="width: 20%">Gross Weight</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${Object.entries(categories).map(([category, items]) => {
-        if (items.length === 0) return '';
-        const catQty = items.reduce((s, i) => s + i.qty, 0);
-        const catWeight = items.reduce((s, i) => s + i.weight, 0);
-        const catGrossWeight = items.reduce((s, i) => s + i.grossWeight, 0);
-
-        return `
-                  <tr class="category-row"><td colspan="5" style="text-align: center;">${category}</td></tr>
-                  ${items.map(item => `
-                    <tr>
-                      <td>${item.name}</td>
-                      <td>${item.unit}</td>
-                      <td>${item.qty}</td>
-                      <td>${item.weight.toFixed(4)} KG</td>
-                      <td>${item.grossWeight.toFixed(4)} KG</td>
-                    </tr>
-                  `).join('')}
-                  <tr class="total-row">
-                    <td colspan="2">TOTAL ${category}</td>
-                    <td>${catQty}</td>
-                    <td>${catWeight.toFixed(4)} KG</td>
-                    <td>${catGrossWeight.toFixed(4)} KG</td>
-                  </tr>
-                `;
-      }).join('')}
-              <tr class="total-row" style="background-color: #000; color: #fff; font-size: 15px;">
-                <td colspan="2">GRAND TOTAL</td>
-                <td>${partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
-                <td>${partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
-                <td>${partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0).toFixed(4)} KG</td>
-              </tr>
-            </tbody>
-          </table>
-
-
-
-          <div class="footer" style="page-break-inside: avoid;">
-            <div class="signature">Receiver's Signature</div>
-            <div class="signature">Authorized Signatory</div>
-          </div>
-        </div>
-      `;
-    });
-
-    fullHtml += `
-          <script>
-            window.onload = () => {
-              window.print();
-              setTimeout(() => window.close(), 500);
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(fullHtml);
-    printWindow.document.close();
+    generateDispatchSlipPdf(buildSlipParties(), "dispatch-slip.pdf", { print: true });
   };
 
   const handleSaveDraft = async () => {

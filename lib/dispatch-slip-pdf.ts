@@ -22,17 +22,29 @@ export interface SlipPartyData {
   products: SlipProduct[]
 }
 
-const CATEGORIES = ["RICE OIL", "SOYA OIL", "PALM OIL", "OTHERS"] as const
+const WHITE: [number, number, number] = [255, 255, 255]
+const BLACK: [number, number, number] = [0, 0, 0]
+const GRAY_HEAD: [number, number, number] = [166, 166, 166]
+const OIL_FILL: Record<string, [number, number, number]> = {
+  rice: [252, 228, 214],
+  soya: [226, 239, 218],
+  palm: [197, 217, 241],
+  other: [229, 231, 235],
+}
+const OIL_LABEL: Record<string, string> = { rice: "Rice Oil", soya: "Soya Oil", palm: "Palm Oil", other: "Other" }
+const OIL_ORDER = ["rice", "soya", "palm", "other"]
 
-function categorize(name: string): typeof CATEGORIES[number] {
-  const u = name.toUpperCase()
-  if (u.includes("RBO") || u.includes("RICE")) return "RICE OIL"
-  if (u.includes("SBO") || u.includes("SOYA")) return "SOYA OIL"
-  if (u.includes("PALM")) return "PALM OIL"
-  return "OTHERS"
+function oilKey(name: string): string {
+  const u = (name || "").toUpperCase()
+  if (u.includes("RBO") || u.includes("RICE")) return "rice"
+  if (u.includes("SBO") || u.includes("SOYA")) return "soya"
+  if (u.includes("PALM")) return "palm"
+  return "other"
 }
 
-export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf") {
+const wt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+
+export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 10
@@ -41,164 +53,96 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
   parties.forEach((party, partyIdx) => {
     if (partyIdx > 0) doc.addPage()
 
-    let y = margin
+    // Group products by oil (only oils present)
+    const byOil: Record<string, SlipProduct[]> = { rice: [], soya: [], palm: [], other: [] }
+    party.products.forEach((p) => byOil[oilKey(p.productName)].push(p))
 
-    // ── Header ───────────────────────────────────────────────────────────────
-    doc.setFontSize(16)
-    doc.setFont("helvetica", "bold")
-    doc.text("SHRI SHYAM OIL EXTRACTION PVT LTD.", pageW / 2, y + 7, { align: "center" })
-    y += 10
+    const body: any[] = []
+    const rowMeta: { type: string; oil?: string }[] = []
+    const push = (cells: any[], meta: { type: string; oil?: string }) => { body.push(cells); rowMeta.push(meta) }
 
-    doc.setFontSize(8)
-    doc.setFont("helvetica", "normal")
-    doc.text("VILL- BANARI, POST-BANARI, DISTT.- JANJGIR-CHAMPA", pageW / 2, y + 4, { align: "center" })
-    y += 7
-
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "bold")
-    doc.text("OIL DISPATCH VOUCHER", pageW / 2, y + 5, { align: "center" })
-    // underline
-    const titleW = doc.getTextWidth("OIL DISPATCH VOUCHER")
-    doc.line(pageW / 2 - titleW / 2, y + 6, pageW / 2 + titleW / 2, y + 6)
-    y += 10
-
-    // double border under header
-    doc.setLineWidth(0.5)
-    doc.line(margin, y, margin + contentW, y)
-    doc.line(margin, y + 1, margin + contentW, y + 1)
-    y += 4
-
-    // ── Info grid (2-col, 4 rows) ─────────────────────────────────────────────
-    const infoRows = [
-      ["Commitment No", party.commitmentNo, "Date", party.date],
-      ["Party Name", party.party, "Broker Name", party.brokerName],
-      ["Place", party.place, "Party Mo.", party.partyMo],
-      ["Manual Sauda No.", party.processId, "", ""],
-    ]
-    const colW = contentW / 2
-    const labelW = 38
-    const cellH = 7
-
-    doc.setLineWidth(0.3)
-    doc.rect(margin, y, contentW, cellH * infoRows.length)
-
-    infoRows.forEach((row, ri) => {
-      const rowY = y + ri * cellH
-      // vertical divider between the two halves
-      doc.line(margin + colW, rowY, margin + colW, rowY + cellH)
-      // horizontal divider (except last row bottom = already drawn by rect)
-      if (ri < infoRows.length - 1) doc.line(margin, rowY + cellH, margin + contentW, rowY + cellH)
-
-      // left cell
-      doc.setFontSize(7)
-      doc.setFont("helvetica", "bold")
-      doc.text(row[0].toUpperCase(), margin + 2, rowY + cellH / 2 + 1)
-      // inner divider after label
-      doc.line(margin + labelW, rowY, margin + labelW, rowY + cellH)
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(8)
-      doc.text(String(row[1]), margin + labelW + 2, rowY + cellH / 2 + 1)
-
-      // right cell
-      doc.setFontSize(7)
-      doc.setFont("helvetica", "bold")
-      doc.text(row[2].toUpperCase(), margin + colW + 2, rowY + cellH / 2 + 1)
-      if (row[2]) {
-        doc.line(margin + colW + labelW, rowY, margin + colW + labelW, rowY + cellH)
-        doc.setFont("helvetica", "normal")
-        doc.setFontSize(8)
-        doc.text(String(row[3]), margin + colW + labelW + 2, rowY + cellH / 2 + 1)
-      }
-    })
-
-    y += cellH * infoRows.length + 4
-
-    // ── Products table ────────────────────────────────────────────────────────
-    const catMap: Record<string, SlipProduct[]> = { "RICE OIL": [], "SOYA OIL": [], "PALM OIL": [], "OTHERS": [] }
-    party.products.forEach(p => catMap[categorize(p.productName)].push(p))
-
-    const tableBody: (string | { content: string; colSpan?: number; styles?: any })[][] = []
-
-    CATEGORIES.forEach(cat => {
-      const items = catMap[cat]
-      if (items.length === 0) return
-
-      // category header row
-      tableBody.push([{
-        content: cat,
-        colSpan: 5,
-        styles: { halign: "center", fillColor: [229, 231, 235], fontStyle: "bold", fontSize: 9 },
-      }] as any)
-
-      items.forEach(item => {
-        tableBody.push([
-          item.productName,
-          item.uom,
-          String(item.qty),
-          `${item.weight.toFixed(4)} KG`,
-          `${item.grossWeight.toFixed(4)} KG`,
-        ])
+    let grandQty = 0, grandNet = 0, grandGross = 0
+    OIL_ORDER.forEach((k) => {
+      const items = byOil[k]
+      if (!items.length) return
+      push([{ content: OIL_LABEL[k], colSpan: 7, styles: { halign: "center", fontStyle: "bold", fontSize: 10 } }], { type: "oilband", oil: k })
+      let q = 0, net = 0, gross = 0
+      items.forEach((it) => {
+        q += it.qty; net += it.weight; gross += it.grossWeight
+        push([it.productName, String(it.qty), it.uom, wt(it.weight), "KGS", wt(it.grossWeight), "KGS"], { type: "item" })
       })
-
-      const catQty = items.reduce((s, i) => s + i.qty, 0)
-      const catWt = items.reduce((s, i) => s + i.weight, 0)
-      const catGross = items.reduce((s, i) => s + i.grossWeight, 0)
-      tableBody.push([{
-        content: `TOTAL ${cat}`,
-        colSpan: 2,
-        styles: { fontStyle: "bold", fillColor: [243, 244, 246] },
-      }, String(catQty), `${catWt.toFixed(4)} KG`, `${catGross.toFixed(4)} KG`] as any)
+      grandQty += q; grandNet += net; grandGross += gross
+      push([{ content: `Total ${OIL_LABEL[k]}`, styles: { halign: "right", fontStyle: "bold" } }, String(q), "", wt(net), "KGS", wt(gross), "KGS"], { type: "total", oil: k })
     })
+    push([{ content: "Grand Total", styles: { halign: "center", fontStyle: "bold" } }, String(grandQty), "", wt(grandNet), "KGS", wt(grandGross), "KGS"], { type: "grand" })
 
-    const grandQty = party.products.reduce((s, p) => s + p.qty, 0)
-    const grandWt = party.products.reduce((s, p) => s + p.weight, 0)
-    const grandGross = party.products.reduce((s, p) => s + p.grossWeight, 0)
-    tableBody.push([{
-      content: "GRAND TOTAL",
-      colSpan: 2,
-      styles: { fontStyle: "bold", fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9 },
-    }, {
-      content: String(grandQty),
-      styles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: "bold" },
-    }, {
-      content: `${grandWt.toFixed(4)} KG`,
-      styles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: "bold" },
-    }, {
-      content: `${grandGross.toFixed(4)} KG`,
-      styles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: "bold" },
-    }] as any)
+    // Footer: signature blocks (stage pages have no punch/approve trail)
+    push([
+      { content: "Receiver's Signature", colSpan: 4, styles: { halign: "center", valign: "bottom", fontStyle: "bold", fontSize: 8, minCellHeight: 16 } },
+      { content: "Authorized Signatory", colSpan: 3, styles: { halign: "center", valign: "bottom", fontStyle: "bold", fontSize: 8, minCellHeight: 16 } },
+    ], { type: "footer" })
+
+    const head = [
+      [{ content: "SHRI SHYAM OIL EXTRACTIONS PVT LTD", colSpan: 7, styles: { halign: "center", valign: "middle", fontStyle: "bold", fontSize: 15, fillColor: WHITE } }],
+      [{ content: "Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)", colSpan: 7, styles: { halign: "center", fontStyle: "normal", fontSize: 8, textColor: [90, 90, 90], fillColor: WHITE } }],
+      [{ content: "Oil Dispatch Voucher", colSpan: 7, styles: { halign: "center", fontStyle: "bold", fontSize: 12, fillColor: WHITE } }],
+      [
+        { content: `DO no.: ${party.commitmentNo}`, colSpan: 4, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+        { content: `DO Date: ${party.date}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+      ],
+      [
+        { content: `Customer: ${party.party}`, colSpan: 4, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+        { content: `Broker: ${party.brokerName}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+      ],
+      [
+        { content: `Address: ${party.place}`, colSpan: 4, styles: { halign: "left", fontStyle: "normal", fontSize: 8, fillColor: WHITE } },
+        { content: `Mob.: ${party.partyMo}\nManual Sauda No.: ${party.processId}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+      ],
+      [
+        { content: "Item Name", styles: { fillColor: GRAY_HEAD } },
+        { content: "QTY", styles: { fillColor: GRAY_HEAD, halign: "center" } },
+        { content: "UOM", styles: { fillColor: GRAY_HEAD, halign: "center" } },
+        { content: "Net Wt.", colSpan: 2, styles: { fillColor: GRAY_HEAD, halign: "center" } },
+        { content: "Gross Wt.", colSpan: 2, styles: { fillColor: GRAY_HEAD, halign: "center" } },
+      ],
+    ]
+
+    const columnStyles: Record<number, any> = {
+      0: { cellWidth: contentW * 0.40, halign: "left" },
+      1: { cellWidth: contentW * 0.10, halign: "center" },
+      2: { cellWidth: contentW * 0.10, halign: "center" },
+      3: { cellWidth: contentW * 0.13, halign: "right" },
+      4: { cellWidth: contentW * 0.07, halign: "left" },
+      5: { cellWidth: contentW * 0.13, halign: "right" },
+      6: { cellWidth: contentW * 0.07, halign: "left" },
+    }
 
     autoTable(doc, {
-      startY: y,
-      head: [["Item Name", "Unit", "Qty", "Net Weight", "Gross Weight"]],
-      body: tableBody,
-      margin: { left: margin, right: margin },
+      head: head as any,
+      body,
+      startY: margin,
+      margin: { top: margin, left: margin, right: margin, bottom: margin },
       tableWidth: contentW,
-      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", fontSize: 8 },
-      bodyStyles: { fontSize: 8, fontStyle: "normal" },
-      columnStyles: {
-        0: { cellWidth: contentW * 0.35 },
-        1: { cellWidth: contentW * 0.10 },
-        2: { cellWidth: contentW * 0.15 },
-        3: { cellWidth: contentW * 0.20 },
-        4: { cellWidth: contentW * 0.20 },
-      },
       theme: "grid",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 1.4, lineColor: BLACK, lineWidth: 0.2, textColor: BLACK, overflow: "linebreak", valign: "middle" },
+      headStyles: { fontStyle: "bold", textColor: BLACK, lineColor: BLACK, lineWidth: 0.2 },
+      columnStyles,
+      didParseCell: (data: any) => {
+        if (data.section !== "body") return
+        const meta = rowMeta[data.row.index]
+        if (!meta) return
+        if (meta.type === "oilband") { data.cell.styles.fillColor = OIL_FILL[meta.oil!]; data.cell.styles.fontStyle = "bold" }
+        else if (meta.type === "total") { data.cell.styles.fillColor = OIL_FILL[meta.oil!]; data.cell.styles.fontStyle = "bold" }
+        else if (meta.type === "grand") { data.cell.styles.fillColor = BLACK; data.cell.styles.textColor = WHITE; data.cell.styles.fontStyle = "bold" }
+        else { data.cell.styles.fillColor = WHITE }
+      },
     })
-
-    // @ts-ignore — jspdf-autotable attaches lastAutoTable to the doc instance
-    y = (doc as any).lastAutoTable.finalY + 12
-
-    // ── Signatures ────────────────────────────────────────────────────────────
-    const sigW = 50
-    doc.setLineWidth(0.5)
-    doc.line(margin, y, margin + sigW, y)
-    doc.line(margin + contentW - sigW, y, margin + contentW, y)
-    doc.setFontSize(7)
-    doc.setFont("helvetica", "bold")
-    doc.text("RECEIVER'S SIGNATURE", margin + sigW / 2, y + 4, { align: "center" })
-    doc.text("AUTHORIZED SIGNATORY", margin + contentW - sigW / 2, y + 4, { align: "center" })
   })
 
-  doc.save(filename)
+  if (opts?.print) {
+    doc.autoPrint()
+    window.open(doc.output("bloburl") as unknown as string, "_blank")
+  } else {
+    doc.save(filename)
+  }
 }

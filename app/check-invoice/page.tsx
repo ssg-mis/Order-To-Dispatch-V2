@@ -109,7 +109,9 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
 
   if (missingBilling || missingShipping) {
     gstType = "no_address"
-  } else if (billingState === shippingState) {
+    cgst = 0
+    sgst = 0
+  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
     gstType = "same"
   } else {
     gstType = "different"
@@ -130,11 +132,11 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
       <div className="p-4 max-w-sm ml-auto space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${cgst.toFixed(2)}` : "—"}</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType !== "different" ? `₹${sgst.toFixed(2)}` : "—"}</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>

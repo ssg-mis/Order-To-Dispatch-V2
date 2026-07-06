@@ -839,7 +839,7 @@ export default function OrderPunchPage() {
   let orderCgst = 0, orderSgst = 0, orderIgst = 0
   if (!billingState || !shippingState) {
     gstType = "no_address"
-  } else if (billingState === shippingState) {
+  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
     gstType = "same"
     orderCgst = Math.round(totalTaxable * 0.025 * 100) / 100
     orderSgst = orderCgst
