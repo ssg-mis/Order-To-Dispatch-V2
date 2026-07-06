@@ -1386,16 +1386,16 @@ export default function ActualDispatchPage() {
   };
 
   const performDispatchConfirmation = async () => {
+    // ONLY IF DEPO IS BANARI — vehicle selection/details are optional for other depots
+    const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
+
     // 1. Basic Vehicle Check
-    if (!vehicleNumber.trim()) {
+    if (isBanari && !vehicleNumber.trim()) {
       toast({ title: "Validation Error", description: "Vehicle Registration Number is required", variant: "destructive" });
       return;
     }
 
     // 2. Stage 6: Vehicle Document Validation
-    // ONLY IF DEPO IS BANARI
-    const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
-
     if (isBanari) {
       const vehicleDocs = [
         { key: 'fitness', label: 'Fitness' },
@@ -1412,15 +1412,20 @@ export default function ActualDispatchPage() {
         { key: 'permit2_end_date', label: 'Permit 2 Expiry' },
       ];
 
+      // Permit documents only apply when GVW > 3000 (same rule as Vehicle Master)
+      const isPermitApplicable = vehicleData.gvw !== '' && Number(vehicleData.gvw) > 3000;
+
       for (const doc of vehicleDocs) {
         const val = vehicleData[doc.key as keyof typeof vehicleData];
         // Skip required check for Permit 2 (both file and date are optional)
         if (doc.key === 'permit2_out_state' || doc.key === 'permit2_end_date') continue;
+        // Permit 1 is only required for vehicles with GVW > 3000
+        if ((doc.key === 'permit1' || doc.key === 'permit1_end_date') && !isPermitApplicable) continue;
 
         if (!val) {
           toast({
-            title: "Validation Error",
-            description: `${doc.label} is required (Stage 6) for BANARI`,
+            title: "Document Required",
+            description: `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`,
             variant: "destructive"
           });
           return;
@@ -1499,9 +1504,9 @@ export default function ActualDispatchPage() {
         return;
       }
 
-      // Validation for Overload
+      // Validation for Overload (only mandatory for Banari depot; optional for other depots)
       const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
-      if (isOverloaded && !loadData.overloadRemarks.trim()) {
+      if (isOverloaded && selectedDepoTab?.toUpperCase() === 'BANARI' && !loadData.overloadRemarks.trim()) {
         toast({
           title: "Overload Check",
           description: "Overload remarks are mandatory as the vehicle is overloaded.",
@@ -1511,8 +1516,8 @@ export default function ActualDispatchPage() {
         return;
       }
 
-      // Validation for Interstate Permit
-      if (isInterState && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
+      // Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
+      if (isBanari && isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
         toast({
           title: "Interstate Document Required",
           description: "National / Other State Permit is mandatory for interstate dispatches.",
@@ -2609,7 +2614,9 @@ export default function ActualDispatchPage() {
                     <div className="bg-slate-50 border-2 border-slate-200 rounded-xl sm:rounded-3xl p-4 sm:p-6 space-y-6 shadow-md transition-all hover:shadow-lg">
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
                         <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Vehicle Registration Number <span className="text-red-500">*</span></Label>
+                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
+                            Vehicle Registration Number {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                          </Label>
                           <Combobox
                             value={vehicleNumber}
                             onValueChange={(v) => {
@@ -2653,7 +2660,9 @@ export default function ActualDispatchPage() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Driver Name <span className="text-red-500">*</span></Label>
+                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
+                            Driver Name {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                          </Label>
                           <Combobox
                             value={driverName}
                             onValueChange={(v) => {
@@ -2729,7 +2738,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Fitness <span className="text-red-500">*</span> {vehicleData.fitness_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.fitness_file_name})</span>}
+                                Fitness {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.fitness_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.fitness_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2753,7 +2762,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Insurance <span className="text-red-500">*</span> {vehicleData.insurance_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.insurance_file_name})</span>}
+                                Insurance {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.insurance_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.insurance_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2777,7 +2786,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Tax Copy <span className="text-red-500">*</span> {vehicleData.tax_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.tax_file_name})</span>}
+                                Tax Copy {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.tax_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.tax_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2801,7 +2810,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Pollution <span className="text-red-500">*</span> {vehicleData.pollution_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.pollution_file_name})</span>}
+                                Pollution {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>} {vehicleData.pollution_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.pollution_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2822,10 +2831,16 @@ export default function ActualDispatchPage() {
                               readOnly
                             />
                           </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors">
+                          <div className={cn(
+                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors",
+                            !(Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
+                          )}>
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                State Permit <span className="text-red-500">*</span> {vehicleData.permit1_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit1_file_name})</span>}
+                              <span className={cn(
+                                "text-[10px] font-black uppercase transition-colors break-words",
+                                Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
+                              )}>
+                                State Permit {Number(vehicleData.gvw) > 3000 ? (selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>) : <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>} {vehicleData.permit1_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit1_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2834,28 +2849,32 @@ export default function ActualDispatchPage() {
                                 helperText="Max file size: 20 MB"
                                 uploading={isUploading === 'permit1'}
                                 buttonText={vehicleData.permit1_file_name ? 'REPLACE' : 'UPLOAD'}
+                                disabled={!(Number(vehicleData.gvw) > 3000)}
                                 onFilesSelected={(files) => handleFileChange('permit1', 'permit1_file_name', files[0] || null)}
                               />
                             </div>
                             <Input
                               type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
+                              className={cn(
+                                "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
+                                Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed opacity-80"
+                              )}
                               min={minDate}
                               value={vehicleData.permit1_end_date}
                               onChange={(e) => setVehicleData(p => ({ ...p, permit1_end_date: e.target.value }))}
-                              readOnly
+                              disabled={!(Number(vehicleData.gvw) > 3000)}
                             />
                           </div>
                           <div className={cn(
                             "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors",
-                            !isInterState ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
+                            !(isInterState && Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
                           )}>
                             <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-2 w-full">
                               <span className={cn(
                                 "text-[10px] font-black uppercase transition-colors break-words",
-                                isInterState ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
+                                isInterState && Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
                               )}>
-                                National / Other State Permit {isInterState && <span className="text-red-500">*</span>} {vehicleData.permit2_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit2_file_name})</span>}
+                                National / Other State Permit {isInterState && Number(vehicleData.gvw) > 3000 ? <span className="text-red-500">*</span> : (Number(vehicleData.gvw) <= 3000 && <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>)} {vehicleData.permit2_file_name && <span className="text-purple-500 normal-case font-medium ml-1">({vehicleData.permit2_file_name})</span>}
                               </span>
                               <FileUploadField
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2864,7 +2883,7 @@ export default function ActualDispatchPage() {
                                 helperText="Max file size: 20 MB"
                                 uploading={isUploading === 'permit2_out_state'}
                                 buttonText={vehicleData.permit2_file_name ? 'REPLACE' : 'UPLOAD'}
-                                disabled={!isInterState}
+                                disabled={!(isInterState && Number(vehicleData.gvw) > 3000)}
                                 onFilesSelected={(files) => handleFileChange('permit2_out_state', 'permit2_file_name', files[0] || null)}
                               />
                             </div>
@@ -2872,12 +2891,12 @@ export default function ActualDispatchPage() {
                               type="date"
                               className={cn(
                                 "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
-                                isInterState ? "bg-white" : "bg-slate-100 cursor-not-allowed"
+                                isInterState && Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed"
                               )}
                               min={minDate}
                               value={vehicleData.permit2_end_date}
                               onChange={(e) => setVehicleData(p => ({ ...p, permit2_end_date: e.target.value }))}
-                              disabled={!isInterState || isReadOnly}
+                              disabled={!(isInterState && Number(vehicleData.gvw) > 3000) || isReadOnly}
                             />
                           </div>
                         </div>
@@ -3148,9 +3167,11 @@ export default function ActualDispatchPage() {
                               <p className="text-sm font-black text-red-600 uppercase tracking-tighter">Vehicle is overload!</p>
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-[10px] font-black uppercase text-red-500 tracking-widest ml-1">Overload Remarks <span className="text-red-500">*</span></Label>
+                              <Label className="text-[10px] font-black uppercase text-red-500 tracking-widest ml-1">
+                                Overload Remarks {selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>}
+                              </Label>
                               <Input
-                                placeholder="Why is the vehicle being overloaded? (MANDATORY)"
+                                placeholder={selectedDepoTab?.toUpperCase() === 'BANARI' ? "Why is the vehicle being overloaded? (MANDATORY)" : "Why is the vehicle being overloaded? (Optional)"}
                                 className="h-10 border-2 border-red-200 rounded-xl bg-white font-bold text-red-700 placeholder:text-red-300 focus:border-red-500 transition-all"
                                 value={loadData.overloadRemarks}
                                 onChange={(e) => setLoadData(p => ({ ...p, overloadRemarks: e.target.value }))}
@@ -3202,7 +3223,7 @@ export default function ActualDispatchPage() {
               <Button
                 variant="outline"
                 onClick={handleSaveDraft}
-                disabled={isSavingDraft || isProcessing || !vehicleNumber || !loadData.transporterName}
+                disabled={isSavingDraft || isProcessing || (selectedDepoTab?.toUpperCase() === 'BANARI' && (!vehicleNumber || !loadData.transporterName))}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50 font-semibold h-11 sm:h-10"
               >
                 {isSavingDraft ? "Saving..." : "Save Draft"}
