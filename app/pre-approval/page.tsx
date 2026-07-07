@@ -908,7 +908,7 @@ export default function PreApprovalPage() {
     }));
   };
 
-  const handleApproveWithAdditions = async (itemsToApprove: any[]) => {
+  const handleApproveWithAdditions = async (itemsToApprove: any[], skipIds: number[] = []) => {
     setIsApproving(true)
     try {
       const normalizeType = (t: string) => {
@@ -1150,7 +1150,7 @@ export default function PreApprovalPage() {
 
       if (approvalPayloads.length > 0 || cascadeBudgets.length > 0) {
         try {
-          await preApprovalApi.submitBatch({ approvals: approvalPayloads, cascadeBudgets });
+          await preApprovalApi.submitBatch({ approvals: approvalPayloads, cascadeBudgets, skipIds });
           itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) => successfulApprovals.push(i));
         } catch (error: any) {
           console.error('Batch submission failed — all approvals and deductions rolled back:', error)
@@ -2898,7 +2898,20 @@ export default function PreApprovalPage() {
                           customerName: prod._orderData.customerName,
                           orderType: prod._orderData.orderType
                         }))
-                        handleApproveWithAdditions(itemsToApprove)
+
+                        // For Stock Transfer DOs: collect IDs of products in the same DO
+                        // that were NOT selected. These will be auto-closed by the backend
+                        // so they don't remain stuck in the pending list.
+                        const skipIds: number[] = allProductsFromSelectedOrders
+                          .filter(p =>
+                            !selectedProductRows.includes(p._rowKey) &&
+                            !p._isNew &&
+                            (p?.order_category || p?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER"
+                          )
+                          .map(p => p.id)
+                          .filter(Boolean)
+
+                        handleApproveWithAdditions(itemsToApprove, skipIds)
                       }}
                       disabled={
                         isReadOnly ||
