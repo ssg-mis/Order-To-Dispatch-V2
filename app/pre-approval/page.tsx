@@ -503,6 +503,7 @@ export default function PreApprovalPage() {
       orderNo: backendOrder.order_no,
       customerName: backendOrder.customer_name,
       orderType: backendOrder.order_type,
+      orderCategory: backendOrder.order_category, // Stock Transfer / Sales
       customerType: backendOrder.customer_type,
       orderPurpose: backendOrder.order_type_delivery_purpose,
       deliveryDate: backendOrder.delivery_date,
@@ -542,6 +543,7 @@ export default function PreApprovalPage() {
         rateOfMaterial: backendOrder.rate_of_material, // Map rate_of_material
         skuName: backendOrder.sku_name,
         approvalQty: backendOrder.approval_qty,
+        order_category: backendOrder.order_category, // carry category to product level
       }]
     };
   };
@@ -689,8 +691,9 @@ export default function PreApprovalPage() {
 
         const rateOfMaterial = parseFloat(rateData?.rateOfMaterial || product.rateOfMaterial || "0") || 0;
         const enteredRate = parseFloat(rateData?.rate) || 0;
+        const isStockTransfer = (product?.order_category || product?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER";
 
-        if (!rateData?.rate) {
+        if (!rateData?.rate && !isStockTransfer) {
           toast({
             title: "Rate Required",
             description: `Please enter a Final Rate for all selected products.`,
@@ -925,8 +928,9 @@ export default function PreApprovalPage() {
 
         const rateOfMaterial = parseFloat(rateData?.rateOfMaterial || product.rateOfMaterial || "0") || 0;
         const enteredRate = parseFloat(rateData?.rate) || 0;
+        const isStockTransfer = (product?.order_category || product?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER";
 
-        if (!rateData?.rate) {
+        if (!rateData?.rate && !isStockTransfer) {
           toast({
             title: "Rate Required",
             description: `Please enter a Final Rate for all selected products.`,
@@ -1483,6 +1487,7 @@ export default function PreApprovalPage() {
         grouped[groupKey]._ordersMap[baseDo] = {
           customerName: order.customerName,
           customerType: order.customerType,
+          orderCategory: order.orderCategory, // e.g. "Stock Transfer" / "Sales"
           orderPurpose: order.orderPurpose,
           orderType: order.orderType,
           startDate: order.startDate,
@@ -1787,7 +1792,9 @@ export default function PreApprovalPage() {
       .reduce((sum, p) => { const _gr = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _gq = parseFloat(p.order_quantity || p.orderQty || "0") || 0; return sum + (_gr > 0 ? Math.min(_gr, _gq) : _gq); }, 0)
 
     const groupApproved = groupRows.reduce((sum, p) => sum + apprOf(p), 0)
-    const overBudget = groupApproved > groupBudget
+    // Stock Transfer: allow exceeding original qty (no hard block)
+    const isStockTransfer = (product?.order_category || product?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER"
+    const overBudget = !isStockTransfer && groupApproved > groupBudget
     const sharedGroup = groupRows.length > 1
     const groupKeys = new Set(groupRows.map(p => p._rowKey))
 
@@ -2295,8 +2302,8 @@ export default function PreApprovalPage() {
                                                     {!isNew ? (
                                                       <>
                                                         <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{calculatedOrderQty}</Badge>
-                                                        {/* Show remaining qty if approval_qty < order_qty */}
-                                                        {product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
+                                                        {/* Show remaining qty only for non-Stock Transfer */}
+                                                        {(product?.order_category || "").toUpperCase() !== "STOCK TRANSFER" && product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
                                                           <span className="text-[9px] text-amber-600 font-bold">
                                                             Remaining: {maxQty - parseFloat(product.approvalQty)}
                                                           </span>
@@ -2693,7 +2700,7 @@ export default function PreApprovalPage() {
                                                 {!isNew ? (
                                                   <>
                                                     <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{calculatedOrderQty}</Badge>
-                                                    {product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
+                                                    {(product?.order_category || "").toUpperCase() !== "STOCK TRANSFER" && product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
                                                       <p className="mt-1 text-[9px] text-amber-600 font-bold">Remaining: {maxQty - parseFloat(product.approvalQty)}</p>
                                                     )}
                                                   </>

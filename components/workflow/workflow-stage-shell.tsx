@@ -664,7 +664,7 @@ export function WorkflowStageShell({
               <div className="flex justify-between items-start">
                 <div>
                   <Badge className="bg-white/15 hover:bg-white/15 text-white border-white/30 text-xs font-black uppercase tracking-widest px-3 py-1 mb-2">
-                    DO No: {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || "—"}
+                    DO No: {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || selectedHistoryItem?.order_no || "—"}
                   </Badge>
                   <DialogTitle className="text-2xl font-black uppercase tracking-tight italic">Record Details</DialogTitle>
                   <DialogDescription className="text-blue-100 font-bold mt-1 uppercase text-[10px] tracking-widest">

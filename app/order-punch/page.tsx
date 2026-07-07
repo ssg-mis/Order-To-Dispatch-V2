@@ -223,6 +223,7 @@ export default function OrderPunchPage() {
   const [gst, setGst] = useState<string>("") // New state for GST
   const [contactPerson, setContactPerson] = useState<string>("")
   const [whatsappNo, setWhatsappNo] = useState<string>("")
+  const [whatsappNoError, setWhatsappNoError] = useState<string>("")
   const [customerAddress, setCustomerAddress] = useState<string>("")
   const [deliveryAddress, setDeliveryAddress] = useState<string>("")
   const [sameAsCustomerAddress, setSameAsCustomerAddress] = useState<boolean>(true)
@@ -371,6 +372,20 @@ export default function OrderPunchPage() {
     }
   }, [orderCategory])
 
+  // Dynamic validation for WhatsApp number
+  useEffect(() => {
+    if (!whatsappNo) {
+      setWhatsappNoError("")
+      return
+    }
+    const digits = whatsappNo.replace(/\D/g, "")
+    if (digits.length !== 10) {
+      setWhatsappNoError("WhatsApp number must be exactly 10 digits")
+    } else {
+      setWhatsappNoError("")
+    }
+  }, [whatsappNo])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -384,6 +399,18 @@ export default function OrderPunchPage() {
         description: "Please select a customer before submitting the order.",
         variant: "destructive",
       })
+      return
+    }
+
+    // Validate WhatsApp number: min and max 10 digits
+    const cleanedWhatsapp = whatsappNo.replace(/\D/g, "")
+    if (cleanedWhatsapp.length !== 10) {
+      toast({
+        title: "Validation Error",
+        description: "Customer contact person WhatsApp number must be exactly 10 digits.",
+        variant: "destructive",
+      })
+      setWhatsappNoError("WhatsApp number must be exactly 10 digits")
       return
     }
 
@@ -786,6 +813,7 @@ export default function OrderPunchPage() {
     setGst("")
     setContactPerson("")
     setWhatsappNo("")
+    setWhatsappNoError("")
     setCustomerAddress("")
     setDeliveryAddress("")
     setSameAsCustomerAddress(true)
@@ -1139,11 +1167,22 @@ export default function OrderPunchPage() {
                   id="whatsappNo"
                   placeholder="Enter WhatsApp number"
                   value={whatsappNo}
-                  onChange={(e) => setWhatsappNo(e.target.value)}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/\D/g, "").slice(0, 10);
+                    setWhatsappNo(cleaned);
+                  }}
+                  minLength={10}
+                  maxLength={10}
                   required
                   disabled={isWhatsappNoAutoFilled}
-                  className={isWhatsappNoAutoFilled ? "bg-muted" : ""}
+                  className={cn(
+                    isWhatsappNoAutoFilled ? "bg-muted" : "",
+                    whatsappNoError && "border-red-500 focus-visible:ring-red-500"
+                  )}
                 />
+                {whatsappNoError && (
+                  <p className="text-xs text-red-600 font-medium">{whatsappNoError}</p>
+                )}
               </div>
 
               <div className="space-y-2 md:col-span-2">

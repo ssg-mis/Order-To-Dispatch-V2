@@ -24,6 +24,9 @@ export interface CustomerWiseCustomer {
 // ── Colors ──────────────────────────────────────────────────────────────────
 const WHITE: [number, number, number] = [255, 255, 255]
 const GRAY: [number, number, number] = [217, 217, 217]
+const OIL_FILL: Record<string, [number, number, number]> = {
+  rice: [252, 228, 214], soya: [226, 239, 218], palm: [197, 217, 241], other: [229, 231, 235],
+}
 
 // ── Formatting ──────────────────────────────────────────────────────────────
 const SHORT_MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -34,6 +37,13 @@ const fmtSaudaDate = (s: string | null): string => {
   return `${d.getDate()} ${SHORT_MONTH[d.getMonth()]} ${d.getFullYear()}`
 }
 const num = (n: number) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })
+const oilKeyOf = (label: string): string => {
+  const l = (label || "").toLowerCase()
+  if (l.includes("rice")) return "rice"
+  if (l.includes("soya") || l.includes("soy")) return "soya"
+  if (l.includes("palm")) return "palm"
+  return "other"
+}
 
 const COL_HEADERS = ["Sauda No.", "Sauda Date", "Oil Type", "Original Qty", "Pending Qty", "Rate (15 KGS Tin)"]
 
@@ -51,8 +61,8 @@ export function generateCustomerWiseSaudaPdf(customers: CustomerWiseCustomer[], 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
 
   const body: any[] = []
-  const rowTypes: string[] = []
-  const push = (cells: any[], type: string) => { body.push(cells); rowTypes.push(type) }
+  const rowMeta: { type: string; oil?: string }[] = []
+  const push = (cells: any[], type: string, oil?: string) => { body.push(cells); rowMeta.push({ type, oil }) }
 
   customers.forEach((cust) => {
     push([{ content: "Customer:" }, { content: cust.customer_name, colSpan: 5, styles: { halign: "center" } }], "customer")
@@ -69,7 +79,7 @@ export function generateCustomerWiseSaudaPdf(customers: CustomerWiseCustomer[], 
                 oil.oil_type, num(oil.original_qty), num(oil.pending_qty), oil.rate ? num(oil.rate) : "",
               ]
             : [oil.oil_type, num(oil.original_qty), num(oil.pending_qty), oil.rate ? num(oil.rate) : ""]
-        push(cells, "oil")
+        push(cells, "oil", oilKeyOf(oil.oil_type))
       })
       push(["", "", { content: "Total", styles: { halign: "right" } }, num(s.total_original), num(s.total_pending), ""], "total")
     })
@@ -89,9 +99,9 @@ export function generateCustomerWiseSaudaPdf(customers: CustomerWiseCustomer[], 
   push([
     { content: `TOTAL ${saudaCount} SAUDA`, rowSpan: 4, colSpan: 2, styles: { halign: "center", valign: "middle", fontStyle: "bold", fillColor: WHITE } },
     "Total Rice Oil", num(agg.rice.o), num(agg.rice.p), "",
-  ], "summary-oil")
-  push(["Total Soya Oil", num(agg.soya.o), num(agg.soya.p), ""], "summary-oil")
-  push(["Total Palm Oil", num(agg.palm.o), num(agg.palm.p), ""], "summary-oil")
+  ], "summary-oil", "rice")
+  push(["Total Soya Oil", num(agg.soya.o), num(agg.soya.p), ""], "summary-oil", "soya")
+  push(["Total Palm Oil", num(agg.palm.o), num(agg.palm.p), ""], "summary-oil", "palm")
   push([{ content: "Grand Total", styles: { halign: "right" } }, num(agg.grand.o), num(agg.grand.p), ""], "grand")
 
   const head = [
@@ -124,15 +134,30 @@ export function generateCustomerWiseSaudaPdf(customers: CustomerWiseCustomer[], 
         d.cell.styles.halign = "center"
         return
       }
-      const t = rowTypes[d.row.index]
+      const meta = rowMeta[d.row.index]
+      if (!meta) return
+      const t = meta.type
       if (t === "customer") { d.cell.styles.fillColor = WHITE; d.cell.styles.fontStyle = "bold" }
       else if (t === "colheader") { d.cell.styles.fillColor = WHITE; d.cell.styles.fontStyle = "bold"; d.cell.styles.halign = "center" }
-      else if (t === "oil") { d.cell.styles.fillColor = ci >= 2 ? GRAY : WHITE }
+      else if (t === "oil") { d.cell.styles.fillColor = ci >= 2 ? (OIL_FILL[meta.oil!] || GRAY) : WHITE }
       else if (t === "total") { d.cell.styles.fillColor = WHITE; d.cell.styles.fontStyle = "bold" }
-      else if (t === "summary-oil") { d.cell.styles.fillColor = ci >= 2 && ci <= 4 ? GRAY : WHITE }
+      else if (t === "summary-oil") { d.cell.styles.fillColor = ci >= 2 && ci <= 4 ? (OIL_FILL[meta.oil!] || GRAY) : WHITE }
       else if (t === "grand") { d.cell.styles.fillColor = WHITE; d.cell.styles.fontStyle = "bold" }
     },
   })
+
+  // Footer: "Page X of Y" on every page
+  const pageCount = (doc as any).getNumberOfPages()
+  const pageSize = doc.internal.pageSize
+  const pageWidth = (pageSize as any).getWidth ? (pageSize as any).getWidth() : (pageSize as any).width
+  const pageHeight = (pageSize as any).getHeight ? (pageSize as any).getHeight() : (pageSize as any).height
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    doc.setFontSize(8)
+    doc.setFont("helvetica", "normal")
+    doc.setTextColor(0, 0, 0)
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 2, { align: "center" })
+  }
 
   // Open in a new tab for preview; the browser's PDF viewer handles download/print.
   doc.setProperties({ title: (filename || "Customer-wise CP Pending Sauda Report (Summary)").replace(/\.pdf$/i, "") })

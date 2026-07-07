@@ -202,6 +202,16 @@ export function generateCustomerWiseDetailedPdf(customers: DetailedCustomer[], f
     })
   })
 
+  // Footer: "Page X of Y" on every page
+  const pageCount = (doc as any).getNumberOfPages()
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    doc.setFontSize(8)
+    doc.setFont("helvetica", "normal")
+    doc.setTextColor(0, 0, 0)
+    doc.text(`Page ${i} of ${pageCount}`, pageW / 2, pageH - 2, { align: "center" })
+  }
+
   doc.setProperties({ title: (filename || "Customer-wise CP Pending Sauda Report (Detailed)").replace(/\.pdf$/i, "") })
   window.open(doc.output("bloburl") as unknown as string, "_blank")
 }

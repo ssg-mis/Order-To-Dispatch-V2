@@ -204,6 +204,19 @@ export function generatePendingSaudaPdf(report: PendingSaudaReport) {
     },
   })
 
+  // Footer: "Page X of Y" on every page
+  const pageCount = (doc as any).getNumberOfPages()
+  const pageSize = doc.internal.pageSize
+  const pageWidth = (pageSize as any).getWidth ? (pageSize as any).getWidth() : (pageSize as any).width
+  const pageHeight = (pageSize as any).getHeight ? (pageSize as any).getHeight() : (pageSize as any).height
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    doc.setFontSize(8)
+    doc.setFont("helvetica", "normal")
+    doc.setTextColor(0, 0, 0)
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 2, { align: "center" })
+  }
+
   // Open in a new tab for preview; the browser's PDF viewer handles download/print.
   doc.setProperties({ title: `CP Pending Sauda Report upto ${uptoStr}` })
   window.open(doc.output("bloburl") as unknown as string, "_blank")
