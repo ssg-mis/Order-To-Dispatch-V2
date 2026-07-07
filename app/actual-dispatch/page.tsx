@@ -964,11 +964,12 @@ export default function ActualDispatchPage() {
         bhada: ""
       })
 
-      // Silently restore saved draft if one exists
-      if (user?.username && targetGroups.length > 0) {
+      // Silently restore saved draft if one exists — shared per order, so this
+      // restores drafts saved by any user, not just the current one
+      if (targetGroups.length > 0) {
         const orderKey = targetGroups[0]._rowKey;
         try {
-          const res = await draftApi.get(user.username, orderKey);
+          const res = await draftApi.get(orderKey);
           if (res.success && res.data?.draft_data) {
             const d = res.data.draft_data;
             if (d.vehicleNumber !== undefined) setVehicleNumber(d.vehicleNumber);
@@ -1492,11 +1493,29 @@ export default function ActualDispatchPage() {
           description: `${successfulDispatches.length} item(s) processed through all stages successfully.`,
         });
 
+        // Stock Transfer DOs are dispatched in one go — any sibling SKU left
+        // unselected should vanish rather than stay pending for a later partial
+        // dispatch (that behavior is only valid for regular Sales orders).
+        const deselectedStockTransferDsrNumbers = selectedGroups.flatMap((g: any) =>
+          g._allProducts
+            .filter((p: any) => !dialogSelectedProducts.includes(p._rowKey))
+            .filter((p: any) => (p.order_category || "").toUpperCase() === "STOCK TRANSFER")
+            .map((p: any) => p.d_sr_number || p.dsrNumber)
+        ).filter(Boolean);
+
+        if (deselectedStockTransferDsrNumbers.length > 0) {
+          try {
+            await actualDispatchApi.cancelUnselected(deselectedStockTransferDsrNumbers);
+          } catch (error) {
+            console.error('Failed to cancel unselected Stock Transfer SKUs', error);
+          }
+        }
+
         // Clean up drafts for all selected groups after successful submission
-        if (user?.username && selectedGroups.length > 0) {
+        if (selectedGroups.length > 0) {
           await Promise.all(
             selectedGroups.map((g: any) =>
-              draftApi.delete(user.username, g._rowKey).catch(() => {})
+              draftApi.delete(g._rowKey).catch(() => {})
             )
           );
         }

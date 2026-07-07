@@ -12,7 +12,7 @@ export interface AuthUser {
   role: string
   page_access: string[] | PageAccessMap | null
   depo_access: Record<string, string[]> | null
-  features?: Record<string, boolean>
+  features?: Record<string, any>
 }
 
 interface AuthContextType {

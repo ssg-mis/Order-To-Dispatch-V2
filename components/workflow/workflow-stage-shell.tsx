@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Eye, Search, Filter, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Eye, Search, Filter, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronUp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
@@ -62,6 +62,7 @@ interface WorkflowStageShellProps {
   showSaudaFilter?: boolean
   /** Label for the date-range filter. When set (e.g. "DO Date"), inputs read "<label> From"/"<label> To". */
   dateLabel?: string
+  groupBySiblingDo?: boolean
 }
 
 const FIELD_GROUPS: Record<string, number> = {
@@ -169,6 +170,7 @@ export function WorkflowStageShell({
   showDateFilters = true,
   showSaudaFilter = false,
   dateLabel,
+  groupBySiblingDo = false,
 }: WorkflowStageShellProps) {
   const [filters, setFilters] = React.useState({
     search: "",
@@ -182,6 +184,20 @@ export function WorkflowStageShell({
   const [selectedHistoryItem, setSelectedHistoryItem] = React.useState<any>(null)
   const [historySearch, setHistorySearch] = React.useState("")
   const [partySearchOpen, setPartySearchOpen] = React.useState(false)
+  const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>({})
+
+  // Helper to extract base order no
+  const getBaseOrderNo = (orderNo: string): string => {
+    if (!orderNo) return "";
+    return orderNo.replace(/[A-Za-z]$/, "");
+  };
+
+  const toggleGroup = (baseOrderNo: string) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [baseOrderNo]: !prev[baseOrderNo]
+    }))
+  }
 
   // History table sorting
   const [historySortField, setHistorySortField] = React.useState<string>("date")
@@ -229,6 +245,38 @@ export function WorkflowStageShell({
       return 0
     })
   }, [historyData, historySortField, historySortDir])
+
+  // Group history data by base order number if enabled
+  const groupedHistoryData = React.useMemo(() => {
+    if (!sortedHistoryData || sortedHistoryData.length === 0) return [];
+    if (!groupBySiblingDo) return sortedHistoryData;
+
+    const groupsMap: Record<string, any[]> = {};
+    sortedHistoryData.forEach((item) => {
+      const base = getBaseOrderNo(item.orderNo) || item.orderNo || "unknown";
+      if (!groupsMap[base]) {
+        groupsMap[base] = [];
+      }
+      groupsMap[base].push(item);
+    });
+
+    return Object.entries(groupsMap).map(([baseOrderNo, items]) => {
+      // Representative properties are from the first item
+      const rep = items[0] || {};
+      return {
+        isGroup: true,
+        baseOrderNo,
+        items,
+        // Match history fields for rendering & sorting
+        date: rep.date || "-",
+        orderNo: baseOrderNo,
+        customerName: rep.customerName || "-",
+        status: rep.status || "Completed",
+        remarks: rep.remarks || "-",
+        rawData: rep.rawData || rep,
+      };
+    });
+  }, [sortedHistoryData, groupBySiblingDo]);
 
   // Group the selected record's fields by stage so the "View" dialog shows
   // section-wise history (which fields came from which stage) instead of one
@@ -556,95 +604,264 @@ export function WorkflowStageShell({
                         </tr>
                       </thead>
                       <tbody>
-                        {sortedHistoryData.map((item, i) => (
-                          <tr key={i} className="border-b hover:bg-muted/20 transition-colors">
-                            <td className="px-4 py-3 text-xs">{item.date || "-"}</td>
-                            <td className="px-4 py-3 font-bold text-blue-700 text-xs">{item.orderNo || "-"}</td>
-                            <td className="px-4 py-3 text-xs font-semibold capitalize">{item.customerName || "-"}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span
-                                className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${item.status === "Approved" || item.status === "Completed" || item.status === "Verified"
-                                  ? "bg-green-100 text-green-700 border border-green-200"
-                                  : item.status === "Rejected"
-                                    ? "bg-red-100 text-red-700 border border-red-200"
-                                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                                  }`}
-                              >
-                                {item.status || "Completed"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
-                              {item.remarks || "-"}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                onClick={() => setSelectedHistoryItem(item.rawData || item)}
-                              >
-                                <Eye className="mr-1 h-3 w-3" />
-                                View
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
+                        {groupedHistoryData.map((item, i) => {
+                          if (item.isGroup && item.items.length > 1) {
+                            const isExpanded = !!expandedGroups[item.baseOrderNo];
+                            return (
+                              <React.Fragment key={item.baseOrderNo}>
+                                {/* Main Group Row */}
+                                <TableRow className="bg-slate-50/50 hover:bg-slate-100/50 border-b transition-colors font-semibold">
+                                  <TableCell className="px-4 py-3 text-xs">{item.date}</TableCell>
+                                  <TableCell className="px-4 py-3 text-xs flex items-center gap-1.5 font-bold text-slate-800">
+                                    <span>{item.baseOrderNo}</span>
+                                    <Badge className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase">
+                                      {item.items.length} Items
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-xs capitalize text-slate-600">{item.customerName}</TableCell>
+                                  <TableCell className="px-4 py-3 text-center">
+                                    <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
+                                      Grouped
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
+                                    Multiple siblings grouped
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-center">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
+                                      onClick={() => toggleGroup(item.baseOrderNo)}
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          <ChevronUp className="mr-1 h-3 w-3" /> Collapse
+                                        </>
+                                      ) : (
+                                        <>
+                                          <ChevronDown className="mr-1 h-3 w-3" /> Expand
+                                        </>
+                                      )}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+
+                                {/* Child rows when expanded */}
+                                {isExpanded && item.items.map((sibling: any) => (
+                                  <TableRow key={sibling.orderNo} className="bg-white hover:bg-blue-50/10 border-b transition-colors">
+                                    <TableCell className="px-4 py-2.5 text-xs text-slate-400 pl-8">{sibling.date || "-"}</TableCell>
+                                    <TableCell className="px-4 py-2.5 font-bold text-blue-700 text-xs pl-8 flex items-center gap-1">
+                                      <span className="text-slate-300 font-normal">↳</span>
+                                      {sibling.orderNo || "-"}
+                                    </TableCell>
+                                    <TableCell className="px-4 py-2.5 text-xs text-slate-500 capitalize pl-8">{sibling.customerName || "-"}</TableCell>
+                                    <TableCell className="px-4 py-2.5 text-center">
+                                      <span
+                                        className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
+                                          ? "bg-green-100 text-green-700 border border-green-200"
+                                          : sibling.status === "Rejected"
+                                            ? "bg-red-100 text-red-700 border border-red-200"
+                                            : "bg-slate-100 text-slate-700 border border-slate-200"
+                                          }`}
+                                      >
+                                        {sibling.status || "Completed"}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="px-4 py-2.5 text-[10px] text-muted-foreground font-medium italic pl-8">
+                                      {sibling.remarks || "-"}
+                                    </TableCell>
+                                    <TableCell className="px-4 py-2.5 text-center">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
+                                        onClick={() => setSelectedHistoryItem(sibling.rawData || sibling)}
+                                      >
+                                        <Eye className="mr-1 h-3 w-3" />
+                                        View
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </React.Fragment>
+                            );
+                          } else {
+                            // Normal single row (either flat single row, or a group with 1 item)
+                            const rowItem = item.isGroup ? item.items[0] : item;
+                            return (
+                              <TableRow key={rowItem.orderNo} className="border-b hover:bg-muted/20 transition-colors">
+                                <TableCell className="px-4 py-3 text-xs">{rowItem.date || "-"}</TableCell>
+                                <TableCell className="px-4 py-3 font-bold text-blue-700 text-xs">{rowItem.orderNo || "-"}</TableCell>
+                                <TableCell className="px-4 py-3 text-xs font-semibold capitalize">{rowItem.customerName || "-"}</TableCell>
+                                <TableCell className="px-4 py-3 text-center">
+                                  <span
+                                    className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
+                                      ? "bg-green-100 text-green-700 border border-green-200"
+                                      : rowItem.status === "Rejected"
+                                        ? "bg-red-100 text-red-700 border border-red-200"
+                                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                                      }`}
+                                  >
+                                    {rowItem.status || "Completed"}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
+                                  {rowItem.remarks || "-"}
+                                </TableCell>
+                                <TableCell className="px-4 py-3 text-center">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
+                                    onClick={() => setSelectedHistoryItem(rowItem.rawData || rowItem)}
+                                  >
+                                    <Eye className="mr-1 h-3 w-3" />
+                                    View
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          }
+                        })}
                       </tbody>
                     </table>
 
                     {/* Mobile Card View */}
                     <div className="grid grid-cols-1 gap-4 p-4 md:hidden">
-                      {sortedHistoryData.map((item, i) => (
-                        <Card key={i} className="p-4 border-2 border-slate-100 shadow-sm space-y-3">
-                          <div className="flex justify-between items-start">
-                            <div className="space-y-1">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{item.date || "-"}</p>
-                              <p className="text-sm font-black text-blue-700">{item.orderNo || "-"}</p>
-                            </div>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${item.status === "Approved" || item.status === "Completed" || item.status === "Verified"
-                                ? "bg-green-100 text-green-700 border border-green-200"
-                                : item.status === "Rejected"
-                                  ? "bg-red-100 text-red-700 border border-red-200"
-                                  : "bg-slate-100 text-slate-700 border border-slate-200"
-                                }`}
-                            >
-                              {item.status || "Completed"}
-                            </span>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Party Name</p>
-                            <p className="text-sm font-bold text-slate-800 capitalize">{item.customerName || "-"}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{remarksColName || "Remarks"}</p>
-                            <p className="text-xs text-slate-600 italic leading-relaxed">{item.remarks || "-"}</p>
-                          </div>
+                      {groupedHistoryData.map((item, i) => {
+                        if (item.isGroup && item.items.length > 1) {
+                          const isExpanded = !!expandedGroups[item.baseOrderNo];
+                          return (
+                            <div key={item.baseOrderNo} className="space-y-2">
+                              {/* Group Header Card */}
+                              <Card className="p-4 border-2 border-slate-200 bg-slate-50/50 shadow-sm space-y-3">
+                                <div className="flex justify-between items-start">
+                                  <div className="space-y-1">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{item.date}</p>
+                                    <p className="text-sm font-black text-slate-800 font-bold">{item.baseOrderNo}</p>
+                                  </div>
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
+                                    {item.items.length} Items
+                                  </span>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Party Name</p>
+                                  <p className="text-sm font-bold text-slate-800 capitalize">{item.customerName}</p>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full h-9 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
+                                  onClick={() => toggleGroup(item.baseOrderNo)}
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      <ChevronUp className="mr-2 h-4 w-4" /> Hide Siblings
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="mr-2 h-4 w-4" /> Show Siblings ({item.items.length})
+                                    </>
+                                  )}
+                                </Button>
+                              </Card>
 
-                          {/* Show specific remarks if available in data */}
-                          {(item.rawData?.order_punch_remarks || item.order_punch_remarks) && (
-                            <div className="space-y-1 border-l-2 border-slate-100 pl-3">
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Order Punch Remarks</p>
-                              <p className="text-xs text-slate-800 font-bold leading-tight">{item.rawData?.order_punch_remarks || item.order_punch_remarks}</p>
+                              {/* Nested Sibling Cards */}
+                              {isExpanded && (
+                                <div className="pl-4 border-l-2 border-slate-200 space-y-2">
+                                  {item.items.map((sibling: any) => (
+                                    <Card key={sibling.orderNo} className="p-3 border border-slate-100 bg-white shadow-sm space-y-3">
+                                      <div className="flex justify-between items-start">
+                                        <div className="space-y-1">
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{sibling.date || "-"}</p>
+                                          <p className="text-xs font-black text-blue-700">{sibling.orderNo || "-"}</p>
+                                        </div>
+                                        <span
+                                          className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
+                                            ? "bg-green-100 text-green-700 border border-green-200"
+                                            : sibling.status === "Rejected"
+                                              ? "bg-red-100 text-red-700 border border-red-200"
+                                              : "bg-slate-100 text-slate-700 border border-slate-200"
+                                            }`}
+                                        >
+                                          {sibling.status || "Completed"}
+                                        </span>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest font-bold">Remarks</p>
+                                        <p className="text-xs text-slate-600 italic leading-relaxed">{sibling.remarks || "-"}</p>
+                                      </div>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full h-8 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter text-[10px]"
+                                        onClick={() => setSelectedHistoryItem(sibling.rawData || sibling)}
+                                      >
+                                        <Eye className="mr-2 h-3.5 w-3.5" /> View Full Details
+                                      </Button>
+                                    </Card>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {(item.rawData?.revert_security_remarks || item.revert_security_remarks) && (
-                            <div className="space-y-1 border-l-2 border-red-100 pl-3">
-                              <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-none mb-1">Security Remarks</p>
-                              <p className="text-xs text-red-700 font-bold leading-tight">{item.rawData?.revert_security_remarks || item.revert_security_remarks}</p>
-                            </div>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full h-9 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                            onClick={() => setSelectedHistoryItem(item.rawData || item)}
-                          >
-                            <Eye className="mr-2 h-4 w-4" />
-                            View Full Details
-                          </Button>
-                        </Card>
-                      ))}
+                          );
+                        } else {
+                          // Normal single row/card
+                          const rowItem = item.isGroup ? item.items[0] : item;
+                          return (
+                            <Card key={rowItem.orderNo} className="p-4 border-2 border-slate-100 shadow-sm space-y-3">
+                              <div className="flex justify-between items-start">
+                                <div className="space-y-1">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{rowItem.date || "-"}</p>
+                                  <p className="text-sm font-black text-blue-700">{rowItem.orderNo || "-"}</p>
+                                </div>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
+                                    ? "bg-green-100 text-green-700 border border-green-200"
+                                    : rowItem.status === "Rejected"
+                                      ? "bg-red-100 text-red-700 border border-red-200"
+                                      : "bg-slate-100 text-slate-700 border border-slate-200"
+                                    }`}
+                                >
+                                  {rowItem.status || "Completed"}
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">Party Name</p>
+                                <p className="text-sm font-bold text-slate-800 capitalize">{rowItem.customerName || "-"}</p>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">Remarks</p>
+                                <p className="text-xs text-slate-600 italic leading-relaxed">{rowItem.remarks || "-"}</p>
+                              </div>
+
+                              {/* Show specific remarks if available in data */}
+                              {(rowItem.rawData?.order_punch_remarks || rowItem.order_punch_remarks) && (
+                                <div className="space-y-1 border-l-2 border-slate-100 pl-3">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Order Punch Remarks</p>
+                                  <p className="text-xs text-slate-800 font-bold leading-tight">{rowItem.rawData?.order_punch_remarks || rowItem.order_punch_remarks}</p>
+                                </div>
+                              )}
+                              {(rowItem.rawData?.revert_security_remarks || rowItem.revert_security_remarks) && (
+                                <div className="space-y-1 border-l-2 border-red-100 pl-3">
+                                  <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-none mb-1">Security Remarks</p>
+                                  <p className="text-xs text-red-700 font-bold leading-tight">{rowItem.rawData?.revert_security_remarks || rowItem.revert_security_remarks}</p>
+                                </div>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full h-9 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
+                                onClick={() => setSelectedHistoryItem(rowItem.rawData || rowItem)}
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Full Details
+                              </Button>
+                            </Card>
+                          );
+                        }
+                      })}
                     </div>
 
                     {historyFooter}

@@ -15,6 +15,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { processStageApi } from "@/lib/api-service"
 
 const STAGE_OPTIONS = [
+  "Commitment Punch",
+  "Order Punch",
   "Pre Approval",
   "Approval of Order",
   "Dispatch Planning",

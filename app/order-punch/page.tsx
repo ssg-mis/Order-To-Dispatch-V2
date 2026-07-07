@@ -74,7 +74,7 @@ type PreApprovalProduct = {
 
 export default function OrderPunchPage() {
   const { toast } = useToast()
-  const { isReadOnly, user, isLoading: isAuthLoading } = useAuth()
+  const { isReadOnly, user, isAdmin, isLoading: isAuthLoading } = useAuth()
   const router = useRouter()
 
   // New state for customers
@@ -275,6 +275,35 @@ export default function OrderPunchPage() {
     const banari = allowedDepos.find((d: string) => d.toLowerCase() === "banari")
     setDepoName(banari || (allowedDepos.length > 0 ? allowedDepos[0] : "Banari"))
   }, [user])
+
+  // Admins/Super Admins always see every option; other users only see the values
+  // granted to them under Settings > Order Punch Field Access. Default is no access.
+  const allowedOrderThroughTypes: string[] = isAdmin
+    ? ["Direct", "Broker", "Salesperson"]
+    : (user?.features?.order_punch_access?.is_order_through || [])
+  const allowedBrokerNames: string[] | null = isAdmin
+    ? null
+    : (user?.features?.order_punch_access?.broker_name || [])
+
+  useEffect(() => {
+    if (isAdmin || !user) return
+    if (allowedOrderThroughTypes.length === 0) {
+      setIsBrokerOrder("Direct")
+    } else if (!allowedOrderThroughTypes.includes(isBrokerOrder)) {
+      setIsBrokerOrder(allowedOrderThroughTypes[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin])
+
+  useEffect(() => {
+    if (isAdmin || !user || isBrokerOrder !== "Broker" || !allowedBrokerNames) return
+    if (allowedBrokerNames.length === 0) {
+      setBrokerName("")
+    } else if (!allowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
+      setBrokerName(allowedBrokerNames[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin, isBrokerOrder])
 
   // Customer Auto-fill Effect
   useEffect(() => {
@@ -655,12 +684,8 @@ export default function OrderPunchPage() {
         // Show success message with prominently displayed order number
         toast({
           title: "✅ Order Created Successfully!",
-          description: `Order Number: ${backendOrderNo.replace(/[A-Z]$/i, '')}`,
-          duration: 5000,
+          description: `Order Number: ${backendOrderNo.replace(/[A-Z]$/i, '')} — this order has been saved to the database.`,
         })
-
-        // Show additional alert for emphasis
-        alert(`Order created successfully!\n\nOrder Number: ${backendOrderNo.replace(/[A-Z]$/i, '')}\n\nThis order has been saved to the database.`)
 
         resetForm()
 
@@ -1168,11 +1193,9 @@ export default function OrderPunchPage() {
                   placeholder="Enter WhatsApp number"
                   value={whatsappNo}
                   onChange={(e) => {
-                    const cleaned = e.target.value.replace(/\D/g, "").slice(0, 10);
+                    const cleaned = e.target.value.replace(/\D/g, "");
                     setWhatsappNo(cleaned);
                   }}
-                  minLength={10}
-                  maxLength={10}
                   required
                   disabled={isWhatsappNoAutoFilled}
                   className={cn(
@@ -1590,21 +1613,23 @@ export default function OrderPunchPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="isBroker"> Is This Order Through</Label>
-                <Select value={isBrokerOrder} onValueChange={setIsBrokerOrder}>
-                  <SelectTrigger id="isBroker">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Direct">Direct</SelectItem>
-                    <SelectItem value="Broker">Broker</SelectItem>
-                    <SelectItem value="Salesperson">Salesperson</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {allowedOrderThroughTypes.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="isBroker"> Is This Order Through</Label>
+                  <Select value={isBrokerOrder} onValueChange={setIsBrokerOrder}>
+                    <SelectTrigger id="isBroker">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedOrderThroughTypes.includes("Direct") && <SelectItem value="Direct">Direct</SelectItem>}
+                      {allowedOrderThroughTypes.includes("Broker") && <SelectItem value="Broker">Broker</SelectItem>}
+                      {allowedOrderThroughTypes.includes("Salesperson") && <SelectItem value="Salesperson">Salesperson</SelectItem>}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-              {isBrokerOrder === "Broker" && (
+              {isBrokerOrder === "Broker" && allowedOrderThroughTypes.includes("Broker") && (
                 <div className="space-y-2">
                   <Label htmlFor="brokerName">Broker Name (IF ORDER THROUGH BROKER)</Label>
                   <AsyncCombobox
@@ -1621,6 +1646,19 @@ export default function OrderPunchPage() {
                       }
                     }}
                     fetchOptions={async (search: string, page: number) => {
+                      if (allowedBrokerNames) {
+                        const allowedSet = new Set(allowedBrokerNames.map(b => b.toLowerCase()))
+                        const filtered = brokers.filter(b =>
+                          allowedSet.has((b.salesman_name || "").toLowerCase()) &&
+                          (!search || (b.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
+                        )
+                        const start = (page - 1) * 20
+                        const pageItems = filtered.slice(start, start + 20)
+                        return {
+                          options: pageItems.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
+                          hasMore: start + 20 < filtered.length
+                        };
+                      }
                       const res = await brokerApi.getAll({ search, page, limit: 20 });
                       const list = res.data.brokers || [];
                       return {

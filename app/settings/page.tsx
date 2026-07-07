@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/hooks/use-toast"
-import { userApi, depotApi } from "@/lib/api-service"
+import { userApi, depotApi, brokerApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useAuthContext } from "@/contexts/auth-context"
 import { Pencil, Trash2, Loader2, RefreshCw, Settings, Shield, Eye, EyeOff, Search, Users, UserPlus } from "lucide-react"
@@ -78,6 +78,9 @@ const PAGE_ACCESS_OPTIONS = [
 // Pages that support per-page accessible depot/location selection
 const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Actual Dispatch", "Inventory"]
 
+// Values selectable in Order Punch's "Is This Order Through" field
+const ORDER_THROUGH_OPTIONS = ["Direct", "Broker", "Salesperson"]
+
 const MASTER_TABS = [
   { key: "customers", label: "Customers" },
   { key: "depots", label: "Depots" },
@@ -124,11 +127,14 @@ export default function SettingsPage() {
     page_access: {} as PageAccessMap,
     depo_access: {} as Record<string, string[]>,
     features: {} as Record<string, boolean>,
-    master_tab_access: {} as MasterTabAccessMap
+    master_tab_access: {} as MasterTabAccessMap,
+    order_punch_access: { is_order_through: [] as string[], broker_name: [] as string[] }
   })
 
   const [depots, setDepots] = useState<any[]>([])
   const [isDepotsLoading, setIsDepotsLoading] = useState(false)
+  const [brokers, setBrokers] = useState<any[]>([])
+  const [isBrokersLoading, setIsBrokersLoading] = useState(false)
 
   // Fetch depots for access control
   useEffect(() => {
@@ -146,6 +152,25 @@ export default function SettingsPage() {
       }
     }
     fetchDepots()
+  }, [])
+
+  // Fetch brokers for Order Punch field access control
+  useEffect(() => {
+    const fetchBrokers = async () => {
+      setIsBrokersLoading(true)
+      try {
+        const brokerRes = await brokerApi.getAll({ all: "true" });
+        if (brokerRes.success) {
+          const list = brokerRes.data?.brokers || (Array.isArray(brokerRes.data) ? brokerRes.data : [])
+          setBrokers(list)
+        }
+      } catch (error) {
+        console.error("Failed to fetch brokers", error)
+      } finally {
+        setIsBrokersLoading(false)
+      }
+    }
+    fetchBrokers()
   }, [])
 
   // User query with infinite pagination
@@ -222,7 +247,8 @@ export default function SettingsPage() {
       page_access: {},
       depo_access: {},
       features: {},
-      master_tab_access: {} as MasterTabAccessMap
+      master_tab_access: {} as MasterTabAccessMap,
+      order_punch_access: { is_order_through: [], broker_name: [] }
     })
     setShowPassword(false)
   }
@@ -256,7 +282,7 @@ export default function SettingsPage() {
 
     setIsSubmitting(true)
     try {
-      const featuresPayload = { ...formData.features, master_tabs: formData.master_tab_access }
+      const featuresPayload = { ...formData.features, master_tabs: formData.master_tab_access, order_punch_access: formData.order_punch_access }
       const response = await userApi.create({ ...formData, page_access: formData.page_access as any, features: featuresPayload })
       if (response.success) {
         toast({
@@ -284,7 +310,7 @@ export default function SettingsPage() {
 
     setIsSubmitting(true)
     try {
-      const featuresPayload = { ...formData.features, master_tabs: formData.master_tab_access }
+      const featuresPayload = { ...formData.features, master_tabs: formData.master_tab_access, order_punch_access: formData.order_punch_access }
       const updateData = {
         ...formData,
         page_access: formData.page_access as any,
@@ -384,16 +410,23 @@ export default function SettingsPage() {
       }
     })
 
-    // Normalize features — extract master_tabs separately
+    // Normalize features — extract master_tabs and order_punch_access separately
     let normalizedFeatures: Record<string, boolean> = {}
     let masterTabAccess: MasterTabAccessMap = {}
+    let orderPunchAccess: { is_order_through: string[], broker_name: string[] } = { is_order_through: [], broker_name: [] }
     const hasMasterAccess = Array.isArray(pageAccessParsed)
       ? pageAccessParsed.includes("Master")
       : !!(pageAccessParsed && typeof pageAccessParsed === 'object' && pageAccessParsed["Master"]);
 
     if (user.features && typeof user.features === 'object' && !Array.isArray(user.features)) {
-      const { master_tabs, ...restFeatures } = user.features as any
+      const { master_tabs, order_punch_access, ...restFeatures } = user.features as any
       normalizedFeatures = restFeatures as Record<string, boolean>
+      if (order_punch_access && typeof order_punch_access === 'object') {
+        orderPunchAccess = {
+          is_order_through: Array.isArray(order_punch_access.is_order_through) ? order_punch_access.is_order_through.map(String) : [],
+          broker_name: Array.isArray(order_punch_access.broker_name) ? order_punch_access.broker_name.map(String) : []
+        }
+      }
       if (master_tabs && typeof master_tabs === 'object') {
         // Migrate old boolean format to new AccessLevel format
         const raw = master_tabs as Record<string, any>
@@ -423,7 +456,8 @@ export default function SettingsPage() {
       page_access: pa,
       depo_access: normalizedDepoAccess,
       features: normalizedFeatures,
-      master_tab_access: masterTabAccess
+      master_tab_access: masterTabAccess,
+      order_punch_access: orderPunchAccess
     })
     setIsDialogOpen(true)
   }
@@ -445,6 +479,25 @@ export default function SettingsPage() {
         da[page] = [...currentDepos, depoName]
       }
       return { ...prev, depo_access: da }
+    })
+  }
+
+  // Toggle allowed "Is This Order Through" value for Order Punch access
+  const toggleOrderThroughAccess = (value: string) => {
+    setFormData(prev => {
+      const current = prev.order_punch_access.is_order_through
+      const next = current.includes(value) ? current.filter(v => v !== value) : [...current, value]
+      return { ...prev, order_punch_access: { ...prev.order_punch_access, is_order_through: next } }
+    })
+  }
+
+  // Toggle allowed broker name for Order Punch access
+  const toggleBrokerNameAccess = (brokerName: string) => {
+    setFormData(prev => {
+      const current = prev.order_punch_access.broker_name
+      const exists = current.some(b => b.toLowerCase() === brokerName.toLowerCase())
+      const next = exists ? current.filter(b => b.toLowerCase() !== brokerName.toLowerCase()) : [...current, brokerName]
+      return { ...prev, order_punch_access: { ...prev.order_punch_access, broker_name: next } }
     })
   }
 
@@ -908,6 +961,55 @@ export default function SettingsPage() {
                       )}
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Order Punch Field Access (Is This Order Through / Broker Name) */}
+            {isPageEnabled('Order Punch') && (
+              <div className="space-y-2">
+                <Label className="text-md">Order Punch Field Access</Label>
+                <div className="space-y-4 p-4 border rounded-md max-h-[320px] overflow-y-auto">
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Is This Order Through</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {ORDER_THROUGH_OPTIONS.map(opt => (
+                        <div key={opt} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`order-through-${opt}`}
+                            checked={formData.order_punch_access.is_order_through.includes(opt)}
+                            onCheckedChange={() => toggleOrderThroughAccess(opt)}
+                          />
+                          <Label htmlFor={`order-through-${opt}`} className="text-xs font-normal cursor-pointer">
+                            {opt}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Broker Name</p>
+                    {isBrokersLoading ? (
+                      <div className="flex items-center gap-1 text-xs text-slate-400">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Fetching brokers…
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {brokers.map((b, idx) => (
+                          <div key={b.id || idx} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`broker-access-${b.id || idx}`}
+                              checked={formData.order_punch_access.broker_name.some(n => n.toLowerCase() === (b.salesman_name || "").toLowerCase())}
+                              onCheckedChange={() => toggleBrokerNameAccess(b.salesman_name)}
+                            />
+                            <Label htmlFor={`broker-access-${b.id || idx}`} className="text-xs font-normal cursor-pointer truncate">
+                              {b.salesman_name}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

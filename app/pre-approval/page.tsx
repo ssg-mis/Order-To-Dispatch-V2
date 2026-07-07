@@ -1922,6 +1922,7 @@ export default function PreApprovalPage() {
       onTabChange={setActiveTab}
       isHistoryLoading={isHistoryLoading}
       showDateFilters={false}
+      groupBySiblingDo={true}
       historyFooter={
         <div className="px-3 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-slate-500 font-bold uppercase tracking-tighter">

@@ -316,6 +316,7 @@ export const preApprovalApi = {
     approvals: Array<{ id: number;[key: string]: any }>;
     cascadeBudgets?: Array<{ base_do: string; oil_type: string; qty: number }>;
     deductions?: Array<{ id: number; order_quantity: number }>;
+    skipIds?: number[];
   }): Promise<ApiResponse> => {
     return request(`/pre-approval/submit-batch`, {
       method: 'POST',
@@ -530,6 +531,16 @@ export const actualDispatchApi = {
   getFilters: async (): Promise<ApiResponse> => {
     return request('/actual-dispatch/filters');
   },
+
+  /**
+   * Cancel Stock Transfer SKUs left unselected in an Actual Dispatch submission
+   */
+  cancelUnselected: async (dsrNumbers: string[]): Promise<ApiResponse> => {
+    return request('/actual-dispatch/cancel-unselected', {
+      method: 'POST',
+      body: JSON.stringify({ dsrNumbers }),
+    });
+  },
 };
 
 /**
@@ -562,6 +573,8 @@ export const gateInApi = {
 
 /**
  * Draft API – Save as Draft for Actual Dispatch stage
+ * Drafts are shared per order (orderKey) so any user can view/continue one;
+ * username is only recorded as "last saved by" metadata on save.
  */
 export const draftApi = {
   save: (username: string, orderKey: string, data: any): Promise<ApiResponse> =>
@@ -570,11 +583,11 @@ export const draftApi = {
       body: JSON.stringify({ username, orderKey, data }),
     }),
 
-  get: (username: string, orderKey: string): Promise<ApiResponse> =>
-    request(`/drafts?username=${encodeURIComponent(username)}&orderKey=${encodeURIComponent(orderKey)}`),
+  get: (orderKey: string): Promise<ApiResponse> =>
+    request(`/drafts?orderKey=${encodeURIComponent(orderKey)}`),
 
-  delete: (username: string, orderKey: string): Promise<ApiResponse> =>
-    request(`/drafts?username=${encodeURIComponent(username)}&orderKey=${encodeURIComponent(orderKey)}`, {
+  delete: (orderKey: string): Promise<ApiResponse> =>
+    request(`/drafts?orderKey=${encodeURIComponent(orderKey)}`, {
       method: 'DELETE',
     }),
 };

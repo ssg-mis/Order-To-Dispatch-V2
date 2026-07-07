@@ -404,7 +404,7 @@ export default function CommitmentPunchPage() {
       }
       const res = await commitmentPunchApi.create(payload)
       if (res.success) {
-        toast({ title: "✅ Commitment Created!", description: `Commitment No: ${res.data?.commitment_no}`, duration: 6000 })
+        toast({ title: "✅ Commitment Created!", description: `Commitment No: ${res.data?.commitment_no}` })
         resetAddForm()
         setIsAddOpen(false)
         loadPending()
@@ -549,7 +549,7 @@ export default function CommitmentPunchPage() {
         toast({ title: "Partial Error", description: errorMsgs[0], variant: "destructive" })
       } else {
         const orderList = generatedOrderNos.length > 0 ? ` Orders: ${generatedOrderNos.join(", ")}` : ""
-        toast({ title: "✅ Processed!", description: `${successCount} order(s) created.${orderList}`, duration: 7000 })
+        toast({ title: "✅ Processed!", description: `${successCount} order(s) created.${orderList}` })
       }
       setIsProcessOpen(false)
       setSelectedIds(new Set())
