@@ -92,6 +92,7 @@ export default function ActualDispatchPage() {
     rto: "",
     passing_weight: "",
     road_tax: "",
+    is_lifetime_tax: false,
     gvw: "",
     ulw: "",
   })
@@ -925,6 +926,7 @@ export default function ActualDispatchPage() {
         rto: "",
         passing_weight: "",
         road_tax: "",
+        is_lifetime_tax: false,
         gvw: "",
         ulw: "",
       })
@@ -1295,6 +1297,8 @@ export default function ActualDispatchPage() {
         if (doc.key === 'permit2_out_state' || doc.key === 'permit2_end_date') continue;
         // Permit 1 is only required for vehicles with GVW > 3000
         if ((doc.key === 'permit1' || doc.key === 'permit1_end_date') && !isPermitApplicable) continue;
+        // Lifetime tax vehicles have no expiry date — only the certificate is required
+        if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
 
         if (!val) {
           toast({
@@ -2469,6 +2473,9 @@ export default function ActualDispatchPage() {
                               setVehicleNumber(v);
                               const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
                               if (selectedV) {
+                                // Lifetime tax vehicles have no expiry — Master stores the
+                                // certificate under life_time_tax/_image instead of road_tax.
+                                const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
                                 // Autofill Logic
                                 setVehicleData(p => ({
                                   ...p,
@@ -2478,13 +2485,14 @@ export default function ActualDispatchPage() {
                                   passing_weight: selectedV.passing || "",
                                   fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
                                   insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
-                                  tax_end_date: selectedV.road_tax ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
+                                  tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
+                                  is_lifetime_tax: isLifetimeTax,
                                   pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
                                   permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
                                   // Images
                                   fitness: selectedV.fitness_image || p.fitness,
                                   insurance: selectedV.insurance_image || p.insurance,
-                                  tax_copy: selectedV.road_tax_image || p.tax_copy,
+                                  tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
                                   polution: selectedV.pollution_image || p.polution,
                                   permit1: selectedV.state_permit_image || p.permit1,
                                   gvw: selectedV.gvw || "",
@@ -2644,14 +2652,20 @@ export default function ActualDispatchPage() {
                                 onFilesSelected={(files) => handleFileChange('tax_copy', 'tax_file_name', files[0] || null)}
                               />
                             </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.tax_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, tax_end_date: e.target.value }))}
-                              readOnly
-                            />
+                            {vehicleData.is_lifetime_tax ? (
+                              <div className="h-7 text-[10px] border border-slate-200 rounded-lg px-2 font-bold bg-slate-100 opacity-80 flex items-center text-slate-500" title="Lifetime Tax">
+                                LTT
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
+                                min={minDate}
+                                value={vehicleData.tax_end_date}
+                                onChange={(e) => setVehicleData(p => ({ ...p, tax_end_date: e.target.value }))}
+                                readOnly
+                              />
+                            )}
                           </div>
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
                             <div className="flex flex-col gap-2 w-full min-w-0">

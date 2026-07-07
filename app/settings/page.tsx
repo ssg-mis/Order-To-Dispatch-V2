@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/hooks/use-toast"
-import { userApi, depotApi, brokerApi } from "@/lib/api-service"
+import { userApi, depotApi, brokerApi, salespersonApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useAuthContext } from "@/contexts/auth-context"
 import { Pencil, Trash2, Loader2, RefreshCw, Settings, Shield, Eye, EyeOff, Search, Users, UserPlus } from "lucide-react"
@@ -128,13 +128,15 @@ export default function SettingsPage() {
     depo_access: {} as Record<string, string[]>,
     features: {} as Record<string, boolean>,
     master_tab_access: {} as MasterTabAccessMap,
-    order_punch_access: { is_order_through: [] as string[], broker_name: [] as string[] }
+    order_punch_access: { is_order_through: [] as string[], broker_name: [] as string[], salesperson_name: [] as string[] }
   })
 
   const [depots, setDepots] = useState<any[]>([])
   const [isDepotsLoading, setIsDepotsLoading] = useState(false)
   const [brokers, setBrokers] = useState<any[]>([])
   const [isBrokersLoading, setIsBrokersLoading] = useState(false)
+  const [salespersons, setSalespersons] = useState<any[]>([])
+  const [isSalespersonsLoading, setIsSalespersonsLoading] = useState(false)
 
   // Fetch depots for access control
   useEffect(() => {
@@ -171,6 +173,25 @@ export default function SettingsPage() {
       }
     }
     fetchBrokers()
+  }, [])
+
+  // Fetch salespersons for Order Punch field access control
+  useEffect(() => {
+    const fetchSalespersons = async () => {
+      setIsSalespersonsLoading(true)
+      try {
+        const salespersonRes = await salespersonApi.getAll({ all: "true" });
+        if (salespersonRes.success) {
+          const list = salespersonRes.data?.salespersons || (Array.isArray(salespersonRes.data) ? salespersonRes.data : [])
+          setSalespersons(list)
+        }
+      } catch (error) {
+        console.error("Failed to fetch salespersons", error)
+      } finally {
+        setIsSalespersonsLoading(false)
+      }
+    }
+    fetchSalespersons()
   }, [])
 
   // User query with infinite pagination
@@ -248,7 +269,7 @@ export default function SettingsPage() {
       depo_access: {},
       features: {},
       master_tab_access: {} as MasterTabAccessMap,
-      order_punch_access: { is_order_through: [], broker_name: [] }
+      order_punch_access: { is_order_through: [], broker_name: [], salesperson_name: [] }
     })
     setShowPassword(false)
   }
@@ -413,7 +434,7 @@ export default function SettingsPage() {
     // Normalize features — extract master_tabs and order_punch_access separately
     let normalizedFeatures: Record<string, boolean> = {}
     let masterTabAccess: MasterTabAccessMap = {}
-    let orderPunchAccess: { is_order_through: string[], broker_name: string[] } = { is_order_through: [], broker_name: [] }
+    let orderPunchAccess: { is_order_through: string[], broker_name: string[], salesperson_name: string[] } = { is_order_through: [], broker_name: [], salesperson_name: [] }
     const hasMasterAccess = Array.isArray(pageAccessParsed)
       ? pageAccessParsed.includes("Master")
       : !!(pageAccessParsed && typeof pageAccessParsed === 'object' && pageAccessParsed["Master"]);
@@ -424,7 +445,8 @@ export default function SettingsPage() {
       if (order_punch_access && typeof order_punch_access === 'object') {
         orderPunchAccess = {
           is_order_through: Array.isArray(order_punch_access.is_order_through) ? order_punch_access.is_order_through.map(String) : [],
-          broker_name: Array.isArray(order_punch_access.broker_name) ? order_punch_access.broker_name.map(String) : []
+          broker_name: Array.isArray(order_punch_access.broker_name) ? order_punch_access.broker_name.map(String) : [],
+          salesperson_name: Array.isArray(order_punch_access.salesperson_name) ? order_punch_access.salesperson_name.map(String) : []
         }
       }
       if (master_tabs && typeof master_tabs === 'object') {
@@ -498,6 +520,16 @@ export default function SettingsPage() {
       const exists = current.some(b => b.toLowerCase() === brokerName.toLowerCase())
       const next = exists ? current.filter(b => b.toLowerCase() !== brokerName.toLowerCase()) : [...current, brokerName]
       return { ...prev, order_punch_access: { ...prev.order_punch_access, broker_name: next } }
+    })
+  }
+
+  // Toggle allowed salesperson name for Order Punch access
+  const toggleSalespersonNameAccess = (salespersonName: string) => {
+    setFormData(prev => {
+      const current = prev.order_punch_access.salesperson_name
+      const exists = current.some(s => s.toLowerCase() === salespersonName.toLowerCase())
+      const next = exists ? current.filter(s => s.toLowerCase() !== salespersonName.toLowerCase()) : [...current, salespersonName]
+      return { ...prev, order_punch_access: { ...prev.order_punch_access, salesperson_name: next } }
     })
   }
 
@@ -987,29 +1019,56 @@ export default function SettingsPage() {
                       ))}
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Broker Name</p>
-                    {isBrokersLoading ? (
-                      <div className="flex items-center gap-1 text-xs text-slate-400">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Fetching brokers…
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {brokers.map((b, idx) => (
-                          <div key={b.id || idx} className="flex items-center gap-2">
-                            <Checkbox
-                              id={`broker-access-${b.id || idx}`}
-                              checked={formData.order_punch_access.broker_name.some(n => n.toLowerCase() === (b.salesman_name || "").toLowerCase())}
-                              onCheckedChange={() => toggleBrokerNameAccess(b.salesman_name)}
-                            />
-                            <Label htmlFor={`broker-access-${b.id || idx}`} className="text-xs font-normal cursor-pointer truncate">
-                              {b.salesman_name}
-                            </Label>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {formData.order_punch_access.is_order_through.includes("Broker") && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Broker Name</p>
+                      {isBrokersLoading ? (
+                        <div className="flex items-center gap-1 text-xs text-slate-400">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Fetching brokers…
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {brokers.map((b, idx) => (
+                            <div key={b.id || idx} className="flex items-center gap-2">
+                              <Checkbox
+                                id={`broker-access-${b.id || idx}`}
+                                checked={formData.order_punch_access.broker_name.some(n => n.toLowerCase() === (b.salesman_name || "").toLowerCase())}
+                                onCheckedChange={() => toggleBrokerNameAccess(b.salesman_name)}
+                              />
+                              <Label htmlFor={`broker-access-${b.id || idx}`} className="text-xs font-normal cursor-pointer truncate">
+                                {b.salesman_name}
+                              </Label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {formData.order_punch_access.is_order_through.includes("Salesperson") && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Salesperson Name</p>
+                      {isSalespersonsLoading ? (
+                        <div className="flex items-center gap-1 text-xs text-slate-400">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Fetching salespersons…
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {salespersons.map((s, idx) => (
+                            <div key={s.id || idx} className="flex items-center gap-2">
+                              <Checkbox
+                                id={`salesperson-access-${s.id || idx}`}
+                                checked={formData.order_punch_access.salesperson_name.some(n => n.toLowerCase() === (s.salesman_name || "").toLowerCase())}
+                                onCheckedChange={() => toggleSalespersonNameAccess(s.salesman_name)}
+                              />
+                              <Label htmlFor={`salesperson-access-${s.id || idx}`} className="text-xs font-normal cursor-pointer truncate">
+                                {s.salesman_name}
+                              </Label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -284,6 +284,9 @@ export default function OrderPunchPage() {
   const allowedBrokerNames: string[] | null = isAdmin
     ? null
     : (user?.features?.order_punch_access?.broker_name || [])
+  const allowedSalespersonNames: string[] | null = isAdmin
+    ? null
+    : (user?.features?.order_punch_access?.salesperson_name || [])
 
   useEffect(() => {
     if (isAdmin || !user) return
@@ -301,6 +304,16 @@ export default function OrderPunchPage() {
       setBrokerName("")
     } else if (!allowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
       setBrokerName(allowedBrokerNames[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin, isBrokerOrder])
+
+  useEffect(() => {
+    if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
+    if (allowedSalespersonNames.length === 0) {
+      setSalespersonName("")
+    } else if (!allowedSalespersonNames.some((s: string) => s.toLowerCase() === salespersonName.toLowerCase())) {
+      setSalespersonName(allowedSalespersonNames[0])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isAdmin, isBrokerOrder])
@@ -1688,6 +1701,19 @@ export default function OrderPunchPage() {
                       }
                     }}
                     fetchOptions={async (search: string, page: number) => {
+                      if (allowedSalespersonNames) {
+                        const allowedSet = new Set(allowedSalespersonNames.map(s => s.toLowerCase()))
+                        const filtered = salespersons.filter(s =>
+                          allowedSet.has((s.salesman_name || "").toLowerCase()) &&
+                          (!search || (s.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
+                        )
+                        const start = (page - 1) * 20
+                        const pageItems = filtered.slice(start, start + 20)
+                        return {
+                          options: pageItems.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
+                          hasMore: start + 20 < filtered.length
+                        };
+                      }
                       const res = await salespersonApi.getAll({ search, page, limit: 20 });
                       const list = res.data.salespersons || [];
                       return {
