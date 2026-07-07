@@ -880,6 +880,10 @@ export default function ActualDispatchPage() {
       .filter(Boolean);
 
     if (targetGroups.length > 0) {
+      // Refresh vehicle/driver/transporter master data so the dialog's autofill
+      // (e.g. Permit 1/State Permit) reflects documents uploaded since page load.
+      fetchMasterData();
+
       setSelectedGroups(targetGroups)
       // Default: Select ALL products in all selected groups
       const allKeys = targetGroups.flatMap(g => g._allProducts.map((p: any) => p._rowKey));
@@ -2489,12 +2493,14 @@ export default function ActualDispatchPage() {
                                   is_lifetime_tax: isLifetimeTax,
                                   pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
                                   permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
+                                  permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
                                   // Images
                                   fitness: selectedV.fitness_image || p.fitness,
                                   insurance: selectedV.insurance_image || p.insurance,
                                   tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
                                   polution: selectedV.pollution_image || p.polution,
                                   permit1: selectedV.state_permit_image || p.permit1,
+                                  permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
                                   gvw: selectedV.gvw || "",
                                   ulw: selectedV.ulw || "",
                                 }));
