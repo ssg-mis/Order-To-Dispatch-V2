@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useMemo, useCallback } from "react"
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
@@ -774,6 +774,17 @@ export default function ActualDispatchPage() {
     })
   }, [filteredPendingOrders, selectedDepoTab])
 
+  // Accumulates every group ever rendered, keyed by _rowKey, across page/search
+  // changes — displayRows only reflects the current server page, but a DO
+  // selected on an earlier page/search still needs to be resolvable here so
+  // Confirm Dispatch can include it.
+  const selectedGroupsCacheRef = useRef<Record<string, any>>({})
+  useEffect(() => {
+    displayRows.forEach((row: any) => {
+      selectedGroupsCacheRef.current[row._rowKey] = row
+    })
+  }, [displayRows])
+
   // ── Pending Table Sorting ─────────────────────────────────────
   const [pendingSortField, setPendingSortField] = useState<string>("")
   const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
@@ -839,10 +850,14 @@ export default function ActualDispatchPage() {
 
 
   const toggleSelectAll = () => {
-    if (selectedOrders.length === displayRows.length) {
-      setSelectedOrders([])
+    const currentPageKeys = displayRows.map((row) => row._rowKey)
+    const allCurrentSelected = currentPageKeys.length > 0 && currentPageKeys.every((k) => selectedOrders.includes(k))
+    if (allCurrentSelected) {
+      // Only drop this page's keys — leave selections made on other pages/searches intact
+      setSelectedOrders(selectedOrders.filter((k) => !currentPageKeys.includes(k)))
     } else {
-      setSelectedOrders(displayRows.map((row) => row._rowKey))
+      // Merge this page's keys into the existing cross-page selection
+      setSelectedOrders(Array.from(new Set([...selectedOrders, ...currentPageKeys])))
     }
   }
 
@@ -857,7 +872,11 @@ export default function ActualDispatchPage() {
 
 
   const handleOpenDialog = async (group?: any) => {
-    const targetGroups = group ? [group] : displayRows.filter(r => selectedOrders.includes(r._rowKey));
+    // Resolve selected DOs from the cross-page cache, not just the currently
+    // loaded page/search results — displayRows only holds what's on screen now.
+    const targetGroups = group ? [group] : selectedOrders
+      .map((key) => selectedGroupsCacheRef.current[key])
+      .filter(Boolean);
 
     if (targetGroups.length > 0) {
       setSelectedGroups(targetGroups)
@@ -1704,7 +1723,7 @@ export default function ActualDispatchPage() {
               <TableRow>
                 <TableHead className="w-12 text-center">
                   <Checkbox
-                    checked={displayRows.length > 0 && selectedOrders.length === displayRows.length}
+                    checked={displayRows.length > 0 && displayRows.every((row) => selectedOrders.includes(row._rowKey))}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
