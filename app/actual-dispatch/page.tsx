@@ -517,12 +517,18 @@ export default function ActualDispatchPage() {
         vehicleMasterApi.getAll({ all: 'true' }),
         transportMasterApi.getAll({ all: 'true' })
       ]);
-      if (vRes.success) setVehicleMaster(vRes.data.vehicles || []);
+      const vehicles = vRes.success ? (vRes.data.vehicles || []) : [];
+      if (vRes.success) setVehicleMaster(vehicles);
       const dRes = await driverMasterApi.getAll({ all: 'true' });
-      if (dRes.success) setDriverMaster(dRes.data.drivers || []);
+      const drivers = dRes.success ? (dRes.data.drivers || []) : [];
+      if (dRes.success) setDriverMaster(drivers);
       if (tRes.success) setTransporterMaster(tRes.data.transporters || []);
+      // Returned directly (not read back off state) so callers avoid the stale-closure
+      // trap of reading `vehicleMaster`/`driverMaster` in the same tick they were set.
+      return { vehicles, drivers };
     } catch (error) {
       console.error("Failed to fetch master data:", error);
+      return { vehicles: [], drivers: [] };
     }
   };
 
@@ -872,6 +878,41 @@ export default function ActualDispatchPage() {
   }
 
 
+  // Fills vehicleData/loadData from a vehicle_master record. Always call this with a fresh
+  // `selectedV` (from a just-refetched vehicleMaster) rather than trusting a saved draft —
+  // these fields are master-derived, and a stale draft can clobber documents renewed since.
+  const autofillVehicleData = (selectedV: any) => {
+    const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
+    setVehicleData(p => ({
+      ...p,
+      registration_no: selectedV.registration_no || "",
+      vehicle_type: selectedV.vehicle_type || "",
+      rto: selectedV.rto || "",
+      passing_weight: selectedV.passing || "",
+      fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
+      insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
+      tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
+      is_lifetime_tax: isLifetimeTax,
+      pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
+      permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
+      permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
+      // Images
+      fitness: selectedV.fitness_image || p.fitness,
+      insurance: selectedV.insurance_image || p.insurance,
+      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
+      polution: selectedV.pollution_image || p.polution,
+      permit1: selectedV.state_permit_image || p.permit1,
+      permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
+      gvw: selectedV.gvw || "",
+      ulw: selectedV.ulw || "",
+    }));
+    setLoadData(p => ({
+      ...p,
+      truckNo: selectedV.registration_no || "",
+      transporterName: selectedV.transporter || p.transporterName
+    }));
+  };
+
   const handleOpenDialog = async (group?: any) => {
     // Resolve selected DOs from the cross-page cache, not just the currently
     // loaded page/search results — displayRows only holds what's on screen now.
@@ -882,7 +923,9 @@ export default function ActualDispatchPage() {
     if (targetGroups.length > 0) {
       // Refresh vehicle/driver/transporter master data so the dialog's autofill
       // (e.g. Permit 1/State Permit) reflects documents uploaded since page load.
-      fetchMasterData();
+      // Awaited so the draft-restore step below can re-derive vehicle docs from
+      // current master data instead of trusting a possibly stale saved draft.
+      const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
 
       setSelectedGroups(targetGroups)
       // Default: Select ALL products in all selected groups
@@ -979,10 +1022,36 @@ export default function ActualDispatchPage() {
           if (res.success && res.data?.draft_data) {
             const d = res.data.draft_data;
             if (d.vehicleNumber !== undefined) setVehicleNumber(d.vehicleNumber);
-            if (d.vehicleData) setVehicleData(prev => ({ ...prev, ...d.vehicleData }));
+            // Vehicle documents (fitness/insurance/tax/pollution/permits/gvw/ulw) are
+            // master-derived — re-fetch them fresh instead of trusting the draft snapshot,
+            // which may predate documents renewed/uploaded since the draft was saved.
+            // Only checkStatus/remarks are genuinely manual dialog inputs worth restoring.
+            const draftVehicle = d.vehicleNumber
+              ? freshVehicles.find((veh: any) => veh.registration_no === d.vehicleNumber)
+              : null;
+            if (draftVehicle) autofillVehicleData(draftVehicle);
+            if (d.vehicleData) {
+              setVehicleData(prev => ({
+                ...prev,
+                checkStatus: d.vehicleData.checkStatus ?? prev.checkStatus,
+                remarks: d.vehicleData.remarks ?? prev.remarks,
+              }));
+            }
             if (d.loadData) setLoadData(prev => ({ ...prev, ...d.loadData }));
-            if (d.driverName) setDriverName(d.driverName);
-            if (d.driverData) setDriverData(prev => ({ ...prev, ...d.driverData }));
+            // Driver fields are entirely master-derived (license no/type/expiry, contact) —
+            // re-fetch fresh from driverMaster rather than trusting the draft snapshot.
+            if (d.driverName) {
+              setDriverName(d.driverName);
+              const draftDriver = freshDrivers.find((drv: any) => drv.driver_name === d.driverName);
+              if (draftDriver) {
+                setDriverData({
+                  contact_no: draftDriver.mobile_no || "",
+                  license_no: draftDriver.driving_licence_no || "",
+                  license_type: draftDriver.driving_licence_type || "",
+                  valid_upto: draftDriver.valid_upto ? new Date(draftDriver.valid_upto).toISOString().split('T')[0] : ""
+                });
+              }
+            }
             if (d.confirmDetails) setConfirmDetails(prev => ({ ...prev, ...d.confirmDetails }));
             if (d.dialogSelectedProducts) setDialogSelectedProducts(d.dialogSelectedProducts);
             toast({ title: "Draft Restored", description: "Your saved draft has been loaded." });
@@ -2476,40 +2545,7 @@ export default function ActualDispatchPage() {
                             onValueChange={(v) => {
                               setVehicleNumber(v);
                               const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                              if (selectedV) {
-                                // Lifetime tax vehicles have no expiry — Master stores the
-                                // certificate under life_time_tax/_image instead of road_tax.
-                                const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
-                                // Autofill Logic
-                                setVehicleData(p => ({
-                                  ...p,
-                                  registration_no: selectedV.registration_no || "",
-                                  vehicle_type: selectedV.vehicle_type || "",
-                                  rto: selectedV.rto || "",
-                                  passing_weight: selectedV.passing || "",
-                                  fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
-                                  insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
-                                  tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
-                                  is_lifetime_tax: isLifetimeTax,
-                                  pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
-                                  permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
-                                  permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
-                                  // Images
-                                  fitness: selectedV.fitness_image || p.fitness,
-                                  insurance: selectedV.insurance_image || p.insurance,
-                                  tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
-                                  polution: selectedV.pollution_image || p.polution,
-                                  permit1: selectedV.state_permit_image || p.permit1,
-                                  permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
-                                  gvw: selectedV.gvw || "",
-                                  ulw: selectedV.ulw || "",
-                                }));
-                                setLoadData(p => ({
-                                  ...p,
-                                  truckNo: selectedV.registration_no || "",
-                                  transporterName: selectedV.transporter || p.transporterName
-                                }));
-                              }
+                              if (selectedV) autofillVehicleData(selectedV);
                             }}
                             options={vehicleOptions}
                             placeholder="Select Vehicle"
