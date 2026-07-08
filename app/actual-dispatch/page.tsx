@@ -167,7 +167,10 @@ export default function ActualDispatchPage() {
 
   // Date validation for vehicle documents (Min docRefDate + 5 days)
   const minDate = useMemo(() => {
-    const d = new Date(docRefDate)
+    const parsed = new Date(docRefDate)
+    // Fall back to today while the field is empty/mid-edit, so an invalid
+    // date never reaches toISOString() (which throws on an Invalid Date).
+    const d = isNaN(parsed.getTime()) ? new Date() : parsed
     d.setDate(d.getDate() + 5)
     return d.toISOString().split("T")[0]
   }, [docRefDate])
@@ -1347,10 +1350,13 @@ export default function ActualDispatchPage() {
     // ONLY IF DEPO IS BANARI — vehicle selection/details are optional for other depots
     const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
 
+    // Collect every validation issue up front so the user sees them all in one toast,
+    // instead of fixing them one at a time across repeated submit attempts.
+    const validationErrors: string[] = [];
+
     // 1. Basic Vehicle Check
     if (isBanari && !vehicleNumber.trim()) {
-      toast({ title: "Validation Error", description: "Vehicle Registration Number is required", variant: "destructive" });
-      return;
+      validationErrors.push("Vehicle Registration Number is required");
     }
 
     // 2. Stage 6: Vehicle Document Validation
@@ -1383,58 +1389,44 @@ export default function ActualDispatchPage() {
         if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
 
         if (!val) {
-          toast({
-            title: "Document Required",
-            description: `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`,
-            variant: "destructive"
-          });
-          return;
+          validationErrors.push(`${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`);
         }
       }
 
       if (!vehicleData.checkStatus) {
-        toast({ title: "Validation Error", description: "Vehicle Check Status is required", variant: "destructive" });
-        return;
+        validationErrors.push("Vehicle Check Status is required");
       }
       // Remarks mandatory ONLY if status is Reject
       if (vehicleData.checkStatus === "Reject" && !vehicleData.remarks.trim()) {
-        toast({ title: "Validation Error", description: "Vehicle Remarks are required for rejection", variant: "destructive" });
-        return;
+        validationErrors.push("Vehicle Remarks are required for rejection");
       }
 
       // 3. Stage 7: Weightment Audit Validation
       if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Actual Qty is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Actual Qty is required");
       }
       if (!loadData.rstNo.trim()) {
-        toast({ title: "Validation Error", description: "RST No is required", variant: "destructive" });
-        return;
+        validationErrors.push("RST No is required");
       }
       // Weightment Slip and No Plate Image are now optional per user request
       if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Gross Weight is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Gross Weight is required");
       }
       if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Tare Weight is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Tare Weight is required");
       }
       if (!loadData.checkStatus) {
-        toast({ title: "Validation Error", description: "Quality Status (STG 7) is required", variant: "destructive" });
-        return;
+        validationErrors.push("Quality Status (STG 7) is required");
       }
       if (!loadData.transporterName.trim()) {
-        toast({ title: "Validation Error", description: "Transporter Name is required", variant: "destructive" });
-        return;
+        validationErrors.push("Transporter Name is required");
       }
       // Reason mandatory ONLY if status is Reject
       if (loadData.checkStatus === "Reject" && !loadData.reason.trim()) {
-        toast({ title: "Validation Error", description: "Weight Difference Reason is required for load rejection", variant: "destructive" });
-        return;
+        validationErrors.push("Weight Difference Reason is required for load rejection");
       }
 
-      // 4. Validate Document End Dates (Min Today + 5 Days)
+      // 4. Validate Document End Dates (Min docRefDate + 5 Days)
       const dateFields = [
         { key: 'fitness_end_date', label: 'Fitness' },
         { key: 'insurance_end_date', label: 'Insurance' },
@@ -1447,43 +1439,39 @@ export default function ActualDispatchPage() {
       for (const field of dateFields) {
         const dateVal = vehicleData[field.key as keyof typeof vehicleData];
         if (dateVal && dateVal < minDate) {
-          toast({
-            title: "Date Error",
-            description: `${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`,
-            variant: "destructive"
-          });
-          return;
+          validationErrors.push(`${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`);
         }
       }
+
+      // 5. Validation for Overload (only mandatory for Banari depot; optional for other depots)
+      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
+      if (isOverloaded && !loadData.overloadRemarks.trim()) {
+        validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
+      }
+
+      // 6. Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
+      if (isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
+        validationErrors.push("National / Other State Permit is mandatory for interstate dispatches.");
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      toast({
+        title: `${validationErrors.length} Validation ${validationErrors.length > 1 ? 'Issues' : 'Issue'} Found`,
+        description: (
+          <ul className="list-disc pl-4 space-y-0.5">
+            {validationErrors.map((err, i) => <li key={i}>{err}</li>)}
+          </ul>
+        ),
+        variant: "destructive"
+      });
+      return;
     }
 
     setIsProcessing(true)
     try {
       if (selectedGroups.length === 0 || dialogSelectedProducts.length === 0) {
         setIsDialogOpen(false);
-        return;
-      }
-
-      // Validation for Overload (only mandatory for Banari depot; optional for other depots)
-      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
-      if (isOverloaded && selectedDepoTab?.toUpperCase() === 'BANARI' && !loadData.overloadRemarks.trim()) {
-        toast({
-          title: "Overload Check",
-          description: "Overload remarks are mandatory as the vehicle is overloaded.",
-          variant: "destructive"
-        });
-        setIsProcessing(false);
-        return;
-      }
-
-      // Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
-      if (isBanari && isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
-        toast({
-          title: "Interstate Document Required",
-          description: "National / Other State Permit is mandatory for interstate dispatches.",
-          variant: "destructive"
-        });
-        setIsProcessing(false);
         return;
       }
 
