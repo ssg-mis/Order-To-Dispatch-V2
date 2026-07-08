@@ -160,12 +160,17 @@ export default function ActualDispatchPage() {
       .map(t => ({ value: t.transporter_name, label: t.transporter_name }))
   ]), [transporterMaster])
 
-  // Date validation for vehicle documents (Min Today + 5 days)
+  // TEMP: manual override for expiry check while old Vehicle Master records get
+  // backfilled with real dates — remove docRefDate and revert minDate to `new Date()`
+  // once Vehicle Master documents are cleaned up.
+  const [docRefDate, setDocRefDate] = useState<string>(() => new Date().toISOString().split("T")[0])
+
+  // Date validation for vehicle documents (Min docRefDate + 5 days)
   const minDate = useMemo(() => {
-    const d = new Date()
+    const d = new Date(docRefDate)
     d.setDate(d.getDate() + 5)
     return d.toISOString().split("T")[0]
-  }, [])
+  }, [docRefDate])
 
   // Interstate detection logic: Check if any selected order address state differs from vehicle RTO state
   const isInterState = useMemo(() => {
@@ -926,6 +931,10 @@ export default function ActualDispatchPage() {
       // Awaited so the draft-restore step below can re-derive vehicle docs from
       // current master data instead of trusting a possibly stale saved draft.
       const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
+
+      // TEMP: reset the manual expiry-check reference date to today on every
+      // dialog open, so a backdated value doesn't leak into an unrelated dispatch.
+      setDocRefDate(new Date().toISOString().split("T")[0])
 
       setSelectedGroups(targetGroups)
       // Default: Select ALL products in all selected groups
@@ -2100,10 +2109,21 @@ export default function ActualDispatchPage() {
         <DialogContent className="w-[calc(100vw-1rem)] sm:w-[95vw] sm:!max-w-[95vw] max-h-[95dvh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-0">
           <div className="p-4 sm:p-6 lg:p-8">
             <DialogHeader className="border-b pb-4 sm:pb-6 mb-4 sm:mb-6 pr-8">
-              <DialogTitle className="text-lg sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight flex flex-wrap items-start gap-3 leading-tight">
-                <Truck className="h-6 w-6 sm:h-7 sm:w-7 text-blue-600 shrink-0" />
-                Actual Dispatch Confirmation - {selectedGroups.length > 1 ? `${selectedGroups.length} Customer Groups` : selectedGroups[0]?.customerName}
-              </DialogTitle>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <DialogTitle className="text-lg sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight flex flex-wrap items-start gap-3 leading-tight">
+                  <Truck className="h-6 w-6 sm:h-7 sm:w-7 text-blue-600 shrink-0" />
+                  Actual Dispatch Confirmation - {selectedGroups.length > 1 ? `${selectedGroups.length} Customer Groups` : selectedGroups[0]?.customerName}
+                </DialogTitle>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsSlipDialogOpen(true)}
+                  disabled={dialogSelectedProducts.length === 0}
+                  className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black h-9 shrink-0"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Slip
+                </Button>
+              </div>
               <DialogDescription className="text-slate-500 font-medium text-sm sm:text-base mt-2">
                 Review and confirm dispatch quantities for selected customers.
               </DialogDescription>
@@ -2121,6 +2141,20 @@ export default function ActualDispatchPage() {
                   : <><XCircle className="h-5 w-5 text-red-400" /> Gate-In Not Done Yet</>
                 }
               </button>
+            </div>
+
+            {/* TEMP: manual override for the expiry check while old Vehicle Master records
+                get backfilled — remove this input and the docRefDate state once done. */}
+            <div className="flex justify-end mb-4">
+              <div className="flex items-center gap-2">
+                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none whitespace-nowrap">Actual Dispatch Date</Label>
+                <Input
+                  type="date"
+                  className="h-8 text-[11px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-white"
+                  value={docRefDate}
+                  onChange={(e) => setDocRefDate(e.target.value)}
+                />
+              </div>
             </div>
 
             {/* Gate-In Images Popup */}
@@ -3202,15 +3236,6 @@ export default function ActualDispatchPage() {
 
             <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="order-last sm:order-none">Cancel</Button>
-              <Button
-                variant="outline"
-                onClick={() => setIsSlipDialogOpen(true)}
-                disabled={dialogSelectedProducts.length === 0}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black h-11 sm:h-10"
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Slip
-              </Button>
               <Button
                 variant="outline"
                 onClick={handleSaveDraft}
