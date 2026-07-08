@@ -3246,7 +3246,7 @@ export default function ActualDispatchPage() {
               </Button>
               <Button
                 onClick={performDispatchConfirmation}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || (selectedDepoTab?.toUpperCase() === 'BANARI' && !gateInData)}
+                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly}
                 className="h-11 sm:h-10 font-black bg-blue-600 hover:bg-blue-700"
               >
                 {isProcessing ? "Wait..." : `Confirm Dispatch (${dialogSelectedProducts.length})`}
