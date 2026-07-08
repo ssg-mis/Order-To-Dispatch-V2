@@ -449,6 +449,16 @@ export const dispatchPlanningApi = {
   },
 
   /**
+   * Cancel an order from Dispatch Planning — Super Admin only
+   */
+  cancel: async (id: number, username: string, remarks: string): Promise<ApiResponse> => {
+    return request(`/dispatch-planning/cancel/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ username, remarks }),
+    });
+  },
+
+  /**
    * Update transfer details for an order
    */
   updateTransferDetails: async (id: number, data: any): Promise<ApiResponse> => {
@@ -516,10 +526,20 @@ export const actualDispatchApi = {
   },
 
   /**
-   * Revert actual dispatch
+   * Revert actual dispatch (back to Pre-Approval)
    */
   revert: async (dsrNumber: string, username: string, remarks?: string): Promise<ApiResponse> => {
     return request(`/actual-dispatch/revert/${dsrNumber}`, {
+      method: 'POST',
+      body: JSON.stringify({ username, remarks }),
+    });
+  },
+
+  /**
+   * Revert actual dispatch back to Dispatch Planning only (one stage back)
+   */
+  revertToDispatchPlanning: async (dsrNumber: string, username: string, remarks?: string): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/revert-to-planning/${dsrNumber}`, {
       method: 'POST',
       body: JSON.stringify({ username, remarks }),
     });

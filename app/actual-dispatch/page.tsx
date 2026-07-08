@@ -1710,6 +1710,87 @@ export default function ActualDispatchPage() {
     }
   };
 
+  const handleRevertToDispatchPlanning = async () => {
+    if (!revertRemarks.trim()) {
+      toast({ title: "Validation Error", description: "Revert remarks are required", variant: "destructive" });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const itemsToRevert = selectedGroups.flatMap(g =>
+        g._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+      );
+
+      if (itemsToRevert.length === 0) {
+        toast({ title: "Error", description: "No products selected to revert", variant: "destructive" });
+        setIsProcessing(false);
+        return;
+      }
+
+      const successfulReverts = [];
+      const failedReverts = [];
+
+      for (const item of itemsToRevert) {
+        const dsrNumber = item.d_sr_number || item.dsrNumber;
+        if (!dsrNumber) continue;
+
+        try {
+          const res = await actualDispatchApi.revertToDispatchPlanning(dsrNumber, user?.username || 'system', revertRemarks.trim());
+          if (res.success) {
+            successfulReverts.push(dsrNumber);
+          } else {
+            failedReverts.push({ dsrNumber, message: res.message });
+          }
+        } catch (err: any) {
+          failedReverts.push({ dsrNumber, message: err.message });
+        }
+      }
+
+      if (successfulReverts.length > 0) {
+        toast({
+          title: "Revert Successful",
+          description: `${successfulReverts.length} item(s) reverted to Dispatch Planning.`,
+        });
+
+        // Reset and refresh
+        setIsDialogOpen(false);
+        setSelectedOrders([]);
+        setDialogSelectedProducts([]);
+        setConfirmDetails({});
+        setSelectedGroups([]);
+        setRevertRemarks("");
+
+        await refetchPending();
+        await refetchHistory();
+      }
+
+      if (failedReverts.length > 0) {
+        // Surface the real reason (e.g. a stale-write conflict from another user)
+        // instead of a generic count, so the user knows to refresh.
+        const messages = Array.from(new Set(failedReverts.map((f) => f.message).filter(Boolean)));
+        toast({
+          title: successfulReverts.length > 0 ? "Partial Revert Failure" : "Revert Failed",
+          description: messages[0] || `Failed to revert ${failedReverts.length} item(s).`,
+          variant: "destructive",
+        });
+        // Refresh so rows already reverted/moved by another user drop off the stale list.
+        if (successfulReverts.length === 0) {
+          await refetchPending();
+          await refetchHistory();
+        }
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "An unexpected error occurred during revert",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <WorkflowStageShell
       title="Stage 5: Actual Dispatch"
@@ -3102,12 +3183,20 @@ export default function ActualDispatchPage() {
                 />
               </div>
               <Button
+                variant="outline"
+                onClick={handleRevertToDispatchPlanning}
+                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
+                className="font-black uppercase tracking-tight h-10 px-6 border-amber-500 text-amber-600 hover:bg-amber-50"
+              >
+                {isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`}
+              </Button>
+              <Button
                 variant="destructive"
                 onClick={handleRevert}
                 disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
                 className="font-black uppercase tracking-tight h-10 px-6"
               >
-                {isProcessing ? "Wait..." : `Revert (${dialogSelectedProducts.length})`}
+                {isProcessing ? "Wait..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`}
               </Button>
             </div>
 
