@@ -1557,7 +1557,7 @@ export default function ActualDispatchPage() {
         setDialogSelectedProducts([]);
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
 
         // setTimeout(() => {
         //   router.push("/security-approval")
@@ -1634,7 +1634,7 @@ export default function ActualDispatchPage() {
         setRevertRemarks("");
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
       }
 
       if (failedReverts.length > 0) {
@@ -1715,7 +1715,7 @@ export default function ActualDispatchPage() {
         setRevertRemarks("");
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
       }
 
       if (failedReverts.length > 0) {
@@ -1730,7 +1730,7 @@ export default function ActualDispatchPage() {
         // Refresh so rows already reverted/moved by another user drop off the stale list.
         if (successfulReverts.length === 0) {
           await refetchPending();
-          await refetchHistory();
+          queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
         }
       }
     } catch (error: any) {
