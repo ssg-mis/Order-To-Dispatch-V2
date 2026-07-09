@@ -930,25 +930,6 @@ export default function DispatchMaterialPage() {
     return true
   })
 
-  const filteredHistory = useMemo(() => {
-    return historyOrders.map((order: any) => {
-      const isCancelled = String(order.overall_status_of_order || "").toLowerCase() === "cancelled"
-      return {
-        ...order,
-        rawData: order,
-        orderNo: order.dispatchPlanningData?.orderNo || order.order_no || "-",
-        customerName: order.customer_name || "-",
-        timestamp: order.dispatchPlanningData?.confirmedAt || order.timestamp,
-        date: new Date(order.dispatchPlanningData?.confirmedAt || order.timestamp || new Date()).toLocaleDateString("en-GB"),
-        stage: "Dispatch Planning",
-        status: isCancelled ? "Rejected" : "Completed",
-        remarks: isCancelled
-          ? `Cancelled: ${order.cancel_remarks || "No reason provided"}`
-          : (order.dispatchPlanningData?.dispatchDate ? `Date: ${order.dispatchPlanningData.dispatchDate}` : "Dispatch Plannned"),
-      }
-    })
-  }, [historyOrders])
-
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
 
