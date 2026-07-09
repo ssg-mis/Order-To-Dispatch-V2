@@ -18,7 +18,8 @@ import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useInView } from "react-intersection-observer"
 import { ChevronLeft, ChevronRight, Settings2, CheckCircle2, Loader2, ChevronDown, ChevronUp, ChevronsUpDown, Check, CheckCircle, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
 import { approvalApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
@@ -30,6 +31,7 @@ import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 
 export default function CommitmentReviewPage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -123,12 +125,9 @@ export default function CommitmentReviewPage() {
 
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [pendingPage, setPendingPage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
   const limit = 20;
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
-  const { ref: historyEndRef, inView: historyInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
     search: "",
@@ -158,7 +157,7 @@ export default function CommitmentReviewPage() {
   // Reset page when filters change
   useEffect(() => {
     setPendingPage(1);
-    setHistoryPage(1);
+    // setHistoryPage(1);
   }, [filterValues]);
 
   // Map backend data (snake_case) to frontend format (camelCase)
@@ -239,35 +238,10 @@ export default function CommitmentReviewPage() {
     refetchOnWindowFocus: true,
   });
 
-  // History query with numeric pagination
-  const {
-    data: historyResult,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["approval-history", filterValues, historyPage],
-    queryFn: async () => {
-      const response = await approvalApi.getHistory({
-        page: historyPage,
-        limit,
-        search: filterValues.search,
-        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        start_date: filterValues.startDate,
-        end_date: filterValues.endDate,
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
   // ── Refetch fresh data from DB whenever stage tab changes ──
   useEffect(() => {
     if (activeTab === "pending") {
       refetchPending();
-    } else if (activeTab === "history") {
-      refetchHistory();
     }
   }, [activeTab]);
 
@@ -291,20 +265,7 @@ export default function CommitmentReviewPage() {
     return "Completed";
   };
 
-  const historyItems = useMemo(() => {
-    return historyResult?.orders.map((order: any) => ({
-      ...order,
-      rawData: order,
-      orderNo: order.order_no,
-      customerName: order.customer_name,
-      stage: "Approval Of Order",
-      status: getApprovalHistoryStatus(order),
-      processedBy: "System",
-      timestamp: order.actual_2,
-      date: order.actual_2 ? new Date(order.actual_2).toLocaleDateString("en-GB") : "-",
-      remarks: order.remark || "-",
-    })) || [];
-  }, [historyResult]);
+
 
 
 
@@ -456,7 +417,7 @@ export default function CommitmentReviewPage() {
 
         // Refresh data from backend
         await refetchPending()
-        await refetchHistory()
+        queryClient.invalidateQueries({ queryKey: ["approval-history"] })
       }
 
       if (failedApprovals.length > 0) {
@@ -534,6 +495,7 @@ export default function CommitmentReviewPage() {
     if (!open) {
       setSelectedOrder(null)
       setDialogSelectedProducts([])
+      setExpandedOrders([])
     } else {
       // Pick the first one as representative for the dialog fields
       if (selectedItems.length > 0) {
@@ -542,6 +504,8 @@ export default function CommitmentReviewPage() {
         const allKeys = selectedItems.flatMap(g => g._allProducts || []).map((p: any) => p._rowKey)
         setDialogSelectedProducts(allKeys)
       }
+      // Start with all per-DO sections collapsed so the grouping is visible & predictable
+      setExpandedOrders([])
 
       // Reset form state whenever opening
       setChecklistValues({
@@ -580,22 +544,20 @@ export default function CommitmentReviewPage() {
     return true
   })
 
-  const filteredHistory = historyItems;
 
-  // Group by base DO number (removing uniqueness by Customer Name)
+
+  // Group orders by base DO number so suffix variants like DO/26-27/0001A and DO/26-27/0001B appear as one grouped row.
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
 
     filteredPendingOrders.forEach((order: any) => {
       const originalOrderId = order.doNumber || order.orderNo || "DO/26-27/0001"
-      // Group by Base DO (e.g. DO/26-27/0001 from DO/26-27/0001A)
       const baseDoMatch = originalOrderId.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
       const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : originalOrderId
-
-      // Group by Order Number (baseDo)
       const groupKey = baseDo
-
-      const products = order.products || []
+      const products = (order.preApprovalProducts && order.preApprovalProducts.length > 0)
+        ? order.preApprovalProducts
+        : (order.products || [])
 
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
@@ -604,16 +566,18 @@ export default function CommitmentReviewPage() {
           _allBaseDos: new Set([baseDo]),
           _rowKey: groupKey,
           _allProducts: [],
+          _seenProductKeys: new Set<string>(),
           _productCount: 0,
-          _ordersMap: {} // Map to store details for each base DO
+          _ordersMap: {}
         }
       } else {
         grouped[groupKey]._allBaseDos.add(baseDo)
       }
 
-      // Store/Update details for this base DO group
       if (!grouped[groupKey]._ordersMap[baseDo]) {
         grouped[groupKey]._ordersMap[baseDo] = {
+          customerName: order.customerName,
+          customerType: order.customerType,
           orderPurpose: order.orderPurpose,
           orderType: order.orderType,
           startDate: order.startDate,
@@ -639,21 +603,28 @@ export default function CommitmentReviewPage() {
         }
       }
 
-      // Aggregate products and link them to their original order ID
       products.forEach((prod: any) => {
-        const pName = prod.productName || prod.oilType;
-        const isVerified = historyItems.some((h: any) =>
-          (h.orderNo === originalOrderId || h.orderNo === baseDo) &&
-          (h.data?.orderData?._product?.productName === pName || h.data?.orderData?._product?.oilType === pName)
-        );
+        const pName = prod.productName || prod.oilType
+        const isVerified = false
 
         if (!isVerified) {
+          // Unique key per (baseDo, orderId, product) so sibling A/B/C DOs of the
+          // same base DO don't collide and we never double-count the same product.
+          const prodIdentifier = prod._pid || prod.id || prod.serial || `${pName}-${prod.rate || ""}`
+          const uniqueKey = `${baseDo}::${order.id ?? "x"}::${prodIdentifier}`
+
+          if (grouped[groupKey]._seenProductKeys.has(uniqueKey)) {
+            return
+          }
+          grouped[groupKey]._seenProductKeys.add(uniqueKey)
+
+          const { _allProducts, _ordersMap, _seenProductKeys, ...cleanOrderData } = grouped[groupKey]
           const productWithId = {
             ...prod,
             _originalOrderId: originalOrderId,
             _baseDo: baseDo,
-            _orderData: order,
-            _rowKey: `${groupKey}-${prod._pid || prod.id}`
+            _orderData: cleanOrderData,
+            _rowKey: uniqueKey
           }
           grouped[groupKey]._allProducts.push(productWithId)
           grouped[groupKey]._ordersMap[baseDo]._products.push(productWithId)
@@ -663,15 +634,23 @@ export default function CommitmentReviewPage() {
       grouped[groupKey]._productCount = grouped[groupKey]._allProducts.length
     })
 
-    // Cleanup display strings
-    return Object.values(grouped).map((group: any) => ({
-      ...group,
-      orderNo: group._displayDo,
-      transportType: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(Boolean).join(", "),
-      orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; "),
-      remark: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.remark))).filter(Boolean).join("; ")
-    })).filter(group => group._productCount > 0)
-  }, [filteredPendingOrders, history])
+    return Object.values(grouped)
+      .map((group: any) => {
+        const customerNames = Array.from(new Set(Object.values(group._ordersMap)
+          .map((order: any) => order.customerName)
+          .filter(Boolean)))
+
+        group._displayDo = Array.from(group._allBaseDos).join(", ")
+        group.customerName = customerNames.join(", ") || group.customerName || "—"
+        group.orderNo = group._displayDo
+        group.soNo = group._displayDo
+        group.transportType = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(Boolean).join(", ")
+        group.orderPunchRemarks = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ")
+        group.remark = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.remark))).filter(Boolean).join("; ")
+        return group
+      })
+      .filter((group: any) => group._productCount > 0)
+  }, [filteredPendingOrders])
 
   // ── Pending Table Sorting ─────────────────────────────────────
   const [pendingSortField, setPendingSortField] = useState<string>("")
@@ -778,41 +757,25 @@ export default function CommitmentReviewPage() {
     <WorkflowStageShell
       title="Stage 3: Approval Of Order"
       description="Six-point verification check before commitment entry."
-      pendingCount={pendingResult?.pagination?.total || 0}
-      historyData={historyItems}
+      pendingCount={displayRows.length}
+      historyData={[]}
       partyNames={filterOptions.customerNames}
       onFilterChange={setFilterValues}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={false}
-      historyFooter={
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-          <div className="text-xs font-bold text-slate-500 bg-white px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{historyPage}</span> of <span className="text-blue-600 px-1">{historyResult?.pagination?.totalPages || 1}</span>
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{historyResult?.pagination?.total || 0}</span> Groups
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
-              disabled={historyPage === 1 || isHistoryLoading}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => p + 1)}
-              disabled={historyPage >= (historyResult?.pagination?.totalPages || 1) || isHistoryLoading}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+      groupBySiblingDo={true}
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="approval-history"
+          getHistoryApi={approvalApi.getHistory}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Approval Of Order"
+          stageLevel={2}
+          remarksColName="Approval Remarks"
+          mapStatus={getApprovalHistoryStatus}
+          getDate={(order: any) => order.actual_2 || null}
+        />
       }
     >
       <div className="space-y-4">
@@ -848,16 +811,17 @@ export default function CommitmentReviewPage() {
 
                     {/* Iterate through each unique base DO for this customer */}
                     {Object.entries(customerGrp._ordersMap).map(([baseDo, orderDetails]: [string, any], orderIdx) => {
-                      const isExpanded = expandedOrders.includes(baseDo);
+                      const orderSectionKey = `${customerGrp._rowKey}__${baseDo}`;
+                      const isExpanded = expandedOrders.includes(orderSectionKey);
 
                       const toggleExpand = () => {
                         setExpandedOrders(prev =>
-                          isExpanded ? prev.filter(id => id !== baseDo) : [...prev, baseDo]
+                          isExpanded ? prev.filter(id => id !== orderSectionKey) : [...prev, orderSectionKey]
                         );
                       };
 
                       return (
-                        <div key={baseDo} className="space-y-4 border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow min-w-0">
+                        <div key={orderSectionKey} className="space-y-4 border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow min-w-0">
                           <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
                             <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                               <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-base font-black tracking-tight rounded-full shadow-sm whitespace-normal break-all">
@@ -870,93 +834,95 @@ export default function CommitmentReviewPage() {
                             </div>
                             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
                               <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2">Click to {isExpanded ? 'Hide' : 'Show'} Details</div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-white hover:bg-white/20 rounded-full"
+                              <span
+                                role="button"
+                                aria-label={isExpanded ? "Collapse section" : "Expand section"}
+                                className="inline-flex h-8 w-8 items-center justify-center text-white hover:bg-white/20 rounded-full"
+                                onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
                               >
                                 {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                              </Button>
+                              </span>
                             </div>
                           </div>
 
-                          {/* Collapsible Order Details */}
+                          {/* Collapsible Content: order details + product table */}
                           {isExpanded && (
-                            <div className="px-3 sm:px-5 pb-5 animate-in slide-in-from-top-2 duration-200">
-                              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-inner">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Name</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight break-words">{customerGrp.customerName || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Depo Name</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.depoName || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Purpose</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderPurpose?.replace(/-/g, ' ') || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Category</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderCategory || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Type</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderType || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Start Date</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.startDate)}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">End Date</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.endDate)}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Date</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.deliveryDate)}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">DO Date</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.partySoDate || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Transport Type</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Contact Person</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.contactPerson || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">WhatsApp No.</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.whatsappNo || "—"}</p>
-                                  </div>
-                                  <div className="sm:col-span-2">
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Address</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight break-words" title={orderDetails.customerAddress}>{orderDetails.customerAddress || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Payment Terms</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.paymentTerms || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
-                                    <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Payment</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.advancePaymentTaken ? "YES" : "NO"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">
-                                      {orderDetails.isOrderThrough === "Salesperson" ? "Salesperson Name" : "Through Broker"}
-                                    </p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">
-                                      {orderDetails.isBrokerOrder ? orderDetails.brokerName || "Yes" : "No"}
-                                    </p>
-                                  </div>
+                            <div className="animate-in slide-in-from-top-2 duration-200">
+                              <div className="px-3 sm:px-5 pb-5">
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-inner">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Name</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight break-words">{customerGrp.customerName || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Depo Name</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.depoName || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Purpose</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderPurpose?.replace(/-/g, ' ') || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Category</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderCategory || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Type</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderType || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Start Date</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.startDate)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">End Date</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.endDate)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Date</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.deliveryDate)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">DO Date</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.partySoDate || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Transport Type</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Contact Person</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.contactPerson || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">WhatsApp No.</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.whatsappNo || "—"}</p>
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Address</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight break-words" title={orderDetails.customerAddress}>{orderDetails.customerAddress || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Payment Terms</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.paymentTerms || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
+                                      <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Payment</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.advancePaymentTaken ? "YES" : "NO"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">
+                                        {orderDetails.isOrderThrough === "Salesperson" ? "Salesperson Name" : "Through Broker"}
+                                      </p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">
+                                        {orderDetails.isBrokerOrder ? orderDetails.brokerName || "Yes" : "No"}
+                                      </p>
+                                    </div>
                                     <div className="sm:col-span-2 bg-amber-50 p-4 rounded-xl border border-amber-100 flex items-start gap-4">
                                       <div className="bg-amber-100 p-2 rounded-lg">
                                         <Settings2 className="h-5 w-5 text-amber-600" />
@@ -968,15 +934,15 @@ export default function CommitmentReviewPage() {
                                     </div>
                                     <div className={cn(
                                       "sm:col-span-2 p-4 rounded-xl border flex items-start gap-4 transition-all duration-300",
-                                      orderDetails.uploadSo 
-                                        ? "bg-blue-50 border-blue-100 hover:bg-blue-100 cursor-pointer group" 
+                                      orderDetails.uploadSo
+                                        ? "bg-blue-50 border-blue-100 hover:bg-blue-100 cursor-pointer group"
                                         : "bg-slate-50 border-slate-100 opacity-60"
                                     )}
-                                    onClick={() => {
-                                      if (orderDetails.uploadSo) {
-                                        window.open(orderDetails.uploadSo, '_blank');
-                                      }
-                                    }}>
+                                      onClick={() => {
+                                        if (orderDetails.uploadSo) {
+                                          window.open(orderDetails.uploadSo, '_blank');
+                                        }
+                                      }}>
                                       <div className={cn(
                                         "p-2 rounded-lg",
                                         orderDetails.uploadSo ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400"
@@ -998,118 +964,119 @@ export default function CommitmentReviewPage() {
                                         )}
                                       </div>
                                     </div>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )}
 
-                          {/* Render Product Table for this DO */}
-                          <div className="px-3 sm:px-5 pb-6 min-w-0">
-                            <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                              <div className="hidden md:block">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow className="bg-slate-50 border-b">
-                                    <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                              {/* Render Product Table for this DO */}
+                              <div className="px-0 pt-2 pb-6 min-w-0">
+                                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
+                                  <div className="hidden md:block">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="bg-slate-50 border-b">
+                                          <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                                            <Checkbox
+                                              checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
+                                              onCheckedChange={(checked) => {
+                                                const productKeys = orderDetails._products.map((p: any) => p._rowKey);
+                                                if (checked) {
+                                                  setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys]))
+                                                  )
+                                                } else {
+                                                  setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
+                                                }
+                                              }}
+                                            />
+                                          </TableHead>
+                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
+                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty</TableHead>
+                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate</TableHead>
+                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Status</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {orderDetails._products.map((prod: any) => (
+                                          <TableRow key={prod._rowKey} className={cn(dialogSelectedProducts.includes(prod._rowKey) ? "bg-blue-50/40" : "")}>
+                                            <TableCell className="text-center p-3">
+                                              <Checkbox
+                                                checked={dialogSelectedProducts.includes(prod._rowKey)}
+                                                onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
+                                              />
+                                            </TableCell>
+                                            <TableCell className="p-3">
+                                              <div className="flex flex-col">
+                                                <span className="text-xs font-black text-slate-900 leading-none mb-1">{prod.productName || prod.oilType || "—"}</span>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{prod._originalOrderId}</span>
+                                              </div>
+                                            </TableCell>
+                                            <TableCell className="p-3">
+                                              <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
+                                            </TableCell>
+                                            <TableCell className="p-3 text-[10px] font-bold text-slate-700">₹{prod.rate || "—"}</TableCell>
+                                            <TableCell className="p-3">
+                                              <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                  <div className="space-y-3 p-3 md:hidden">
+                                    <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+                                      <div>
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
+                                        <p className="text-xs font-bold text-slate-700">{orderDetails._products.length} items</p>
+                                      </div>
                                       <Checkbox
                                         checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
                                         onCheckedChange={(checked) => {
                                           const productKeys = orderDetails._products.map((p: any) => p._rowKey);
                                           if (checked) {
-                                            setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys]))
-                                            )
+                                            setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys])))
                                           } else {
                                             setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
                                           }
                                         }}
                                       />
-                                    </TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Status</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {orderDetails._products.map((prod: any) => (
-                                    <TableRow key={prod._rowKey} className={cn(dialogSelectedProducts.includes(prod._rowKey) ? "bg-blue-50/40" : "")}>
-                                      <TableCell className="text-center p-3">
-                                        <Checkbox
-                                          checked={dialogSelectedProducts.includes(prod._rowKey)}
-                                          onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                        />
-                                      </TableCell>
-                                      <TableCell className="p-3">
-                                        <div className="flex flex-col">
-                                          <span className="text-xs font-black text-slate-900 leading-none mb-1">{prod.productName || prod.oilType || "—"}</span>
-                                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{prod._originalOrderId}</span>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell className="p-3">
-                                        <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                      </TableCell>
-                                      <TableCell className="p-3 text-[10px] font-bold text-slate-700">₹{prod.rate || "—"}</TableCell>
-                                      <TableCell className="p-3">
-                                        <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                              </div>
-                              <div className="space-y-3 p-3 md:hidden">
-                                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-                                  <div>
-                                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
-                                    <p className="text-xs font-bold text-slate-700">{orderDetails._products.length} items</p>
-                                  </div>
-                                  <Checkbox
-                                    checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
-                                    onCheckedChange={(checked) => {
-                                      const productKeys = orderDetails._products.map((p: any) => p._rowKey);
-                                      if (checked) {
-                                        setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys])))
-                                      } else {
-                                        setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                {orderDetails._products.map((prod: any) => {
-                                  const selected = dialogSelectedProducts.includes(prod._rowKey)
-                                  return (
-                                    <div
-                                      key={prod._rowKey}
-                                      className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}
-                                    >
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
-                                          <p className="text-sm font-black text-slate-900 break-words">{prod.productName || prod.oilType || "—"}</p>
-                                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight break-all">{prod._originalOrderId}</p>
-                                        </div>
-                                        <Checkbox
-                                          checked={selected}
-                                          onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                        />
-                                      </div>
-                                      <div className="grid grid-cols-2 gap-3 text-xs">
-                                        <div className="rounded-md bg-slate-50 p-2">
-                                          <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                                          <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                        </div>
-                                        <div className="rounded-md bg-slate-50 p-2">
-                                          <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                          <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
-                                        </div>
-                                      </div>
-                                      <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
                                     </div>
-                                  )
-                                })}
+                                    {orderDetails._products.map((prod: any) => {
+                                      const selected = dialogSelectedProducts.includes(prod._rowKey)
+                                      return (
+                                        <div
+                                          key={prod._rowKey}
+                                          className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}
+                                        >
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
+                                              <p className="text-sm font-black text-slate-900 break-words">{prod.productName || prod.oilType || "—"}</p>
+                                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight break-all">{prod._originalOrderId}</p>
+                                            </div>
+                                            <Checkbox
+                                              checked={selected}
+                                              onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
+                                            />
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-3 text-xs">
+                                            <div className="rounded-md bg-slate-50 p-2">
+                                              <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
+                                              <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
+                                            </div>
+                                            <div className="rounded-md bg-slate-50 p-2">
+                                              <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
+                                              <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
+                                            </div>
+                                          </div>
+                                          <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       )
                     })}

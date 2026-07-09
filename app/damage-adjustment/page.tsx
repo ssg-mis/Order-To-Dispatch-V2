@@ -29,7 +29,8 @@ const TOGGLE_COLUMNS = getColumnsUpToStage("damage-adjustment")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { damageAdjustmentApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -90,12 +91,12 @@ async function compressImageForUpload(file: File): Promise<File> {
 }
 
 export default function DamageAdjustmentPage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const { ref: pendingEndRef, inView: pendingInView } = useInView()
-  const { ref: historyEndRef, inView: historyInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -181,55 +182,15 @@ export default function DamageAdjustmentPage() {
     },
   });
 
-  // History query with infinite pagination (lazy loaded)
-  const {
-    data: historyData,
-    fetchNextPage: fetchNextHistory,
-    hasNextPage: hasNextHistory,
-    isFetchingNextPage: isFetchingNextHistory,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useInfiniteQuery({
-    queryKey: ["damage-adjustment-history", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
-      const response = await damageAdjustmentApi.getHistory({
-        page: pageParam,
-        limit: 20,
-        search: filterValues.search,
-        manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.orders?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
-    },
-    enabled: activeTab === "history",
-  });
-
   const pendingOrders = useMemo(() => {
     return pendingData?.pages.flatMap((page) => page.orders) || [];
   }, [pendingData]);
-
-  const historyOrders = useMemo(() => {
-    return historyData?.pages.flatMap((page) => page.orders) || [];
-  }, [historyData]);
 
   useEffect(() => {
     if (pendingInView && hasNextPending) {
       fetchNextPending();
     }
   }, [pendingInView, hasNextPending, fetchNextPending]);
-
-  useEffect(() => {
-    if (historyInView && hasNextHistory) {
-      fetchNextHistory();
-    }
-  }, [historyInView, hasNextHistory, fetchNextHistory]);
 
   const handleFileUpload = (file: File) => {
     if (!file) return;
@@ -566,7 +527,7 @@ export default function DamageAdjustmentPage() {
         })
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["damage-adjustment-history"] });
 
         setIsDialogOpen(false)
         setSelectedItems([])
@@ -602,39 +563,38 @@ export default function DamageAdjustmentPage() {
       title="Stage 13: Damage Adjustment"
       description="Process credit notes and adjustments for damaged goods."
       pendingCount={displayRows.length}
-      historyData={historyOrders.map((order) => ({
-        ...order,
-        date: order.actual_9 ? new Date(order.actual_9).toLocaleDateString("en-GB") : "-",
-        orderNo: order.so_no,
-        stage: "Damage Adjustment",
-        customerName: (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name,
-        status: order.status_2 || "Completed",
-        remarks: order.credit_note_no ? `CN: ${order.credit_note_no}` : "-",
-        rawData: order,
-      }))}
+      historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={true}
       stageLevel={10}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
       searchPlaceholder="Search DO Number or Customer..."
-      historyFooter={
-        <div ref={historyEndRef} className="py-4 flex justify-center">
-          {isFetchingNextHistory && (
-            <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-xs tracking-widest ">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>LOADING MORE ADJUSTMENT HISTORY...</span>
-            </div>
-          )}
-          {!hasNextHistory && historyOrders.length > 0 && (
-            <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest bg-slate-50 px-4 py-1.5 rounded-full border border-slate-100 italic">
-              END OF HISTORY
-            </span>
-          )}
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="damage-adjustment-history"
+          getHistoryApi={(params: any) => damageAdjustmentApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+            search: params.order_no,
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            do_date_from: params.start_date,
+            do_date_to: params.end_date,
+            party_name: params.customer_name,
+          })}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Damage Adjustment"
+          stageLevel={10}
+          remarksColName="Remarks"
+          orderListKey="orders"
+          mapOrderNo={(order: any) => order.so_no || "-"}
+          mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
+          mapRemarks={(order: any) => order.credit_note_no ? `CN: ${order.credit_note_no}` : "-"}
+          getDate={(order: any) => order.actual_9 || order.timestamp || null}
+        />
       }
     >
       <div className="space-y-4">

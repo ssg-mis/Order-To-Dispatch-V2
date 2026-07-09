@@ -32,7 +32,8 @@ const TOGGLE_COLUMNS = getColumnsUpToStage("security-approval")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { securityGuardApprovalApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Loader2, ChevronLeft, ChevronRight, Filter, RotateCcw, ExternalLink } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
@@ -102,6 +103,7 @@ const PAGE_COLUMNS = [
 type ColId = typeof PAGE_COLUMNS[number]["id"]
 
 export default function SecurityApprovalPage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -109,7 +111,6 @@ export default function SecurityApprovalPage() {
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -237,52 +238,13 @@ export default function SecurityApprovalPage() {
     },
   });
 
-  // History query with numeric pagination
-  const {
-    data: historyResult,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["security-approval-history", filterValues, historyPage],
-    queryFn: async () => {
-      const response = await securityGuardApprovalApi.getHistory({
-        page: historyPage,
-        limit: 10,
-        search: filterValues.search,
-        manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-      });
-      return response.success ? response.data : { approvals: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-  });
-
   const pendingOrders = useMemo(() => {
     return pendingResult?.approvals || [];
   }, [pendingResult]);
 
-  const historyOrders = useMemo(() => {
-    return historyResult?.approvals?.map((record: any) => ({
-      ...record,
-      orderNo: record.so_no,
-      doNumber: record.d_sr_number,
-      customerName: (record.transfer === 'yes' && record.bill_company_name) ? record.bill_company_name : record.party_name,
-      stage: "Security Approval",
-      status: "Completed" as const,
-      processedBy: "System",
-      timestamp: record.actual_4,
-      date: record.actual_4 ? new Date(record.actual_4).toLocaleDateString("en-GB") : "-",
-      remarks: record.bilty_no || "-",
-      rawData: record,
-    })) || [];
-  }, [historyResult]);
-
   // Reset pages when filters change
   useEffect(() => {
     setPendingPage(1);
-    setHistoryPage(1);
   }, [filterValues]);
 
   const handleFileUpload = (file: File, type: 'bilty' | 'vehicle') => {
@@ -437,7 +399,7 @@ export default function SecurityApprovalPage() {
 
         // Refresh data from backend
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["security-approval-history"] });
 
         // Navigate to next stage after delay
         // setTimeout(() => {
@@ -760,52 +722,43 @@ export default function SecurityApprovalPage() {
 
   return (
     <WorkflowStageShell
-      historyFooter={
-        <div className="px-6 py-4 border-t bg-slate-50/50 flex items-center justify-between">
-          <div className="text-xs text-slate-500 font-medium tracking-tight">
-            Showing <span className="text-slate-900">{(historyPage - 1) * 10 + 1}</span> to <span className="text-slate-900">{Math.min(historyPage * 10, historyResult?.pagination?.total || 0)}</span> of <span className="text-slate-900">{historyResult?.pagination?.total || 0}</span> records
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
-              disabled={historyPage === 1 || isHistoryLoading}
-              className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="flex items-center px-2">
-              <span className="text-xs font-semibold text-slate-900">Page {historyPage}</span>
-              <span className="text-[10px] text-slate-400 font-medium mx-1">of</span>
-              <span className="text-xs font-semibold text-slate-900">{historyResult?.pagination?.totalPages || 1}</span>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => p + 1)}
-              disabled={historyPage >= (historyResult?.pagination?.totalPages || 1) || isHistoryLoading}
-              className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      }
       title="Stage 8: Security Guard Approval"
       description="Upload bilty and vehicle images for security verification."
       pendingCount={pendingResult?.pagination?.total || 0}
-      historyData={historyOrders}
+      historyData={[]}
       onFilterChange={setFilterValues}
       partyNames={filterOptions.customerNames}
       showStatusFilter={true}
       stageLevel={5}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
       searchPlaceholder="Search DO Number or Customer..."
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="security-approval-history"
+          getHistoryApi={(params: any) => securityGuardApprovalApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+            search: params.order_no,
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            do_date_from: params.start_date,
+            do_date_to: params.end_date,
+            customer_name: params.customer_name,
+          })}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Security Approval"
+          stageLevel={5}
+          remarksColName="Bilty No"
+          orderListKey="approvals"
+          mapOrderNo={(record: any) => record.so_no || "-"}
+          mapCustomerName={(record: any) => (record.transfer === 'yes' && record.bill_company_name) ? record.bill_company_name : record.party_name}
+          mapRemarks={(record: any) => record.bilty_no || "-"}
+          getDate={(record: any) => record.actual_4 || null}
+        />
+      }
     >
       <div className="space-y-4">
         <div className="flex justify-end gap-2">

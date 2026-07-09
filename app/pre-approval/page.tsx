@@ -45,7 +45,8 @@ import {
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -54,6 +55,7 @@ import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 
 export default function PreApprovalPage() {
+  const queryClient = useQueryClient()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const router = useRouter()
@@ -131,7 +133,6 @@ export default function PreApprovalPage() {
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
-  const [historyPage, setHistoryPage] = useState(1)
   const limit = 25
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [dialogNewProducts, setDialogNewProducts] = useState<{ [key: string]: any[] }>({})
@@ -575,57 +576,15 @@ export default function PreApprovalPage() {
   }, [pendingData]);
 
 
-  // Query for History with numeric pagination
-  const {
-    data: historyData,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["approvalHistory", filterValues, historyPage],
-    queryFn: async () => {
-      const response = await preApprovalApi.getHistory({
-        page: historyPage,
-        limit: limit,
-        order_no: filterValues.search,
-        customer_name: filterValues.partyName !== "all" ? filterValues.partyName : undefined,
-        start_date: filterValues.startDate,
-        end_date: filterValues.endDate,
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
-  const history = useMemo(() => {
-    return historyData?.orders.map((order: any) => ({
-      ...order,
-      rawData: order,
-      orderNo: order.order_no,
-      customerName: order.customer_name,
-      stage: "Pre-Approval",
-      status: "Completed" as const,
-      processedBy: "System",
-      timestamp: order.actual_1,
-      date: order.actual_1 ? new Date(order.actual_1).toLocaleDateString("en-GB") : "-",
-      remarks: order.remark || "-",
-    })) || [];
-  }, [historyData]);
-
-
   // Reset pages when filters change
   useEffect(() => {
     setPendingPage(1);
-    setHistoryPage(1);
   }, [filterValues]);
 
   // ── Refetch fresh data from DB whenever stage tab changes ──
   useEffect(() => {
     if (activeTab === "pending") {
       refetchPending();
-    } else if (activeTab === "history") {
-      refetchHistory();
     }
   }, [activeTab]);
 
@@ -770,7 +729,7 @@ export default function PreApprovalPage() {
 
         // Refresh data from backend
         await refetchPending()
-        await refetchHistory()
+        queryClient.invalidateQueries({ queryKey: ["pre-approval-history"] })
       }
 
       if (failedApprovals.length > 0) {
@@ -1163,7 +1122,7 @@ export default function PreApprovalPage() {
       if (successfulApprovals.length > 0) {
         toast({ title: "Success", description: "Approvals and additions processed." });
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["pre-approval-history"] });
         setDialogNewProducts({});
       }
 
@@ -1422,10 +1381,7 @@ export default function PreApprovalPage() {
 
   const destinationColumnsCount = visibleColumns.length + 1
 
-  const filteredHistory = useMemo(() => {
-    // Basic filtering is now done at API level, but we can keep it as a safety layer for any edge cases
-    return history;
-  }, [history])
+
 
   const filteredPendingOrders = useMemo(() => {
     return pendingOrders.filter((order: any) => {
@@ -1916,39 +1872,22 @@ export default function PreApprovalPage() {
       title="Stage 2: Pre-Approval"
       description="Review and set rates for item requirements."
       pendingCount={displayRows.length}
-      historyData={filteredHistory}
+      historyData={[]}
       partyNames={customerNames}
       onFilterChange={setFilterValues}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={false}
       groupBySiblingDo={true}
-      historyFooter={
-        <div className="px-3 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-slate-500 font-bold uppercase tracking-tighter">
-            Showing Page {historyPage} of {historyData?.pagination?.totalPages || 1} ({historyData?.pagination?.total || 0} Groups)
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={historyPage === 1}
-              className="font-bold uppercase tracking-widest text-[10px]"
-              onClick={() => setHistoryPage(p => p - 1)}
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="font-bold uppercase tracking-widest text-[10px]"
-              disabled={historyPage >= (historyData?.pagination?.totalPages || 1)}
-              onClick={() => setHistoryPage(p => p + 1)}
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="pre-approval-history"
+          getHistoryApi={preApprovalApi.getHistory}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Pre-Approval"
+          stageLevel={1}
+          remarksColName="Pre-Approval Remarks"
+        />
       }
     >
       <div className="space-y-4">

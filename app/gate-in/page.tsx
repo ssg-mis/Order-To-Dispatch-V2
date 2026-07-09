@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi } from "@/lib/api-service"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
@@ -349,12 +350,12 @@ function GateInGSTSummary({ records }: { records: any[] }) {
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function GateInPage() {
+  const queryClient = useQueryClient()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
-  const [historyPage, setHistoryPage] = useState(1)
   const limit = 20
 
   const [selectedRows, setSelectedRows] = useState<string[]>([])
@@ -398,24 +399,7 @@ export default function GateInPage() {
     refetchOnWindowFocus: true,
   })
 
-  // ── History ────────────────────────────────────────────────────────────────
-  const {
-    data: historyResult,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["gate-in-history", historyPage],
-    queryFn: async () => {
-      const res = await gateInApi.getHistory({ page: historyPage, limit })
-      return res.success ? res.data : { records: [], pagination: { total: 0 } }
-    },
-    enabled: activeTab === "history",
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  })
-
   const pendingRecords: any[] = pendingResult?.records || []
-  const historyRecords: any[] = historyResult?.records || []
 
   // ── SKU weight lookup ──────────────────────────────────────────────────────
   const { data: skuDetailsData } = useQuery({
@@ -438,17 +422,7 @@ export default function GateInPage() {
     return map
   }, [skuDetailsData])
 
-  // ── History shape for WorkflowStageShell ──────────────────────────────────
-  const historyData = useMemo(() =>
-    historyRecords.map((r: any) => ({
-      date: formatDate(r.submitted_at),
-      orderNo: r.order_key,
-      customerName: r.draft_data?.vehicleNumber || r.order_key,
-      driverName: r.draft_data?.driverName || "—",
-      status: "Completed",
-      remarks: `Gate-In by ${r.username}`,
-      rawData: r,
-    })), [historyRecords])
+
 
   // ── Select helpers ─────────────────────────────────────────────────────────
 
@@ -672,7 +646,7 @@ export default function GateInPage() {
         .filter(Boolean) as string[]
 
       await refetchPending()
-      await refetchHistory()
+      queryClient.invalidateQueries({ queryKey: ["gate-in-history"] })
 
       if (failed.length > 0) {
         const failMsg = failed.length === selectedGroupKeys.length
@@ -711,30 +685,33 @@ export default function GateInPage() {
       title="Gate In"
       description="Record vehicle gate-in photos before Actual Dispatch confirmation."
       pendingCount={pendingRecords.length}
-      historyData={historyData}
+      historyData={[]}
       onFilterChange={() => { }}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={false}
-      historyFooter={
-        <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50/50 rounded-b-xl">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            Page <span className="text-slate-900 mx-1">{historyPage}</span>
-            {historyResult?.pagination?.totalPages && (
-              <> of <span className="text-slate-900 mx-1">{historyResult.pagination.totalPages}</span></>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50">
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setHistoryPage(p => p + 1)} disabled={historyPage >= (historyResult?.pagination?.totalPages || 1)}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50">
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="gate-in-history"
+          getHistoryApi={(params: any) => gateInApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+          })}
+          filterValues={{
+            search: "",
+            partyName: "all",
+            startDate: "",
+            endDate: "",
+          }}
+          activeTab={activeTab}
+          stageName="Gate In"
+          stageLevel={1}
+          remarksColName="Remarks"
+          orderListKey="records"
+          mapOrderNo={(r: any) => r.order_key}
+          mapCustomerName={(r: any) => r.draft_data?.vehicleNumber || r.order_key}
+          mapRemarks={(r: any) => `Gate-In by ${r.username}`}
+          getDate={(r: any) => r.submitted_at || null}
+        />
       }
     >
       <div className="space-y-4">

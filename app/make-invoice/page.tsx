@@ -32,7 +32,8 @@ import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { makeInvoiceApi, orderApi, skuDetailsApi, depotApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
@@ -155,12 +156,12 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
 }
 
 export default function MakeInvoicePage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const { ref: pendingEndRef, inView: pendingInView } = useInView()
-  const { ref: historyEndRef, inView: historyInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -351,55 +352,15 @@ export default function MakeInvoicePage() {
     },
   });
 
-  // History query with infinite pagination (lazy loaded)
-  const {
-    data: historyData,
-    fetchNextPage: fetchNextHistory,
-    hasNextPage: hasNextHistory,
-    isFetchingNextPage: isFetchingNextHistory,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useInfiniteQuery({
-    queryKey: ["make-invoice-history", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
-      const response = await makeInvoiceApi.getHistory({
-        page: pageParam,
-        limit: 20,
-        search: filterValues.search,
-        manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-      });
-      return response.success ? response.data : { invoices: [], pagination: { total: 0 } };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.invoices?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
-    },
-    enabled: activeTab === "history",
-  });
-
   const pendingOrders = useMemo(() => {
     return pendingData?.pages.flatMap((page) => page.invoices) || [];
   }, [pendingData]);
-
-  const historyOrders = useMemo(() => {
-    return historyData?.pages.flatMap((page) => page.invoices) || [];
-  }, [historyData]);
 
   useEffect(() => {
     if (pendingInView && hasNextPending) {
       fetchNextPending();
     }
   }, [pendingInView, hasNextPending, fetchNextPending]);
-
-  useEffect(() => {
-    if (historyInView && hasNextHistory) {
-      fetchNextHistory();
-    }
-  }, [historyInView, hasNextHistory, fetchNextHistory]);
 
   /* Filter Logic */
 
@@ -757,7 +718,7 @@ export default function MakeInvoicePage() {
 
         // Refresh Data
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["make-invoice-history"] });
 
         setIsDialogOpen(false)
         setSelectedItems([]) // Clear root selection
@@ -824,39 +785,38 @@ export default function MakeInvoicePage() {
       title="Stage 9: Make Invoice (Proforma)"
       description="Create proforma invoice grouped by DO Number."
       pendingCount={displayRows.length} // Count groups
-      historyData={historyOrders.map((order) => ({
-        ...order,
-        date: order.actual_5 ? new Date(order.actual_5).toLocaleDateString("en-GB") : "-",
-        stage: "Make Invoice",
-        orderNo: order.so_no,
-        customerName: (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name,
-        status: "Completed",
-        remarks: `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight: ₹${order.freight_rate}` : ""}`,
-        rawData: order,
-      }))}
+      historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={true}
       stageLevel={6}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
       searchPlaceholder="Search DO Number or Customer..."
-      historyFooter={
-        <div ref={historyEndRef} className="py-4 flex justify-center">
-          {isFetchingNextHistory && (
-            <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-xs tracking-widest ">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>LOADING MORE INVOICE HISTORY...</span>
-            </div>
-          )}
-          {!hasNextHistory && historyOrders.length > 0 && (
-            <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest bg-slate-50 px-4 py-1.5 rounded-full border border-slate-100 italic">
-              END OF HISTORY
-            </span>
-          )}
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="make-invoice-history"
+          getHistoryApi={(params: any) => makeInvoiceApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+            search: params.order_no,
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            do_date_from: params.start_date,
+            do_date_to: params.end_date,
+            party_name: params.customer_name,
+          })}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Make Invoice"
+          stageLevel={6}
+          remarksColName="Invoice No"
+          orderListKey="invoices"
+          mapOrderNo={(order: any) => order.so_no || "-"}
+          mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
+          mapRemarks={(order: any) => `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight: ₹${order.freight_rate}` : ""}`}
+          getDate={(order: any) => order.actual_5 || order.timestamp || null}
+        />
       }
     >
       <div className="space-y-4">
