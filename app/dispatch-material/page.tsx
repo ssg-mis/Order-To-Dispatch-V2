@@ -251,7 +251,7 @@ export default function DispatchMaterialPage() {
                   {reference.label !== "Direct" && reference.value ? `: ${reference.value}` : ""}
                 </div>
                 <div className="border-b border-r border-black p-1.5">Address: {place}</div>
-                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}<br />Manual Sauda No.: {processId}</div>
+                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}</div>
               </div>
               <table className="w-full border-collapse">
                 <thead>
@@ -378,7 +378,7 @@ export default function DispatchMaterialPage() {
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
     { id: "soNo", label: "DO No." },
-    { id: "processId", label: "Manual Sauda No." },
+    // { id: "processId", label: "Manual Sauda No." },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
     { id: "customerType", label: "Customer Type" },
@@ -488,7 +488,7 @@ export default function DispatchMaterialPage() {
         // If the key exists but is empty [], we show NOTHING.
         // Filter by user permissions: strict deny-by-default even for admins.
         const allowedDepos = user?.depo_access?.['Dispatch Planning'] || [];
-        depots = depots.filter((d: any) => 
+        depots = depots.filter((d: any) =>
           allowedDepos.some(ad => ad.toLowerCase() === d.depot_name.toLowerCase())
         );
 
@@ -520,7 +520,7 @@ export default function DispatchMaterialPage() {
         else skuArray = response.data.skuDetails || response.data.skus || response.data.items || []
       }
       setSkus(skuArray)
-    } catch {}
+    } catch { }
   }
 
   useEffect(() => {
@@ -1323,10 +1323,10 @@ export default function DispatchMaterialPage() {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                    <div className="rounded-md bg-slate-50 p-2">
+                    {/* <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Manual Sauda No.</p>
                       <p className="mt-1 font-bold break-words">{display.processId}</p>
-                    </div>
+                    </div> */}
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Products</p>
                       <p className="mt-1 font-bold">{display.productCount} items</p>
@@ -1406,10 +1406,21 @@ export default function DispatchMaterialPage() {
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-3 sm:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] [overflow-wrap:anywhere]">
-          <DialogHeader className="border-b pb-4 min-w-0">
-            <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words">
-              Dispatch Planning
-            </DialogTitle>
+          <DialogHeader className="border-b pb-4 min-w-0 pr-8">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words flex flex-wrap items-start gap-3">
+                Dispatch Planning
+              </DialogTitle>
+              <Button
+                variant="outline"
+                onClick={() => setIsSlipDialogOpen(true)}
+                disabled={dialogSelectedProducts.length === 0}
+                className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black h-9 shrink-0"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Slip
+              </Button>
+            </div>
             <DialogDescription className="text-slate-500 mt-1.5">
               Review order details and set dispatch quantities for products.
             </DialogDescription>
@@ -1528,15 +1539,15 @@ export default function DispatchMaterialPage() {
                                   </div>
                                   <div className={cn(
                                     "sm:col-span-2 p-4 rounded-xl border flex items-start gap-4 transition-all duration-300",
-                                    group.uploadSo 
-                                      ? "bg-blue-50 border-blue-100 hover:bg-blue-100 cursor-pointer group" 
+                                    group.uploadSo
+                                      ? "bg-blue-50 border-blue-100 hover:bg-blue-100 cursor-pointer group"
                                       : "bg-slate-50 border-slate-100 opacity-60"
                                   )}
-                                  onClick={() => {
-                                    if (group.uploadSo) {
-                                      window.open(group.uploadSo, '_blank');
-                                    }
-                                  }}>
+                                    onClick={() => {
+                                      if (group.uploadSo) {
+                                        window.open(group.uploadSo, '_blank');
+                                      }
+                                    }}>
                                     <div className={cn(
                                       "p-2 rounded-lg",
                                       group.uploadSo ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400"
@@ -1702,7 +1713,7 @@ export default function DispatchMaterialPage() {
                                       </Button>
                                     ) : "—"}
                                   </TableCell>
-                                 </TableRow>
+                                </TableRow>
                               );
                             })}
                           </TableBody>
@@ -1938,41 +1949,8 @@ export default function DispatchMaterialPage() {
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-              <Button
-                variant="outline"
-                onClick={() => setIsSlipDialogOpen(true)}
-                disabled={dialogSelectedProducts.length === 0}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black w-full sm:w-auto"
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Slip
-              </Button>
               <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto">
                 {isProcessing ? "Processing..." : `Dispatch ${dialogSelectedProducts.length} Item(s)`}
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Slip Dialog */}
-      <Dialog open={isSlipDialogOpen} onOpenChange={setIsSlipDialogOpen}>
-        <DialogContent className="max-w-4xl sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Dispatch Slip Preview</DialogTitle>
-            <DialogDescription>Review the dispatch slip details below.</DialogDescription>
-          </DialogHeader>
-          <div className="bg-slate-50 p-4 rounded-lg overflow-x-auto">
-            {renderSlipContent()}
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-3 mt-4">
-            <Button variant="outline" onClick={() => setIsSlipDialogOpen(false)} className="sm:order-first">Close</Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
-                <Printer className="mr-2 h-4 w-4" /> Print Slip
-              </Button>
-              <Button onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700">
-                <Download className="mr-2 h-4 w-4" /> Download PDF
               </Button>
             </div>
           </DialogFooter>
@@ -2381,6 +2359,31 @@ export default function DispatchMaterialPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Slip Dialog */}
+      <Dialog open={isSlipDialogOpen} onOpenChange={setIsSlipDialogOpen}>
+        <DialogContent className="max-w-4xl sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Dispatch Slip Preview</DialogTitle>
+            <DialogDescription>Review the dispatch slip details below.</DialogDescription>
+          </DialogHeader>
+          <div className="bg-slate-50 p-4 rounded-lg overflow-x-auto">
+            {renderSlipContent()}
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setIsSlipDialogOpen(false)} className="sm:order-first">Close</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
+                <Printer className="mr-2 h-4 w-4" /> Print Slip
+              </Button>
+              <Button onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700">
+                <Download className="mr-2 h-4 w-4" /> Download PDF
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </WorkflowStageShell>
   )
 }

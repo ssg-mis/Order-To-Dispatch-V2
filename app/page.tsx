@@ -67,6 +67,7 @@ export default function Dashboard() {
 
   // Pipeline state
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null)
+  const [isPaymentCardExpanded, setIsPaymentCardExpanded] = useState(false)
   const [filterOrderNo, setFilterOrderNo] = useState("")
   const [filterCompany, setFilterCompany] = useState("")
   const [pageCount, setPageCount] = useState(1)
@@ -275,7 +276,25 @@ export default function Dashboard() {
                     ]}
                     onClick={() => openDialog("dispatch")} />
                   <MiniStatCard icon={AlertTriangle} label="Damages (Qty)" value={stats.totalDamageQty} badge="Critical" badgeColor="#f43f5e" cardBg="oklch(0.99 0.04 25 / 0.4)" borderColor="oklch(0.88 0.08 25)" iconColor="#f43f5e" onClick={() => openDialog("damages")} />
-                  <MiniStatCard icon={FileText} label="Total Payment" value={fmtCurrency(stats.totalPaymentAmount)} badge="Payment" badgeColor="#8b5cf6" cardBg="oklch(0.98 0.03 295 / 0.4)" borderColor="oklch(0.88 0.06 295)" iconColor="#8b5cf6" onClick={() => openDialog("invoices")} />
+                  <div className={isPaymentCardExpanded ? "sm:col-span-2 xl:col-span-3 transition-all duration-300" : "transition-all duration-300"}>
+                    <MiniStatCard
+                      icon={FileText}
+                      label="Total Payment"
+                      value={fmtCurrency(stats.totalPaymentAmount)}
+                      badge="Payment"
+                      badgeColor="#8b5cf6"
+                      cardBg="oklch(0.98 0.03 295 / 0.4)"
+                      borderColor="oklch(0.88 0.06 295)"
+                      iconColor="#8b5cf6"
+                      onClick={() => openDialog("invoices")}
+                      isExpandable={true}
+                      isExpanded={isPaymentCardExpanded}
+                      onToggleExpand={(e: any) => {
+                        e.stopPropagation();
+                        setIsPaymentCardExpanded(!isPaymentCardExpanded);
+                      }}
+                    />
+                  </div>
                 </>
               )}
             </div>
@@ -755,18 +774,41 @@ function KPICard({ title, value, icon: Icon, color, trend, alert = false, onClic
 // ═══════════════════════════════════════════════════════════════════════════
 //  MINI STAT CARD
 // ═══════════════════════════════════════════════════════════════════════════
-function MiniStatCard({ icon: Icon, label, value, badge, badgeColor, iconColor, cardBg, borderColor, subData, onClick }: any) {
+function MiniStatCard({ icon: Icon, label, value, badge, badgeColor, iconColor, cardBg, borderColor, subData, onClick, isExpandable, isExpanded, onToggleExpand }: any) {
   return (
-    <div onClick={onClick} className="flex flex-col justify-between p-5 rounded-xl border cursor-pointer transition-all duration-200 min-h-[150px] card-premium"
+    <div onClick={onClick} className="flex flex-col justify-between p-5 rounded-xl border cursor-pointer transition-all duration-300 min-h-[150px] card-premium"
       style={{ background: cardBg, borderColor }}>
       <div className="flex items-start justify-between">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shrink-0" style={{ boxShadow: "0 1px 4px oklch(0 0 0 / 0.08)" }}>
           <Icon className="h-4 w-4" style={{ color: iconColor }} />
         </div>
-        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md text-white" style={{ background: badgeColor }}>{badge}</span>
+        <div className="flex items-center gap-2">
+          {isExpandable && (
+            <button
+              onClick={onToggleExpand}
+              className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-600 transition-colors border border-slate-200 shadow-sm"
+              title={isExpanded ? "Minimize Card" : "Expand Card"}
+            >
+              {isExpanded ? "Minimize" : "Expand"}
+            </button>
+          )}
+          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md text-white" style={{ background: badgeColor }}>{badge}</span>
+        </div>
       </div>
-      <div>
-        <h4 className="text-4xl font-black text-slate-800 tracking-tighter">{value}</h4>
+      <div className="mt-3">
+        <h4 className={`font-black text-slate-800 tracking-tighter break-all leading-tight transition-all duration-300 ${
+          isExpanded
+            ? 'text-4xl'
+            : value && value.toString().length > 15
+              ? 'text-lg sm:text-xl'
+              : value && value.toString().length > 12
+                ? 'text-xl sm:text-2xl'
+                : value && value.toString().length > 9
+                  ? 'text-2xl sm:text-3xl'
+                  : 'text-4xl'
+        }`} title={value}>
+          {value}
+        </h4>
         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">{label}</p>
         {subData && (
           <div className="flex gap-3 mt-2">

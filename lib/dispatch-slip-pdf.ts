@@ -118,7 +118,7 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
       ],
       [
         { content: `Address: ${party.place}`, colSpan: 4, styles: { halign: "left", fontStyle: "normal", fontSize: 8, fillColor: WHITE } },
-        { content: `Mob.: ${party.partyMo}\nManual Sauda No.: ${party.processId}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+        { content: `Mob.: ${party.partyMo}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
       ],
       [
         { content: "Item Name", styles: { fillColor: GRAY_HEAD } },

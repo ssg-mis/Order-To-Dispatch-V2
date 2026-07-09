@@ -1137,7 +1137,7 @@ export default function ActualDispatchPage() {
                 <div className="border-b border-r border-black p-1.5 font-bold">Customer: {party}</div>
                 <div className="border-b border-black p-1.5 font-bold">Broker: {brokerName}</div>
                 <div className="border-b border-r border-black p-1.5">Address: {place}</div>
-                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}<br />Manual Sauda No.: {processId}</div>
+                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}</div>
               </div>
 
               <table className="w-full border-collapse">
@@ -1545,7 +1545,7 @@ export default function ActualDispatchPage() {
         if (selectedGroups.length > 0) {
           await Promise.all(
             selectedGroups.map((g: any) =>
-              draftApi.delete(g._rowKey).catch(() => {})
+              draftApi.delete(g._rowKey).catch(() => { })
             )
           );
         }
@@ -2492,7 +2492,7 @@ export default function ActualDispatchPage() {
                               <Badge variant="outline" className="text-[8px] bg-orange-50 text-orange-700 border-orange-200 uppercase font-black">Pending</Badge>
                             </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-1">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Planned Qty</p>
                                 <p className="text-sm font-black text-blue-700">{prod.qtyToDispatch} <span className="text-[9px] font-bold uppercase">{prod.uom}</span></p>

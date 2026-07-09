@@ -565,7 +565,7 @@ export function WorkflowStageShell({
                 {isHistoryLoading ? (
                   <div className="p-0 border-none shadow-none">
                     <table className="w-full text-sm table-fixed">
-                      <thead className="bg-muted/30 border-b text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                      <thead className="border-b text-[10px] uppercase font-black text-slate-500 tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left w-[12%]">Date</th>
                           <th className="px-4 py-3 text-left w-[18%]">Order No.</th>
@@ -593,7 +593,7 @@ export function WorkflowStageShell({
                   <div className="overflow-x-auto max-h-[600px] overflow-y-auto relative">
                     {/* Desktop Table View */}
                     <table className="w-full text-sm table-fixed hidden md:table">
-                      <thead className="bg-white border-b text-[10px] uppercase font-black text-slate-500 tracking-wider sticky top-0 z-10 shadow-sm">
+                      <thead className="bg-muted/30 border-b text-[10px] uppercase font-black text-slate-500 tracking-wider sticky top-0 z-10 shadow-sm">
                         <tr>
                           <th className="px-4 py-3 text-left w-[12%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("date")}>Date<HistorySortIcon field="date" /></th>
                           <th className="px-4 py-3 text-left w-[18%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("orderNo")}>Order No.<HistorySortIcon field="orderNo" /></th>
@@ -618,11 +618,7 @@ export function WorkflowStageShell({
                                       {item.items.length} Items
                                     </Badge>
                                   </TableCell>
-                                  <TableCell className="px-4 py-3 text-[10px] capitalize text-slate-600">
-                                     <div className="break-words whitespace-normal leading-tight" title={item.customerName}>
-                                       {item.customerName}
-                                     </div>
-                                   </TableCell>
+                                  <TableCell className="px-4 py-3 text-xs capitalize text-slate-600">{item.customerName}</TableCell>
                                   <TableCell className="px-4 py-3 text-center">
                                     <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
                                       Grouped
@@ -659,11 +655,7 @@ export function WorkflowStageShell({
                                       <span className="text-slate-300 font-normal">↳</span>
                                       {sibling.orderNo || "-"}
                                     </TableCell>
-                                    <TableCell className="px-4 py-2.5 text-[10px] text-slate-500 capitalize pl-8">
-                                      <div className="break-words whitespace-normal leading-tight" title={sibling.customerName}>
-                                        {sibling.customerName || "-"}
-                                      </div>
-                                    </TableCell>
+                                    <TableCell className="px-4 py-2.5 text-xs text-slate-500 capitalize pl-8">{sibling.customerName || "-"}</TableCell>
                                     <TableCell className="px-4 py-2.5 text-center">
                                       <span
                                         className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
@@ -701,11 +693,7 @@ export function WorkflowStageShell({
                               <TableRow key={rowItem.orderNo} className="border-b hover:bg-muted/20 transition-colors">
                                 <TableCell className="px-4 py-3 text-xs">{rowItem.date || "-"}</TableCell>
                                 <TableCell className="px-4 py-3 font-bold text-blue-700 text-xs">{rowItem.orderNo || "-"}</TableCell>
-                                 <TableCell className="px-4 py-3 text-[10px] font-semibold capitalize">
-                                   <div className="break-words whitespace-normal leading-tight" title={rowItem.customerName}>
-                                     {rowItem.customerName || "-"}
-                                   </div>
-                                 </TableCell>
+                                <TableCell className="px-4 py-3 text-xs font-semibold capitalize">{rowItem.customerName || "-"}</TableCell>
                                 <TableCell className="px-4 py-3 text-center">
                                   <span
                                     className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
