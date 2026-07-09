@@ -23,7 +23,8 @@ import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
@@ -31,12 +32,12 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 export default function ActualDispatchPage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
-  const [historyPage, setHistoryPage] = useState(1)
   const limit = 20
 
   const [filterValues, setFilterValues] = useState({
@@ -386,40 +387,21 @@ export default function ActualDispatchPage() {
     refetchOnWindowFocus: true, // refetch when user switches browser tab back
   });
 
-  // History query with numeric pagination
-  const {
-    data: historyResult,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["actual-dispatch-history", filterValues, historyPage, selectedDepoTab, user?.depo_access?.['Actual Dispatch']],
-    queryFn: async () => {
-      // Paginate within the selected depot tab (see pending query note above).
-      const allowedDepots = user?.depo_access ? (user.depo_access['Actual Dispatch'] || []) : undefined
-      const response = await actualDispatchApi.getHistory({
-        page: historyPage,
-        limit,
-        search: filterValues.search,
-        manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        depo_names: selectedDepoTab ? [selectedDepoTab] : allowedDepots
-      });
-      return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
   const pendingOrders = useMemo(() => {
     return pendingResult?.dispatches || [];
   }, [pendingResult]);
 
-  const historyOrders = useMemo(() => {
-    return historyResult?.dispatches || [];
-  }, [historyResult]);
+  // Reset page when filters or depot tab changes
+  useEffect(() => {
+    setPendingPage(1);
+  }, [filterValues, selectedDepoTab]);
+
+  // ── Refetch fresh data from DB whenever stage tab or depot tab changes ──
+  useEffect(() => {
+    if (activeTab === "pending") {
+      refetchPending();
+    }
+  }, [activeTab, selectedDepoTab]);
 
   // Fetch SKU details for weight calculations
   const fetchSkus = async () => {
@@ -517,12 +499,18 @@ export default function ActualDispatchPage() {
         vehicleMasterApi.getAll({ all: 'true' }),
         transportMasterApi.getAll({ all: 'true' })
       ]);
-      if (vRes.success) setVehicleMaster(vRes.data.vehicles || []);
+      const vehicles = vRes.success ? (vRes.data.vehicles || []) : [];
+      if (vRes.success) setVehicleMaster(vehicles);
       const dRes = await driverMasterApi.getAll({ all: 'true' });
-      if (dRes.success) setDriverMaster(dRes.data.drivers || []);
+      const drivers = dRes.success ? (dRes.data.drivers || []) : [];
+      if (dRes.success) setDriverMaster(drivers);
       if (tRes.success) setTransporterMaster(tRes.data.transporters || []);
+      // Returned directly (not read back off state) so callers avoid the stale-closure
+      // trap of reading `vehicleMaster`/`driverMaster` in the same tick they were set.
+      return { vehicles, drivers };
     } catch (error) {
       console.error("Failed to fetch master data:", error);
+      return { vehicles: [], drivers: [] };
     }
   };
 
@@ -530,20 +518,7 @@ export default function ActualDispatchPage() {
     fetchMasterData();
   }, []);
 
-  // Reset pagination on filter change
-  useEffect(() => {
-    setPendingPage(1);
-    setHistoryPage(1);
-  }, [filterValues, selectedDepoTab]);
 
-  // ── Refetch fresh data from DB whenever stage tab or depot tab changes ──
-  useEffect(() => {
-    if (activeTab === "pending") {
-      refetchPending();
-    } else if (activeTab === "history") {
-      refetchHistory();
-    }
-  }, [activeTab, selectedDepoTab]);
 
   // Auto-calculate Net Weight (Gross - Tare)
   useEffect(() => {
@@ -645,19 +620,6 @@ export default function ActualDispatchPage() {
     return matches
   })
 
-  const filteredHistory = useMemo(() => {
-    return historyOrders.map((order: any) => ({
-      ...order,
-      rawData: order,
-      orderNo: order.actualDispatchData?.orderNo || order.order_no || "-",
-      customerName: (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.customerName || "-"),
-      timestamp: order.actualDispatchData?.confirmedAt || order.timestamp,
-      date: new Date(order.actualDispatchData?.confirmedAt || order.timestamp || new Date()).toLocaleDateString("en-GB"),
-      stage: "Actual Dispatch",
-      status: "Completed",
-      remarks: "Dispatch Confirmed",
-    }))
-  }, [historyOrders])
 
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
@@ -872,6 +834,41 @@ export default function ActualDispatchPage() {
   }
 
 
+  // Fills vehicleData/loadData from a vehicle_master record. Always call this with a fresh
+  // `selectedV` (from a just-refetched vehicleMaster) rather than trusting a saved draft —
+  // these fields are master-derived, and a stale draft can clobber documents renewed since.
+  const autofillVehicleData = (selectedV: any) => {
+    const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
+    setVehicleData(p => ({
+      ...p,
+      registration_no: selectedV.registration_no || "",
+      vehicle_type: selectedV.vehicle_type || "",
+      rto: selectedV.rto || "",
+      passing_weight: selectedV.passing || "",
+      fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
+      insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
+      tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
+      is_lifetime_tax: isLifetimeTax,
+      pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
+      permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
+      permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
+      // Images
+      fitness: selectedV.fitness_image || p.fitness,
+      insurance: selectedV.insurance_image || p.insurance,
+      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
+      polution: selectedV.pollution_image || p.polution,
+      permit1: selectedV.state_permit_image || p.permit1,
+      permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
+      gvw: selectedV.gvw || "",
+      ulw: selectedV.ulw || "",
+    }));
+    setLoadData(p => ({
+      ...p,
+      truckNo: selectedV.registration_no || "",
+      transporterName: selectedV.transporter || p.transporterName
+    }));
+  };
+
   const handleOpenDialog = async (group?: any) => {
     // Resolve selected DOs from the cross-page cache, not just the currently
     // loaded page/search results — displayRows only holds what's on screen now.
@@ -882,7 +879,9 @@ export default function ActualDispatchPage() {
     if (targetGroups.length > 0) {
       // Refresh vehicle/driver/transporter master data so the dialog's autofill
       // (e.g. Permit 1/State Permit) reflects documents uploaded since page load.
-      fetchMasterData();
+      // Awaited so the draft-restore step below can re-derive vehicle docs from
+      // current master data instead of trusting a possibly stale saved draft.
+      const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
 
       setSelectedGroups(targetGroups)
       // Default: Select ALL products in all selected groups
@@ -979,10 +978,36 @@ export default function ActualDispatchPage() {
           if (res.success && res.data?.draft_data) {
             const d = res.data.draft_data;
             if (d.vehicleNumber !== undefined) setVehicleNumber(d.vehicleNumber);
-            if (d.vehicleData) setVehicleData(prev => ({ ...prev, ...d.vehicleData }));
+            // Vehicle documents (fitness/insurance/tax/pollution/permits/gvw/ulw) are
+            // master-derived — re-fetch them fresh instead of trusting the draft snapshot,
+            // which may predate documents renewed/uploaded since the draft was saved.
+            // Only checkStatus/remarks are genuinely manual dialog inputs worth restoring.
+            const draftVehicle = d.vehicleNumber
+              ? freshVehicles.find((veh: any) => veh.registration_no === d.vehicleNumber)
+              : null;
+            if (draftVehicle) autofillVehicleData(draftVehicle);
+            if (d.vehicleData) {
+              setVehicleData(prev => ({
+                ...prev,
+                checkStatus: d.vehicleData.checkStatus ?? prev.checkStatus,
+                remarks: d.vehicleData.remarks ?? prev.remarks,
+              }));
+            }
             if (d.loadData) setLoadData(prev => ({ ...prev, ...d.loadData }));
-            if (d.driverName) setDriverName(d.driverName);
-            if (d.driverData) setDriverData(prev => ({ ...prev, ...d.driverData }));
+            // Driver fields are entirely master-derived (license no/type/expiry, contact) —
+            // re-fetch fresh from driverMaster rather than trusting the draft snapshot.
+            if (d.driverName) {
+              setDriverName(d.driverName);
+              const draftDriver = freshDrivers.find((drv: any) => drv.driver_name === d.driverName);
+              if (draftDriver) {
+                setDriverData({
+                  contact_no: draftDriver.mobile_no || "",
+                  license_no: draftDriver.driving_licence_no || "",
+                  license_type: draftDriver.driving_licence_type || "",
+                  valid_upto: draftDriver.valid_upto ? new Date(draftDriver.valid_upto).toISOString().split('T')[0] : ""
+                });
+              }
+            }
             if (d.confirmDetails) setConfirmDetails(prev => ({ ...prev, ...d.confirmDetails }));
             if (d.dialogSelectedProducts) setDialogSelectedProducts(d.dialogSelectedProducts);
             toast({ title: "Draft Restored", description: "Your saved draft has been loaded." });
@@ -1626,8 +1651,8 @@ export default function ActualDispatchPage() {
         });
         // Refresh so rows already reverted/moved by another user drop off the stale list.
         if (successfulReverts.length === 0) {
-          await refetchPending();
-          await refetchHistory();
+          await refetchPending()
+          queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
         }
       }
     } catch (error: any) {
@@ -1646,47 +1671,37 @@ export default function ActualDispatchPage() {
       title="Stage 5: Actual Dispatch"
       description="Confirm actual dispatch details before vehicle assignment."
       pendingCount={displayRows.length}
-      historyData={filteredHistory}
+      historyData={[]}
       partyNames={filterOptions.customerNames}
       onFilterChange={setFilterValues}
       remarksColName="Confirmation"
       showStatusFilter={true}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
       searchPlaceholder="Search DO Number or Customer..."
-      historyFooter={
-        <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50/50 rounded-b-xl">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            Showing Page <span className="text-slate-900 mx-1">{historyPage}</span>
-            {historyResult?.pagination?.totalPages && (
-              <> of <span className="text-slate-900 mx-1">{historyResult.pagination.totalPages}</span></>
-            )}
-            <span className="ml-2 text-[9px] lowercase italic font-normal text-slate-400">({historyResult?.pagination?.total || 0} items)</span>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
-              disabled={historyPage === 1}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => p + 1)}
-              disabled={historyPage >= (historyResult?.pagination?.totalPages || 1)}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="actual-dispatch-history"
+          getHistoryApi={(params: any) => actualDispatchApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+            search: params.order_no,
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            do_date_from: params.start_date,
+            do_date_to: params.end_date,
+            party_name: params.customer_name,
+            depo_names: selectedDepoTab ? [selectedDepoTab] : (user?.depo_access?.['Actual Dispatch'] || undefined),
+          })}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Actual Dispatch"
+          stageLevel={4}
+          remarksColName="Dispatch Confirmation"
+          orderListKey="dispatches"
+          getDate={(order: any) => order.actualDispatchData?.confirmedAt || order.timestamp || null}
+        />
       }
     >
       <div className="space-y-4">
@@ -2476,40 +2491,7 @@ export default function ActualDispatchPage() {
                             onValueChange={(v) => {
                               setVehicleNumber(v);
                               const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                              if (selectedV) {
-                                // Lifetime tax vehicles have no expiry — Master stores the
-                                // certificate under life_time_tax/_image instead of road_tax.
-                                const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
-                                // Autofill Logic
-                                setVehicleData(p => ({
-                                  ...p,
-                                  registration_no: selectedV.registration_no || "",
-                                  vehicle_type: selectedV.vehicle_type || "",
-                                  rto: selectedV.rto || "",
-                                  passing_weight: selectedV.passing || "",
-                                  fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
-                                  insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
-                                  tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
-                                  is_lifetime_tax: isLifetimeTax,
-                                  pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
-                                  permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
-                                  permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
-                                  // Images
-                                  fitness: selectedV.fitness_image || p.fitness,
-                                  insurance: selectedV.insurance_image || p.insurance,
-                                  tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
-                                  polution: selectedV.pollution_image || p.polution,
-                                  permit1: selectedV.state_permit_image || p.permit1,
-                                  permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
-                                  gvw: selectedV.gvw || "",
-                                  ulw: selectedV.ulw || "",
-                                }));
-                                setLoadData(p => ({
-                                  ...p,
-                                  truckNo: selectedV.registration_no || "",
-                                  transporterName: selectedV.transporter || p.transporterName
-                                }));
-                              }
+                              if (selectedV) autofillVehicleData(selectedV);
                             }}
                             options={vehicleOptions}
                             placeholder="Select Vehicle"

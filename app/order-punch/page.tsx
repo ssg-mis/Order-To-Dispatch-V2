@@ -208,12 +208,17 @@ export default function OrderPunchPage() {
     }
   }
 
+type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
+
+
   const [products, setProducts] = useState<ProductItem[]>([
     { id: "1", productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" },
   ])
   const [customerType, setCustomerType] = useState<string>("existing")
   const [depoName, setDepoName] = useState<string>("")
-  const [isBrokerOrder, setIsBrokerOrder] = useState<string>("Broker")
+  const [isBrokerOrder, setIsBrokerOrder] = useState<OrderThroughType>("Direct")
+  const orderThrough = isBrokerOrder
+  const setOrderThrough = setIsBrokerOrder
   const [orderPurpose, setOrderPurpose] = useState<string>("week-on-week")
   const [orderType, setOrderType] = useState<string>("regular")
   const [advancePaymentTaken, setAdvancePaymentTaken] = useState<string>("NO")
@@ -291,22 +296,22 @@ export default function OrderPunchPage() {
   useEffect(() => {
     if (isAdmin || !user) return
     if (allowedOrderThroughTypes.length === 0) {
-      setIsBrokerOrder("Direct")
-    } else if (!allowedOrderThroughTypes.includes(isBrokerOrder)) {
-      setIsBrokerOrder(allowedOrderThroughTypes[0])
+      setOrderThrough("Direct")
+    } else if (!allowedOrderThroughTypes.includes(orderThrough)) {
+      setOrderThrough(allowedOrderThroughTypes[0] as OrderThroughType)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isAdmin])
 
   useEffect(() => {
-    if (isAdmin || !user || isBrokerOrder !== "Broker" || !allowedBrokerNames) return
+    if (isAdmin || !user || orderThrough !== "Broker" || !allowedBrokerNames) return
     if (allowedBrokerNames.length === 0) {
       setBrokerName("")
     } else if (!allowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
       setBrokerName(allowedBrokerNames[0])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, isBrokerOrder])
+  }, [user, isAdmin, orderThrough])
 
   useEffect(() => {
     if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
@@ -842,7 +847,7 @@ export default function OrderPunchPage() {
     const allowedDepos = user?.depo_access?.['Order Punch'] || []
     const banari = allowedDepos.find((d: string) => d.toLowerCase() === "banari")
     setDepoName(banari || (allowedDepos.length > 0 ? allowedDepos[0] : "Banari"))
-    setIsBrokerOrder("Broker")
+    setIsBrokerOrder("Direct")
     setOrderPurpose("week-on-week")
     setOrderType("regular")
     setAdvancePaymentTaken("NO")
@@ -1629,7 +1634,7 @@ export default function OrderPunchPage() {
               {allowedOrderThroughTypes.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="isBroker"> Is This Order Through</Label>
-                  <Select value={isBrokerOrder} onValueChange={setIsBrokerOrder}>
+                  <Select value={orderThrough} onValueChange={(value: OrderThroughType) => setOrderThrough(value)}>
                     <SelectTrigger id="isBroker">
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>

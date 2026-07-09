@@ -25,7 +25,8 @@ import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-se
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Loader2, ChevronLeft, ChevronRight, XCircle, FileText, ExternalLink, Printer, Download } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
@@ -33,12 +34,12 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 export default function DispatchMaterialPage() {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
   const limit = 25;
 
   const [filterValues, setFilterValues] = useState({
@@ -126,6 +127,61 @@ export default function DispatchMaterialPage() {
       : (prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty)
   }
 
+  const getCustomerName = (record: any) => {
+    const candidates = [
+      record?.customerName,
+      record?.customer_name,
+      record?.partyName,
+      record?.party_name,
+      record?.customer?.customer_name,
+      record?.customer?.name,
+      record?.data?.orderData?.customerName,
+      record?.data?.orderData?.customer_name,
+      record?.data?.orderData?.partyName,
+      record?.data?.orderData?.party_name,
+      record?.orderData?.customerName,
+      record?.orderData?.customer_name,
+      record?.orderData?.partyName,
+      record?.orderData?.party_name,
+    ]
+
+    return candidates.find((value) => value && String(value).trim()) || ""
+  }
+
+  const getSlipReference = (prod: any) => {
+    const orderThrough = String(prod?.isOrderThrough || prod?.is_order_through || prod?.orderThrough || prod?.order_through || "").trim().toLowerCase()
+    if (orderThrough === "salesperson") {
+      return {
+        label: "Salesperson",
+        value: prod?.salespersonName || prod?.salesperson_name || prod?.salesperson || "",
+      }
+    }
+    if (orderThrough === "broker") {
+      return {
+        label: "Broker",
+        value: prod?.brokerName || prod?.broker_name || prod?.broker || "",
+      }
+    }
+    if (orderThrough === "direct") {
+      return { label: "Direct", value: "" }
+    }
+
+    const hasBrokerFlag = Boolean(prod?.isBroker || prod?.is_order_through_broker)
+    if (hasBrokerFlag) {
+      return {
+        label: "Broker",
+        value: prod?.brokerName || prod?.broker_name || prod?.broker || "",
+      }
+    }
+
+    const salespersonName = prod?.salespersonName || prod?.salesperson_name || prod?.salesperson
+    if (salespersonName) {
+      return { label: "Salesperson", value: salespersonName }
+    }
+
+    return { label: "Direct", value: "" }
+  }
+
   const renderSlipContent = () => {
     if (selectedItems.length === 0 || dialogSelectedProducts.length === 0) return null
     const productsForSlip = selectedItems.flatMap((g: any) =>
@@ -133,7 +189,7 @@ export default function DispatchMaterialPage() {
     )
     const partyGroups: Record<string, any[]> = {}
     productsForSlip.forEach((p: any) => {
-      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party"
+      const pName = getCustomerName(p) || "Unknown Party"
       if (!partyGroups[pName]) partyGroups[pName] = []
       partyGroups[pName].push(p)
     })
@@ -156,8 +212,7 @@ export default function DispatchMaterialPage() {
           const firstProd = partyProducts[0]
           const date = new Date().toLocaleDateString('en-GB')
           const commitmentNo = firstProd.orderNo || "—"
-          const isBroker = firstProd.isBroker || firstProd.is_order_through_broker
-          const brokerName = isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—"
+          const reference = getSlipReference(firstProd)
           const place = firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—"
           const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—"
           const processId = firstProd.processid || firstProd.process_id || firstProd.processId || "—"
@@ -189,7 +244,10 @@ export default function DispatchMaterialPage() {
                 <div className="border-b border-r border-black p-1.5 font-bold">DO no.: {commitmentNo}</div>
                 <div className="border-b border-black p-1.5 font-bold">DO Date: {date}</div>
                 <div className="border-b border-r border-black p-1.5 font-bold">Customer: {party}</div>
-                <div className="border-b border-black p-1.5 font-bold">Broker: {brokerName}</div>
+                <div className="border-b border-black p-1.5 font-bold">
+                  {reference.label}
+                  {reference.label !== "Direct" && reference.value ? `: ${reference.value}` : ""}
+                </div>
                 <div className="border-b border-r border-black p-1.5">Address: {place}</div>
                 <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}<br />Manual Sauda No.: {processId}</div>
               </div>
@@ -262,18 +320,19 @@ export default function DispatchMaterialPage() {
     )
     const partyGroups: Record<string, any[]> = {}
     productsForSlip.forEach((p: any) => {
-      const pName = p.customerName || p.party_name || p.partyName || "Unknown Party"
+      const pName = getCustomerName(p) || "Unknown Party"
       if (!partyGroups[pName]) partyGroups[pName] = []
       partyGroups[pName].push(p)
     })
     return Object.entries(partyGroups).map(([party, partyProducts]) => {
       const firstProd = partyProducts[0]
-      const isBroker = firstProd.isBroker || firstProd.is_order_through_broker
+      const reference = getSlipReference(firstProd)
       return {
         party,
         commitmentNo: firstProd.orderNo || "—",
         date: new Date().toLocaleDateString('en-GB'),
-        brokerName: isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—",
+        referenceLabel: reference.label,
+        referenceValue: reference.value,
         place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
         partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
         processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
@@ -397,35 +456,11 @@ export default function DispatchMaterialPage() {
     refetchOnWindowFocus: true,
   });
 
-  // History query with numeric pagination
-  const {
-    data: historyData,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["dispatch-history", filterValues, user?.depo_access?.['Dispatch Planning'], historyPage],
-    queryFn: async () => {
-      const response = await dispatchPlanningApi.getHistory({
-        page: historyPage,
-        limit: limit,
-        order_no: filterValues.search,
-        start_date: filterValues.startDate,
-        end_date: filterValues.endDate,
-        manual_sauda_no: filterValues.manualSaudaNo || undefined,
-        depo_names: user?.depo_access ? (user.depo_access['Dispatch Planning'] || []) : undefined
-      });
-      return response.success ? response.data : { dispatches: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-  });
-
   const pendingOrders = pendingData?.dispatches || [];
-  const historyOrders = historyData?.dispatches || [];
 
   // Reset to page 1 on filter or depot change
   useEffect(() => {
     setPendingPage(1);
-    setHistoryPage(1);
   }, [filterValues, selectedDepoTab]);
 
   const fetchCustomers = async () => {
@@ -646,7 +681,7 @@ export default function DispatchMaterialPage() {
         setIsDialogOpen(false);
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
 
         // setTimeout(() => {
         //   router.push("/actual-dispatch")
@@ -719,7 +754,7 @@ export default function DispatchMaterialPage() {
         setRevertRemarks("");
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
       }
 
       if (failedReverts.length > 0) {
@@ -734,7 +769,7 @@ export default function DispatchMaterialPage() {
         // Refresh so rows already reverted/moved by another user drop off the stale list.
         if (successfulReverts.length === 0) {
           await refetchPending();
-          await refetchHistory();
+          queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
         }
       }
     } catch (error: any) {
@@ -779,7 +814,7 @@ export default function DispatchMaterialPage() {
         });
 
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
       } else {
         toast({ title: "Error", description: res.message || "Failed to preclose", variant: "destructive" });
       }
@@ -816,19 +851,6 @@ export default function DispatchMaterialPage() {
     return true
   })
 
-  const filteredHistory = useMemo(() => {
-    return historyOrders.map((order: any) => ({
-      ...order,
-      rawData: order,
-      orderNo: order.dispatchPlanningData?.orderNo || order.order_no || "-",
-      customerName: order.customer_name || "-",
-      timestamp: order.dispatchPlanningData?.confirmedAt || order.timestamp,
-      date: new Date(order.dispatchPlanningData?.confirmedAt || order.timestamp || new Date()).toLocaleDateString("en-GB"),
-      stage: "Dispatch Planning",
-      status: "Completed",
-      remarks: order.dispatchPlanningData?.dispatchDate ? `Date: ${order.dispatchPlanningData.dispatchDate}` : "Dispatch Plannned",
-    }))
-  }, [historyOrders])
 
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
@@ -839,14 +861,17 @@ export default function DispatchMaterialPage() {
       const baseDoMatch = orderId.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
       const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : orderId
 
-      // Group by individual DO Number as requested
-      const custName = order.customer_name || order.customerName || "Unknown"
+      const internalOrder = order.data?.orderData || order
+      const customerName = getCustomerName(internalOrder) || getCustomerName(order) || "—"
       const groupKey = baseDo // Group by DO instead of Customer Name
 
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
           ...order,
-          customerName: order.customer_name || order.customerName || "—",
+          customerName,
+          customer_name: customerName,
+          partyName: customerName,
+          party_name: customerName,
           transportType: order.type_of_transporting || order.transportType || "—",
           _displayDo: baseDo,
           _rowKey: groupKey,
@@ -856,11 +881,14 @@ export default function DispatchMaterialPage() {
         }
       }
 
-      const internalOrder = order.data?.orderData || order;
       if (!grouped[groupKey]._ordersMap[baseDo]) {
         grouped[groupKey]._ordersMap[baseDo] = {
           ...order,
           baseDo,
+          customerName,
+          customer_name: customerName,
+          partyName: customerName,
+          party_name: customerName,
           _products: [],
           // Robust Mapping for Header
           deliveryPurpose: internalOrder.order_type_delivery_purpose || internalOrder.orderPurpose || "—",
@@ -878,9 +906,10 @@ export default function DispatchMaterialPage() {
           advanceTaken: internalOrder.advance_payment_to_be_taken || internalOrder.advancePaymentTaken || false,
           advanceAmount: internalOrder.advance_amount || internalOrder.advanceAmount || "—",
           isBroker: internalOrder.is_order_through_broker || internalOrder.isBrokerOrder || false,
-          isOrderThrough: internalOrder.is_order_through || "Broker",
-          brokerName: internalOrder.broker_name || internalOrder.brokerName || "—",
-          depoName: internalOrder.depo_name || internalOrder.depoName || "—",
+          isOrderThrough: internalOrder.is_order_through || internalOrder.isOrderThrough || "Broker",
+          brokerName: internalOrder.broker_name || internalOrder.brokerName || "",
+          salespersonName: internalOrder.salesperson_name || internalOrder.salespersonName || "",
+          depoName: internalOrder.depo_name || internalOrder.depoName || "",
           orderPunchRemarks: internalOrder.order_punch_remarks || internalOrder.orderPunchRemarks || "—",
           custContactName: internalOrder.customer_contact_person_name || internalOrder.contactPerson || "—",
           weDealInSku: internalOrder.we_are_dealing_in_ordered_sku || false,
@@ -898,6 +927,10 @@ export default function DispatchMaterialPage() {
         ...order,
         _rowKey: `${baseDo}-${order.id}`,
         id: order.id,
+        customerName,
+        customer_name: customerName,
+        partyName: customerName,
+        party_name: customerName,
         orderNo: order.order_no,
         productName: order.product_name || order._product?.productName || order._product?.oilType,
         oilType: order.oil_type || order._product?.oilType,
@@ -1027,44 +1060,30 @@ export default function DispatchMaterialPage() {
       title="Stage 4: Dispatch Planning"
       description="Prepare and Dispatch Plannings for delivery."
       pendingCount={displayRows.length}
-      historyData={filteredHistory}
+      historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={true}
       stageLevel={3}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      historyFooter={
-        <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-            Showing Page <span className="text-slate-900 mx-1">{historyPage}</span>
-            {historyData?.pagination?.total && (
-              <> of <span className="text-slate-900 mx-1">{Math.ceil(historyData.pagination.total / limit)}</span></>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
-              disabled={historyPage === 1 || isHistoryLoading}
-              className="h-8 rounded-lg gap-1 px-3 font-bold"
-            >
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryPage(p => p + 1)}
-              disabled={isHistoryLoading || (historyPage * limit >= (historyData?.pagination?.total || 0))}
-              className="h-8 rounded-lg gap-1 px-3 font-bold"
-            >
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="dispatch-history"
+          getHistoryApi={dispatchPlanningApi.getHistory}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Dispatch Planning"
+          stageLevel={3}
+          remarksColName="Dispatch Remarks"
+          orderListKey="dispatches"
+          extraApiParams={{
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            depo_names: user?.depo_access ? (user.depo_access['Dispatch Planning'] || []) : undefined,
+          }}
+          getDate={(order: any) => order.dispatchPlanningData?.confirmedAt || order.timestamp || null}
+        />
       }
     >
       <div className="flex flex-col justify-end gap-2 sm:flex-row">

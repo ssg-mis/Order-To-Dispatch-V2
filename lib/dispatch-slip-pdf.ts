@@ -15,7 +15,8 @@ export interface SlipPartyData {
   party: string
   commitmentNo: string
   date: string
-  brokerName: string
+  referenceLabel?: string
+  referenceValue?: string
   place: string
   partyMo: string
   processId: string
@@ -113,7 +114,7 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
       ],
       [
         { content: `Customer: ${party.party}`, colSpan: 4, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
-        { content: `Broker: ${party.brokerName}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
+        { content: `${party.referenceLabel || "Broker"}: ${party.referenceValue || "—"}`, colSpan: 3, styles: { halign: "left", fontStyle: "bold", fontSize: 9, fillColor: WHITE } },
       ],
       [
         { content: `Address: ${party.place}`, colSpan: 4, styles: { halign: "left", fontStyle: "normal", fontSize: 8, fillColor: WHITE } },
