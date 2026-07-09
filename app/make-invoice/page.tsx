@@ -719,6 +719,10 @@ export default function MakeInvoicePage() {
         // Refresh Data
         await refetchPending();
         queryClient.invalidateQueries({ queryKey: ["make-invoice-history"] });
+        // A submitted invoice moves forward to Check Invoice — invalidate its pending
+        // list (prefix matches all filter variations) so it appears there without a
+        // full page refresh.
+        queryClient.invalidateQueries({ queryKey: ["check-invoice-pending"] });
 
         setIsDialogOpen(false)
         setSelectedItems([]) // Clear root selection
