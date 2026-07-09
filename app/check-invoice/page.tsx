@@ -634,6 +634,10 @@ export default function CheckInvoicePage() {
 
         await refetchPending();
         queryClient.invalidateQueries({ queryKey: ["check-invoice-history"] });
+        // A record marked "Issue" is sent back to Make Invoice — invalidate its
+        // pending list (prefix matches all filter variations) so it shows up there
+        // without a full page refresh.
+        queryClient.invalidateQueries({ queryKey: ["make-invoice-pending"] });
 
         setIsDialogOpen(false)
         setSelectedItems([])
