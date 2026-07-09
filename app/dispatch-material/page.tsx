@@ -107,7 +107,9 @@ export default function DispatchMaterialPage() {
     const sku = skus.find(s => s.sku_name?.toUpperCase() === productName.toUpperCase())
       || skus.find(s => normalize(s.sku_name || '') === norm)
       || skus.find(s => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) })
-    return sku?.sku_gross_weight ? parseFloat(sku.sku_gross_weight) : 0
+    const grossWeight = sku?.gross_weight ? parseFloat(sku.gross_weight) : 0
+    const skuWeight = sku?.sku_weight ? parseFloat(sku.sku_weight) : 0
+    return grossWeight > 0 ? grossWeight : skuWeight
   }
 
   const calculateWeight = (productName: string, qty: string | number): number => {
@@ -515,7 +517,7 @@ export default function DispatchMaterialPage() {
       let skuArray: any[] = []
       if (response?.data) {
         if (Array.isArray(response.data)) skuArray = response.data
-        else skuArray = response.data.skus || response.data.items || []
+        else skuArray = response.data.skuDetails || response.data.skus || response.data.items || []
       }
       setSkus(skuArray)
     } catch {}
