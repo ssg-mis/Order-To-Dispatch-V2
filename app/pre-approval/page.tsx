@@ -662,6 +662,18 @@ export default function PreApprovalPage() {
           return;
         }
 
+        // Approval Qty is mandatory in pre-approval — a blank qty would leave
+        // remaining_dispatch_qty NULL and lose the approved quantity.
+        if (!rateData?.approvalQty || !(parseFloat(rateData.approvalQty) > 0)) {
+          toast({
+            title: "Approval Qty Required",
+            description: `Please enter the Approval Qty for all selected products.`,
+            variant: "destructive"
+          });
+          setIsApproving(false);
+          return;
+        }
+
         // if (enteredRate < rateOfMaterial) {
         //   toast({
         //     title: "Invalid Rate",
@@ -893,6 +905,18 @@ export default function PreApprovalPage() {
           toast({
             title: "Rate Required",
             description: `Please enter a Final Rate for all selected products.`,
+            variant: "destructive"
+          });
+          setIsApproving(false);
+          return;
+        }
+
+        // Approval Qty is mandatory in pre-approval — a blank qty would leave
+        // remaining_dispatch_qty NULL and lose the approved quantity.
+        if (!rateData?.approvalQty || !(parseFloat(rateData.approvalQty) > 0)) {
+          toast({
+            title: "Approval Qty Required",
+            description: `Please enter the Approval Qty for all selected products.`,
             variant: "destructive"
           });
           setIsApproving(false);

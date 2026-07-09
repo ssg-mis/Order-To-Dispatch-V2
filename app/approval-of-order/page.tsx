@@ -849,7 +849,7 @@ export default function CommitmentReviewPage() {
                             </div>
                           </div>
 
-                          {/* Collapsible Content: order details + product table */}
+                          {/* Collapsible Order Details (product table below is always visible) */}
                           {isExpanded && (
                             <div className="animate-in slide-in-from-top-2 duration-200">
                               <div className="px-3 sm:px-5 pb-5">
@@ -971,9 +971,11 @@ export default function CommitmentReviewPage() {
                                   </div>
                                 </div>
                               </div>
+                            </div>
+                          )}
 
-                              {/* Render Product Table for this DO */}
-                              <div className="px-0 pt-2 pb-6 min-w-0">
+                          {/* Render Product Table for this DO (always visible) */}
+                          <div className="px-3 sm:px-5 pt-2 pb-6 min-w-0">
                                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
                                   <div className="hidden md:block">
                                     <Table>
@@ -1079,8 +1081,6 @@ export default function CommitmentReviewPage() {
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          )}
                         </div>
                       )
                     })}
