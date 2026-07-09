@@ -504,8 +504,12 @@ export default function CommitmentReviewPage() {
         const allKeys = selectedItems.flatMap(g => g._allProducts || []).map((p: any) => p._rowKey)
         setDialogSelectedProducts(allKeys)
       }
-      // Start with all per-DO sections collapsed so the grouping is visible & predictable
-      setExpandedOrders([])
+      // Start with all per-DO sections expanded so products are visible without
+      // an extra click (section key must match the render: `${_rowKey}__${baseDo}`).
+      const allSectionKeys = selectedItems.flatMap((g: any) =>
+        Object.keys(g._ordersMap || {}).map((baseDo) => `${g._rowKey}__${baseDo}`)
+      )
+      setExpandedOrders(allSectionKeys)
 
       // Reset form state whenever opening
       setChecklistValues({
