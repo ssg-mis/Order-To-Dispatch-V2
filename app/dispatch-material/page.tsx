@@ -37,7 +37,7 @@ export default function DispatchMaterialPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
-  const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
+  const { isReadOnly, user, isAdmin, isFeatureEnabled, role } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
   const limit = 25;
@@ -783,6 +783,85 @@ export default function DispatchMaterialPage() {
     }
   };
 
+  const handleCancel = async () => {
+    if (!revertRemarks.trim()) {
+      toast({ title: "Validation Error", description: "Cancellation remarks are required", variant: "destructive" });
+      return;
+    }
+
+    if (role !== 'super_admin') {
+      toast({ title: "Access Denied", description: "Only Super Admin can cancel a Dispatch Planning order", variant: "destructive" });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const itemsToCancel = allProductsFromSelectedGroups.filter((p: any) => dialogSelectedProducts.includes(p._rowKey));
+
+      if (itemsToCancel.length === 0) {
+        toast({ title: "Error", description: "No products selected to cancel", variant: "destructive" });
+        setIsProcessing(false);
+        return;
+      }
+
+      const successfulCancels: any[] = [];
+      const failedCancels: any[] = [];
+
+      for (const item of itemsToCancel) {
+        const orderId = item.id;
+        if (!orderId) continue;
+
+        try {
+          const res = await dispatchPlanningApi.cancel(orderId, user?.username || 'system', revertRemarks.trim());
+          if (res.success) {
+            successfulCancels.push(orderId);
+          } else {
+            failedCancels.push({ orderId, message: res.message });
+          }
+        } catch (err: any) {
+          failedCancels.push({ orderId, message: err.message });
+        }
+      }
+
+      if (successfulCancels.length > 0) {
+        toast({
+          title: "Order Cancelled",
+          description: `${successfulCancels.length} item(s) cancelled.`,
+        });
+
+        setIsDialogOpen(false);
+        setSelectedItems([]);
+        setDialogSelectedProducts([]);
+        setDispatchDetails({});
+        setRevertRemarks("");
+
+        await refetchPending();
+        await refetchHistory();
+      }
+
+      if (failedCancels.length > 0) {
+        const messages = Array.from(new Set(failedCancels.map((f) => f.message).filter(Boolean)));
+        toast({
+          title: successfulCancels.length > 0 ? "Partial Cancel Failure" : "Cancel Failed",
+          description: messages[0] || `Failed to cancel ${failedCancels.length} item(s).`,
+          variant: "destructive",
+        });
+        if (successfulCancels.length === 0) {
+          await refetchPending();
+          await refetchHistory();
+        }
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "An unexpected error occurred during cancellation",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handlePreclose = async (id: number, qty: number, action: "commitment" | "close", remarks: string) => {
     if (!remarks.trim()) {
       toast({ title: "Reason Required", description: "Please enter a reason for preclosing.", variant: "destructive" });
@@ -851,6 +930,24 @@ export default function DispatchMaterialPage() {
     return true
   })
 
+  const filteredHistory = useMemo(() => {
+    return historyOrders.map((order: any) => {
+      const isCancelled = String(order.overall_status_of_order || "").toLowerCase() === "cancelled"
+      return {
+        ...order,
+        rawData: order,
+        orderNo: order.dispatchPlanningData?.orderNo || order.order_no || "-",
+        customerName: order.customer_name || "-",
+        timestamp: order.dispatchPlanningData?.confirmedAt || order.timestamp,
+        date: new Date(order.dispatchPlanningData?.confirmedAt || order.timestamp || new Date()).toLocaleDateString("en-GB"),
+        stage: "Dispatch Planning",
+        status: isCancelled ? "Rejected" : "Completed",
+        remarks: isCancelled
+          ? `Cancelled: ${order.cancel_remarks || "No reason provided"}`
+          : (order.dispatchPlanningData?.dispatchDate ? `Date: ${order.dispatchPlanningData.dispatchDate}` : "Dispatch Plannned"),
+      }
+    })
+  }, [historyOrders])
 
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
@@ -1829,14 +1926,24 @@ export default function DispatchMaterialPage() {
           <DialogFooter className="mt-4 border-t pt-4 px-1 sm:px-8 pb-4 sm:pb-8 flex flex-col gap-4 sm:flex-col w-full">
             <div className="flex flex-col sm:flex-row sm:items-end gap-3 w-full">
               <div className="flex-1 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Revert Remarks <span className="text-red-500">*</span></Label>
+                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Remarks <span className="text-red-500">*</span></Label>
                 <Input
                   className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white focus:border-red-400 transition-colors"
-                  placeholder="Enter reason for reverting..."
+                  placeholder="Enter reason for reverting or cancelling..."
                   value={revertRemarks}
                   onChange={(e) => setRevertRemarks(e.target.value)}
                 />
               </div>
+              {role === 'super_admin' && (
+                <Button
+                  variant="outline"
+                  onClick={handleCancel}
+                  disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
+                  className="w-full sm:w-auto font-black uppercase tracking-tight whitespace-normal sm:whitespace-nowrap border-2 border-red-600 text-red-600 hover:bg-red-50"
+                >
+                  {isProcessing ? "Processing..." : `Cancel Order (${dialogSelectedProducts.length})`}
+                </Button>
+              )}
               <Button
                 variant="destructive"
                 onClick={handleRevert}

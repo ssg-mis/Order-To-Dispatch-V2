@@ -161,12 +161,20 @@ export default function ActualDispatchPage() {
       .map(t => ({ value: t.transporter_name, label: t.transporter_name }))
   ]), [transporterMaster])
 
-  // Date validation for vehicle documents (Min Today + 5 days)
+  // TEMP: manual override for expiry check while old Vehicle Master records get
+  // backfilled with real dates — remove docRefDate and revert minDate to `new Date()`
+  // once Vehicle Master documents are cleaned up.
+  const [docRefDate, setDocRefDate] = useState<string>(() => new Date().toISOString().split("T")[0])
+
+  // Date validation for vehicle documents (Min docRefDate + 5 days)
   const minDate = useMemo(() => {
-    const d = new Date()
+    const parsed = new Date(docRefDate)
+    // Fall back to today while the field is empty/mid-edit, so an invalid
+    // date never reaches toISOString() (which throws on an Invalid Date).
+    const d = isNaN(parsed.getTime()) ? new Date() : parsed
     d.setDate(d.getDate() + 5)
     return d.toISOString().split("T")[0]
-  }, [])
+  }, [docRefDate])
 
   // Interstate detection logic: Check if any selected order address state differs from vehicle RTO state
   const isInterState = useMemo(() => {
@@ -883,6 +891,10 @@ export default function ActualDispatchPage() {
       // current master data instead of trusting a possibly stale saved draft.
       const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
 
+      // TEMP: reset the manual expiry-check reference date to today on every
+      // dialog open, so a backdated value doesn't leak into an unrelated dispatch.
+      setDocRefDate(new Date().toISOString().split("T")[0])
+
       setSelectedGroups(targetGroups)
       // Default: Select ALL products in all selected groups
       const allKeys = targetGroups.flatMap(g => g._allProducts.map((p: any) => p._rowKey));
@@ -1294,10 +1306,13 @@ export default function ActualDispatchPage() {
     // ONLY IF DEPO IS BANARI — vehicle selection/details are optional for other depots
     const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
 
+    // Collect every validation issue up front so the user sees them all in one toast,
+    // instead of fixing them one at a time across repeated submit attempts.
+    const validationErrors: string[] = [];
+
     // 1. Basic Vehicle Check
     if (isBanari && !vehicleNumber.trim()) {
-      toast({ title: "Validation Error", description: "Vehicle Registration Number is required", variant: "destructive" });
-      return;
+      validationErrors.push("Vehicle Registration Number is required");
     }
 
     // 2. Stage 6: Vehicle Document Validation
@@ -1330,58 +1345,44 @@ export default function ActualDispatchPage() {
         if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
 
         if (!val) {
-          toast({
-            title: "Document Required",
-            description: `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`,
-            variant: "destructive"
-          });
-          return;
+          validationErrors.push(`${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`);
         }
       }
 
       if (!vehicleData.checkStatus) {
-        toast({ title: "Validation Error", description: "Vehicle Check Status is required", variant: "destructive" });
-        return;
+        validationErrors.push("Vehicle Check Status is required");
       }
       // Remarks mandatory ONLY if status is Reject
       if (vehicleData.checkStatus === "Reject" && !vehicleData.remarks.trim()) {
-        toast({ title: "Validation Error", description: "Vehicle Remarks are required for rejection", variant: "destructive" });
-        return;
+        validationErrors.push("Vehicle Remarks are required for rejection");
       }
 
       // 3. Stage 7: Weightment Audit Validation
       if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Actual Qty is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Actual Qty is required");
       }
       if (!loadData.rstNo.trim()) {
-        toast({ title: "Validation Error", description: "RST No is required", variant: "destructive" });
-        return;
+        validationErrors.push("RST No is required");
       }
       // Weightment Slip and No Plate Image are now optional per user request
       if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Gross Weight is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Gross Weight is required");
       }
       if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
-        toast({ title: "Validation Error", description: "Valid Tare Weight is required", variant: "destructive" });
-        return;
+        validationErrors.push("Valid Tare Weight is required");
       }
       if (!loadData.checkStatus) {
-        toast({ title: "Validation Error", description: "Quality Status (STG 7) is required", variant: "destructive" });
-        return;
+        validationErrors.push("Quality Status (STG 7) is required");
       }
       if (!loadData.transporterName.trim()) {
-        toast({ title: "Validation Error", description: "Transporter Name is required", variant: "destructive" });
-        return;
+        validationErrors.push("Transporter Name is required");
       }
       // Reason mandatory ONLY if status is Reject
       if (loadData.checkStatus === "Reject" && !loadData.reason.trim()) {
-        toast({ title: "Validation Error", description: "Weight Difference Reason is required for load rejection", variant: "destructive" });
-        return;
+        validationErrors.push("Weight Difference Reason is required for load rejection");
       }
 
-      // 4. Validate Document End Dates (Min Today + 5 Days)
+      // 4. Validate Document End Dates (Min docRefDate + 5 Days)
       const dateFields = [
         { key: 'fitness_end_date', label: 'Fitness' },
         { key: 'insurance_end_date', label: 'Insurance' },
@@ -1394,43 +1395,39 @@ export default function ActualDispatchPage() {
       for (const field of dateFields) {
         const dateVal = vehicleData[field.key as keyof typeof vehicleData];
         if (dateVal && dateVal < minDate) {
-          toast({
-            title: "Date Error",
-            description: `${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`,
-            variant: "destructive"
-          });
-          return;
+          validationErrors.push(`${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`);
         }
       }
+
+      // 5. Validation for Overload (only mandatory for Banari depot; optional for other depots)
+      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
+      if (isOverloaded && !loadData.overloadRemarks.trim()) {
+        validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
+      }
+
+      // 6. Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
+      if (isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
+        validationErrors.push("National / Other State Permit is mandatory for interstate dispatches.");
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      toast({
+        title: `${validationErrors.length} Validation ${validationErrors.length > 1 ? 'Issues' : 'Issue'} Found`,
+        description: (
+          <ul className="list-disc pl-4 space-y-0.5">
+            {validationErrors.map((err, i) => <li key={i}>{err}</li>)}
+          </ul>
+        ),
+        variant: "destructive"
+      });
+      return;
     }
 
     setIsProcessing(true)
     try {
       if (selectedGroups.length === 0 || dialogSelectedProducts.length === 0) {
         setIsDialogOpen(false);
-        return;
-      }
-
-      // Validation for Overload (only mandatory for Banari depot; optional for other depots)
-      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
-      if (isOverloaded && selectedDepoTab?.toUpperCase() === 'BANARI' && !loadData.overloadRemarks.trim()) {
-        toast({
-          title: "Overload Check",
-          description: "Overload remarks are mandatory as the vehicle is overloaded.",
-          variant: "destructive"
-        });
-        setIsProcessing(false);
-        return;
-      }
-
-      // Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
-      if (isBanari && isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
-        toast({
-          title: "Interstate Document Required",
-          description: "National / Other State Permit is mandatory for interstate dispatches.",
-          variant: "destructive"
-        });
-        setIsProcessing(false);
         return;
       }
 
@@ -1653,6 +1650,87 @@ export default function ActualDispatchPage() {
         if (successfulReverts.length === 0) {
           await refetchPending()
           queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
+        }
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "An unexpected error occurred during revert",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRevertToDispatchPlanning = async () => {
+    if (!revertRemarks.trim()) {
+      toast({ title: "Validation Error", description: "Revert remarks are required", variant: "destructive" });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const itemsToRevert = selectedGroups.flatMap(g =>
+        g._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+      );
+
+      if (itemsToRevert.length === 0) {
+        toast({ title: "Error", description: "No products selected to revert", variant: "destructive" });
+        setIsProcessing(false);
+        return;
+      }
+
+      const successfulReverts = [];
+      const failedReverts = [];
+
+      for (const item of itemsToRevert) {
+        const dsrNumber = item.d_sr_number || item.dsrNumber;
+        if (!dsrNumber) continue;
+
+        try {
+          const res = await actualDispatchApi.revertToDispatchPlanning(dsrNumber, user?.username || 'system', revertRemarks.trim());
+          if (res.success) {
+            successfulReverts.push(dsrNumber);
+          } else {
+            failedReverts.push({ dsrNumber, message: res.message });
+          }
+        } catch (err: any) {
+          failedReverts.push({ dsrNumber, message: err.message });
+        }
+      }
+
+      if (successfulReverts.length > 0) {
+        toast({
+          title: "Revert Successful",
+          description: `${successfulReverts.length} item(s) reverted to Dispatch Planning.`,
+        });
+
+        // Reset and refresh
+        setIsDialogOpen(false);
+        setSelectedOrders([]);
+        setDialogSelectedProducts([]);
+        setConfirmDetails({});
+        setSelectedGroups([]);
+        setRevertRemarks("");
+
+        await refetchPending();
+        await refetchHistory();
+      }
+
+      if (failedReverts.length > 0) {
+        // Surface the real reason (e.g. a stale-write conflict from another user)
+        // instead of a generic count, so the user knows to refresh.
+        const messages = Array.from(new Set(failedReverts.map((f) => f.message).filter(Boolean)));
+        toast({
+          title: successfulReverts.length > 0 ? "Partial Revert Failure" : "Revert Failed",
+          description: messages[0] || `Failed to revert ${failedReverts.length} item(s).`,
+          variant: "destructive",
+        });
+        // Refresh so rows already reverted/moved by another user drop off the stale list.
+        if (successfulReverts.length === 0) {
+          await refetchPending();
+          await refetchHistory();
         }
       }
     } catch (error: any) {
@@ -1965,10 +2043,21 @@ export default function ActualDispatchPage() {
         <DialogContent className="w-[calc(100vw-1rem)] sm:w-[95vw] sm:!max-w-[95vw] max-h-[95dvh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-0">
           <div className="p-4 sm:p-6 lg:p-8">
             <DialogHeader className="border-b pb-4 sm:pb-6 mb-4 sm:mb-6 pr-8">
-              <DialogTitle className="text-lg sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight flex flex-wrap items-start gap-3 leading-tight">
-                <Truck className="h-6 w-6 sm:h-7 sm:w-7 text-blue-600 shrink-0" />
-                Actual Dispatch Confirmation - {selectedGroups.length > 1 ? `${selectedGroups.length} Customer Groups` : selectedGroups[0]?.customerName}
-              </DialogTitle>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <DialogTitle className="text-lg sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight flex flex-wrap items-start gap-3 leading-tight">
+                  <Truck className="h-6 w-6 sm:h-7 sm:w-7 text-blue-600 shrink-0" />
+                  Actual Dispatch Confirmation - {selectedGroups.length > 1 ? `${selectedGroups.length} Customer Groups` : selectedGroups[0]?.customerName}
+                </DialogTitle>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsSlipDialogOpen(true)}
+                  disabled={dialogSelectedProducts.length === 0}
+                  className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black h-9 shrink-0"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Slip
+                </Button>
+              </div>
               <DialogDescription className="text-slate-500 font-medium text-sm sm:text-base mt-2">
                 Review and confirm dispatch quantities for selected customers.
               </DialogDescription>
@@ -1986,6 +2075,20 @@ export default function ActualDispatchPage() {
                   : <><XCircle className="h-5 w-5 text-red-400" /> Gate-In Not Done Yet</>
                 }
               </button>
+            </div>
+
+            {/* TEMP: manual override for the expiry check while old Vehicle Master records
+                get backfilled — remove this input and the docRefDate state once done. */}
+            <div className="flex justify-end mb-4">
+              <div className="flex items-center gap-2">
+                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none whitespace-nowrap">Actual Dispatch Date</Label>
+                <Input
+                  type="date"
+                  className="h-8 text-[11px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-white"
+                  value={docRefDate}
+                  onChange={(e) => setDocRefDate(e.target.value)}
+                />
+              </div>
             </div>
 
             {/* Gate-In Images Popup */}
@@ -3048,26 +3151,25 @@ export default function ActualDispatchPage() {
                 />
               </div>
               <Button
+                variant="outline"
+                onClick={handleRevertToDispatchPlanning}
+                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
+                className="font-black uppercase tracking-tight h-10 px-6 border-amber-500 text-amber-600 hover:bg-amber-50"
+              >
+                {isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`}
+              </Button>
+              <Button
                 variant="destructive"
                 onClick={handleRevert}
                 disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
                 className="font-black uppercase tracking-tight h-10 px-6"
               >
-                {isProcessing ? "Wait..." : `Revert (${dialogSelectedProducts.length})`}
+                {isProcessing ? "Wait..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`}
               </Button>
             </div>
 
             <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="order-last sm:order-none">Cancel</Button>
-              <Button
-                variant="outline"
-                onClick={() => setIsSlipDialogOpen(true)}
-                disabled={dialogSelectedProducts.length === 0}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50 font-black h-11 sm:h-10"
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Slip
-              </Button>
               <Button
                 variant="outline"
                 onClick={handleSaveDraft}
@@ -3078,7 +3180,7 @@ export default function ActualDispatchPage() {
               </Button>
               <Button
                 onClick={performDispatchConfirmation}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || (selectedDepoTab?.toUpperCase() === 'BANARI' && !gateInData)}
+                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly}
                 className="h-11 sm:h-10 font-black bg-blue-600 hover:bg-blue-700"
               >
                 {isProcessing ? "Wait..." : `Confirm Dispatch (${dialogSelectedProducts.length})`}
