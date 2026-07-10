@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -666,7 +667,8 @@ export default function DispatchMaterialPage() {
             }
           }
         } catch (error: any) {
-          failedDispatches.push({ item, error: error?.message || error?.toString() || 'Unknown error' });
+          // Preserve error.code so stale-write (409) conflicts can be told apart below.
+          failedDispatches.push({ item, error: error?.message || error?.toString() || 'Unknown error', code: error?.code });
         }
       }
 
@@ -690,10 +692,28 @@ export default function DispatchMaterialPage() {
         // }, 1500)
       }
 
-      if (failedDispatches.length > 0) {
+      // Split failures: stale-write conflicts (row already processed/moved by another
+      // user) get a dedicated message and always trigger a refetch so the phantom rows
+      // drop off the list — even when nothing in this batch succeeded.
+      const staleDispatches = failedDispatches.filter((f: any) => isStaleWriteError(f));
+      const otherDispatches = failedDispatches.filter((f: any) => !isStaleWriteError(f));
+
+      if (staleDispatches.length > 0) {
+        toast({
+          title: "Already Processed",
+          description: `${staleDispatches.length} order(s) were already processed or moved by another user. Refreshing the list…`,
+          variant: "destructive",
+        });
+        if (successfulDispatches.length === 0) {
+          await refetchPending();
+          queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
+        }
+      }
+
+      if (otherDispatches.length > 0) {
         toast({
           title: "Some Dispatches Failed",
-          description: `${failedDispatches.length} dispatch(es) failed.`,
+          description: `${otherDispatches.length} dispatch(es) failed.`,
           variant: "destructive",
         })
       }
@@ -838,7 +858,6 @@ export default function DispatchMaterialPage() {
         setRevertRemarks("");
 
         await refetchPending();
-        await refetchHistory();
       }
 
       if (failedCancels.length > 0) {
@@ -850,7 +869,6 @@ export default function DispatchMaterialPage() {
         });
         if (successfulCancels.length === 0) {
           await refetchPending();
-          await refetchHistory();
         }
       }
     } catch (error: any) {

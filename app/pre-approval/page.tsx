@@ -33,6 +33,7 @@ import { Settings2, Loader2, ChevronDown, ChevronUp, Trash2, Plus, Check, Search
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
 import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, skuDetailsApi, customerApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import {
@@ -1137,8 +1138,9 @@ export default function PreApprovalPage() {
           itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) => successfulApprovals.push(i));
         } catch (error: any) {
           console.error('Batch submission failed — all approvals and deductions rolled back:', error)
+          // Preserve error.code so a stale-write (409) conflict can be told apart below.
           itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) =>
-            failedApprovals.push({ item: i, error: error?.message || "Batch failed" })
+            failedApprovals.push({ item: i, error: error?.message || "Batch failed", code: error?.code })
           )
         }
       }
@@ -1150,7 +1152,21 @@ export default function PreApprovalPage() {
         setDialogNewProducts({});
       }
 
-      if (failedApprovals.length > 0) {
+      // Split failures: a stale-write conflict (409) rolls back the whole atomic batch —
+      // the row was already processed or moved by another user. Show a dedicated message
+      // and always refetch so phantom rows drop off, even though nothing succeeded.
+      const staleApprovals = failedApprovals.filter((f: any) => isStaleWriteError(f));
+      const otherApprovals = failedApprovals.filter((f: any) => !isStaleWriteError(f));
+
+      if (staleApprovals.length > 0) {
+        toast({ title: "Already Processed", description: "Some order(s) were already processed or moved by another user. Refreshing the list…", variant: "destructive" });
+        if (successfulApprovals.length === 0) {
+          await refetchPending();
+          queryClient.invalidateQueries({ queryKey: ["pre-approval-history"] });
+        }
+      }
+
+      if (otherApprovals.length > 0) {
         toast({ title: "Failed", description: "Some items failed to process.", variant: "destructive" });
       }
 

@@ -22,6 +22,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
 import { approvalApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
@@ -356,7 +357,8 @@ export default function CommitmentReviewPage() {
           }
         } catch (error: any) {
           console.error(`[APPROVAL] Failed to submit approval for ${orderIdentifier}:`, error);
-          failedApprovals.push({ item, error: error?.message || "Unknown error" });
+          // Preserve error.code so stale-write (409) conflicts can be told apart below.
+          failedApprovals.push({ item, error: error?.message || "Unknown error", code: error?.code });
         }
 
         // Save to local history for tracking (both success and failure cases)
@@ -420,10 +422,28 @@ export default function CommitmentReviewPage() {
         queryClient.invalidateQueries({ queryKey: ["approval-history"] })
       }
 
-      if (failedApprovals.length > 0) {
+      // Split failures: stale-write conflicts (order already processed or reverted to a
+      // different stage by another user) get a dedicated message and always trigger a
+      // refetch so the phantom rows drop off — even when nothing in this batch succeeded.
+      const staleApprovals = failedApprovals.filter((f: any) => isStaleWriteError(f))
+      const otherApprovals = failedApprovals.filter((f: any) => !isStaleWriteError(f))
+
+      if (staleApprovals.length > 0) {
+        toast({
+          title: "Already Processed",
+          description: `${staleApprovals.length} order(s) were already processed or moved by another user. Refreshing the list…`,
+          variant: "destructive",
+        })
+        if (successfulApprovals.length === 0) {
+          await refetchPending()
+          queryClient.invalidateQueries({ queryKey: ["approval-history"] })
+        }
+      }
+
+      if (otherApprovals.length > 0) {
         toast({
           title: "Some Approvals Failed",
-          description: `${failedApprovals.length} approval(s) failed. Please try again.`,
+          description: `${otherApprovals.length} approval(s) failed. Please try again.`,
           variant: "destructive",
         })
       }

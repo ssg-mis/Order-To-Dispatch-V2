@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { actualDispatchApi, vehicleDetailsApi, materialLoadApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
@@ -1512,7 +1513,7 @@ export default function ActualDispatchPage() {
             error: error,
             message: error?.message || (error?.response?.data?.message) || 'Unknown error'
           });
-          failedDispatches.push({ item, error: error?.message || 'Unknown error' });
+          failedDispatches.push({ item, error: error?.message || 'Unknown error', code: error?.code });
         }
       }
 
@@ -1564,10 +1565,25 @@ export default function ActualDispatchPage() {
         // }, 1500)
       }
 
-      if (failedDispatches.length > 0) {
+      // Stale-write conflicts: the row was already dispatched/moved by another user.
+      // Refetch the pending list even if nothing succeeded so the phantom row vanishes.
+      const staleWrites = failedDispatches.filter((f: any) => isStaleWriteError(f));
+      const otherFailures = failedDispatches.filter((f: any) => !isStaleWriteError(f));
+
+      if (staleWrites.length > 0) {
+        toast({
+          title: "Already processed",
+          description: `${staleWrites.length} item(s) were already dispatched or moved by another user. Refreshing the list…`,
+          variant: "destructive",
+        })
+        await refetchPending();
+        queryClient.invalidateQueries({ queryKey: ["actual-dispatch-history"] });
+      }
+
+      if (otherFailures.length > 0) {
         toast({
           title: "Partial Success",
-          description: `${failedDispatches.length} item(s) failed during one of the stages.`,
+          description: `${otherFailures.length} item(s) failed during one of the stages.`,
           variant: "destructive",
         })
       }

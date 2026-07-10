@@ -31,6 +31,7 @@ import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/li
 const TOGGLE_COLUMNS = getColumnsUpToStage("security-approval")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { securityGuardApprovalApi, orderApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -365,7 +366,7 @@ export default function SecurityApprovalPage() {
           }
         } catch (error: any) {
           console.error('[SECURITY] Failed to submit approval:', error);
-          failedSubmissions.push({ product, error: error?.message || error?.toString() || 'Unknown error' });
+          failedSubmissions.push({ product, error: error?.message || error?.toString() || 'Unknown error', code: error?.code });
         }
       }
 
@@ -407,11 +408,26 @@ export default function SecurityApprovalPage() {
         // }, 1500)
       }
 
-      if (failedSubmissions.length > 0) {
-        console.error('[SECURITY] Failed submissions:', failedSubmissions);
+      // Stale-write conflicts: the row was already processed/moved by another user.
+      // Refetch the pending list even if nothing succeeded so the phantom row vanishes.
+      const staleWrites = failedSubmissions.filter((f: any) => isStaleWriteError(f));
+      const otherFailures = failedSubmissions.filter((f: any) => !isStaleWriteError(f));
+
+      if (staleWrites.length > 0) {
+        toast({
+          title: "Already processed",
+          description: `${staleWrites.length} approval(s) were already processed or moved by another user. Refreshing the list…`,
+          variant: "destructive",
+        })
+        await refetchPending();
+        queryClient.invalidateQueries({ queryKey: ["security-approval-history"] });
+      }
+
+      if (otherFailures.length > 0) {
+        console.error('[SECURITY] Failed submissions:', otherFailures);
         toast({
           title: "Some Approvals Failed",
-          description: `${failedSubmissions.length} approval(s) failed. Check console for details.`,
+          description: `${otherFailures.length} approval(s) failed. Check console for details.`,
           variant: "destructive",
         })
       }

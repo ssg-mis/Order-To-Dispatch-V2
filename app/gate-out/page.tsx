@@ -28,6 +28,7 @@ import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/li
 const TOGGLE_COLUMNS = getColumnsUpToStage("gate-out")
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { gateOutApi, orderApi, depotApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -647,7 +648,7 @@ export default function GateOutPage() {
           }
         } catch (err: any) {
           console.error(`[GATE-OUT] Failed for ID ${product.id}`, err);
-          failedSubmissions.push({ product, error: err.message });
+          failedSubmissions.push({ product, error: err.message, code: err?.code });
         }
       }
 
@@ -664,10 +665,25 @@ export default function GateOutPage() {
         setSelectedItems([])
       }
 
-      if (failedSubmissions.length > 0) {
+      // Stale-write conflicts: the row was already processed/moved by another user.
+      // Refetch the pending list even if nothing succeeded so the phantom row vanishes.
+      const staleWrites = failedSubmissions.filter((f: any) => isStaleWriteError(f));
+      const otherFailures = failedSubmissions.filter((f: any) => !isStaleWriteError(f));
+
+      if (staleWrites.length > 0) {
+        toast({
+          title: "Already processed",
+          description: `${staleWrites.length} item(s) were already processed or moved by another user. Refreshing the list…`,
+          variant: "destructive",
+        })
+        await refetchPending();
+        queryClient.invalidateQueries({ queryKey: ["gate-out-history"] });
+      }
+
+      if (otherFailures.length > 0) {
         toast({
           title: "Partial Failure",
-          description: `Failed to process ${failedSubmissions.length} items.`,
+          description: `Failed to process ${otherFailures.length} items.`,
           variant: "destructive"
         })
       }
