@@ -96,6 +96,7 @@ export default function ActualDispatchPage() {
     passing_weight: "",
     road_tax: "",
     is_lifetime_tax: false,
+    fuel_type: "",
     gvw: "",
     ulw: "",
   })
@@ -858,7 +859,8 @@ export default function ActualDispatchPage() {
       insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
       tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
       is_lifetime_tax: isLifetimeTax,
-      pollution_end_date: selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : "",
+      fuel_type: selectedV.fuel_type || "",
+      pollution_end_date: selectedV.fuel_type === 'Electrical' ? "" : (selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : ""),
       permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
       permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
       // Images
@@ -943,6 +945,7 @@ export default function ActualDispatchPage() {
         passing_weight: "",
         road_tax: "",
         is_lifetime_tax: false,
+        fuel_type: "",
         gvw: "",
         ulw: "",
       })
@@ -1349,6 +1352,8 @@ export default function ActualDispatchPage() {
         if ((doc.key === 'permit1' || doc.key === 'permit1_end_date') && !isPermitApplicable) continue;
         // Lifetime tax vehicles have no expiry date — only the certificate is required
         if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
+        // Electrical vehicles have no pollution certificate/expiry (matches Vehicle Master)
+        if ((doc.key === 'polution' || doc.key === 'pollution_end_date') && vehicleData.fuel_type === 'Electrical') continue;
 
         if (!val) {
           validationErrors.push(`${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`);
@@ -2776,7 +2781,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
                             <div className="flex flex-col gap-2 w-full min-w-0">
                               <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Pollution {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
+                                Pollution {vehicleData.fuel_type === 'Electrical' ? <span className="text-slate-400 normal-case font-medium">(N/A - Electrical)</span> : selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
                               </span>
                               <FileUploadField className="w-full min-w-0"
                                 accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"

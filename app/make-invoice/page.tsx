@@ -20,7 +20,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, Settings2, FileText, ChevronUp, ChevronDown, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, Settings2, FileText, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -273,7 +273,6 @@ export default function MakeInvoicePage() {
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
-  const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
 
@@ -1076,15 +1075,12 @@ export default function MakeInvoicePage() {
                 {/* 1. Stacked Company Information Bars */}
                 <div className="space-y-4 min-w-0">
                   {selectedGroups.map((group, groupIdx) => {
-                    const isExpanded = expandedOrders.includes(group._rowKey);
-                    const toggleExpand = () => {
-                      setExpandedOrders(prev => isExpanded ? prev.filter(id => id !== group._rowKey) : [...prev, group._rowKey]);
-                    };
                     const uniqueOrderDetails = Object.values(group._ordersMap);
+                    const doCount = String(group.doNumber || "").split(",").map((s: string) => s.trim()).filter(Boolean).length;
 
                     return (
                       <div key={group._rowKey} className="border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm min-w-0">
-                        <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
+                        <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                             <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
                               DETAILS FOR {group.customerName}
@@ -1092,17 +1088,9 @@ export default function MakeInvoicePage() {
                             <div className="flex flex-col">
                               <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">PARTY {groupIdx + 1} | {group.doNumber}</span>
                               <span className="text-xs text-blue-100 font-bold leading-none">
-                                {group._productCount} Items Selected
+                                {doCount} DO{doCount !== 1 ? 's' : ''} · {group._productCount} Items Selected
                               </span>
                             </div>
-                          </div>
-                          <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
-                            <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2 leading-none cursor-pointer">
-                              {isExpanded ? 'HIDE PARTY DETAILS ▲' : 'CLICK TO SHOW PARTY DETAILS ▼'}
-                            </div>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/20 rounded-full">
-                              {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                            </Button>
                           </div>
                         </div>
 
@@ -1115,8 +1103,7 @@ export default function MakeInvoicePage() {
                           </div>
                         )}
 
-                        {isExpanded && (
-                          <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                        <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100">
                             {uniqueOrderDetails.map((orderDetails: any, idx) => {
                               const firstProd = orderDetails._products[0] || {};
                               return (
@@ -1141,6 +1128,10 @@ export default function MakeInvoicePage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">DO Date</p>
                                       <p className="text-xs font-bold text-slate-700">{orderDetails.partySoDate || "—"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Actual Dispatch Date</p>
+                                      <p className="text-xs font-bold text-blue-700 leading-none">{formatDate(firstProd.lrc_actual_1 || firstProd.actual_1)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transport Type</p>
@@ -1171,9 +1162,9 @@ export default function MakeInvoicePage() {
                                     </div>
                                     <div className="md:col-span-2">
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">PO Copy (SO Upload)</p>
-                                      {group.uploadSo ? (
+                                      {orderDetails.uploadSo ? (
                                         <a
-                                          href={group.uploadSo}
+                                          href={orderDetails.uploadSo}
                                           target="_blank" 
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
@@ -1329,7 +1320,6 @@ export default function MakeInvoicePage() {
                               );
                             })}
                           </div>
-                        )}
                       </div>
                     );
                   })}
