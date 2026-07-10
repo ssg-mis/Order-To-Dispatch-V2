@@ -372,13 +372,13 @@ export default function MaterialReceiptPage() {
     const grouped: { [key: string]: any } = {}
 
     pendingOrders.forEach((order: any) => {
+      // Group strictly by Invoice Number (matches Check Invoice & Damage Adjustment).
       const invoiceNo = order.invoice_no || "No Invoice"
       const doNumber = order.so_no || order.d_sr_number || "DO/26-27/0001"
-      const groupKey = invoiceNo !== "No Invoice" ? invoiceNo : doNumber;
 
-      if (!grouped[groupKey]) {
-        grouped[groupKey] = {
-          _rowKey: groupKey,
+      if (!grouped[invoiceNo]) {
+        grouped[invoiceNo] = {
+          _rowKey: invoiceNo,
           doNumber: doNumber,
           invoiceNo: invoiceNo,
           customerName: order.party_name || "—",
@@ -434,9 +434,9 @@ export default function MaterialReceiptPage() {
       const freightRate = parseFloat(order.freight_rate) || 0;
       const computedBillAmount = (rate * nosPerMainUom + freightRate) * actualQty;
 
-      grouped[groupKey]._allProducts.push({
+      grouped[invoiceNo]._allProducts.push({
         ...order,
-        _rowKey: `${groupKey}-${order.id}`,
+        _rowKey: `${invoiceNo}-${order.id}`,
         id: order.id,
         specificOrderNo: order.so_no,
         productName: order.product_name,
@@ -450,7 +450,7 @@ export default function MaterialReceiptPage() {
         processid: order.processid || null
       })
 
-      grouped[groupKey]._productCount = grouped[groupKey]._allProducts.length
+      grouped[invoiceNo]._productCount = grouped[invoiceNo]._allProducts.length
     })
 
     return Object.values(grouped).map((g: any) => ({

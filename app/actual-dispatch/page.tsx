@@ -1452,6 +1452,11 @@ export default function ActualDispatchPage() {
             product_name_1: item.productName || item.product_name,
             actual_qty_dispatch: confirmedQty || item.qtyToDispatch,
 
+            // Manually-entered Actual Dispatch Date (docRefDate, "YYYY-MM-DD").
+            // Persisted as the source-of-truth dispatch date (backend stores it into
+            // actual_1). Temporary until historical dates are fully backfilled.
+            actual_dispatch_date: docRefDate || null,
+
             // Stage 6 fields
             vehicle_number: vehicleNumber,
             check_status: vehicleData.checkStatus,
