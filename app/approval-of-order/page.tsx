@@ -524,12 +524,9 @@ export default function CommitmentReviewPage() {
         const allKeys = selectedItems.flatMap(g => g._allProducts || []).map((p: any) => p._rowKey)
         setDialogSelectedProducts(allKeys)
       }
-      // Start with all per-DO sections expanded so products are visible without
-      // an extra click (section key must match the render: `${_rowKey}__${baseDo}`).
-      const allSectionKeys = selectedItems.flatMap((g: any) =>
-        Object.keys(g._ordersMap || {}).map((baseDo) => `${g._rowKey}__${baseDo}`)
-      )
-      setExpandedOrders(allSectionKeys)
+      // Default to hiding per-DO details sections on open
+      setExpandedOrders([])
+
 
       // Reset form state whenever opening
       setChecklistValues({
@@ -996,111 +993,111 @@ export default function CommitmentReviewPage() {
 
                           {/* Render Product Table for this DO (always visible) */}
                           <div className="px-3 sm:px-5 pt-2 pb-6 min-w-0">
-                                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                                  <div className="hidden md:block">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow className="bg-slate-50 border-b">
-                                          <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
-                                            <Checkbox
-                                              checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
-                                              onCheckedChange={(checked) => {
-                                                const productKeys = orderDetails._products.map((p: any) => p._rowKey);
-                                                if (checked) {
-                                                  setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys]))
-                                                  )
-                                                } else {
-                                                  setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
-                                                }
-                                              }}
-                                            />
-                                          </TableHead>
-                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
-                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty</TableHead>
-                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate</TableHead>
-                                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Status</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {orderDetails._products.map((prod: any) => (
-                                          <TableRow key={prod._rowKey} className={cn(dialogSelectedProducts.includes(prod._rowKey) ? "bg-blue-50/40" : "")}>
-                                            <TableCell className="text-center p-3">
-                                              <Checkbox
-                                                checked={dialogSelectedProducts.includes(prod._rowKey)}
-                                                onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                              />
-                                            </TableCell>
-                                            <TableCell className="p-3">
-                                              <div className="flex flex-col">
-                                                <span className="text-xs font-black text-slate-900 leading-none mb-1">{prod.productName || prod.oilType || "—"}</span>
-                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{prod._originalOrderId}</span>
-                                              </div>
-                                            </TableCell>
-                                            <TableCell className="p-3">
-                                              <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                            </TableCell>
-                                            <TableCell className="p-3 text-[10px] font-bold text-slate-700">₹{prod.rate || "—"}</TableCell>
-                                            <TableCell className="p-3">
-                                              <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                  <div className="space-y-3 p-3 md:hidden">
-                                    <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-                                      <div>
-                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
-                                        <p className="text-xs font-bold text-slate-700">{orderDetails._products.length} items</p>
-                                      </div>
-                                      <Checkbox
-                                        checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
-                                        onCheckedChange={(checked) => {
-                                          const productKeys = orderDetails._products.map((p: any) => p._rowKey);
-                                          if (checked) {
-                                            setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys])))
-                                          } else {
-                                            setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
-                                          }
-                                        }}
-                                      />
-                                    </div>
-                                    {orderDetails._products.map((prod: any) => {
-                                      const selected = dialogSelectedProducts.includes(prod._rowKey)
-                                      return (
-                                        <div
-                                          key={prod._rowKey}
-                                          className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}
-                                        >
-                                          <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
-                                              <p className="text-sm font-black text-slate-900 break-words">{prod.productName || prod.oilType || "—"}</p>
-                                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight break-all">{prod._originalOrderId}</p>
-                                            </div>
-                                            <Checkbox
-                                              checked={selected}
-                                              onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                            />
+                            <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
+                              <div className="hidden md:block">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-slate-50 border-b">
+                                      <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                                        <Checkbox
+                                          checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
+                                          onCheckedChange={(checked) => {
+                                            const productKeys = orderDetails._products.map((p: any) => p._rowKey);
+                                            if (checked) {
+                                              setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys]))
+                                              )
+                                            } else {
+                                              setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
+                                            }
+                                          }}
+                                        />
+                                      </TableHead>
+                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
+                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty</TableHead>
+                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate</TableHead>
+                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Status</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {orderDetails._products.map((prod: any) => (
+                                      <TableRow key={prod._rowKey} className={cn(dialogSelectedProducts.includes(prod._rowKey) ? "bg-blue-50/40" : "")}>
+                                        <TableCell className="text-center p-3">
+                                          <Checkbox
+                                            checked={dialogSelectedProducts.includes(prod._rowKey)}
+                                            onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
+                                          />
+                                        </TableCell>
+                                        <TableCell className="p-3">
+                                          <div className="flex flex-col">
+                                            <span className="text-xs font-black text-slate-900 leading-none mb-1">{prod.productName || prod.oilType || "—"}</span>
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{prod._originalOrderId}</span>
                                           </div>
-                                          <div className="grid grid-cols-2 gap-3 text-xs">
-                                            <div className="rounded-md bg-slate-50 p-2">
-                                              <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                                              <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                            </div>
-                                            <div className="rounded-md bg-slate-50 p-2">
-                                              <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                              <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
-                                            </div>
-                                          </div>
+                                        </TableCell>
+                                        <TableCell className="p-3">
+                                          <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
+                                        </TableCell>
+                                        <TableCell className="p-3 text-[10px] font-bold text-slate-700">₹{prod.rate || "—"}</TableCell>
+                                        <TableCell className="p-3">
                                           <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
                               </div>
+                              <div className="space-y-3 p-3 md:hidden">
+                                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+                                  <div>
+                                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
+                                    <p className="text-xs font-bold text-slate-700">{orderDetails._products.length} items</p>
+                                  </div>
+                                  <Checkbox
+                                    checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
+                                    onCheckedChange={(checked) => {
+                                      const productKeys = orderDetails._products.map((p: any) => p._rowKey);
+                                      if (checked) {
+                                        setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys])))
+                                      } else {
+                                        setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
+                                      }
+                                    }}
+                                  />
+                                </div>
+                                {orderDetails._products.map((prod: any) => {
+                                  const selected = dialogSelectedProducts.includes(prod._rowKey)
+                                  return (
+                                    <div
+                                      key={prod._rowKey}
+                                      className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
+                                          <p className="text-sm font-black text-slate-900 break-words">{prod.productName || prod.oilType || "—"}</p>
+                                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight break-all">{prod._originalOrderId}</p>
+                                        </div>
+                                        <Checkbox
+                                          checked={selected}
+                                          onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-3 text-xs">
+                                        <div className="rounded-md bg-slate-50 p-2">
+                                          <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
+                                          <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
+                                        </div>
+                                        <div className="rounded-md bg-slate-50 p-2">
+                                          <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
+                                          <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
+                                        </div>
+                                      </div>
+                                      <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )
                     })}
