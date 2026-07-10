@@ -225,6 +225,7 @@ export default function DispatchMaterialPage() {
           const preApproveAt = firstProd.actual_1 || null
           const approveBy = firstProd.order_approval_user || "—"
           const approveAt = firstProd.actual_2 || null
+          const status = firstProd.has_prior_dispatch ? "Pending" : "Original"
           const categories: Record<string, any[]> = { "RICE OIL": [], "SOYA OIL": [], "PALM OIL": [], "OTHERS": [] }
           partyProducts.forEach((prod: any) => {
             const name = (prod.productName || "").toUpperCase()
@@ -237,31 +238,34 @@ export default function DispatchMaterialPage() {
             else categories["OTHERS"].push(item)
           })
           return (
-            <div key={party} className="border border-black bg-white text-black mb-8 last:mb-0">
+            <div key={party} className="border border-black bg-white text-black mb-8 last:mb-0 max-w-[600px] mx-auto">
               <div className="text-center px-2 pt-3 pb-2">
                 <h1 className="text-xl font-black">SHRI SHYAM OIL EXTRACTIONS PVT LTD</h1>
                 <p className="text-[11px] text-gray-500">Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)</p>
                 <div className="text-base font-bold mt-1">Oil Dispatch Voucher</div>
               </div>
               <div className="grid grid-cols-2 text-xs border-t border-black">
-                <div className="border-b border-r border-black p-1.5 font-bold">DO no.: {commitmentNo}</div>
-                <div className="border-b border-black p-1.5 font-bold">DO Date: {date}</div>
-                <div className="border-b border-r border-black p-1.5 font-bold">Customer: {party}</div>
-                <div className="border-b border-black p-1.5 font-bold">
-                  {reference.label}
-                  {reference.label !== "Direct" && reference.value ? `: ${reference.value}` : ""}
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">DO no.:</span> {commitmentNo}</div>
+                <div className="border-b border-black p-1.5"><span className="font-bold">DO Date:</span> {date}</div>
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Customer:</span> {party}</div>
+                <div className="border-b border-black p-1.5">
+                  <span className="font-bold">{reference.label}{reference.label !== "Direct" && reference.value ? ":" : ""}</span>
+                  {reference.label !== "Direct" && reference.value ? ` ${reference.value}` : ""}
                 </div>
-                <div className="border-b border-r border-black p-1.5">Address: {place}</div>
-                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}</div>
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Address:</span> {place}</div>
+                <div className="border-b border-black p-1.5">
+                  <span className="font-bold">Mob.:</span> {partyMo}<br />
+                  <span className="font-bold">Status:</span> {status}
+                </div>
               </div>
               <table className="w-full border-collapse">
                 <thead>
                   <tr style={{ background: "#A6A6A6" }}>
-                    <th className="border border-black border-t-0 p-1.5 text-left text-xs">Item Name</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">QTY</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">UOM</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Net Wt.</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Gross Wt.</th>
+                    <th className="border border-black border-t-0 p-1.5 text-left text-xs w-full">Item Name</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">QTY</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">UOM</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">Net Wt.</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">Gross Wt.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -278,16 +282,16 @@ export default function DispatchMaterialPage() {
                             <td className="border border-black p-1.5 text-xs">{item.name}</td>
                             <td className="border border-black p-1.5 text-xs text-center">{item.qty}</td>
                             <td className="border border-black p-1.5 text-xs text-center">{item.unit}</td>
-                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.weight)} KGS</td>
-                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.grossWeight)} KGS</td>
+                            <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(item.weight)} KGS</td>
+                            <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(item.grossWeight)} KGS</td>
                           </tr>
                         ))}
                         <tr style={{ background: OIL_COLORS[category] }} className="font-bold">
-                          <td className="border border-black p-1.5 text-xs text-right">Total {OIL_TITLES[category]}</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">Total {OIL_TITLES[category]}</td>
                           <td className="border border-black p-1.5 text-xs text-center">{catQty}</td>
                           <td className="border border-black p-1.5 text-xs"></td>
-                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catWeight)} KGS</td>
-                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catGross)} KGS</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(catWeight)} KGS</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(catGross)} KGS</td>
                         </tr>
                       </Fragment>
                     )
@@ -296,8 +300,8 @@ export default function DispatchMaterialPage() {
                     <td className="border border-black p-1.5 text-xs text-center">Grand Total</td>
                     <td className="border border-black p-1.5 text-xs text-center">{partyProducts.reduce((s: number, p: any) => s + parseFloat(String(getProductQty(p) || "0")), 0)}</td>
                     <td className="border border-black p-1.5 text-xs"></td>
-                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s: number, p: any) => s + calculateWeight(p.productName, getProductQty(p)), 0))} KGS</td>
-                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s: number, p: any) => s + calculateGrossWeight(p.productName, getProductQty(p)), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s: number, p: any) => s + calculateWeight(p.productName, getProductQty(p)), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s: number, p: any) => s + calculateGrossWeight(p.productName, getProductQty(p)), 0))} KGS</td>
                   </tr>
                   <tr>
                     <td colSpan={5} className="border border-black p-2 align-top">
@@ -338,6 +342,7 @@ export default function DispatchMaterialPage() {
         referenceValue: reference.value,
         place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
         partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
+        status: firstProd.has_prior_dispatch ? "Pending" : "Original",
         processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
         punchBy: firstProd.order_punch_user || "—",
         punchAt: firstProd.created_at || null,
@@ -378,7 +383,6 @@ export default function DispatchMaterialPage() {
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
-    { id: "soNo", label: "DO No." },
     // { id: "processId", label: "Manual Sauda No." },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },

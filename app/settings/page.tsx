@@ -81,6 +81,18 @@ const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Actual Dispatch
 // Values selectable in Order Punch's "Is This Order Through" field
 const ORDER_THROUGH_OPTIONS = ["Direct", "Broker", "Salesperson"]
 
+// Values selectable in Order Punch's "Order Type" field
+const ORDER_TYPE_OPTIONS = [
+  { value: "regular", label: "Regular" },
+  { value: "pre-approval", label: "Pre-Approval" },
+]
+
+// Values selectable in Order Punch's "Order Category" field
+const ORDER_CATEGORY_OPTIONS = [
+  { value: "Sales", label: "Sales" },
+  { value: "Stock Transfer", label: "Stock Transfer" },
+]
+
 const MASTER_TABS = [
   { key: "customers", label: "Customers" },
   { key: "depots", label: "Depots" },
@@ -128,7 +140,13 @@ export default function SettingsPage() {
     depo_access: {} as Record<string, string[]>,
     features: {} as Record<string, boolean>,
     master_tab_access: {} as MasterTabAccessMap,
-    order_punch_access: { is_order_through: [] as string[], broker_name: [] as string[], salesperson_name: [] as string[] }
+    order_punch_access: {
+      is_order_through: [] as string[],
+      broker_name: [] as string[],
+      salesperson_name: [] as string[],
+      order_type: [] as string[],
+      order_category: [] as string[],
+    }
   })
 
   const [depots, setDepots] = useState<any[]>([])
@@ -269,7 +287,7 @@ export default function SettingsPage() {
       depo_access: {},
       features: {},
       master_tab_access: {} as MasterTabAccessMap,
-      order_punch_access: { is_order_through: [], broker_name: [], salesperson_name: [] }
+      order_punch_access: { is_order_through: [], broker_name: [], salesperson_name: [], order_type: [], order_category: [] }
     })
     setShowPassword(false)
   }
@@ -434,7 +452,7 @@ export default function SettingsPage() {
     // Normalize features — extract master_tabs and order_punch_access separately
     let normalizedFeatures: Record<string, boolean> = {}
     let masterTabAccess: MasterTabAccessMap = {}
-    let orderPunchAccess: { is_order_through: string[], broker_name: string[], salesperson_name: string[] } = { is_order_through: [], broker_name: [], salesperson_name: [] }
+    let orderPunchAccess: { is_order_through: string[], broker_name: string[], salesperson_name: string[], order_type: string[], order_category: string[] } = { is_order_through: [], broker_name: [], salesperson_name: [], order_type: [], order_category: [] }
     const hasMasterAccess = Array.isArray(pageAccessParsed)
       ? pageAccessParsed.includes("Master")
       : !!(pageAccessParsed && typeof pageAccessParsed === 'object' && pageAccessParsed["Master"]);
@@ -446,7 +464,9 @@ export default function SettingsPage() {
         orderPunchAccess = {
           is_order_through: Array.isArray(order_punch_access.is_order_through) ? order_punch_access.is_order_through.map(String) : [],
           broker_name: Array.isArray(order_punch_access.broker_name) ? order_punch_access.broker_name.map(String) : [],
-          salesperson_name: Array.isArray(order_punch_access.salesperson_name) ? order_punch_access.salesperson_name.map(String) : []
+          salesperson_name: Array.isArray(order_punch_access.salesperson_name) ? order_punch_access.salesperson_name.map(String) : [],
+          order_type: Array.isArray(order_punch_access.order_type) ? order_punch_access.order_type.map(String) : [],
+          order_category: Array.isArray(order_punch_access.order_category) ? order_punch_access.order_category.map(String) : []
         }
       }
       if (master_tabs && typeof master_tabs === 'object') {
@@ -530,6 +550,24 @@ export default function SettingsPage() {
       const exists = current.some(s => s.toLowerCase() === salespersonName.toLowerCase())
       const next = exists ? current.filter(s => s.toLowerCase() !== salespersonName.toLowerCase()) : [...current, salespersonName]
       return { ...prev, order_punch_access: { ...prev.order_punch_access, salesperson_name: next } }
+    })
+  }
+
+  // Toggle allowed "Order Type" value for Order Punch access
+  const toggleOrderTypeAccess = (value: string) => {
+    setFormData(prev => {
+      const current = prev.order_punch_access.order_type
+      const next = current.includes(value) ? current.filter(v => v !== value) : [...current, value]
+      return { ...prev, order_punch_access: { ...prev.order_punch_access, order_type: next } }
+    })
+  }
+
+  // Toggle allowed "Order Category" value for Order Punch access
+  const toggleOrderCategoryAccess = (value: string) => {
+    setFormData(prev => {
+      const current = prev.order_punch_access.order_category
+      const next = current.includes(value) ? current.filter(v => v !== value) : [...current, value]
+      return { ...prev, order_punch_access: { ...prev.order_punch_access, order_category: next } }
     })
   }
 
@@ -1002,6 +1040,40 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label className="text-md">Order Punch Field Access</Label>
                 <div className="space-y-4 p-4 border rounded-md max-h-[320px] overflow-y-auto">
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Order Category</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {ORDER_CATEGORY_OPTIONS.map(opt => (
+                        <div key={opt.value} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`order-category-${opt.value}`}
+                            checked={formData.order_punch_access.order_category.includes(opt.value)}
+                            onCheckedChange={() => toggleOrderCategoryAccess(opt.value)}
+                          />
+                          <Label htmlFor={`order-category-${opt.value}`} className="text-xs font-normal cursor-pointer">
+                            {opt.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Order Type</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {ORDER_TYPE_OPTIONS.map(opt => (
+                        <div key={opt.value} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`order-type-${opt.value}`}
+                            checked={formData.order_punch_access.order_type.includes(opt.value)}
+                            onCheckedChange={() => toggleOrderTypeAccess(opt.value)}
+                          />
+                          <Label htmlFor={`order-type-${opt.value}`} className="text-xs font-normal cursor-pointer">
+                            {opt.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Is This Order Through</p>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">

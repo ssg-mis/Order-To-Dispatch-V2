@@ -25,10 +25,7 @@ import { FileUploadField } from "@/components/file-upload-field"
 import { Upload, X, Plus, Settings2, ShieldAlert, ShieldCheck, Truck, ChevronDown, ChevronUp, FileText, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
-
-// Columns available in this stage's toggle: this stage + all earlier stages (no future-stage columns)
-const TOGGLE_COLUMNS = getColumnsUpToStage("security-approval")
+import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { securityGuardApprovalApi, orderApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
@@ -94,6 +91,7 @@ async function compressImageForUpload(file: File): Promise<File> {
 
 const PAGE_COLUMNS = [
   { id: "partySoDate",       label: "DO DATE" },
+  { id: "actualDispatchDate", label: "ACTUAL DISPATCH DATE" },
   { id: "orderNo",           label: "DO NUMBERS" },
   { id: "processid",         label: "MANUAL SAUDA NO." },
   { id: "customerName",      label: "CUSTOMER NAME" },
@@ -178,7 +176,7 @@ export default function SecurityApprovalPage() {
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
     "security-approval",
-    ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "status"]
+    ["partySoDate", "actualDispatchDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "status"]
   )
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
@@ -549,6 +547,9 @@ export default function SecurityApprovalPage() {
       return {
         ...group,
         partySoDate: formatDate(group._allProducts[0]?.party_so_date),
+        // Actual Dispatch Date = the date the group is keyed on (actual_1). group.actualDate
+        // is the raw "YYYY-MM-DD" used for grouping; format it for display, "—" if absent.
+        actualDispatchDate: (group.actualDate && group.actualDate !== "NoDate") ? formatDate(group.actualDate) : "—",
         doNumber: formatLabel(uniqueDos),
         customerName: formatLabel(uniqueCustomers),
         processId: formatLabel(uniqueProcessIds),
@@ -598,6 +599,8 @@ export default function SecurityApprovalPage() {
 
   const getSortValue = (group: any, colId: string): string => {
     if (colId === "partySoDate") return group.partySoDate || ""
+    // Sort on the raw YYYY-MM-DD (chronological), not the formatted DD/MM/YYYY.
+    if (colId === "actualDispatchDate") return group.actualDate && group.actualDate !== "NoDate" ? group.actualDate : ""
     if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
     if (colId === "processId" || colId === "processid") return group.processId || ""
     if (colId === "customerName") return group.customerName || ""
@@ -623,8 +626,9 @@ export default function SecurityApprovalPage() {
   }, [displayRows, pendingSortField, pendingSortDir])
 
   const [columnOrder, setColumnOrder] = useColumnOrder("security-approval", PAGE_COLUMNS.map(c => c.id))
-  // itemCount is a computed core column and always shown; every other core column follows the toggle
-  const ALWAYS_VISIBLE_COLS = new Set(["itemCount"])
+  // itemCount and actualDispatchDate are computed core columns, always shown (actualDispatchDate
+  // isn't in the toggle registry, so it can't be enabled/disabled from the menu anyway).
+  const ALWAYS_VISIBLE_COLS = new Set(["itemCount", "actualDispatchDate"])
   const orderedVisibleCols = useMemo(() =>
     columnOrder
       .map(id => PAGE_COLUMNS.find(c => c.id === id))
@@ -640,6 +644,7 @@ export default function SecurityApprovalPage() {
 
   const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
     partySoDate:       "partySoDate",
+    actualDispatchDate: "actualDispatchDate",
     orderNo:           "doNumber",
     processid:         "processId",
     customerName:      "customerName",
@@ -652,6 +657,8 @@ export default function SecurityApprovalPage() {
     switch (colId) {
       case "partySoDate":
         return <TableCell key={colId} className="p-4 text-center text-xs font-medium">{group.partySoDate}</TableCell>
+      case "actualDispatchDate":
+        return <TableCell key={colId} className="p-4 text-center text-xs font-bold text-purple-700">{group.actualDispatchDate}</TableCell>
       case "orderNo":
         return (
           <TableCell key={colId} className="p-4">
@@ -670,7 +677,7 @@ export default function SecurityApprovalPage() {
         return (
           <TableCell key={colId} className="text-center p-4">
             <div className="flex flex-col items-center">
-              <span className="font-black text-lg text-slate-800">{group._productCount}</span>
+              <span className="font-black text-sm text-slate-800">{group._productCount}</span>
               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Products</span>
             </div>
           </TableCell>
@@ -787,7 +794,7 @@ export default function SecurityApprovalPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -812,7 +819,7 @@ export default function SecurityApprovalPage() {
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
+                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {orderedVisibleCols.map(col => {
                     const sf = COL_SORT_FIELD[col.id]
                     return (
@@ -826,7 +833,7 @@ export default function SecurityApprovalPage() {
                       </SortableTableHead>
                     )
                   })}
-                  {visibleColumns.filter(colId => !['partySoDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
+                  {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
                     const col = ALL_COLUMNS.find(c => c.id === colId)
                     if (!col) return null
                     return (
@@ -846,6 +853,7 @@ export default function SecurityApprovalPage() {
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
                     <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                     <TableCell className="p-4 text-center"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                    <TableCell className="p-4 text-center"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                     <TableCell className="p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                     <TableCell className="p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                     <TableCell className="p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full" /></TableCell>
@@ -862,7 +870,7 @@ export default function SecurityApprovalPage() {
                       <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </TableCell>
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
-                    {visibleColumns.filter(colId => !['partySoDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
+                    {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
                       const col = ALL_COLUMNS.find(c => c.id === colId)
                       if (!col) return null
                       return (
@@ -882,7 +890,7 @@ export default function SecurityApprovalPage() {
                 ))
               ) : (
                   <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).length} className="text-center py-20">
+                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).length} className="text-center py-20">
                     <div className="flex flex-col items-center gap-2">
                       <ShieldAlert className="w-12 h-12 text-slate-200" />
                       <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No vehicles pending for security check</p>
@@ -963,6 +971,10 @@ export default function SecurityApprovalPage() {
 
                     <div className="grid grid-cols-2 gap-4 py-2 border-y border-slate-50">
                       <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Actual Dispatch Date</p>
+                        <p className="text-xs font-bold text-purple-700">{group.actualDispatchDate}</p>
+                      </div>
+                      <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Vehicle No</p>
                         <p className="text-xs font-bold text-slate-700">{group.vehicleNo}</p>
                       </div>
@@ -994,7 +1006,7 @@ export default function SecurityApprovalPage() {
                     {/* Dynamic columns selected by user */}
                     <div className="grid grid-cols-1 gap-y-3 pt-2">
                       {visibleColumns.filter(colId => 
-                        !['partySoDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)
+                        !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)
                       ).map(colId => {
                         const col = ALL_COLUMNS.find(c => c.id === colId);
                         if (!col) return null;

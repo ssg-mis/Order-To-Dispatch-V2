@@ -22,14 +22,12 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Settings2, Truck, Weight } from "lucide-react"
-import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS, getColumnsUpToStage } from "@/lib/workflow-columns"
-
-// Toggle lists this stage + all earlier stages' columns (no future-stage columns)
-const TOGGLE_COLUMNS = getColumnsUpToStage("material-load")
+import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Checkbox } from "@/components/ui/checkbox"
 import { materialLoadApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 
 export default function MaterialLoadPage() {
   const router = useRouter()
@@ -39,7 +37,7 @@ export default function MaterialLoadPage() {
   const [historyOrders, setHistoryOrders] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [visibleColumns, setVisibleColumns] = useState<string[]>([
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("material-load", [
     "orderNo",
     "customerName",
     "status",
@@ -426,7 +424,7 @@ export default function MaterialLoadPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={TOGGLE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}

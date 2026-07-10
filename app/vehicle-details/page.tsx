@@ -27,6 +27,7 @@ import { ALL_WORKFLOW_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Checkbox } from "@/components/ui/checkbox"
 import { orderApi, vehicleDetailsApi } from "@/lib/api-service"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export default function VehicleDetailsPage() {
@@ -36,7 +37,7 @@ export default function VehicleDetailsPage() {
   const [pendingOrders, setPendingOrders] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [visibleColumns, setVisibleColumns] = useState<string[]>([
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("vehicle-details", [
     "orderNo",
     "customerName",
     "status",

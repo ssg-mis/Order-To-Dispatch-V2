@@ -2000,7 +2000,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
           <div className="space-y-2">
             <Label>Fuel Type</Label>
-            <Select value={vehicleForm.fuel_type || 'Diesel'} onValueChange={val => setVehicleForm({...vehicleForm, fuel_type: val})}>
+            <Select value={vehicleForm.fuel_type || 'Diesel'} onValueChange={val => setVehicleForm((prev: any) => ({...prev, fuel_type: val, ...(val === 'Electrical' ? { pollution: '' } : {})}))}>
               <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="Diesel">Diesel</SelectItem>
@@ -2117,8 +2117,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
         <div className="grid grid-cols-2 gap-4 border p-3 rounded-lg bg-slate-50/50">
           <div className="space-y-2">
-            <Label>Pollution Expiry</Label>
-            <Input type="date" value={vehicleForm.pollution?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, pollution: e.target.value})} />
+            <Label className="flex justify-between items-center">
+              <span>Pollution Expiry</span>
+              {vehicleForm.fuel_type === 'Electrical' && (
+                <span className="text-[10px] text-slate-400 font-normal">Not applicable (Electrical vehicle)</span>
+              )}
+            </Label>
+            <Input
+              type="date"
+              disabled={vehicleForm.fuel_type === 'Electrical'}
+              value={vehicleForm.pollution?.split('T')[0] || ''}
+              onChange={e => setVehicleForm({...vehicleForm, pollution: e.target.value})}
+            />
           </div>
           <div className="space-y-2">
             <FileUploadField
@@ -4033,10 +4043,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                 )}
                               </div>
                             )}
-                            {(item.pollution || item.pollution_image) && (
+                            {(item.pollution || item.pollution_image || item.fuel_type === 'Electrical') && (
                               <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
                                 <span className="font-medium text-slate-500">Pollution Expiry</span>
-                                {item.pollution_image ? (
+                                {item.fuel_type === 'Electrical' ? (
+                                  item.pollution_image ? (
+                                    <button onClick={(e) => { e.stopPropagation(); window.open(item.pollution_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                                      N/A
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-700">N/A</span>
+                                  )
+                                ) : item.pollution_image ? (
                                   <button onClick={(e) => { e.stopPropagation(); window.open(item.pollution_image, '_blank'); }} className="text-blue-600 hover:text-blue-800 hover:underline font-medium">
                                     {formatDocDate(item.pollution)}
                                   </button>
@@ -4166,7 +4184,17 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               ) : (
                                 renderDocCell(item.road_tax, item.road_tax_image)
                               )}
-                              {renderDocCell(item.pollution, item.pollution_image)}
+                              {item.fuel_type === 'Electrical' ? (
+                                <TableCell className="text-xs">
+                                  {item.pollution_image ? (
+                                    <button onClick={() => window.open(item.pollution_image, '_blank')} className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-left w-fit">N/A</button>
+                                  ) : (
+                                    <span className="text-slate-700 font-medium">N/A</span>
+                                  )}
+                                </TableCell>
+                              ) : (
+                                renderDocCell(item.pollution, item.pollution_image)
+                              )}
                               {renderDocCell(item.insurance, item.insurance_image)}
                               {renderDocCell(item.fitness, item.fitness_image)}
                               {renderDocCell(item.state_permit, item.state_permit_image)}

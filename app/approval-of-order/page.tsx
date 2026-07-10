@@ -56,7 +56,6 @@ export default function CommitmentReviewPage() {
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
-    { id: "soNo", label: "DO No." },
     { id: "orderCategory", label: "Order Category" },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
@@ -664,7 +663,6 @@ export default function CommitmentReviewPage() {
         group._displayDo = Array.from(group._allBaseDos).join(", ")
         group.customerName = customerNames.join(", ") || group.customerName || "—"
         group.orderNo = group._displayDo
-        group.soNo = group._displayDo
         group.transportType = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(Boolean).join(", ")
         group.orderPunchRemarks = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ")
         group.remark = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.remark))).filter(Boolean).join("; ")
@@ -740,7 +738,6 @@ export default function CommitmentReviewPage() {
       deliveryPurpose: orderDetails.orderPurpose || "—",
       customerType: orderDetails.customerType || "—",
       orderType: orderDetails.orderType || "—",
-      soNo: baseDos || "—",
       partySoDate: orderDetails.partySoDate || "—",
       customerName: order.customerName || "—",
       startDate: orderDetails.startDate || "—",

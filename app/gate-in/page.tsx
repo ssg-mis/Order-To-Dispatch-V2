@@ -14,7 +14,8 @@ import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi } from "
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu"
+import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -170,7 +171,6 @@ const PAGE_COLUMNS = [
   { id: "deliveryDate",          label: "Delivery Date" },
   { id: "deliveryFrom",          label: "Delivery From" },
   { id: "partySoDate",           label: "DO Date" },
-  { id: "soNo",                  label: "DO No." },
   { id: "orderNo",               label: "DO Number" },
   { id: "driver_name",           label: "Driver Name" },
   { id: "endDate",               label: "End Date" },
@@ -207,7 +207,6 @@ type ColId = typeof PAGE_COLUMNS[number]["id"]
 const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
   partySoDate:           "party_so_date",
   orderNo:               "so_no",
-  soNo:                  "so_no",
   processId:             "processid",
   deliveryPurpose:       "order_type_delivery_purpose",
   orderType:             "order_type",
@@ -725,18 +724,7 @@ export default function GateInPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-62.5 max-h-100 overflow-y-auto">
-                {PAGE_COLUMNS.map((col) => (
-                  <DropdownMenuCheckboxItem
-                    key={col.id}
-                    className="capitalize"
-                    checked={visibleColumns.includes(col.id)}
-                    onCheckedChange={(checked) => {
-                      setVisibleColumns((prev) => (checked ? [...prev, col.id] : prev.filter((id) => id !== col.id)))
-                    }}
-                  >
-                    {col.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
+                <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

@@ -292,6 +292,12 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const allowedSalespersonNames: string[] | null = isAdmin
     ? null
     : (user?.features?.order_punch_access?.salesperson_name || [])
+  const allowedOrderTypes: string[] = isAdmin
+    ? ["regular", "pre-approval"]
+    : (user?.features?.order_punch_access?.order_type || [])
+  const allowedOrderCategories: string[] = isAdmin
+    ? ["Sales", "Stock Transfer"]
+    : (user?.features?.order_punch_access?.order_category || [])
 
   useEffect(() => {
     if (isAdmin || !user) return
@@ -305,23 +311,51 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
 
   useEffect(() => {
     if (isAdmin || !user || orderThrough !== "Broker" || !allowedBrokerNames) return
-    if (allowedBrokerNames.length === 0) {
+    const activeBrokerSet = new Set(
+      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.salesman_name || "").toLowerCase())
+    )
+    const activeAllowedBrokerNames = allowedBrokerNames.filter(b => activeBrokerSet.has(b.toLowerCase()))
+    if (activeAllowedBrokerNames.length === 0) {
       setBrokerName("")
-    } else if (!allowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
-      setBrokerName(allowedBrokerNames[0])
+    } else if (!activeAllowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
+      setBrokerName(activeAllowedBrokerNames[0])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, orderThrough])
+  }, [user, isAdmin, orderThrough, brokers])
 
   useEffect(() => {
     if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
-    if (allowedSalespersonNames.length === 0) {
+    const activeSalespersonSet = new Set(
+      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesman_name || "").toLowerCase())
+    )
+    const activeAllowedSalespersonNames = allowedSalespersonNames.filter(s => activeSalespersonSet.has(s.toLowerCase()))
+    if (activeAllowedSalespersonNames.length === 0) {
       setSalespersonName("")
-    } else if (!allowedSalespersonNames.some((s: string) => s.toLowerCase() === salespersonName.toLowerCase())) {
-      setSalespersonName(allowedSalespersonNames[0])
+    } else if (!activeAllowedSalespersonNames.some((s: string) => s.toLowerCase() === salespersonName.toLowerCase())) {
+      setSalespersonName(activeAllowedSalespersonNames[0])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, isBrokerOrder])
+  }, [user, isAdmin, isBrokerOrder, salespersons])
+
+  useEffect(() => {
+    if (isAdmin || !user) return
+    if (allowedOrderTypes.length === 0) {
+      setOrderType("")
+    } else if (!allowedOrderTypes.includes(orderType)) {
+      setOrderType(allowedOrderTypes[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin])
+
+  useEffect(() => {
+    if (isAdmin || !user) return
+    if (allowedOrderCategories.length === 0) {
+      setOrderCategory("")
+    } else if (!allowedOrderCategories.includes(orderCategory)) {
+      setOrderCategory(allowedOrderCategories[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin])
 
   // Customer Auto-fill Effect
   useEffect(() => {
@@ -959,8 +993,12 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Sales">Sales</SelectItem>
-                    <SelectItem value="Stock Transfer">Stock Transfer</SelectItem>
+                    {allowedOrderCategories.includes("Sales") && (
+                      <SelectItem value="Sales">Sales</SelectItem>
+                    )}
+                    {allowedOrderCategories.includes("Stock Transfer") && (
+                      <SelectItem value="Stock Transfer">Stock Transfer</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -986,8 +1024,12 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="regular">Regular</SelectItem>
-                    <SelectItem value="pre-approval">Pre-Approval</SelectItem>
+                    {allowedOrderTypes.includes("regular") && (
+                      <SelectItem value="regular">Regular</SelectItem>
+                    )}
+                    {allowedOrderTypes.includes("pre-approval") && (
+                      <SelectItem value="pre-approval">Pre-Approval</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
                 {orderType === "regular" && (
@@ -1668,6 +1710,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         const allowedSet = new Set(allowedBrokerNames.map(b => b.toLowerCase()))
                         const filtered = brokers.filter(b =>
                           allowedSet.has((b.salesman_name || "").toLowerCase()) &&
+                          (b.status || "").toLowerCase() === "active" &&
                           (!search || (b.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20
@@ -1710,6 +1753,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         const allowedSet = new Set(allowedSalespersonNames.map(s => s.toLowerCase()))
                         const filtered = salespersons.filter(s =>
                           allowedSet.has((s.salesman_name || "").toLowerCase()) &&
+                          (s.status || "").toLowerCase() === "active" &&
                           (!search || (s.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20

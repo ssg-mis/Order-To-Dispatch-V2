@@ -62,7 +62,6 @@ export default function PreApprovalPage() {
   const router = useRouter()
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
-    { id: "soNo", label: "DO No." },
     { id: "orderNo", label: "DO Number" },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
@@ -101,7 +100,7 @@ export default function PreApprovalPage() {
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
     "pre-approval",
-    ["partySoDate", "soNo", "customerName", "deliveryPurpose", "deliveryDate", "oilType", "ratePer15Kg", "ratePerLtr", "orderPunchRemarks", "revertDispatchRemarks", "revertPlanningRemarks"]
+    ["partySoDate", "orderNo", "customerName", "deliveryPurpose", "deliveryDate", "oilType", "ratePer15Kg", "ratePerLtr", "orderPunchRemarks", "revertDispatchRemarks", "revertPlanningRemarks"]
   )
   const [columnOrder, setColumnOrder] = useColumnOrder("pre-approval", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = columnOrder
@@ -1722,7 +1721,6 @@ export default function PreApprovalPage() {
       deliveryPurpose: rawOrder.orderPurpose || "Week On Week",
       customerType: rawOrder.customerType || "Existing",
       orderType: rawOrder.orderType || "Regular",
-      soNo: rawOrder._displayDo,
       partySoDate: formatDate(rawOrder.soDate),
       customerName: CUSTOMER_MAP[rawOrder.customerName] || rawOrder.customerName || "Acme Corp",
       startDate: formatDate(rawOrder.startDate),
@@ -2956,7 +2954,7 @@ export default function PreApprovalPage() {
                           <TableCell key={col.id} className="py-4">
                             <div className={cn(
                               "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
-                              col.id === 'customerName' ? "w-32" : col.id === 'soNo' ? "w-20" : "w-16"
+                              col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-20" : "w-16"
                             )} />
                           </TableCell>
                         ))}
@@ -3014,7 +3012,7 @@ export default function PreApprovalPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="font-mono text-sm font-black text-blue-700 break-words">{row.soNo}</p>
+                          <p className="font-mono text-sm font-black text-blue-700 break-words">{row.orderNo}</p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">{row.partySoDate}</p>
                         </div>
                         <Checkbox

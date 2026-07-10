@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -312,7 +313,6 @@ export default function ActualDispatchPage() {
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
-    { id: "soNo", label: "DO No." },
     { id: "processId", label: "Manual Sauda No." },
     { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
     { id: "orderType", label: "Order Type" },
@@ -1101,6 +1101,7 @@ export default function ActualDispatchPage() {
           const preApproveAt = firstProd.pre_approval_at || null;
           const approveBy = firstProd.order_approval_user || "—";
           const approveAt = firstProd.order_approval_at || null;
+          const status = firstProd.has_prior_dispatch ? "Pending" : "Original";
 
           const categories: Record<string, any[]> = {
             "RICE OIL": [],
@@ -1125,7 +1126,7 @@ export default function ActualDispatchPage() {
           });
 
           return (
-            <div key={party} className="border border-black bg-white text-black mb-8 last:mb-0">
+            <div key={party} className="border border-black bg-white text-black mb-8 last:mb-0 max-w-[600px] mx-auto">
               <div className="text-center px-2 pt-3 pb-2">
                 <h1 className="text-xl font-black">SHRI SHYAM OIL EXTRACTIONS PVT LTD</h1>
                 <p className="text-[11px] text-gray-500">Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)</p>
@@ -1133,22 +1134,25 @@ export default function ActualDispatchPage() {
               </div>
 
               <div className="grid grid-cols-2 text-xs border-t border-black">
-                <div className="border-b border-r border-black p-1.5 font-bold">DO no.: {commitmentNo}</div>
-                <div className="border-b border-black p-1.5 font-bold">DO Date: {date}</div>
-                <div className="border-b border-r border-black p-1.5 font-bold">Customer: {party}</div>
-                <div className="border-b border-black p-1.5 font-bold">Broker: {brokerName}</div>
-                <div className="border-b border-r border-black p-1.5">Address: {place}</div>
-                <div className="border-b border-black p-1.5 font-bold">Mob.: {partyMo}</div>
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">DO no.:</span> {commitmentNo}</div>
+                <div className="border-b border-black p-1.5"><span className="font-bold">DO Date:</span> {date}</div>
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Customer:</span> {party}</div>
+                <div className="border-b border-black p-1.5"><span className="font-bold">Broker:</span> {brokerName}</div>
+                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Address:</span> {place}</div>
+                <div className="border-b border-black p-1.5">
+                  <span className="font-bold">Mob.:</span> {partyMo}<br />
+                  <span className="font-bold">Status:</span> {status}
+                </div>
               </div>
 
               <table className="w-full border-collapse">
                 <thead>
                   <tr style={{ background: "#A6A6A6" }}>
-                    <th className="border border-black border-t-0 p-1.5 text-left text-xs">Item Name</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">QTY</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">UOM</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Net Wt.</th>
-                    <th className="border border-black border-t-0 p-1.5 text-center text-xs">Gross Wt.</th>
+                    <th className="border border-black border-t-0 p-1.5 text-left text-xs w-full">Item Name</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">QTY</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">UOM</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">Net Wt.</th>
+                    <th className="border border-black border-t-0 p-1.5 text-center text-xs whitespace-nowrap">Gross Wt.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1165,16 +1169,16 @@ export default function ActualDispatchPage() {
                             <td className="border border-black p-1.5 text-xs">{item.name}</td>
                             <td className="border border-black p-1.5 text-xs text-center">{item.qty}</td>
                             <td className="border border-black p-1.5 text-xs text-center">{item.unit}</td>
-                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.weight)} KGS</td>
-                            <td className="border border-black p-1.5 text-xs text-right">{fmtWt(item.grossWeight)} KGS</td>
+                            <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(item.weight)} KGS</td>
+                            <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(item.grossWeight)} KGS</td>
                           </tr>
                         ))}
                         <tr style={{ background: OIL_COLORS[category] }} className="font-bold">
-                          <td className="border border-black p-1.5 text-xs text-right">Total {OIL_TITLES[category]}</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">Total {OIL_TITLES[category]}</td>
                           <td className="border border-black p-1.5 text-xs text-center">{catQty}</td>
                           <td className="border border-black p-1.5 text-xs"></td>
-                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catWeight)} KGS</td>
-                          <td className="border border-black p-1.5 text-xs text-right">{fmtWt(catGrossWeight)} KGS</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(catWeight)} KGS</td>
+                          <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(catGrossWeight)} KGS</td>
                         </tr>
                       </React.Fragment>
                     )
@@ -1183,8 +1187,8 @@ export default function ActualDispatchPage() {
                     <td className="border border-black p-1.5 text-xs text-center">Grand Total</td>
                     <td className="border border-black p-1.5 text-xs text-center">{partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
                     <td className="border border-black p-1.5 text-xs"></td>
-                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
-                    <td className="border border-black p-1.5 text-xs text-right">{fmtWt(partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
                   </tr>
                   <tr>
                     <td colSpan={5} className="border border-black p-2 align-top">
@@ -1224,6 +1228,7 @@ export default function ActualDispatchPage() {
         brokerName: isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—",
         place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
         partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
+        status: firstProd.has_prior_dispatch ? "Pending" : "Original",
         processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
         punchBy: firstProd.order_punch_user || "—",
         punchAt: firstProd.order_punch_at || null,
@@ -1814,18 +1819,7 @@ export default function ActualDispatchPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-62.5 max-h-100 overflow-y-auto">
-                {PAGE_COLUMNS.map((col) => (
-                  <DropdownMenuCheckboxItem
-                    key={col.id}
-                    className="capitalize"
-                    checked={visibleColumns.includes(col.id)}
-                    onCheckedChange={(checked) => {
-                      setVisibleColumns((prev) => (checked ? [...prev, col.id] : prev.filter((id) => id !== col.id)))
-                    }}
-                  >
-                    {col.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
+                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
