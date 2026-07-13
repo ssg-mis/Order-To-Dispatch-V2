@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { Settings2, Loader2, ChevronDown, ChevronUp, Trash2, Plus, Check, Search, Package, Calculator, Save, Calendar, ChevronLeft, ChevronRight, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
-import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, skuDetailsApi, customerApi } from "@/lib/api-service"
+import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, skuDetailsApi, customerApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
@@ -54,6 +54,28 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 
+
+// Company/billing address comes from the DEPOT master record (depot's own address), keyed by depo name
+function BillingAddressField({ depoName }: { depoName: string }) {
+  const { data: billingRes } = useQuery({
+    queryKey: ['billing-depot-address', depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
+    staleTime: 10 * 60 * 1000,
+  })
+  const billingDepots: any[] = billingRes?.data?.depots || []
+  const billingDepot = billingDepots.find((d: any) =>
+    d.depot_name?.toLowerCase() === depoName?.toLowerCase()
+  ) || billingDepots[0]
+  const billingAddress = [billingDepot?.depot_address, billingDepot?.state].filter(Boolean).join(", ")
+
+  return (
+    <div className="sm:col-span-2">
+      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Billing Address</p>
+      <p className="text-sm font-bold text-slate-900 leading-tight break-words">{billingAddress || "—"}</p>
+    </div>
+  )
+}
 
 export default function PreApprovalPage() {
   const queryClient = useQueryClient()
@@ -2051,6 +2073,7 @@ export default function PreApprovalPage() {
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Address</p>
                                       <p className="text-sm font-bold text-slate-900 leading-tight break-words">{orderDetails.customerAddress || "—"}</p>
                                     </div>
+                                    <BillingAddressField depoName={orderDetails.depoName} />
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Payment Terms</p>
                                       <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.paymentTerms || "—"}</p>
