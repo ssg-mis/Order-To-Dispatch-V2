@@ -1818,7 +1818,9 @@ export default function ActualDispatchPage() {
           stageLevel={4}
           remarksColName="Dispatch Confirmation"
           orderListKey="dispatches"
-          getDate={(order: any) => order.actualDispatchData?.confirmedAt || order.timestamp || null}
+          mapOrderNo={(order: any) => order.so_no || "-"}
+          mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
+          getDate={(order: any) => order.actual_1 || order.timestamp || null}
         />
       }
     >

@@ -1184,7 +1184,7 @@ export default function DispatchMaterialPage() {
             manual_sauda_no: filterValues.manualSaudaNo || undefined,
             depo_names: user?.depo_access ? (user.depo_access['Dispatch Planning'] || []) : undefined,
           }}
-          getDate={(order: any) => order.dispatchPlanningData?.confirmedAt || order.timestamp || null}
+          getDate={(order: any) => order.actual_3 || order.timestamp || null}
         />
       }
     >
