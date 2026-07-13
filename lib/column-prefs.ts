@@ -58,7 +58,27 @@ export function useColumnPrefsServer() {
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+const pending = new Map<string, { userId: number; stageKey: string; field: "visible" | "order"; value: string[] }>()
 const DEBOUNCE_MS = 600
+
+/**
+ * Immediately sends a pending save (bypassing the remaining debounce delay)
+ * and clears its timer/queue entry. Used both by the normal debounce timeout
+ * and by the unload/visibility flush below.
+ */
+function flushSave(key: string, keepalive: boolean): void {
+  const entry = pending.get(key)
+  if (!entry) return
+  pending.delete(key)
+  const timer = timers.get(key)
+  if (timer) {
+    clearTimeout(timer)
+    timers.delete(key)
+  }
+  userApi
+    .saveColumnPrefs(entry.userId, entry.stageKey, { [entry.field]: entry.value }, { keepalive })
+    .catch(() => {})
+}
 
 /**
  * Debounced, fire-and-forget save of one field of one stage's prefs.
@@ -71,13 +91,23 @@ export function debouncedSaveColumnPref(
   value: string[],
 ): void {
   const key = `${userId}:${stageKey}:${field}`
+  pending.set(key, { userId, stageKey, field, value })
   const existing = timers.get(key)
   if (existing) clearTimeout(existing)
-  timers.set(
-    key,
-    setTimeout(() => {
-      timers.delete(key)
-      userApi.saveColumnPrefs(userId, stageKey, { [field]: value }).catch(() => {})
-    }, DEBOUNCE_MS),
-  )
+  timers.set(key, setTimeout(() => flushSave(key, false), DEBOUNCE_MS))
+}
+
+// Refreshing/closing the tab within the debounce window would otherwise drop
+// the pending save (the setTimeout never fires), so the server keeps a stale
+// value that then overwrites the correct localStorage state on next load's
+// hydration. Flush any pending saves immediately (with keepalive so the
+// request survives the page teardown) whenever the page is about to go away.
+if (typeof window !== "undefined") {
+  const flushAll = () => {
+    for (const key of Array.from(pending.keys())) flushSave(key, true)
+  }
+  window.addEventListener("pagehide", flushAll)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushAll()
+  })
 }

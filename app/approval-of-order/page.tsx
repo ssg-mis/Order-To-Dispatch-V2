@@ -1177,7 +1177,7 @@ export default function CommitmentReviewPage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>

@@ -121,12 +121,11 @@ export default function DamageAdjustmentPage() {
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
     "damage-adjustment",
-    ["partySoDate", "orderNo", "customerName", "invoiceNo", "status"]
+    ["partySoDate", "orderNo", "customerName", "invoiceNo", "status", "products"]
   )
   const DMG_STD_IDS = ["partySoDate", "orderNo", "processid", "customerName", "invoiceNo", "vehicleNo", "orderPunchRemarks", "status", "products"]
   const [columnOrder, setColumnOrder] = useColumnOrder("damage-adjustment", DMG_STD_IDS)
-  // "products" is always visible (not user-toggleable), so bypass the visibleColumns filter for it
-  const ALWAYS_VISIBLE_DMG = new Set(["products"])
+  const ALWAYS_VISIBLE_DMG = new Set<string>([])
   const orderedVisibleStd = columnOrder.filter(id => ALWAYS_VISIBLE_DMG.has(id) || visibleColumns.includes(id))
   const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
     const coreInNewOrder = newVisibleOrder.filter(id => DMG_STD_IDS.includes(id))
@@ -349,7 +348,7 @@ export default function DamageAdjustmentPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
-  const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "productCount", "productName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
+  const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
 
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
   const getSortValue = (group: any, field: string) => {
@@ -568,7 +567,7 @@ export default function DamageAdjustmentPage() {
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      searchPlaceholder="Search DO Number or Customer..."
+      searchPlaceholder="Search DO Number..."
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="damage-adjustment-history"
@@ -614,7 +613,7 @@ export default function DamageAdjustmentPage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
@@ -759,7 +758,7 @@ export default function DamageAdjustmentPage() {
                     if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
                     if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
                     if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Products</SortableTableHead>
+                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
                     return null
                   })}
                   {dynamicColumns.map((colId) => {

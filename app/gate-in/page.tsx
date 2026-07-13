@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useMemo, useCallback } from "react"
+import { useRef, useState, useMemo, useCallback, useEffect } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Card } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -357,6 +357,19 @@ export default function GateInPage() {
   const [pendingPage, setPendingPage] = useState(1)
   const limit = 20
 
+  const [filterValues, setFilterValues] = useState({
+    search: "",
+    status: "",
+    startDate: "",
+    endDate: "",
+    partyName: "",
+    manualSaudaNo: ""
+  })
+
+  useEffect(() => {
+    setPendingPage(1)
+  }, [filterValues])
+
   const [selectedRows, setSelectedRows] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<any>(null)
@@ -389,9 +402,9 @@ export default function GateInPage() {
     isLoading: isPendingLoading,
     refetch: refetchPending,
   } = useQuery({
-    queryKey: ["gate-in-pending", pendingPage],
+    queryKey: ["gate-in-pending", pendingPage, filterValues.search],
     queryFn: async () => {
-      const res = await gateInApi.getPending({ page: pendingPage, limit })
+      const res = await gateInApi.getPending({ page: pendingPage, limit, search: filterValues.search })
       return res.success ? res.data : { records: [], pagination: { total: 0 } }
     },
     staleTime: 0,
@@ -685,7 +698,7 @@ export default function GateInPage() {
       description="Record vehicle gate-in photos before Actual Dispatch confirmation."
       pendingCount={pendingRecords.length}
       historyData={[]}
-      onFilterChange={() => { }}
+      onFilterChange={setFilterValues}
       onTabChange={setActiveTab}
       showDateFilters={false}
       historyContent={
@@ -723,7 +736,7 @@ export default function GateInPage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-62.5 max-h-100 overflow-y-auto">
+              <DropdownMenuContent align="end" className="w-62.5" collisionPadding={16}>
                 <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>

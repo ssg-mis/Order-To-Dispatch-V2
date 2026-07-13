@@ -22,7 +22,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, X, Plus, Settings2, ShieldAlert, ShieldCheck, Truck, ChevronDown, ChevronUp, FileText, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, X, Plus, Settings2, ShieldAlert, ShieldCheck, ChevronDown, ChevronUp, FileText, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
@@ -95,7 +95,6 @@ const PAGE_COLUMNS = [
   { id: "orderNo",           label: "DO NUMBERS" },
   { id: "processid",         label: "MANUAL SAUDA NO." },
   { id: "customerName",      label: "CUSTOMER NAME" },
-  { id: "itemCount",         label: "ITEM COUNT" },
   { id: "vehicleNo",         label: "VEHICLE NO." },
   { id: "orderPunchRemarks", label: "ORDER PUNCH REMARKS" },
 ] as const
@@ -477,11 +476,11 @@ export default function SecurityApprovalPage() {
       group.customerNames.add(currentCustName)
 
       const rawDoNumber = order.so_no || order.soNo || "—"
-      const doNumber = rawDoNumber.replace(/[A-Z]+$/, '')
+      const doNumber = rawDoNumber.replace(/(?<=\d)[A-Z].*$/, '')
       group.doNumberList.add(doNumber)
 
       // Handle interleaved grouping (by unique DO)
-      const baseDo = doNumber.split(/[A-Z]$/)[0] // Simple base DO extraction
+      const baseDo = doNumber
       if (!group._ordersMap[baseDo]) {
         group._ordersMap[baseDo] = {
           _products: [],
@@ -556,7 +555,24 @@ export default function SecurityApprovalPage() {
         vehicleNo: group.truckNo !== 'NOTRUCK' ? group.truckNo : "—",
         orderPunchRemarks: group._allProducts[0]?.order_punch_remarks || "—",
         uploadSo: group._allProducts[0]?.upload_so || group._allProducts[0]?.uploadSo || null,
-        isDisabled: group._allProducts.some((p: any) => p.actual_1 == null)
+        isDisabled: group._allProducts.some((p: any) => p.actual_1 == null),
+        // actual_qty_dispatch is a PER-PRODUCT line quantity, so the group total must
+        // sum across every product — otherwise getDynamicColumnValue falls back to
+        // only the first product's qty (e.g. showing 10 instead of 435 for 6 products).
+        // actual_qty itself is already a whole-load total duplicated on every product
+        // row, so it needs no summation and is left to the existing first-product fallback.
+        actual_qty_dispatch: group._allProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch) || 0), 0),
+        // One entry per DO in this group, so columns that vary per-DO (DO Number,
+        // Dispatched Date, Order Punch Remarks) can be rendered stacked instead of
+        // collapsing to a truncated label or the first DO's value.
+        doDetails: Object.entries(group._ordersMap as Record<string, any>).map(([doNo, details]) => {
+          const firstProd = details._products[0] || {}
+          return {
+            doNumber: doNo,
+            dispatchedDate: formatDate(firstProd.actual_1) || "—",
+            orderPunchRemarks: firstProd.order_punch_remarks || details.orderPunchRemarks || "—",
+          }
+        }),
       }
     })
   }, [filteredPendingOrders])
@@ -626,9 +642,9 @@ export default function SecurityApprovalPage() {
   }, [displayRows, pendingSortField, pendingSortDir])
 
   const [columnOrder, setColumnOrder] = useColumnOrder("security-approval", PAGE_COLUMNS.map(c => c.id))
-  // itemCount and actualDispatchDate are computed core columns, always shown (actualDispatchDate
-  // isn't in the toggle registry, so it can't be enabled/disabled from the menu anyway).
-  const ALWAYS_VISIBLE_COLS = new Set(["itemCount", "actualDispatchDate"])
+  // actualDispatchDate is a computed core column, always shown (it isn't in the toggle
+  // registry, so it can't be enabled/disabled from the menu anyway).
+  const ALWAYS_VISIBLE_COLS = new Set(["actualDispatchDate"])
   const orderedVisibleCols = useMemo(() =>
     columnOrder
       .map(id => PAGE_COLUMNS.find(c => c.id === id))
@@ -651,20 +667,28 @@ export default function SecurityApprovalPage() {
     vehicleNo:         "vehicleNo",
     orderPunchRemarks: "orderPunchRemarks",
   }
-  const CENTER_COLS: ColId[] = ["itemCount", "vehicleNo", "orderPunchRemarks"]
+  const CENTER_COLS: ColId[] = ["vehicleNo", "orderPunchRemarks"]
 
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
         return <TableCell key={colId} className="p-4 text-center text-xs font-medium">{group.partySoDate}</TableCell>
       case "actualDispatchDate":
-        return <TableCell key={colId} className="p-4 text-center text-xs font-bold text-purple-700">{group.actualDispatchDate}</TableCell>
+        return (
+          <TableCell key={colId} className="p-4 text-center text-xs font-bold text-purple-700">
+            <div className="flex flex-col gap-1.5">
+              {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actualDispatchDate }]).map((d: any, idx: number) => (
+                <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
+              ))}
+            </div>
+          </TableCell>
+        )
       case "orderNo":
         return (
           <TableCell key={colId} className="p-4">
-            <div className="flex flex-wrap gap-1 max-w-sm">
-              {group.doNumber.split(", ").map((doNum: string) => (
-                <Badge key={doNum} variant="outline" className="bg-white text-purple-700 border-purple-200 font-bold text-[10px]">{doNum}</Badge>
+            <div className="flex flex-col gap-1.5 max-w-sm">
+              {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
+                <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-white text-purple-700 border-purple-200 font-bold text-[10px]">{d.doNumber}</Badge>
               ))}
             </div>
           </TableCell>
@@ -673,19 +697,18 @@ export default function SecurityApprovalPage() {
         return <TableCell key={colId} className="p-4"><span className="text-xs font-bold text-slate-600">{group.processId}</span></TableCell>
       case "customerName":
         return <TableCell key={colId} className="p-4 font-black text-slate-700 uppercase tracking-tighter italic">{group.customerName}</TableCell>
-      case "itemCount":
-        return (
-          <TableCell key={colId} className="text-center p-4">
-            <div className="flex flex-col items-center">
-              <span className="font-black text-sm text-slate-800">{group._productCount}</span>
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Products</span>
-            </div>
-          </TableCell>
-        )
       case "vehicleNo":
         return <TableCell key={colId} className="text-center p-4"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
       case "orderPunchRemarks":
-        return <TableCell key={colId} className="text-center p-4"><span className="text-xs text-slate-600 font-medium">{group.orderPunchRemarks}</span></TableCell>
+        return (
+          <TableCell key={colId} className="text-center p-4">
+            <div className="flex flex-col gap-1.5">
+              {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
+                <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600 font-medium">{d.orderPunchRemarks}</span>
+              ))}
+            </div>
+          </TableCell>
+        )
       default:
         return null
     }
@@ -757,7 +780,7 @@ export default function SecurityApprovalPage() {
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      searchPlaceholder="Search DO Number or Customer..."
+      searchPlaceholder="Search DO Number..."
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="security-approval-history"
@@ -785,20 +808,6 @@ export default function SecurityApprovalPage() {
     >
       <div className="space-y-4">
         <div className="flex justify-end gap-2">
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
@@ -807,6 +816,23 @@ export default function SecurityApprovalPage() {
             <Upload className="mr-2 h-4 w-4" />
             Process Security ({selectedItems.length})
           </Button>
+
+          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="bg-transparent border-slate-200 text-slate-600 hover:bg-slate-50">
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  Columns
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
+                {/* "products" ("Items") has no real column here — the product list/count is
+                    always shown via the fixed "{n} PRODUCTS" expand header, not a toggleable
+                    cell — so it's excluded here to avoid a broken checkbox. */}
+                <ColumnToggleContent columns={ALL_COLUMNS.filter(c => c.id !== "products")} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         <Card className="hidden md:block border-none shadow-xl rounded-3xl overflow-hidden bg-white/50 backdrop-blur-md">
@@ -819,7 +845,7 @@ export default function SecurityApprovalPage() {
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
+                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {orderedVisibleCols.map(col => {
                     const sf = COL_SORT_FIELD[col.id]
                     return (
@@ -833,7 +859,7 @@ export default function SecurityApprovalPage() {
                       </SortableTableHead>
                     )
                   })}
-                  {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
+                  {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
                     const col = ALL_COLUMNS.find(c => c.id === colId)
                     if (!col) return null
                     return (
@@ -857,7 +883,6 @@ export default function SecurityApprovalPage() {
                     <TableCell className="p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                     <TableCell className="p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                     <TableCell className="p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-6 w-8 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                     <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                     <TableCell className="text-center p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                     <TableCell className="text-center p-4"><div className="h-5 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
@@ -870,7 +895,7 @@ export default function SecurityApprovalPage() {
                       <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </TableCell>
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
-                    {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).map(colId => {
+                    {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
                       const col = ALL_COLUMNS.find(c => c.id === colId)
                       if (!col) return null
                       return (
@@ -890,7 +915,7 @@ export default function SecurityApprovalPage() {
                 ))
               ) : (
                   <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)).length} className="text-center py-20">
+                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).length} className="text-center py-20">
                     <div className="flex flex-col items-center gap-2">
                       <ShieldAlert className="w-12 h-12 text-slate-200" />
                       <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No vehicles pending for security check</p>
@@ -962,9 +987,9 @@ export default function SecurityApprovalPage() {
                     
                     <div className="space-y-1">
                       <h4 className="text-sm font-black text-slate-800 uppercase leading-tight italic">{group.customerName}</h4>
-                      <div className="flex flex-wrap gap-1">
-                        {group.doNumber.split(", ").map((doNum: string) => (
-                          <Badge key={doNum} variant="outline" className="bg-purple-50 text-purple-700 border-purple-100 font-bold text-[9px] px-1.5 py-0">#{doNum}</Badge>
+                      <div className="flex flex-col gap-1">
+                        {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
+                          <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-purple-50 text-purple-700 border-purple-100 font-bold text-[9px] px-1.5 py-0">#{d.doNumber}</Badge>
                         ))}
                       </div>
                     </div>
@@ -972,7 +997,11 @@ export default function SecurityApprovalPage() {
                     <div className="grid grid-cols-2 gap-4 py-2 border-y border-slate-50">
                       <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Actual Dispatch Date</p>
-                        <p className="text-xs font-bold text-purple-700">{group.actualDispatchDate}</p>
+                        <div className="flex flex-col gap-0.5">
+                          {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actualDispatchDate }]).map((d: any, idx: number) => (
+                            <p key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-purple-700">{d.dispatchedDate}</p>
+                          ))}
+                        </div>
                       </div>
                       <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Vehicle No</p>
@@ -984,11 +1013,7 @@ export default function SecurityApprovalPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Truck className="h-3 w-3 text-slate-400" />
-                        <span className="text-xs font-black text-slate-600">{group._productCount} Products</span>
-                      </div>
+                    <div className="flex items-center justify-end">
                       {group._allProducts.some((p: any) => p.security_guard_status === 'REJECT') ? (
                         <Badge className="bg-red-100 text-red-700 font-black text-[9px]">REJECTED</Badge>
                       ) : (
@@ -999,14 +1024,18 @@ export default function SecurityApprovalPage() {
                     {group.orderPunchRemarks && group.orderPunchRemarks !== "—" && (
                       <div className="mt-2 p-2 bg-slate-50 rounded-lg">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Remarks</p>
-                        <p className="text-[10px] font-medium text-slate-600 italic">"{group.orderPunchRemarks}"</p>
+                        <div className="flex flex-col gap-1">
+                          {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
+                            <p key={`${d.doNumber}-${idx}`} className="text-[10px] font-medium text-slate-600 italic">"{d.orderPunchRemarks}"</p>
+                          ))}
+                        </div>
                       </div>
                     )}
 
                     {/* Dynamic columns selected by user */}
                     <div className="grid grid-cols-1 gap-y-3 pt-2">
                       {visibleColumns.filter(colId => 
-                        !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'itemCount'].includes(colId)
+                        !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)
                       ).map(colId => {
                         const col = ALL_COLUMNS.find(c => c.id === colId);
                         if (!col) return null;

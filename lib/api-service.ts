@@ -247,6 +247,24 @@ export const orderApi = {
 };
 
 /**
+ * Order Lookup API — cross-stage DO lookup, resolves which workflow stage
+ * a DO number is currently sitting at.
+ */
+export const orderLookupApi = {
+  lookup: async (search: string): Promise<ApiResponse<{
+    orderNo: string;
+    customerName: string;
+    depoName: string;
+    manualSaudaNo: string | null;
+    createdAt: string;
+    currentStage: string;
+    isCompleted: boolean;
+  }[]>> => {
+    return request(`/order-lookup${buildQuery({ search })}`);
+  },
+};
+
+/**
  * Pre-Approval API
  */
 export const preApprovalApi = {
@@ -567,9 +585,8 @@ export const actualDispatchApi = {
  * Gate In API
  */
 export const gateInApi = {
-  getPending: (params?: { page?: number; limit?: number }): Promise<ApiResponse> => {
-    const qs = params ? '?' + new URLSearchParams(params as any).toString() : '';
-    return request(`/gate-in/pending${qs}`);
+  getPending: (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
+    return request(`/gate-in/pending${buildQuery(params)}`);
   },
 
   getHistory: (params?: { page?: number; limit?: number }): Promise<ApiResponse> => {
@@ -1135,11 +1152,13 @@ export const userApi = {
   saveColumnPrefs: async (
     id: number,
     stageKey: string,
-    partial: { visible?: string[]; order?: string[] }
+    partial: { visible?: string[]; order?: string[] },
+    opts?: { keepalive?: boolean }
   ): Promise<ApiResponse> => {
     return request(`/users/${id}/column-prefs`, {
       method: 'PUT',
       body: JSON.stringify({ stageKey, ...partial }),
+      ...(opts?.keepalive ? { keepalive: true } : {}),
     });
   },
 };

@@ -69,7 +69,6 @@ export const ALL_WORKFLOW_COLUMNS = [
   { id: "permit1_end_date", label: "Permit 1 End Date" },
   { id: "permit2_end_date", label: "Permit 2 End Date" },
   { id: "actual_qty_dispatch", label: "Actual Qty Dispatch" },
-  { id: "product_name_1", label: "Product Name 1" },
   { id: "actual_dispatch_user", label: "Actual Dispatch User" },
   { id: "extra_weight", label: "Extra Weight" },
   { id: "reason_of_difference_in_weight_if_any_speacefic", label: "Reason Of Difference In Weight" },
@@ -208,7 +207,6 @@ const COLUMN_STAGE: Record<string, WorkflowStageKey> = {
   // Actual Dispatch
   actual1Date: "actual-dispatch",
   actual_qty_dispatch: "actual-dispatch",
-  product_name_1: "actual-dispatch",
   actual_dispatch_user: "actual-dispatch",
   extra_weight: "actual-dispatch",
   reason_of_difference_in_weight_if_any_speacefic: "actual-dispatch",

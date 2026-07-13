@@ -240,7 +240,7 @@ export default function GateOutPage() {
     "gate-out",
     ["partySoDate", "orderNo", "customerName", "invoiceNo", "status", "products"]
   )
-  const GATE_OUT_STD_IDS = ["partySoDate", "customerName", "orderNo", "actual1Date", "processid", "invoiceNo", "vehicleNo", "orderPunchRemarks", "status"]
+  const GATE_OUT_STD_IDS = ["partySoDate", "customerName", "orderNo", "actual1Date", "processid", "invoiceNo", "vehicleNo", "orderPunchRemarks", "status", "products"]
   const [columnOrder, setColumnOrder] = useColumnOrder("gate-out", [...GATE_OUT_STD_IDS, ...ALL_COLUMNS.map(c => c.id).filter(id => !GATE_OUT_STD_IDS.includes(id))])
   const ALWAYS_VISIBLE_GATE_OUT = new Set<string>([])
   const orderedVisible = columnOrder.filter(id => ALWAYS_VISIBLE_GATE_OUT.has(id) || visibleColumns.includes(id))
@@ -475,6 +475,10 @@ export default function GateOutPage() {
         invoiceNo: g._allProducts[0]?.invoice_no || "—",
         orderPunchRemarks: g._allProducts[0]?.order_punch_remarks || "—",
         uploadSo: g._allProducts[0]?.upload_so || g._allProducts[0]?.uploadSo || null,
+        // actual_qty_dispatch is a PER-PRODUCT line quantity, so the group total must
+        // sum across every product — otherwise the dynamic-column fallback shows only
+        // the first product's qty instead of the full group total.
+        actual_qty_dispatch: g._allProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch) || 0), 0),
       }
     })
 
@@ -715,7 +719,7 @@ export default function GateOutPage() {
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      searchPlaceholder="Search DO Number or Customer..."
+      searchPlaceholder="Search DO Number..."
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="gate-out-history"
@@ -761,7 +765,7 @@ export default function GateOutPage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>

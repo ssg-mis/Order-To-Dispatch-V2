@@ -778,14 +778,11 @@ export default function ActualDispatchPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
-  const getSortValue = (row: any, colId: string): string => {
-    if (colId === "status") {
-      return row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In"
-    }
-    if (colId === "qtyToDispatch") {
-      return String(row.qtyToDispatch || 0)
-    }
-    // Check if the column is a product-level column that was flattened/nested
+  // Product-level columns (Product Name, Oil Type, Rate, UOM, etc.) only exist on
+  // individual line items inside _allProducts — the flattened group row never carries
+  // them — so any renderer reading row[colId] directly for these gets blank. Read from
+  // the first product instead. Shared by the sort comparator and both table/card cell renderers.
+  const getColumnDisplayValue = (row: any, colId: string): string => {
     const firstProd = row._allProducts?.[0] || {}
     if (colId === "oilType") return String(firstProd.oilType || firstProd.oil_type || "—")
     if (colId === "productName") return String(firstProd.productName || firstProd.product_name || "—")
@@ -806,6 +803,16 @@ export default function ActualDispatchPage() {
     if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
 
     return "—"
+  }
+
+  const getSortValue = (row: any, colId: string): string => {
+    if (colId === "status") {
+      return row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In"
+    }
+    if (colId === "qtyToDispatch") {
+      return String(row.qtyToDispatch || 0)
+    }
+    return getColumnDisplayValue(row, colId)
   }
 
   // Sorts displayRows by any field key — dynamic columns are automatically sortable
@@ -1026,6 +1033,7 @@ export default function ActualDispatchPage() {
             }
             if (d.confirmDetails) setConfirmDetails(prev => ({ ...prev, ...d.confirmDetails }));
             if (d.dialogSelectedProducts) setDialogSelectedProducts(d.dialogSelectedProducts);
+            if (d.docRefDate) setDocRefDate(d.docRefDate);
             toast({ title: "Draft Restored", description: "Your saved draft has been loaded." });
           }
         } catch {
@@ -1288,6 +1296,7 @@ export default function ActualDispatchPage() {
       driverData,
       totalPackingWeight: totalPackingWeightFromSku,
       combinedGroupKeys: selectedGroups.map((g: any) => g._rowKey),
+      docRefDate,
     };
 
     setIsSavingDraft(true);
@@ -1789,7 +1798,7 @@ export default function ActualDispatchPage() {
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      searchPlaceholder="Search DO Number or Customer..."
+      searchPlaceholder="Search DO Number..."
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="actual-dispatch-history"
@@ -1815,19 +1824,6 @@ export default function ActualDispatchPage() {
     >
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row justify-end gap-2">
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent h-9 text-xs">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-62.5 max-h-100 overflow-y-auto">
-                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
           <Button
             onClick={() => handleOpenDialog()}
             disabled={selectedOrders.length === 0}
@@ -1836,6 +1832,19 @@ export default function ActualDispatchPage() {
           >
             Confirm Dispatch ({selectedOrders.length})
           </Button>
+          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="bg-transparent h-9 text-xs">
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  Columns
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-62.5" collisionPadding={16}>
+                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {availableDepots.length > 0 && (
@@ -1924,7 +1933,7 @@ export default function ActualDispatchPage() {
                               {row._productCount > 1 && <span className="text-[10px] text-slate-500">(Total)</span>}
                             </div>
                           ) : (
-                            row[col.id as keyof typeof row] || "—"
+                            getColumnDisplayValue(row, col.id)
                           )}
                         </TableCell>
                       ))}
@@ -1994,7 +2003,7 @@ export default function ActualDispatchPage() {
                         {orderedVisibleCols.filter(col =>
                           !['orderNo', 'partySoDate', 'status', 'customerName', 'qtyToDispatch'].includes(col.id)
                         ).map(col => {
-                          let val = row[col.id as keyof typeof row] || "—";
+                          let val = getColumnDisplayValue(row, col.id);
                           if (col.id === 'revertSecurityRemarks') val = row.revertSecurityRemarks || row.revert_security_remarks || "—";
                           if (col.id === 'orderPunchRemarks') val = row.orderPunchRemarks || row.order_punch_remarks || "—";
 

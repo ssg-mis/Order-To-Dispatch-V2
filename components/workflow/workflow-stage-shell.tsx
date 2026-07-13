@@ -98,7 +98,7 @@ export const FIELD_GROUPS: Record<string, number> = {
   fitness: 4, insurance: 4, tax_copy: 4, polution: 4, permit1: 4, permit2_out_state: 4,
   fitness_end_date: 4, insurance_end_date: 4, tax_end_date: 4, pollution_end_date: 4,
   permit1_end_date: 4, permit2_end_date: 4, actual_qty_dispatch: 4,
-  product_name_1: 4, actual_dispatch_user: 4, extra_weight: 4,
+  actual_dispatch_user: 4, extra_weight: 4,
   reason_of_difference_in_weight_if_any_speacefic: 4,
 
   // Level 5: Security Approval (Stage 8)
@@ -166,7 +166,7 @@ export function WorkflowStageShell({
   historyFooter,
   isHistoryLoading = false,
   fetchPartyOptions,
-  searchPlaceholder = "Search DO Number, Customer...",
+  searchPlaceholder = "Search DO Number...",
   showDateFilters = true,
   showSaudaFilter = false,
   dateLabel,

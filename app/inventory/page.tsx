@@ -253,7 +253,7 @@ export default function InventoryPage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={INVENTORY_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>

@@ -1189,6 +1189,14 @@ export default function DispatchMaterialPage() {
       }
     >
       <div className="flex flex-col justify-end gap-2 sm:flex-row">
+        <Button
+          onClick={handleOpenDialog}
+          disabled={selectedItems.length === 0}
+          className="w-full sm:w-auto"
+        >
+          {`Dispatch Selected (${selectedItems.length})`}
+        </Button>
+
         {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1197,19 +1205,11 @@ export default function DispatchMaterialPage() {
                 Columns
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[250px]">
+            <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
               <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-
-        <Button
-          onClick={handleOpenDialog}
-          disabled={selectedItems.length === 0}
-          className="w-full sm:w-auto"
-        >
-          {`Dispatch Selected (${selectedItems.length})`}
-        </Button>
       </div>
 
       {activeDepots.length > 0 && (

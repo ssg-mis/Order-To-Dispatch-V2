@@ -234,11 +234,11 @@ export default function CheckInvoicePage() {
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
     "check-invoice",
-    ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "invoiceNo", "status"]
+    ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "invoiceNo", "status", "products"]
   )
   const CHECK_INV_STD_IDS = ["partySoDate", "orderNo", "processid", "customerName", "actual1Date", "invoiceNo", "vehicleNo", "orderPunchRemarks", "status", "products"]
   const [columnOrder, setColumnOrder] = useColumnOrder("check-invoice", [...CHECK_INV_STD_IDS, ...ALL_COLUMNS.map(c => c.id).filter(id => !CHECK_INV_STD_IDS.includes(id))])
-  const ALWAYS_VISIBLE_CHECK_INV = new Set(["products"])
+  const ALWAYS_VISIBLE_CHECK_INV = new Set<string>([])
   const orderedVisible = columnOrder.filter(id => ALWAYS_VISIBLE_CHECK_INV.has(id) || visibleColumns.includes(id))
   const dynamicColumns = visibleColumns.filter(id => !CHECK_INV_STD_IDS.includes(id))
   const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
@@ -337,7 +337,7 @@ export default function CheckInvoicePage() {
       const invoiceNo = order.invoice_no || "No Invoice"
       const partyName = (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer")
       const rawDoNumber = order.so_no || order.soNo || "—"
-      const doNumber = rawDoNumber.replace(/[A-Z]+$/, "")
+      const doNumber = rawDoNumber.replace(/(?<=\d)[A-Z].*$/, "")
 
       if (!grouped[invoiceNo]) {
         grouped[invoiceNo] = {
@@ -456,6 +456,21 @@ export default function CheckInvoicePage() {
         uploadSo: group._allProducts[0]?.upload_so || group._allProducts[0]?.uploadSo || null,
         isReverted: group._allProducts.every((p: any) => !p.actual_5),
         actual1Date: formatDate(actual1DateVal),
+        // actual_qty_dispatch is a PER-PRODUCT line quantity, so the group total must
+        // sum across every product — otherwise the dynamic-column fallback shows only
+        // the first product's qty instead of the full group total.
+        actual_qty_dispatch: group._allProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch) || 0), 0),
+        // One entry per DO in this group, so columns that vary per-DO (DO Number,
+        // Dispatched Date, Order Punch Remarks) can be rendered stacked instead of
+        // collapsing to the first DO's value.
+        doDetails: Object.entries(group._ordersMap as Record<string, any>).map(([doNo, details]) => {
+          const firstProd = details._products[0] || {}
+          return {
+            doNumber: doNo,
+            dispatchedDate: formatDate(firstProd.lrc_actual_1 || firstProd.actual_1),
+            orderPunchRemarks: firstProd.order_punch_remarks || "—",
+          }
+        }),
       }
     })
   }, [filteredPendingOrders])
@@ -698,6 +713,7 @@ export default function CheckInvoicePage() {
     invoiceCopy: group._allProducts?.[0]?.invoice_copy,
     statusText: group.isReverted || group._allProducts?.some((p: any) => p.status_1 === "Issue") ? "Issue Reported" : "Pending Review",
     actual1Date: group.actual1Date || formatDate(group._allProducts?.[0]?.lrc_actual_1 || group._allProducts?.[0]?.actual_1),
+    doDetails: group.doDetails || [],
   })
 
 
@@ -731,7 +747,7 @@ export default function CheckInvoicePage() {
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      searchPlaceholder="Search DO Number or Customer..."
+      searchPlaceholder="Search DO Number..."
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="check-invoice-history"
@@ -777,7 +793,7 @@ export default function CheckInvoicePage() {
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]">
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
@@ -804,7 +820,7 @@ export default function CheckInvoicePage() {
                     if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
                     if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
                     if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Products</SortableTableHead>
+                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
                     const dynCol = ALL_COLUMNS.find(c => c.id === id)
                     if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
                     return null
@@ -850,10 +866,26 @@ export default function CheckInvoicePage() {
                     </TableCell>
                     {orderedVisible.map(id => {
                       if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
-                      if (id === "orderNo") return <TableCell key={id} className="text-center text-xs font-medium">{group.orderNo}</TableCell>
+                      if (id === "orderNo") return (
+                        <TableCell key={id} className="text-center text-xs font-medium">
+                          <div className="flex flex-col gap-1.5">
+                            {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.orderNo }]).map((d: any, idx: number) => (
+                              <span key={`${d.doNumber}-${idx}`}>{d.doNumber}</span>
+                            ))}
+                          </div>
+                        </TableCell>
+                      )
                       if (id === "processid") return <TableCell key={id} className="text-center text-xs font-medium">{group.processid}</TableCell>
                       if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
-                      if (id === "actual1Date") return <TableCell key={id} className="text-center text-xs font-medium text-blue-700">{group.actual1Date}</TableCell>
+                      if (id === "actual1Date") return (
+                        <TableCell key={id} className="text-center text-xs font-medium text-blue-700">
+                          <div className="flex flex-col gap-1.5">
+                            {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actual1Date }]).map((d: any, idx: number) => (
+                              <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
+                            ))}
+                          </div>
+                        </TableCell>
+                      )
                       if (id === "invoiceNo") return (
                         <TableCell key={id} className="text-center text-xs font-medium">
                           {group._allProducts?.[0]?.invoice_copy ? (
@@ -862,7 +894,15 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
-                      if (id === "orderPunchRemarks") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600 font-medium">{group.orderPunchRemarks}</span></TableCell>
+                      if (id === "orderPunchRemarks") return (
+                        <TableCell key={id} className="text-center">
+                          <div className="flex flex-col gap-1.5">
+                            {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
+                              <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600 font-medium">{d.orderPunchRemarks}</span>
+                            ))}
+                          </div>
+                        </TableCell>
+                      )
                       if (id === "status") return (
                         <TableCell key={id} className="text-center">
                           {group.isReverted ? (
@@ -917,7 +957,13 @@ export default function CheckInvoicePage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        {visibleColumns.includes("orderNo") && <p className="font-mono text-sm font-black text-blue-700 break-all">{display.doNumber}</p>}
+                        {visibleColumns.includes("orderNo") && (
+                          <div className="flex flex-col gap-0.5">
+                            {(display.doDetails.length > 0 ? display.doDetails : [{ doNumber: display.doNumber }]).map((d: any, idx: number) => (
+                              <p key={`${d.doNumber}-${idx}`} className="font-mono text-sm font-black text-blue-700 break-all">{d.doNumber}</p>
+                            ))}
+                          </div>
+                        )}
                         {visibleColumns.includes("partySoDate") && <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>}
                       </div>
                       {group.isReverted ? (
@@ -965,7 +1011,7 @@ export default function CheckInvoicePage() {
                         </div>
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Products</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Items</p>
                         <p className="mt-1 font-bold">{display.productCount} items</p>
                       </div>
                       {visibleColumns.includes("vehicleNo") && (
@@ -977,7 +1023,11 @@ export default function CheckInvoicePage() {
                       {visibleColumns.includes("actual1Date") && (
                         <div className="rounded-md bg-slate-50 p-2">
                           <p className="text-[10px] font-black uppercase text-slate-400">Dispatched Date</p>
-                          <p className="mt-1 font-bold break-words">{display.actual1Date}</p>
+                          <div className="mt-1 flex flex-col gap-0.5">
+                            {(display.doDetails.length > 0 ? display.doDetails : [{ doNumber: "—", dispatchedDate: display.actual1Date }]).map((d: any, idx: number) => (
+                              <p key={`${d.doNumber}-${idx}`} className="font-bold break-words">{d.dispatchedDate}</p>
+                            ))}
+                          </div>
                         </div>
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
@@ -1006,7 +1056,12 @@ export default function CheckInvoicePage() {
 
                     {display.orderPunchRemarks !== "—" && (
                       <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs">
-                        <span className="font-black text-amber-800">Order Remarks:</span> {display.orderPunchRemarks}
+                        <span className="font-black text-amber-800">Order Remarks:</span>
+                        <div className="mt-1 flex flex-col gap-1">
+                          {(display.doDetails.length > 0 ? display.doDetails : [{ doNumber: "—", orderPunchRemarks: display.orderPunchRemarks }]).map((d: any, idx: number) => (
+                            <p key={`${d.doNumber}-${idx}`}>{d.orderPunchRemarks}</p>
+                          ))}
+                        </div>
                       </div>
                     )}
                     <Badge className={cn("mt-3", display.statusText === "Issue Reported" ? "bg-red-100 text-red-700 hover:bg-red-100" : "bg-yellow-100 text-yellow-700 hover:bg-yellow-100")}>
@@ -1457,7 +1512,7 @@ export default function CheckInvoicePage() {
                   <div className="space-y-3 p-3 md:hidden">
                     <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
                       <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Items</p>
                         <p className="text-xs font-bold text-slate-700">{selectedGroups.flatMap(g => g._allProducts).length} items</p>
                       </div>
                       <Checkbox
