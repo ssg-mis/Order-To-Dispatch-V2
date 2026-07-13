@@ -504,6 +504,7 @@ export default function MakeInvoicePage() {
           doNumber: doNo,
           dispatchedDate: formatDate(firstProd.lrc_actual_1 || firstProd.actual_1),
           orderPunchRemarks: firstProd.order_punch_remarks || "—",
+          processId: firstProd.processid || "—",
         }
       }),
     }))
@@ -925,15 +926,20 @@ export default function MakeInvoicePage() {
                     </TableCell>
                     {orderedVisible.map(id => {
                       if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
-                      if (id === "actual1Date") return (
-                        <TableCell key={id} className="text-center text-xs font-medium text-blue-700">
-                          <div className="flex flex-col gap-1.5">
-                            {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actual1Date }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
-                            ))}
-                          </div>
-                        </TableCell>
-                      )
+                      if (id === "actual1Date") {
+                        const dispatchedDates = group.doDetails && group.doDetails.length > 0
+                          ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
+                          : [group.actual1Date]
+                        return (
+                          <TableCell key={id} className="text-center text-xs font-medium text-blue-700">
+                            <div className="flex flex-col gap-1.5">
+                              {dispatchedDates.map((date: any, idx: number) => (
+                                <span key={`${date}-${idx}`}>{date}</span>
+                              ))}
+                            </div>
+                          </TableCell>
+                        )
+                      }
                       if (id === "orderNo") return (
                         <TableCell key={id} className="text-center text-xs font-medium">
                           <div className="flex flex-col gap-1.5">
@@ -943,7 +949,15 @@ export default function MakeInvoicePage() {
                           </div>
                         </TableCell>
                       )
-                      if (id === "processid") return <TableCell key={id} className="text-center text-xs font-medium">{group.processId}</TableCell>
+                      if (id === "processid") return (
+                        <TableCell key={id} className="text-center text-xs font-medium">
+                          <div className="flex flex-col gap-1.5">
+                            {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
+                              <span key={`${d.doNumber}-${idx}`}>{d.processId}</span>
+                            ))}
+                          </div>
+                        </TableCell>
+                      )
                       if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
                       if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
@@ -1031,14 +1045,21 @@ export default function MakeInvoicePage() {
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Dispatched Date</p>
                         <div className="mt-1 flex flex-col gap-0.5">
-                          {(display.doDetails.length > 0 ? display.doDetails : [{ doNumber: "—", dispatchedDate: display.actual1Date }]).map((d: any, idx: number) => (
-                            <p key={`${d.doNumber}-${idx}`} className="font-bold text-blue-700">{d.dispatchedDate}</p>
+                          {(display.doDetails.length > 0
+                            ? Array.from(new Set(display.doDetails.map((d: any) => d.dispatchedDate)))
+                            : [display.actual1Date]
+                          ).map((date: any, idx: number) => (
+                            <p key={`${date}-${idx}`} className="font-bold text-blue-700">{date}</p>
                           ))}
                         </div>
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Manual Sauda No.</p>
-                        <p className="mt-1 font-bold break-words">{display.processId}</p>
+                        <div className="mt-1 flex flex-col gap-0.5">
+                          {(display.doDetails.length > 0 ? display.doDetails : [{ doNumber: "—", processId: display.processId }]).map((d: any, idx: number) => (
+                            <p key={`${d.doNumber}-${idx}`} className="font-bold break-words">{d.processId}</p>
+                          ))}
+                        </div>
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Product</p>

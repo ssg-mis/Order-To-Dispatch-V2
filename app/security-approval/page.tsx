@@ -571,6 +571,7 @@ export default function SecurityApprovalPage() {
             doNumber: doNo,
             dispatchedDate: formatDate(firstProd.actual_1) || "—",
             orderPunchRemarks: firstProd.order_punch_remarks || details.orderPunchRemarks || "—",
+            processId: firstProd.processid || "—",
           }
         }),
       }
@@ -673,16 +674,20 @@ export default function SecurityApprovalPage() {
     switch (colId) {
       case "partySoDate":
         return <TableCell key={colId} className="p-4 text-center text-xs font-medium">{group.partySoDate}</TableCell>
-      case "actualDispatchDate":
+      case "actualDispatchDate": {
+        const dispatchedDates = group.doDetails && group.doDetails.length > 0
+          ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
+          : [group.actualDispatchDate]
         return (
           <TableCell key={colId} className="p-4 text-center text-xs font-bold text-purple-700">
             <div className="flex flex-col gap-1.5">
-              {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actualDispatchDate }]).map((d: any, idx: number) => (
-                <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
+              {dispatchedDates.map((date: any, idx: number) => (
+                <span key={`${date}-${idx}`}>{date}</span>
               ))}
             </div>
           </TableCell>
         )
+      }
       case "orderNo":
         return (
           <TableCell key={colId} className="p-4">
@@ -694,7 +699,15 @@ export default function SecurityApprovalPage() {
           </TableCell>
         )
       case "processid":
-        return <TableCell key={colId} className="p-4"><span className="text-xs font-bold text-slate-600">{group.processId}</span></TableCell>
+        return (
+          <TableCell key={colId} className="p-4">
+            <div className="flex flex-col gap-1.5">
+              {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
+                <span key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-slate-600">{d.processId}</span>
+              ))}
+            </div>
+          </TableCell>
+        )
       case "customerName":
         return <TableCell key={colId} className="p-4 font-black text-slate-700 uppercase tracking-tighter italic">{group.customerName}</TableCell>
       case "vehicleNo":
@@ -998,8 +1011,11 @@ export default function SecurityApprovalPage() {
                       <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Actual Dispatch Date</p>
                         <div className="flex flex-col gap-0.5">
-                          {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actualDispatchDate }]).map((d: any, idx: number) => (
-                            <p key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-purple-700">{d.dispatchedDate}</p>
+                          {(group.doDetails && group.doDetails.length > 0
+                            ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
+                            : [group.actualDispatchDate]
+                          ).map((date: any, idx: number) => (
+                            <p key={`${date}-${idx}`} className="text-xs font-bold text-purple-700">{date}</p>
                           ))}
                         </div>
                       </div>
@@ -1009,7 +1025,11 @@ export default function SecurityApprovalPage() {
                       </div>
                       <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Manual Sauda No.</p>
-                        <p className="text-xs font-bold text-slate-700">{group.processId}</p>
+                        <div className="flex flex-col gap-0.5">
+                          {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
+                            <p key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-slate-700">{d.processId}</p>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
