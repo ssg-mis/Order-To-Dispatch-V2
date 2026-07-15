@@ -24,7 +24,7 @@ import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, CheckSquare, Ey
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { gateOutApi, orderApi, depotApi } from "@/lib/api-service"
+import { gateOutApi, orderApi, depotApi, skuDetailsApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -221,6 +221,29 @@ export default function GateOutPage() {
     manualSaudaNo: ""
   })
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // SKU weight lookup
+  const { data: skuDetailsData } = useQuery({
+    queryKey: ["sku-details-all"],
+    queryFn: async () => {
+      const res = await skuDetailsApi.getAll({ all: "true" })
+      return res.success ? res.data?.skuDetails ?? [] : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const skuWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          const weight = sku.sku_weight ?? ""
+          map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "—";
     try {
@@ -1376,7 +1399,14 @@ export default function GateOutPage() {
                                       </div>
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {product.netWeight || "—"}
+                                      {(() => {
+                                        const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
+                                        const skuWt = parseFloat(skuWtStr || "") || 0;
+                                        const qty = parseFloat(product.actualQty) || 0;
+                                        const totalWt = skuWt * qty;
+                                        if (!totalWt) return "—";
+                                        return totalWt.toFixed(4);
+                                      })()}
                                     </TableCell>
                                     <TableCell className="text-center p-2">
                                       <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
@@ -1495,7 +1525,14 @@ export default function GateOutPage() {
                                   <div className="grid grid-cols-2 gap-3">
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Weight(KGS)</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.netWeight || "—"}</p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{(() => {
+                                        const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
+                                        const skuWt = parseFloat(skuWtStr || "") || 0;
+                                        const qty = parseFloat(product.actualQty) || 0;
+                                        const totalWt = skuWt * qty;
+                                        if (!totalWt) return "—";
+                                        return totalWt.toFixed(4);
+                                      })()}</p>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>

@@ -25,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { confirmMaterialReceiptApi, orderApi, depotApi } from "@/lib/api-service"
+import { confirmMaterialReceiptApi, orderApi, depotApi, skuDetailsApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, ChevronLeft, ChevronRight, Settings2, CheckCircle, Upload, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
@@ -294,6 +294,35 @@ export default function MaterialReceiptPage() {
   });
 
   const pendingOrders = pendingData?.orders || [];
+
+  // SKU weight lookup
+  const { data: skuDetailsData } = useQuery({
+    queryKey: ["sku-details-all"],
+    queryFn: async () => {
+      const res = await skuDetailsApi.getAll({ all: "true" })
+      return res.success ? res.data?.skuDetails ?? [] : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const skuWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          const weight = sku.sku_weight ?? ""
+          map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+
+  const getProductWeight = (product: any) => {
+    const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase())
+    const skuWt = parseFloat(skuWtStr || "") || 0
+    const qty = parseFloat(product.actualQty) || 0
+    return skuWt * qty
+  }
 
   // History Query
   const {
@@ -680,11 +709,11 @@ export default function MaterialReceiptPage() {
         return {
           billAmt: acc.billAmt + (parseFloat(p.billAmount) || 0),
           actualQty: acc.actualQty + (parseFloat(p.actualQty) || 0),
-          netWt: acc.netWt + (parseFloat(p.netWeight) || 0),
+          netWt: acc.netWt + getProductWeight(p),
           taxable: acc.taxable + (rateWoGst * qty),
         }
       }, { billAmt: 0, actualQty: 0, netWt: 0, taxable: 0 })
-  }, [selectedGroup, selectedProducts])
+  }, [selectedGroup, selectedProducts, skuWeightMap])
 
   const dynamicColumns = visibleColumns.filter(
     (colId) => !["partySoDate", "doNumber", "processId", "customerName", "productCount", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo"].includes(colId)
@@ -1087,6 +1116,7 @@ export default function MaterialReceiptPage() {
                           const rateWoGst = parseFloat((netRate / 1.05).toFixed(2));
                           const qty = parseFloat(product.actualQty) || 0;
                           const taxable = rateWoGst * qty;
+                          const productWeight = getProductWeight(product);
                           const selected = selectedProducts.includes(product._rowKey);
                           return (
                             <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
@@ -1110,7 +1140,7 @@ export default function MaterialReceiptPage() {
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">WEIGHT(KGS)</p>
                                   <p className="mt-1 font-mono font-bold text-slate-700">
-                                    {product.netWeight ? (parseFloat(product.netWeight) || 0).toFixed(4) : "—"}
+                                    {productWeight ? productWeight.toFixed(4) : "—"}
                                   </p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
@@ -1259,6 +1289,7 @@ export default function MaterialReceiptPage() {
                             const rateWoGst = parseFloat((netRate / 1.05).toFixed(2));
                             const qty = parseFloat(product.actualQty) || 0;
                             const taxable = rateWoGst * qty;
+                            const productWeight = getProductWeight(product);
                             return (
                             <TableRow key={product._rowKey} className={cn("h-14 transition-colors", selectedProducts.includes(product._rowKey) ? "bg-blue-50/40" : "")}>
                               <TableCell className="text-center">
@@ -1276,7 +1307,7 @@ export default function MaterialReceiptPage() {
                                 </div>
                               </TableCell>
                               <TableCell className="text-center font-black text-xs text-slate-700">
-                                {product.netWeight ? (parseFloat(product.netWeight) || 0).toFixed(4) : "—"}
+                                {productWeight ? productWeight.toFixed(4) : "—"}
                               </TableCell>
                               <TableCell className="text-center">
                                 <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
