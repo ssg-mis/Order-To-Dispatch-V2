@@ -83,8 +83,6 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/approval-of-order": "Approval of Order",
         "/dispatch-material": "Dispatch Planning",
         "/actual-dispatch": "Actual Dispatch",
-        "/vehicle-details": "Vehicle Details",
-        "/material-load": "Material Load",
         "/security-approval": "Security Guard Approval",
         "/make-invoice": "Make Invoice",
         "/check-invoice": "Check Invoice",

@@ -29,8 +29,6 @@ const STAGES = [
   { id: "Approval Of Order", label: "Approval of Order", shortLabel: "Approval", color: "#a855f7", url: "/approval-of-order" },
   { id: "Dispatch Planning", label: "Dispatch Planning", shortLabel: "Plan", color: "#ec4899", url: "/dispatch-material" },
   { id: "Actual Dispatch", label: "Actual Dispatch", shortLabel: "Dispatch", color: "#f43f5e", url: "/actual-dispatch" },
-  { id: "Vehicle Details", label: "Vehicle Details", shortLabel: "Vehicle", color: "#f97316", url: "/vehicle-details" },
-  { id: "Material Load", label: "Material Load", shortLabel: "Load", color: "#f59e0b", url: "/material-load" },
   { id: "Security Approval", label: "Security Guard Approval", shortLabel: "Security", color: "#eab308", url: "/security-approval" },
   { id: "Make Invoice", label: "Invoice (Proforma)", shortLabel: "Invoice", color: "#84cc16", url: "/make-invoice" },
   { id: "Check Invoice", label: "Check Invoice", shortLabel: "Check", color: "#22c55e", url: "/check-invoice" },

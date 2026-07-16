@@ -4,6 +4,16 @@
  */
 
 import { API_CONFIG, API_ENDPOINTS } from './api-config';
+import {
+  adaptList,
+  flattenOrderItemStage,
+  flattenDispatchStage,
+  flattenSecurityStage,
+  flattenInvoiceStage,
+  flattenGateOutStage,
+  flattenMaterialReceiptStage,
+  flattenDamageStage,
+} from './v2-adapter';
 
 // Types
 export interface ApiResponse<T = any> {
@@ -42,47 +52,35 @@ function buildQuery(params?: Record<string, any>): string {
   return s ? `?${s}` : '';
 }
 
-export interface OrderProduct {
-  product_name: string;
+// v2 schema: one order_items row per SKU line. Real FK ids, not name strings.
+export interface OrderItem {
+  skuId: number;
   uom?: string;
-  order_quantity?: number;
-  rate_of_material?: number;
-  alternate_uom?: string;
-  alternate_qty_kg?: number;
-  oil_type?: string;
-  rate_per_15kg?: number;
-  rate_per_ltr?: number;
-  sku_name?: string;
-  approval_qty?: number;
-  final_rate?: number;
+  orderQuantity?: number;
+  rateOfMaterial?: number;
+  alternateUom?: string;
+  alternateQtyKg?: number;
+  oilType?: string;
+  ratePer15kg?: number;
+  ratePerLtr?: number;
 }
 
 export interface CreateOrderRequest {
-  customer_name: string;
-  order_type: string;
-  customer_type?: string;
-  order_type_delivery_purpose?: string;
-  start_date?: string;
-  end_date?: string;
-  delivery_date?: string;
-  party_so_date?: string;
-  customer_contact_person_name?: string;
-  customer_contact_person_whatsapp_no?: string;
-  customer_address?: string;
-  payment_terms?: string;
-  advance_payment_to_be_taken?: boolean;
-  advance_amount?: number;
-  is_order_through_broker?: boolean;
-  broker_name?: string;
-  type_of_transporting?: string;
-  remark?: string;
-  products?: OrderProduct[];
+  customerId: number;
+  orderType: 'regular' | 'pre-approval';
+  depotId?: number;
+  brokerId?: number;
+  salespersonId?: number;
+  orderCategory?: 'Sales' | 'Stock Transfer';
+  deliveryPurpose?: 'week-on-week' | 'future-period';
+  orderThrough?: 'Direct' | 'Broker' | 'Salesperson';
+  items: OrderItem[];
   [key: string]: any;
 }
 
 export interface CreateOrderResponse {
-  order_no: string;
-  orders: any[];
+  order: any;
+  items: any[];
 }
 
 /**
@@ -100,9 +98,10 @@ export function setMasterTabContext(tab: string | null): void {
  */
 async function request<T = any>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  baseUrl: string = API_CONFIG.baseURL
 ): Promise<T> {
-  const url = `${API_CONFIG.baseURL}${endpoint}`;
+  const url = `${baseUrl}${endpoint}`;
 
   const headers: any = {
     ...options.headers,
@@ -283,7 +282,7 @@ export const preApprovalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return request(`/pre-approval/pending${queryString}`);
+    return adaptList(await request(`/pre-approval/pending${queryString}`), 'orders', flattenOrderItemStage);
   },
 
   /**
@@ -301,7 +300,7 @@ export const preApprovalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return request(`/pre-approval/history${queryString}`);
+    return adaptList(await request(`/pre-approval/history${queryString}`), 'orders', flattenOrderItemStage);
   },
 
   /**
@@ -315,11 +314,11 @@ export const preApprovalApi = {
   },
 
   /**
-   * Deduct qty from an existing pending order without advancing it in the workflow.
+   * Deduct qty from an existing pending pre-approval order_item without advancing it.
    * Used when a new SKU consumes budget from existing orders.
-   * qty = 0 → backend sets planned_1 = NULL (audit-only row).
+   * qty = 0 → backend closes the pre_approvals gate (audit-only row).
    */
-  deductBudget: async (id: number, data: { order_quantity: number }): Promise<ApiResponse> => {
+  deductBudget: async (id: number, data: { orderQuantity: number }): Promise<ApiResponse> => {
     return request(`/pre-approval/deduct-budget/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -333,8 +332,9 @@ export const preApprovalApi = {
   submitBatch: async (payload: {
     approvals: Array<{ id: number;[key: string]: any }>;
     cascadeBudgets?: Array<{ base_do: string; oil_type: string; qty: number }>;
-    deductions?: Array<{ id: number; order_quantity: number }>;
+    deductions?: Array<{ id: number; orderQuantity: number }>;
     skipIds?: number[];
+    newItems?: Array<{ orderId: number; skuId: number;[key: string]: any }>;
   }): Promise<ApiResponse> => {
     return request(`/pre-approval/submit-batch`, {
       method: 'POST',
@@ -363,7 +363,7 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return request(`/approval/pending${queryString}`);
+    return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenOrderItemStage);
   },
 
   /**
@@ -382,7 +382,7 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return request(`/approval/history${queryString}`);
+    return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenOrderItemStage);
   },
 
   /**
@@ -427,7 +427,7 @@ export const dispatchPlanningApi = {
     manual_sauda_no?: string;
     depo_names?: string[];
   }): Promise<ApiResponse> => {
-    return request(`/dispatch-planning/pending${buildQuery(params)}`);
+    return adaptList(await request(`/dispatch-planning/pending${buildQuery(params)}`), 'dispatches', flattenOrderItemStage);
   },
 
   /**
@@ -443,7 +443,7 @@ export const dispatchPlanningApi = {
     manual_sauda_no?: string;
     depo_names?: string[];
   }): Promise<ApiResponse> => {
-    return request(`/dispatch-planning/history${buildQuery(params)}`);
+    return adaptList(await request(`/dispatch-planning/history${buildQuery(params)}`), 'dispatches', flattenOrderItemStage);
   },
 
   /**
@@ -514,7 +514,7 @@ export const actualDispatchApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/actual-dispatch/pending${buildQuery(params)}`);
+    return adaptList(await request(`/actual-dispatch/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
   },
 
   /**
@@ -530,36 +530,36 @@ export const actualDispatchApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/actual-dispatch/history${buildQuery(params)}`);
+    return adaptList(await request(`/actual-dispatch/history${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
   },
 
   /**
-   * Submit actual dispatch
+   * Submit actual dispatch. id = dispatch id (v2 route /submit/:id).
    */
-  submit: async (dsrNumber: string, data?: any): Promise<ApiResponse> => {
-    return request(`/actual-dispatch/submit/${dsrNumber}`, {
+  submit: async (id: number, data?: any): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/submit/${id}`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     });
   },
 
   /**
-   * Revert actual dispatch (back to Pre-Approval)
+   * Revert actual dispatch (back to Pre-Approval). id = dispatch id.
    */
-  revert: async (dsrNumber: string, username: string, remarks?: string): Promise<ApiResponse> => {
-    return request(`/actual-dispatch/revert/${dsrNumber}`, {
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/revert/${id}`, {
       method: 'POST',
-      body: JSON.stringify({ username, remarks }),
+      body: JSON.stringify({ userId, remarks }),
     });
   },
 
   /**
-   * Revert actual dispatch back to Dispatch Planning only (one stage back)
+   * Revert actual dispatch back to Dispatch Planning only (one stage back). id = dispatch id.
    */
-  revertToDispatchPlanning: async (dsrNumber: string, username: string, remarks?: string): Promise<ApiResponse> => {
-    return request(`/actual-dispatch/revert-to-planning/${dsrNumber}`, {
+  revertToDispatchPlanning: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/revert-to-planning/${id}`, {
       method: 'POST',
-      body: JSON.stringify({ username, remarks }),
+      body: JSON.stringify({ userId, remarks }),
     });
   },
 
@@ -571,12 +571,13 @@ export const actualDispatchApi = {
   },
 
   /**
-   * Cancel Stock Transfer SKUs left unselected in an Actual Dispatch submission
+   * Cancel Stock Transfer SKUs left unselected in an Actual Dispatch submission.
+   * dispatchIds = dispatch ids (v2 body: { dispatchIds: number[] }).
    */
-  cancelUnselected: async (dsrNumbers: string[]): Promise<ApiResponse> => {
+  cancelUnselected: async (dispatchIds: number[]): Promise<ApiResponse> => {
     return request('/actual-dispatch/cancel-unselected', {
       method: 'POST',
-      body: JSON.stringify({ dsrNumbers }),
+      body: JSON.stringify({ dispatchIds }),
     });
   },
 };
@@ -630,118 +631,6 @@ export const draftApi = {
 };
 
 /**
- * Vehicle Details API (Stage 6)
- */
-export const vehicleDetailsApi = {
-  /**
-   * Get pending vehicle details
-   */
-  getPending: async (params?: {
-    page?: number;
-    limit?: number;
-    d_sr_number?: string;
-    so_no?: string;
-    party_name?: string;
-  }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/vehicle-details/pending${queryString}`);
-  },
-
-  /**
-   * Get vehicle details history
-   */
-  getHistory: async (params?: {
-    page?: number;
-    limit?: number;
-    d_sr_number?: string;
-    so_no?: string;
-    party_name?: string;
-  }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/vehicle-details/history${queryString}`);
-  },
-
-  /**
-   * Get vehicle details by ID
-   */
-  getById: async (id: number): Promise<ApiResponse> => {
-    return request(`/vehicle-details/${id}`);
-  },
-
-  /**
-   * Submit vehicle details
-   */
-  submit: async (id: number, data?: any): Promise<ApiResponse> => {
-    return request(`/vehicle-details/submit/${id}`, {
-      method: 'POST',
-      body: JSON.stringify(data || {}),
-    });
-  },
-};
-
-/**
- * Material Load API (Stage 7)
- */
-export const materialLoadApi = {
-  /**
-   * Get pending material loads
-   */
-  getPending: async (params?: {
-    page?: number;
-    limit?: number;
-    d_sr_number?: string;
-    so_no?: string;
-    party_name?: string;
-  }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/material-load/pending${queryString}`);
-  },
-
-  /**
-   * Get material load history
-   */
-  getHistory: async (params?: {
-    page?: number;
-    limit?: number;
-    d_sr_number?: string;
-    so_no?: string;
-    party_name?: string;
-  }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-
-    return request(`/material-load/history${queryString}`);
-  },
-
-  /**
-   * Get material load by ID
-   */
-  getById: async (id: number): Promise<ApiResponse> => {
-    return request(`/material-load/${id}`);
-  },
-
-  /**
-   * Submit material load
-   */
-  submit: async (id: number, data?: any): Promise<ApiResponse> => {
-    return request(`/material-load/submit/${id}`, {
-      method: 'POST',
-      body: JSON.stringify(data || {}),
-    });
-  },
-};
-
-/**
  * Security Guard Approval API (Stage 8)
  */
 export const securityGuardApprovalApi = {
@@ -772,7 +661,7 @@ export const securityGuardApprovalApi = {
         depo_names.forEach(d => url += `depo_names=${encodeURIComponent(d)}&`);
       }
     }
-    return request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url);
+    return adaptList(await request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url), 'approvals', flattenSecurityStage);
   },
 
   /**
@@ -806,7 +695,7 @@ export const securityGuardApprovalApi = {
       if (start_date) url += `start_date=${start_date}&`;
       if (end_date) url += `end_date=${end_date}&`;
     }
-    return request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url);
+    return adaptList(await request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url), 'approvals', flattenSecurityStage);
   },
 
   /**
@@ -849,7 +738,7 @@ export const makeInvoiceApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/make-invoice/pending${buildQuery(params)}`);
+    return adaptList(await request(`/make-invoice/pending${buildQuery(params)}`), 'invoices', flattenInvoiceStage);
   },
 
   getHistory: async (params?: {
@@ -863,7 +752,7 @@ export const makeInvoiceApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/make-invoice/history${buildQuery(params)}`);
+    return adaptList(await request(`/make-invoice/history${buildQuery(params)}`), 'invoices', flattenInvoiceStage);
   },
 
   getById: async (id: number | string): Promise<ApiResponse> => {
@@ -893,7 +782,7 @@ export const checkInvoiceApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/check-invoice/pending${buildQuery(params)}`);
+    return adaptList(await request(`/check-invoice/pending${buildQuery(params)}`), 'invoices', flattenInvoiceStage);
   },
 
   getHistory: async (params?: {
@@ -907,7 +796,7 @@ export const checkInvoiceApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/check-invoice/history${buildQuery(params)}`);
+    return adaptList(await request(`/check-invoice/history${buildQuery(params)}`), 'invoices', flattenInvoiceStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -933,7 +822,7 @@ export const gateOutApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/gate-out/pending${buildQuery(params)}`);
+    return adaptList(await request(`/gate-out/pending${buildQuery(params)}`), 'orders', flattenGateOutStage);
   },
 
   getHistory: async (params?: {
@@ -947,7 +836,7 @@ export const gateOutApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/gate-out/history${buildQuery(params)}`);
+    return adaptList(await request(`/gate-out/history${buildQuery(params)}`), 'orders', flattenGateOutStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -974,7 +863,7 @@ export const confirmMaterialReceiptApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/confirm-receipt/pending${buildQuery(params)}`);
+    return adaptList(await request(`/confirm-receipt/pending${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
   },
 
   getHistory: async (params?: {
@@ -989,7 +878,7 @@ export const confirmMaterialReceiptApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/confirm-receipt/history${buildQuery(params)}`);
+    return adaptList(await request(`/confirm-receipt/history${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -1015,7 +904,7 @@ export const damageAdjustmentApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/damage-adjustment/pending${buildQuery(params)}`);
+    return adaptList(await request(`/damage-adjustment/pending${buildQuery(params)}`), 'orders', flattenDamageStage);
   },
 
   getHistory: async (params?: {
@@ -1029,7 +918,7 @@ export const damageAdjustmentApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return request(`/damage-adjustment/history${buildQuery(params)}`);
+    return adaptList(await request(`/damage-adjustment/history${buildQuery(params)}`), 'orders', flattenDamageStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
@@ -1886,8 +1775,6 @@ export default {
   approval: approvalApi,
   dispatchPlanning: dispatchPlanningApi,
   actualDispatch: actualDispatchApi,
-  vehicleDetails: vehicleDetailsApi,
-  materialLoad: materialLoadApi,
   securityGuardApproval: securityGuardApprovalApi,
   makeInvoice: makeInvoiceApi,
   checkInvoice: checkInvoiceApi,

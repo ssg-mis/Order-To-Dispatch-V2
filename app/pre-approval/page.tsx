@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { Settings2, Loader2, ChevronDown, ChevronUp, Trash2, Plus, Check, Search, Package, Calculator, Save, Calendar, ChevronLeft, ChevronRight, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
-import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, skuDetailsApi, customerApi, depotApi } from "@/lib/api-service"
+import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, customerApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
@@ -185,7 +185,7 @@ export default function PreApprovalPage() {
   // Fetch SKUs
   const fetchSkus = async () => {
     try {
-      const response = await skuDetailsApi.getAll()
+      const response = await skuApi.getAll()
       if (response.success) {
         // Extract array from paginated response
         const skuData = response.data.skuDetails || (Array.isArray(response.data) ? response.data : [])
@@ -553,6 +553,7 @@ export default function PreApprovalPage() {
       preApprovalProducts: [{
         _pid: `${backendOrder.id}-${backendOrder.order_no}`,
         id: backendOrder.id,
+        order_id: backendOrder.order_id,
         productName: backendOrder.product_name,
         oilType: backendOrder.oil_type,
         uom: backendOrder.uom,
@@ -651,143 +652,6 @@ export default function PreApprovalPage() {
       fetchAndCalculateRates()
     }
   }, [isBulkDialogOpen])
-
-  const handleApprove = async (itemsToApprove: any[]) => {
-    setIsApproving(true)
-    try {
-      const normalizeType = (t: string) => {
-        const s = (t || "").toLowerCase();
-        if (s.includes("palm") || s.includes("p.o")) return "palm";
-        if (s.includes("rice") || s.includes("rbo") || s.includes("r.o")) return "rice";
-        if (s.includes("soya") || s.includes("sbo") || s.includes("s.o")) return "soya";
-        if (s.includes("sunflower") || s.includes("sun")) return "sunflower";
-        return s;
-      };
-
-      // Preliminary validation
-      for (const item of itemsToApprove) {
-        const productKey = item._rowKey;
-        const rateData = productRates[productKey];
-        const product = item._product;
-
-        const rateOfMaterial = parseFloat(rateData?.rateOfMaterial || product.rateOfMaterial || "0") || 0;
-        const enteredRate = parseFloat(rateData?.rate) || 0;
-        const isStockTransfer = (product?.order_category || product?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER";
-
-        if (!rateData?.rate && !isStockTransfer) {
-          toast({
-            title: "Rate Required",
-            description: `Please enter a Final Rate for all selected products.`,
-            variant: "destructive"
-          });
-          setIsApproving(false);
-          return;
-        }
-
-        // Approval Qty is mandatory in pre-approval — a blank qty would leave
-        // remaining_dispatch_qty NULL and lose the approved quantity.
-        if (!rateData?.approvalQty || !(parseFloat(rateData.approvalQty) > 0)) {
-          toast({
-            title: "Approval Qty Required",
-            description: `Please enter the Approval Qty for all selected products.`,
-            variant: "destructive"
-          });
-          setIsApproving(false);
-          return;
-        }
-
-        // if (enteredRate < rateOfMaterial) {
-        //   toast({
-        //     title: "Invalid Rate",
-        //     description: `Final rate for product in ${item._displayDo} cannot be less than ₹${rateOfMaterial.toFixed(2)}.`,
-        //     variant: "destructive"
-        //   });
-        //   setIsApproving(false);
-        //   return;
-        // }
-      }
-
-      const successfulApprovals: any[] = []
-      const failedApprovals: any[] = []
-
-      // Submit each approval to backend
-      for (const item of itemsToApprove) {
-        try {
-          const product = item._product
-          const productKey = item._rowKey
-          const rateData: any = productRates[productKey]
-
-          // Prepare submission data
-          const submissionData = {
-            sku_name: rateData?.skuName,
-            product_name: rateData?.productName || rateData?.skuName,  // Include product_name
-            approval_qty: rateData?.approvalQty ? parseFloat(rateData.approvalQty) : null,
-            remaining_dispatch_qty: rateData?.approvalQty ? parseFloat(rateData.approvalQty) : null,
-            rate_per_ltr: (rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) ? parseFloat(rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) : null,
-            final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-            rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-            remark: rateData?.remark || null, // Use individual remark
-            user_id: user?.id || null, // Track acting user's login id
-          }
-
-          // Call backend API to submit pre-approval
-          await preApprovalApi.submit(product.id, submissionData)
-
-          successfulApprovals.push(item)
-
-          // Also save to workflow history for local tracking
-          const historyEntry = {
-            orderNo: item._displayDo,
-            customerName: item.customerName || "Unknown",
-            stage: "Pre-Approval",
-            status: "Completed" as const,
-            processedBy: "Current User",
-            timestamp: new Date().toISOString(),
-            remarks: rateData?.remark || "-", // Use individual remark
-            orderType: item.orderType || "pre-approval"
-          }
-          saveWorkflowHistory(historyEntry)
-
-        } catch (error: any) {
-          console.error(`Failed to approve order ${item._displayDo}:`, error)
-          failedApprovals.push({ item, error: error?.message || "Unknown error" })
-        }
-      }
-
-      // Show results
-      if (successfulApprovals.length > 0) {
-        toast({
-          title: "Approvals Submitted",
-          description: `${successfulApprovals.length} product(s) approved successfully.`,
-        })
-
-        // Refresh data from backend
-        await refetchPending()
-        queryClient.invalidateQueries({ queryKey: ["pre-approval-history"] })
-      }
-
-      if (failedApprovals.length > 0) {
-        toast({
-          title: "Some Approvals Failed",
-          description: `${failedApprovals.length} approval(s) failed. Please try again.`,
-          variant: "destructive",
-        })
-      }
-
-      setSelectedRows([])
-      setIsBulkDialogOpen(false)
-      setProductRates({})
-
-      // Navigate if all pending items are processed
-      // if (successfulApprovals.length > 0 && pendingOrders.length === successfulApprovals.length) {
-      //   setTimeout(() => {
-      //     router.push("/approval-of-order")
-      //   }, 1500)
-      // }
-    } finally {
-      setIsApproving(false)
-    }
-  }
 
   const handleAddProductRow = async (baseDo: string, orderData: any) => {
     // Calculate next suffix (A, B, C...) by checking database AND local state
@@ -1045,85 +909,76 @@ export default function PreApprovalPage() {
         }
       }
 
-      // Phase 1: Handle new SKU creations separately (they use orderApi.create, not submitBatch)
+      // Resolve a SKU name (the combobox only round-trips a name) to its master
+      // id. Only hits the network when a SKU is actually being set/changed.
+      // MUST use skuApi (/api/v1/skus, v2-native masterLookup against the local
+      // skus table) - NOT skuDetailsApi (/api/v1/sku-details), which still reads
+      // production RDS and returns ids that don't exist in the local v2 mirror,
+      // so using it here would violate order_items' FK to skus.
+      const resolveSkuId = async (skuName?: string): Promise<number | undefined> => {
+        if (!skuName) return undefined;
+        const res = await skuApi.getAll({ search: skuName, limit: 5 });
+        const list = res?.data?.skuDetails || [];
+        const match = list.find((s: any) => (s.sku_name || '').toLowerCase() === skuName.toLowerCase());
+        return match?.id;
+      };
+
+      // New SKU lines: inserted onto the EXISTING order (v2 supports multiple line
+      // items per order natively). Their own qty is never reduced - the cascade
+      // budget below funds them by deducting from siblings. Submitted in the SAME
+      // atomic submitBatch call as the approvals, so a bad SKU/order rolls back
+      // everything instead of leaving an orphaned, unbudgeted row.
+      const newItemPayloads: Array<Record<string, any>> = [];
       for (const item of itemsToApprove.filter((i: any) => i._product._isNew)) {
-        try {
-          const product = item._product
-          const rateData: any = productRates[item._rowKey]
-          const orderData = {
-            ...product._orderData,
-            order_no: product._originalOrderId,
-            products: [{
-              product_name: rateData?.skuName || rateData?.productName,
-              oil_type: product.oilType || "",
-              uom: product.uom,
-              order_quantity: parseFloat(rateData?.approvalQty || "0"),
-              rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
-              approval_qty: parseFloat(rateData?.approvalQty || "0"),
-              rate_per_ltr: parseFloat(rateData?.ratePerLtr || "0"),
-              final_rate: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
-              remark: rateData?.remark || "",
-              sku_name: rateData?.skuName,
-              user_id: user?.id || null
-            }]
-          };
-          const mappedOrderData: any = {
-            planned_1: new Date().toISOString(),
-            actual_1: new Date().toISOString()
-          };
-          Object.entries(orderData).forEach(([key, val]) => {
-            if (key === 'customerName') mappedOrderData.customer_name = val;
-            else if (key === 'orderType') mappedOrderData.order_type = val;
-            else if (key === 'orderPurpose') mappedOrderData.order_type_delivery_purpose = val;
-            else if (key === 'startDate') mappedOrderData.start_date = val;
-            else if (key === 'endDate') mappedOrderData.end_date = val;
-            else if (key === 'deliveryDate') mappedOrderData.delivery_date = val;
-            else if (key === 'soDate') mappedOrderData.party_so_date = val;
-            else if (key === 'contactPerson') mappedOrderData.customer_contact_person_name = val;
-            else if (key === 'whatsappNo') mappedOrderData.customer_contact_person_whatsapp_no = val;
-            else if (key === 'customerAddress') mappedOrderData.customer_address = val;
-            else if (key === 'paymentTerms') mappedOrderData.payment_terms = val;
-            else if (key === 'advancePaymentTaken') mappedOrderData.advance_payment_to_be_taken = val;
-            else if (key === 'advanceAmount') mappedOrderData.advance_amount = val;
-            else if (key === 'isBrokerOrder') mappedOrderData.is_order_through_broker = val;
-            else if (key === 'brokerName') mappedOrderData.broker_name = val;
-            else if (key === 'transportType') mappedOrderData.type_of_transporting = val;
-            else if (key === 'depoName') mappedOrderData.depo_name = val;
-            else if (key === 'orderPunchRemarks') mappedOrderData.order_punch_remarks = val;
-            else if (key === 'customerType') mappedOrderData.customer_type = val;
-            else if (key === 'totalWithGst') mappedOrderData.total_amount_with_gst = val;
-            else mappedOrderData[key] = val;
-          });
-          const { orderApi } = await import('@/lib/api-service');
-          await orderApi.create(mappedOrderData);
-          successfulApprovals.push(item)
-        } catch (error: any) {
-          console.error(`Failed to create new SKU:`, error)
-          failedApprovals.push({ item, error: error?.message || "Unknown error" })
+        const product = item._product
+        const rateData: any = productRates[item._rowKey]
+        const skuName = rateData?.skuName || rateData?.productName;
+        const orderId = product._orderData?._products?.[0]?.order_id;
+        const skuId = await resolveSkuId(skuName);
+
+        if (!orderId) {
+          toast({ title: "Missing Order", description: `Could not determine which order to add "${skuName}" to.`, variant: "destructive" });
+          setIsApproving(false);
+          return;
         }
+        if (!skuId) {
+          toast({ title: "Unknown SKU", description: `Could not match "${skuName}" to a known product. Please pick a SKU from the list.`, variant: "destructive" });
+          setIsApproving(false);
+          return;
+        }
+
+        newItemPayloads.push({
+          orderId,
+          skuId,
+          uom: product.uom,
+          oilType: product.oilType || "",
+          orderQuantity: parseFloat(rateData?.approvalQty || "0"),
+          rateOfMaterial: rateData?.rate ? parseFloat(rateData.rate) : parseFloat(rateData?.rateOfMaterial || "0"),
+          ratePerLtr: rateData?.ratePerLtr ? parseFloat(rateData.ratePerLtr) : undefined,
+        });
       }
 
-      // Phase 2: Build approvals + cascade deductions payload, submit atomically
+      // Existing-item approvals (v2-native camelCase; the adapter already sets
+      // product.id to the order_item id for this stage).
       const approvalPayloads: Array<{ id: number;[key: string]: any }> = [];
       for (const item of itemsToApprove.filter((i: any) => !i._product._isNew)) {
         const product = item._product
         const rateData: any = productRates[item._rowKey]
-        const originalQty = parseFloat(product.order_quantity || product.orderQty || "0") || 0;
         const approvalQtyForThis = rateData?.approvalQty ? parseFloat(rateData.approvalQty) : 0;
-        const isOverOwnQty = approvalQtyForThis > originalQty;
-        const effectiveOrderQty = isOverOwnQty ? approvalQtyForThis : originalQty;
+
+        // The SKU combobox only round-trips a NAME - resolve it only when it
+        // actually differs from what's already on this line.
+        const currentSkuName = product.sku_name || product.productName;
+        const newSkuName = rateData?.skuName;
+        const skuId = (newSkuName && newSkuName !== currentSkuName) ? await resolveSkuId(newSkuName) : undefined;
+
         approvalPayloads.push({
           id: product.id,
-          sku_name: rateData?.skuName,
-          product_name: rateData?.productName || rateData?.skuName,
-          order_quantity: effectiveOrderQty,
-          approval_qty: approvalQtyForThis || null,
-          remaining_dispatch_qty: approvalQtyForThis || null,
-          rate_per_ltr: (rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) ? parseFloat(rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) : null,
-          final_rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-          rate_of_material: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : null),
-          remark: rateData?.remark || null,
-          user_id: user?.id || null,
+          approvalQty: approvalQtyForThis || undefined,
+          skuId,
+          rate: rateData?.rate ? parseFloat(rateData.rate) : (product.rateOfMaterial ? parseFloat(product.rateOfMaterial) : undefined),
+          ratePerLtr: (rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) ? parseFloat(rateData?.ratePerLtr || product.rate_per_ltr || product.ratePerLtr) : undefined,
+          userId: user?.id || undefined,
         });
       }
 
@@ -1153,14 +1008,14 @@ export default function PreApprovalPage() {
 
       console.log("[DEBUG] Cascade Budgets (server-side):", cascadeBudgets);
 
-      if (approvalPayloads.length > 0 || cascadeBudgets.length > 0) {
+      if (approvalPayloads.length > 0 || cascadeBudgets.length > 0 || newItemPayloads.length > 0) {
         try {
-          await preApprovalApi.submitBatch({ approvals: approvalPayloads, cascadeBudgets, skipIds });
-          itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) => successfulApprovals.push(i));
+          await preApprovalApi.submitBatch({ approvals: approvalPayloads, cascadeBudgets, skipIds, newItems: newItemPayloads });
+          itemsToApprove.forEach((i: any) => successfulApprovals.push(i));
         } catch (error: any) {
-          console.error('Batch submission failed — all approvals and deductions rolled back:', error)
+          console.error('Batch submission failed — all approvals, new SKU lines, and deductions rolled back:', error)
           // Preserve error.code so a stale-write (409) conflict can be told apart below.
-          itemsToApprove.filter((i: any) => !i._product._isNew).forEach((i: any) =>
+          itemsToApprove.forEach((i: any) =>
             failedApprovals.push({ item: i, error: error?.message || "Batch failed", code: error?.code })
           )
         }
@@ -2343,7 +2198,7 @@ export default function PreApprovalPage() {
                                                     placeholder="Select SKU..."
                                                     searchPlaceholder="Search products..."
                                                     fetchOptions={async (search: string, page: number) => {
-                                                      const res = await skuDetailsApi.getAll({ search, page, limit: 20 });
+                                                      const res = await skuApi.getAll({ search, page, limit: 20 });
                                                       let list = res.data.skuDetails || [];
                                                       const productOilType = (product.oilType || product.productName || "").toLowerCase();
                                                       list = list.filter((sku: any) => {
@@ -2753,7 +2608,7 @@ export default function PreApprovalPage() {
                                                 placeholder="Select SKU..."
                                                 searchPlaceholder="Search products..."
                                                 fetchOptions={async (search: string, page: number) => {
-                                                  const res = await skuDetailsApi.getAll({ search, page, limit: 20 })
+                                                  const res = await skuApi.getAll({ search, page, limit: 20 })
                                                   let list = res.data.skuDetails || []
                                                   const productOilType = (product.oilType || product.productName || "").toLowerCase()
                                                   list = list.filter((sku: any) => {

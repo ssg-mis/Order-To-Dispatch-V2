@@ -325,18 +325,17 @@ export default function CommitmentReviewPage() {
         // Try submitting to backend API
         try {
           if (product?.id) {
-            // Prepare approval data for backend
-            // Convert to boolean values as requested by USER
+            // Prepare approval data for backend (v2-native camelCase)
             const approvalData = {
-              rate_is_rightly_as_per_current_market_rate: checklistValues.rate === "approve",
-              we_are_dealing_in_ordered_sku: checklistValues.sku === "approve",
-              party_credit_status: checklistValues.credit === "approve", // Submit boolean true/false
-              dispatch_date_confirmed: checklistValues.dispatch === "approve",
               // Auto-reject if ANY checklist item is 'reject'
-              overall_status_of_order: !hasRejection && checklistValues.overall === "approve",
-              order_confirmation_with_customer: checklistValues.confirm === "approve",
-              processid: processId || null, // Add Process ID to the submission
-              user_id: user?.id || null // Track acting user's login id
+              overallStatus: !hasRejection && checklistValues.overall === "approve",
+              rateIsRightlyAsPerCurrentMarketRate: checklistValues.rate === "approve",
+              weAreDealingInOrderedSku: checklistValues.sku === "approve",
+              partyCreditStatus: checklistValues.credit === "approve",
+              dispatchDateConfirmed: checklistValues.dispatch === "approve",
+              orderConfirmationWithCustomer: checklistValues.confirm === "approve",
+              processId: processId || null, // Manual Sauda No.
+              userId: user?.id || null // Track acting user's login id
             };
 
             console.log('[APPROVAL] Submitting to API:', {

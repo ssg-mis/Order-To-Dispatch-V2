@@ -18,7 +18,7 @@ import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, depotApi, skuDetailsApi, brokerApi, orderApi, salespersonApi } from "@/lib/api-service"
+import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
@@ -52,6 +52,7 @@ function extractState(addr: string): string | null {
 
 type ProductItem = {
   id: string
+  skuId?: number
   productName: string
   uom: string
   orderQty: string
@@ -146,7 +147,7 @@ export default function OrderPunchPage() {
   const fetchSkus = async () => {
     try {
       setIsLoadingSkus(true)
-      const response = await skuDetailsApi.getAll({ all: "true" })
+      const response = await skuApi.getAll({ all: "true" })
       if (response.success) {
         const skuData = response.data.skuDetails || (Array.isArray(response.data) ? response.data : [])
         skuData.forEach((s: any) => { if (s.sku_name) skuRegistryRef.current[s.sku_name] = s })
@@ -312,7 +313,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   useEffect(() => {
     if (isAdmin || !user || orderThrough !== "Broker" || !allowedBrokerNames) return
     const activeBrokerSet = new Set(
-      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.salesman_name || "").toLowerCase())
+      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.broker_name || "").toLowerCase())
     )
     const activeAllowedBrokerNames = allowedBrokerNames.filter(b => activeBrokerSet.has(b.toLowerCase()))
     if (activeAllowedBrokerNames.length === 0) {
@@ -326,7 +327,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   useEffect(() => {
     if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
     const activeSalespersonSet = new Set(
-      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesman_name || "").toLowerCase())
+      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesperson_name || "").toLowerCase())
     )
     const activeAllowedSalespersonNames = allowedSalespersonNames.filter(s => activeSalespersonSet.has(s.toLowerCase()))
     if (activeAllowedSalespersonNames.length === 0) {
@@ -587,45 +588,70 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       // Prepare data for backend API
       const customerNameValue = customerType === "existing" ? customerName.split('|')[0] : customerName
 
-      // Prepare common order data
-      const orderData: any = {
-        customer_name: customerNameValue,
-        order_type: orderType,
-        customer_type: customerType,
-        order_type_delivery_purpose: orderPurpose,
-        start_date: startDate || null,
-        end_date: endDate || null,
-        delivery_date: deliveryDate || null,
-        party_so_date: soDate || null,
-        customer_contact_person_name: contactPerson || null,
-        customer_contact_person_whatsapp_no: whatsappNo || null,
-        customer_address: customerAddress || null,
-        customer_delivery_address: (sameAsCustomerAddress ? customerAddress : deliveryAddress) || null,
-        depo_name: depoName || null,
-        payment_terms: paymentTerms || null,
-        advance_payment_to_be_taken: advancePaymentTaken === "YES",
-        advance_amount: advanceAmount ? parseFloat(advanceAmount) : null,
-        is_order_through_broker: isBrokerOrder === "Broker" || isBrokerOrder === "Salesperson",
-        is_order_through: isBrokerOrder,
-        broker_name: isBrokerOrder === "Broker" ? brokerName || null : null,
-        salesperson_name: isBrokerOrder === "Salesperson" ? salespersonName || null : null,
-        type_of_transporting: transportType || null,
-        order_punch_remarks: orderPunchRemarks || null,
-        remark: null,
-        futureperioddate: futurePeriodDate || null, // Add future period date
-        upload_so: uploadedSoUrl, // Add uploaded SO copy URL
-        user_id: user?.id || null, // Track acting user's login id
-        order_category: orderCategory,
-        gst: gst || null, // Add GST number
+      // v2 requires a real customer FK - a "new" (not-yet-in-master) customer
+      // has no id to send. Master-data self-serve creation isn't migrated yet,
+      // so block here rather than silently submitting an unresolvable order.
+      if (!selectedCustomerRecord) {
+        setIsSubmitting(false)
+        toast({
+          title: "Customer Not Found In Master Data",
+          description: customerType === "new"
+            ? "This v2 build requires selecting an existing customer from master data - on-the-fly new-customer creation isn't migrated yet."
+            : "Could not resolve the selected customer to a master record. Please re-select it from the list.",
+          variant: "destructive",
+        })
+        return
       }
 
-      // Add products array for backend (for regular and pre-approval order types)
+      const selectedBrokerRecord = isBrokerOrder === "Broker"
+        ? brokers.find((b: any) => (b.broker_name || "").toLowerCase() === (brokerName || "").toLowerCase())
+        : null
+      const selectedSalespersonRecord = isBrokerOrder === "Salesperson"
+        ? salespersons.find((s: any) => (s.salesperson_name || "").toLowerCase() === (salespersonName || "").toLowerCase())
+        : null
+
+      // Prepare common order data (v2 schema: real FK ids, not name strings)
+      const orderData: any = {
+        customerId: selectedCustomerRecord.id,
+        depotId: billingDepot?.id ?? null,
+        brokerId: selectedBrokerRecord?.id ?? null,
+        salespersonId: selectedSalespersonRecord?.id ?? null,
+        orderType: orderType,
+        customerType: customerType,
+        deliveryPurpose: orderPurpose,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        deliveryDate: deliveryDate || null,
+        partySoDate: soDate || null,
+        customerContactPersonName: contactPerson || null,
+        customerContactPersonWhatsappNo: whatsappNo || null,
+        customerAddress: customerAddress || null,
+        customerDeliveryAddress: (sameAsCustomerAddress ? customerAddress : deliveryAddress) || null,
+        paymentTerms: paymentTerms || null,
+        advancePaymentToBeTaken: advancePaymentTaken === "YES",
+        advanceAmount: advanceAmount ? parseFloat(advanceAmount) : null,
+        orderThrough: isBrokerOrder,
+        typeOfTransporting: transportType || null,
+        orderPunchRemarks: orderPunchRemarks || null,
+        futurePeriodDate: futurePeriodDate || null,
+        uploadSo: uploadedSoUrl,
+        userId: user?.id || null,
+        orderCategory: orderCategory,
+        gst: gst || null,
+      }
+
+      // Add items array for backend (for regular and pre-approval order types)
       if ((orderType === "regular" || orderType === "pre-approval") && products.length > 0) {
         const missingRateProducts: string[] = []
-        orderData.products = products.map(p => {
+        const missingSkuProducts: string[] = []
+        orderData.items = products.map(p => {
           let rate15kg = p.ratePer15Kg ? parseFloat(p.ratePer15Kg) : null
           let rateLtr = p.ratePerLtr ? parseFloat(p.ratePerLtr) : null
           let oilTypeVal = ""
+
+          if (!p.skuId) {
+            missingSkuProducts.push(p.productName || "Unnamed product")
+          }
 
           // For pre-approval, pick from the preApprovalProducts list based on detected oil type
           if (orderType === "pre-approval") {
@@ -657,17 +683,29 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
           }
 
           return {
-            product_name: p.productName,
+            skuId: p.skuId ?? null,
             uom: p.uom || "Ltr",
-            order_quantity: p.orderQty ? parseFloat(p.orderQty) : null,
-            rate_of_material: p.rate ? parseFloat(p.rate) : null,
-            rate_per_15kg: rate15kg,
-            rate_per_ltr: rateLtr,
-            oil_type: oilTypeVal,
-            alternate_uom: p.altUom || "Kg",
-            alternate_qty_kg: p.altQty ? parseFloat(p.altQty) : null,
+            orderQuantity: p.orderQty ? parseFloat(p.orderQty) : null,
+            rateOfMaterial: p.rate ? parseFloat(p.rate) : null,
+            ratePer15kg: rate15kg,
+            ratePerLtr: rateLtr,
+            oilType: oilTypeVal,
+            alternateUom: p.altUom || "Kg",
+            alternateQtyKg: p.altQty ? parseFloat(p.altQty) : null,
           }
         })
+
+        // v2 requires a real SKU FK - a free-typed product name that was never
+        // selected from the dropdown has no id to send.
+        if (missingSkuProducts.length > 0) {
+          setIsSubmitting(false)
+          toast({
+            title: "Product Not Selected From List",
+            description: `Select these products from the dropdown (not typed manually) so they resolve to a master SKU: ${[...new Set(missingSkuProducts)].join(", ")}.`,
+            variant: "destructive",
+          })
+          return
+        }
 
         // Block submission if any pre-approval product is missing its rate,
         // otherwise it would save null and show blank in the WhatsApp message
@@ -682,11 +720,11 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         }
       }
 
-      // Call backend API
+      // Call backend API (v2 schema)
       const response = await orderApi.create(orderData)
 
       if (response.success) {
-        const backendOrderNo = response.data.order_no
+        const backendOrderNo = response.data.order.orderNo
 
         // Prepare order entry for localStorage (for compatibility in existing workflow)
         const orderEntry = {
@@ -800,6 +838,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
           if (p.id !== productId) return p;
           return {
             ...p,
+            skuId: selectedSku.id,
             productName: selectedSku.sku_name,
             uom: selectedSku.main_uom || "",
             altUom: selectedSku.alternate_uom || "",
@@ -1496,7 +1535,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                               }}
                               fetchOptions={async (search: string, page: number) => {
                                 // Manual check for pre-approval filter
-                                const res = await skuDetailsApi.getAll({ search, page, limit: 20 });
+                                const res = await skuApi.getAll({ search, page, limit: 20 });
                                 let list = res.data.skuDetails || [];
                                 
                                 // Local filter for pre-approval types if needed
@@ -1709,21 +1748,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       if (allowedBrokerNames) {
                         const allowedSet = new Set(allowedBrokerNames.map(b => b.toLowerCase()))
                         const filtered = brokers.filter(b =>
-                          allowedSet.has((b.salesman_name || "").toLowerCase()) &&
+                          allowedSet.has((b.broker_name || "").toLowerCase()) &&
                           (b.status || "").toLowerCase() === "active" &&
-                          (!search || (b.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
+                          (!search || (b.broker_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20
                         const pageItems = filtered.slice(start, start + 20)
                         return {
-                          options: pageItems.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
+                          options: pageItems.map((b: any) => ({ value: b.broker_name, label: b.broker_name, original: b })),
                           hasMore: start + 20 < filtered.length
                         };
                       }
                       const res = await brokerApi.getAll({ search, page, limit: 20 });
                       const list = res.data.brokers || [];
                       return {
-                        options: list.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
+                        options: list.map((b: any) => ({ value: b.broker_name, label: b.broker_name, original: b })),
                         hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}
@@ -1752,21 +1791,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       if (allowedSalespersonNames) {
                         const allowedSet = new Set(allowedSalespersonNames.map(s => s.toLowerCase()))
                         const filtered = salespersons.filter(s =>
-                          allowedSet.has((s.salesman_name || "").toLowerCase()) &&
+                          allowedSet.has((s.salesperson_name || "").toLowerCase()) &&
                           (s.status || "").toLowerCase() === "active" &&
-                          (!search || (s.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
+                          (!search || (s.salesperson_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20
                         const pageItems = filtered.slice(start, start + 20)
                         return {
-                          options: pageItems.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
+                          options: pageItems.map((s: any) => ({ value: s.salesperson_name, label: s.salesperson_name, original: s })),
                           hasMore: start + 20 < filtered.length
                         };
                       }
                       const res = await salespersonApi.getAll({ search, page, limit: 20 });
                       const list = res.data.salespersons || [];
                       return {
-                        options: list.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
+                        options: list.map((s: any) => ({ value: s.salesperson_name, label: s.salesperson_name, original: s })),
                         hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}

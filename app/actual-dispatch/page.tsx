@@ -20,7 +20,7 @@ import { FileUploadField } from "@/components/file-upload-field"
 import { Separator } from "@/components/ui/separator"
 import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { actualDispatchApi, vehicleDetailsApi, materialLoadApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
+import { actualDispatchApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -1484,75 +1484,78 @@ export default function ActualDispatchPage() {
         g._allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
       )
 
+      // Empty string / NaN → undefined, so a sparse field is simply omitted
+      // from the patch (never sent as a literal NaN, which Postgres rejects).
+      const numOrUndef = (v: any): number | undefined => {
+        if (v === "" || v === null || v === undefined) return undefined;
+        const n = parseFloat(v);
+        return isNaN(n) ? undefined : n;
+      };
+
       // Submit each item as a single consolidated request
       for (const item of itemsToProcess) {
-        const dsrNumber = item.d_sr_number || item.dsrNumber;
+        const dispatchId = item.id;
+        const dsrNumber = item.d_sr_number || item.dsrNumber; // display only
         const rowKey = item._rowKey;
         const confirmedQty = confirmDetails[rowKey]?.qty || item.qtyToDispatch;
 
         try {
-          // Combine ALL fields into one request
+          // v2-native camelCase payload (backend: services/actualDispatchService.js#submitActualDispatch)
           const payload = {
-            // Stage 5 fields
-            product_name_1: item.productName || item.product_name,
-            actual_qty_dispatch: confirmedQty || item.qtyToDispatch,
-
+            actualQtyDispatch: numOrUndef(confirmedQty ?? item.qtyToDispatch),
+            actualQty: numOrUndef(loadData.actualQty) ?? numOrUndef(confirmedQty),
             // Manually-entered Actual Dispatch Date (docRefDate, "YYYY-MM-DD").
-            // Persisted as the source-of-truth dispatch date (backend stores it into
-            // actual_1). Temporary until historical dates are fully backfilled.
-            actual_dispatch_date: docRefDate || null,
+            // Persisted as the source-of-truth dispatch date. Temporary until
+            // historical dates are fully backfilled.
+            actualDispatchDate: docRefDate || null,
 
-            // Stage 6 fields
-            vehicle_number: vehicleNumber,
-            check_status: vehicleData.checkStatus,
-            remarks: vehicleData.remarks,
-            fitness: vehicleData.fitness || "pending",
-            insurance: vehicleData.insurance || "pending",
-            tax_copy: vehicleData.tax_copy || "pending",
-            polution: vehicleData.polution || "pending",
-            permit1: vehicleData.permit1 || "pending",
-            permit2_out_state: vehicleData.permit2_out_state || "pending",
+            // Vehicle/driver/transporter: resolved server-side by id (not
+            // collected here) or natural-key fallback.
+            registrationNo: vehicleNumber || vehicleData.registration_no || undefined,
+            driverName: driverName || undefined,
+            drivingLicenceNo: driverData.license_no || undefined,
+            transporterName: loadData.transporterName || undefined,
 
-            // End Dates
-            fitness_end_date: vehicleData.fitness_end_date || null,
-            insurance_end_date: vehicleData.insurance_end_date || null,
-            tax_end_date: vehicleData.tax_end_date || null,
-            pollution_end_date: vehicleData.pollution_end_date || null,
-            permit1_end_date: vehicleData.permit1_end_date || null,
-            permit2_end_date: vehicleData.permit2_end_date || null,
+            checkStatus: vehicleData.checkStatus || undefined,
+            remarks: vehicleData.remarks || loadData.remarks || undefined,
 
-            // Stage 7 fields
-            actual_qty: parseFloat(loadData.actualQty) || parseFloat(confirmedQty),
-            weightment_slip_copy: loadData.weightmentSlip || "pending",
-            rst_no: loadData.rstNo,
-            gross_weight: parseFloat(loadData.grossWeight),
-            tare_weight: parseFloat(loadData.tareWeight),
-            net_weight: parseFloat(loadData.netWeightPacking) || null,
-            transporter_name: loadData.transporterName,
-            reason_of_difference_in_weight_if_any_speacefic: loadData.reason,
-            truck_no: loadData.truckNo || vehicleNumber,
-            vehicle_no_plate_image: loadData.vehicleNoPlateImage || "pending",
-            extra_weight: parseFloat(loadData.extraWeight) || 0,
-            difference: parseFloat(loadData.differanceWeight) || 0,
-            registration_no: vehicleData.registration_no || null,
-            vehicle_type: vehicleData.vehicle_type || null,
-            vehicle_overload_remarks: loadData.overloadRemarks || null,
-            gvw: parseFloat(vehicleData.gvw) || 0,
-            ulw: parseFloat(vehicleData.ulw) || 0,
-            passing_weight: parseFloat(vehicleData.passing_weight) || 0,
-            rto: vehicleData.rto || null,
-            road_tax: vehicleData.tax_end_date || null,
-            driver_name: driverName || null,
-            driver_contact_no: driverData.contact_no || null,
-            driving_license_no: driverData.license_no || null,
-            dl_valid_upto: driverData.valid_upto || null,
-            cash_bank: parseFloat(loadData.cash_bank) || 0,
-            diesel_advance: parseFloat(loadData.diesel_advance) || 0,
-            bhada: parseFloat(loadData.bhada) || 0,
-            user_id: user?.id || null // Track acting user's login id
+            vehicleNoPlateImage: loadData.vehicleNoPlateImage || undefined,
+
+            fitnessImage: vehicleData.fitness || undefined,
+            fitnessEndDate: vehicleData.fitness_end_date || undefined,
+            insuranceImage: vehicleData.insurance || undefined,
+            insuranceEndDate: vehicleData.insurance_end_date || undefined,
+            taxCopyImage: vehicleData.tax_copy || undefined,
+            taxEndDate: vehicleData.tax_end_date || undefined,
+            pollutionImage: vehicleData.polution || undefined,
+            pollutionEndDate: vehicleData.pollution_end_date || undefined,
+            permit1Image: vehicleData.permit1 || undefined,
+            permit1EndDate: vehicleData.permit1_end_date || undefined,
+            permit2OutStateImage: vehicleData.permit2_out_state || undefined,
+            permit2EndDate: vehicleData.permit2_end_date || undefined,
+
+            weightmentSlipCopy: loadData.weightmentSlip || undefined,
+            rstNo: loadData.rstNo || undefined,
+            grossWeight: numOrUndef(loadData.grossWeight),
+            tareWeight: numOrUndef(loadData.tareWeight),
+            netWeight: numOrUndef(loadData.netWeightPacking),
+            extraWeight: numOrUndef(loadData.extraWeight),
+            passingWeight: numOrUndef(vehicleData.passing_weight),
+            difference: numOrUndef(loadData.differanceWeight),
+
+            reasonOfWeightDifference: loadData.reason || undefined,
+            vehicleOverloadRemarks: loadData.overloadRemarks || undefined,
+
+            freightRateType: loadData.freightRateType || undefined,
+            freightAmount: numOrUndef(loadData.freightAmount),
+            advanceBhadaBank: numOrUndef(loadData.cash_bank),
+            advanceBhadaDieselAdvance: numOrUndef(loadData.diesel_advance),
+            advanceBhadaCash: numOrUndef(loadData.bhada),
+
+            userId: user?.id || null, // Track acting user's login id
           };
 
-          const res = await actualDispatchApi.submit(dsrNumber, payload);
+          const res = await actualDispatchApi.submit(dispatchId, payload);
 
           if (!res.success) throw new Error(res.message);
 
@@ -1577,16 +1580,16 @@ export default function ActualDispatchPage() {
         // Stock Transfer DOs are dispatched in one go — any sibling SKU left
         // unselected should vanish rather than stay pending for a later partial
         // dispatch (that behavior is only valid for regular Sales orders).
-        const deselectedStockTransferDsrNumbers = selectedGroups.flatMap((g: any) =>
+        const deselectedStockTransferDispatchIds = selectedGroups.flatMap((g: any) =>
           g._allProducts
             .filter((p: any) => !dialogSelectedProducts.includes(p._rowKey))
             .filter((p: any) => (p.order_category || "").toUpperCase() === "STOCK TRANSFER")
-            .map((p: any) => p.d_sr_number || p.dsrNumber)
+            .map((p: any) => p.id)
         ).filter(Boolean);
 
-        if (deselectedStockTransferDsrNumbers.length > 0) {
+        if (deselectedStockTransferDispatchIds.length > 0) {
           try {
-            await actualDispatchApi.cancelUnselected(deselectedStockTransferDsrNumbers);
+            await actualDispatchApi.cancelUnselected(deselectedStockTransferDispatchIds);
           } catch (error) {
             console.error('Failed to cancel unselected Stock Transfer SKUs', error);
           }
@@ -1670,11 +1673,12 @@ export default function ActualDispatchPage() {
       const failedReverts = [];
 
       for (const item of itemsToRevert) {
-        const dsrNumber = item.d_sr_number || item.dsrNumber;
-        if (!dsrNumber) continue;
+        const dispatchId = item.id;
+        const dsrNumber = item.d_sr_number || item.dsrNumber; // display only
+        if (!dispatchId) continue;
 
         try {
-          const res = await actualDispatchApi.revert(dsrNumber, user?.username || 'system', revertRemarks.trim());
+          const res = await actualDispatchApi.revert(dispatchId, user?.id || null, revertRemarks.trim());
           if (res.success) {
             successfulReverts.push(dsrNumber);
           } else {
@@ -1751,11 +1755,12 @@ export default function ActualDispatchPage() {
       const failedReverts = [];
 
       for (const item of itemsToRevert) {
-        const dsrNumber = item.d_sr_number || item.dsrNumber;
-        if (!dsrNumber) continue;
+        const dispatchId = item.id;
+        const dsrNumber = item.d_sr_number || item.dsrNumber; // display only
+        if (!dispatchId) continue;
 
         try {
-          const res = await actualDispatchApi.revertToDispatchPlanning(dsrNumber, user?.username || 'system', revertRemarks.trim());
+          const res = await actualDispatchApi.revertToDispatchPlanning(dispatchId, user?.id || null, revertRemarks.trim());
           if (res.success) {
             successfulReverts.push(dsrNumber);
           } else {
