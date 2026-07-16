@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
@@ -56,6 +57,7 @@ export default function ActualDispatchPage() {
   const [skus, setSkus] = useState<any[]>([])
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [docWarningDialog, setDocWarningDialog] = useState<{ open: boolean; messages: string[] }>({ open: false, messages: [] })
   const [confirmDetails, setConfirmDetails] = useState<Record<string, { qty: string }>>({})
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
@@ -1327,6 +1329,9 @@ export default function ActualDispatchPage() {
     // Collect every validation issue up front so the user sees them all in one toast,
     // instead of fixing them one at a time across repeated submit attempts.
     const validationErrors: string[] = [];
+    // Tax copy / Pollution certificate issues are soft — warn and let the user
+    // choose to continue instead of blocking the dispatch.
+    const docWarnings: string[] = [];
 
     // 1. Basic Vehicle Check
     if (isBanari && !vehicleNumber.trim()) {
@@ -1365,7 +1370,13 @@ export default function ActualDispatchPage() {
         if ((doc.key === 'polution' || doc.key === 'pollution_end_date') && vehicleData.fuel_type === 'Electrical') continue;
 
         if (!val) {
-          validationErrors.push(`${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`);
+          const message = `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`;
+          // Tax copy & Pollution certificate are optional — warn only, don't block.
+          if (doc.key === 'tax_copy' || doc.key === 'tax_end_date' || doc.key === 'polution' || doc.key === 'pollution_end_date') {
+            docWarnings.push(message);
+          } else {
+            validationErrors.push(message);
+          }
         }
       }
 
@@ -1415,7 +1426,13 @@ export default function ActualDispatchPage() {
       for (const field of dateFields) {
         const dateVal = vehicleData[field.key as keyof typeof vehicleData];
         if (dateVal && dateVal < minDate) {
-          validationErrors.push(`${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`);
+          const message = `${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`;
+          // Tax & Pollution expiry are optional — warn only, don't block.
+          if (field.key === 'tax_end_date' || field.key === 'pollution_end_date') {
+            docWarnings.push(message);
+          } else {
+            validationErrors.push(message);
+          }
         }
       }
 
@@ -1444,6 +1461,15 @@ export default function ActualDispatchPage() {
       return;
     }
 
+    if (docWarnings.length > 0) {
+      setDocWarningDialog({ open: true, messages: docWarnings });
+      return;
+    }
+
+    await submitDispatch();
+  }
+
+  const submitDispatch = async () => {
     setIsProcessing(true)
     try {
       if (selectedGroups.length === 0 || dialogSelectedProducts.length === 0) {
@@ -3220,6 +3246,34 @@ export default function ActualDispatchPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Tax Copy / Pollution Warning Dialog — these docs are optional, so we warn but don't block */}
+      <AlertDialog open={docWarningDialog.open} onOpenChange={(open) => setDocWarningDialog(prev => ({ ...prev, open }))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Missing or Expired Documents</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p className="mb-2">The following documents are missing or expired. You can still continue with the dispatch.</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {docWarningDialog.messages.map((msg, i) => <li key={i}>{msg}</li>)}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setDocWarningDialog({ open: false, messages: [] });
+                submitDispatch();
+              }}
+            >
+              Continue Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Slip Dialog */}
       <Dialog open={isSlipDialogOpen} onOpenChange={setIsSlipDialogOpen}>
