@@ -459,20 +459,20 @@ export const dispatchPlanningApi = {
   /**
    * Revert dispatch planning to pre-approval
    */
-  revert: async (id: number, username: string, remarks?: string): Promise<ApiResponse> => {
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
     return request(`/dispatch-planning/revert/${id}`, {
       method: 'POST',
-      body: JSON.stringify({ username, remarks }),
+      body: JSON.stringify({ userId, remarks }),
     });
   },
 
   /**
    * Cancel an order from Dispatch Planning — Super Admin only
    */
-  cancel: async (id: number, username: string, remarks: string): Promise<ApiResponse> => {
+  cancel: async (id: number, userId: number | null, remarks: string): Promise<ApiResponse> => {
     return request(`/dispatch-planning/cancel/${id}`, {
       method: 'POST',
-      body: JSON.stringify({ username, remarks }),
+      body: JSON.stringify({ userId, remarks }),
     });
   },
 
@@ -489,7 +489,7 @@ export const dispatchPlanningApi = {
   /**
    * Pre-close quantity for an order
    */
-  preclose: async (id: number, data: { preclose_qty: number, username: string, action: string, preclose_remarks: string }): Promise<ApiResponse> => {
+  preclose: async (id: number, data: { precloseQty: number, userId: number | null, action: string, precloseRemarks: string }): Promise<ApiResponse> => {
     return request(`/dispatch-planning/preclose/${id}`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1201,9 +1201,9 @@ export const depotApi = {
   },
 
   /**
-   * Update depot
+   * Update depot (id = real serial PK, not the legacy depot_id text code)
    */
-  update: async (id: string, data: any): Promise<ApiResponse> => {
+  update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/depots/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -1211,13 +1211,13 @@ export const depotApi = {
   },
 
   /**
-   * Delete depot
+   * Delete depot (id = real serial PK)
    */
-  delete: async (id: string): Promise<ApiResponse> => {
+  delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/depots/${id}`, { method: 'DELETE' });
   },
   getPending: async (): Promise<ApiResponse> => request('/depots/pending'),
-  review: async (id: string, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/depots/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/depots/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const processStageApi = {
@@ -1283,9 +1283,9 @@ export const brokerApi = {
   },
 
   /**
-   * Update broker
+   * Update broker (id = real serial PK, not the legacy broker_id text code)
    */
-  update: async (id: string, data: any): Promise<ApiResponse> => {
+  update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/brokers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -1293,13 +1293,13 @@ export const brokerApi = {
   },
 
   /**
-   * Delete broker
+   * Delete broker (id = real serial PK)
    */
-  delete: async (id: string): Promise<ApiResponse> => {
+  delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/brokers/${id}`, { method: 'DELETE' });
   },
   getPending: async (): Promise<ApiResponse> => request('/brokers/pending'),
-  review: async (id: string, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/brokers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/brokers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 /**
@@ -1554,42 +1554,24 @@ export const salespersonApi = {
     });
   },
 
-  update: async (id: string, data: any): Promise<ApiResponse> => {
+  // id = real serial PK, not the legacy broker_id text code
+  update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/salespersons/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
-  delete: async (id: string): Promise<ApiResponse> => {
+  delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/salespersons/${id}`, { method: 'DELETE' });
   },
   getPending: async (): Promise<ApiResponse> => request('/salespersons/pending'),
-  review: async (id: string, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/salespersons/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/salespersons/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 /**
  * Tag API
  */
-export const tagApi = {
-  getAll: async (params?: any): Promise<ApiResponse> => {
-    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
-    return request(`/tags${queryString}`);
-  },
-  getById: async (id: number): Promise<ApiResponse> => {
-    return request(`/tags/${id}`);
-  },
-  create: async (data: any): Promise<ApiResponse> => {
-    return request('/tags', { method: 'POST', body: JSON.stringify(data) });
-  },
-  update: async (id: number, data: any): Promise<ApiResponse> => {
-    return request(`/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-  },
-  delete: async (id: number): Promise<ApiResponse> => {
-    return request(`/tags/${id}`, { method: 'DELETE' });
-  },
-};
-
 /**
  * Dashboard API
  */
@@ -1623,8 +1605,9 @@ export const ownerDashboardApi = {
       : '';
     return request(`${API_ENDPOINTS.ownerDashboard.userDetail}/${userId}${queryString}`);
   },
-  getCustomerOrders: async (customer: string, params?: Record<string, any>): Promise<ApiResponse> => {
-    const qs = new URLSearchParams({ customer, ...Object.fromEntries(Object.entries(params || {}).filter(([,v]) => v)) }).toString();
+  getCustomerOrders: async (customerId: string, params?: Record<string, any>): Promise<ApiResponse> => {
+    // customerId is the customers FK ('' = the unmapped "—" group), never a name.
+    const qs = new URLSearchParams({ customerId: customerId ?? '', ...Object.fromEntries(Object.entries(params || {}).filter(([,v]) => v)) }).toString();
     return request(`${API_ENDPOINTS.ownerDashboard.customerOrders}?${qs}`);
   },
   getOrderJourney: async (orderNo: string): Promise<ApiResponse> => {

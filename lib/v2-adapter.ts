@@ -104,8 +104,8 @@ function base(row: any): Record<string, any> {
   r.transfer = dsp.isTransfer !== undefined
     ? (dsp.isTransfer ? 'yes' : 'no')
     : (o.billCompanyName ? 'yes' : (r.transfer ?? null));
-  r.processid = o.processId ?? null;
-  r.manual_sauda_no = o.processId ?? null;
+  r.processid = o.manualSaudaNo ?? null;
+  r.manual_sauda_no = o.manualSaudaNo ?? null;
   r.order_punch_remarks = o.orderPunchRemarks ?? null;
   r.upload_so = o.uploadSo ?? null;
   r.upload_copy = o.uploadCopy ?? null;
@@ -142,6 +142,13 @@ function base(row: any): Record<string, any> {
   r.order_id = o.id ?? null;
   r.order_item_id = oi.id ?? null;
 
+  // Doer (who performed each stage) — only present when the list query joined
+  // `users` for that stage (see orderDispatchService.js/orderApprovalService.js).
+  if (row.orderPunchUser !== undefined) r.order_punch_user = row.orderPunchUser;
+  // Explicit key (not the generic merged `created_at`, which a split order_item's
+  // own created_at would shadow — orderItem merges first in mergeNested above).
+  if (row.orderCreatedAt !== undefined) r.order_punch_at = row.orderCreatedAt ?? null;
+
   return r;
 }
 
@@ -152,12 +159,46 @@ function base(row: any): Record<string, any> {
 export function flattenOrderItemStage(row: any): Record<string, any> {
   const r = base(row);
   r.id = row.orderItem?.id ?? null;
-  r.planned_1 = row.plannedAt ?? null;
-  r.actual_1 = row.actualAt ?? null;
+
+  // Own-gate timestamps, keyed to whichever gate this row actually belongs to
+  // (Pre-Approval / Order-Approval / Dispatch-Planning all reuse `plannedAt`/
+  // `actualAt` as generic column names) so they land under the right
+  // FIELD_GROUPS level instead of always being labeled "Pre-Approval".
+  if (row.dispatchPlanningId !== undefined) {
+    r.planned_3 = row.plannedAt ?? null;
+    r.actual_3 = row.actualAt ?? null;
+  } else if (row.orderApprovalId !== undefined) {
+    r.planned_2 = row.plannedAt ?? null;
+    r.actual_2 = row.actualAt ?? null;
+  } else {
+    r.planned_1 = row.plannedAt ?? null;
+    r.actual_1 = row.actualAt ?? null;
+  }
+
+  // Rolled-up earlier-gate timestamps — present only when the list query for
+  // this stage also joined that earlier gate (so downstream history dialogs
+  // show the real Pre-Approval / Order-Approval times, not this stage's own).
+  if (row.preApprovalPlannedAt !== undefined) r.planned_1 = row.preApprovalPlannedAt ?? null;
+  if (row.preApprovalActualAt !== undefined) r.actual_1 = row.preApprovalActualAt ?? null;
+  if (row.orderApprovalPlannedAt !== undefined) r.planned_2 = row.orderApprovalPlannedAt ?? null;
+  if (row.orderApprovalActualAt !== undefined) r.actual_2 = row.orderApprovalActualAt ?? null;
+
   // Order-Approval checklist / status passthroughs.
   if (row.overallStatus !== undefined) r.overall_status_of_order = row.overallStatus;
+  if (row.rateIsRightlyAsPerCurrentMarketRate !== undefined) r.rate_is_rightly_as_per_current_market_rate = row.rateIsRightlyAsPerCurrentMarketRate;
+  if (row.weAreDealingInOrderedSku !== undefined) r.we_are_dealing_in_ordered_sku = row.weAreDealingInOrderedSku;
+  if (row.partyCreditStatus !== undefined) r.party_credit_status = row.partyCreditStatus;
+  if (row.dispatchDateConfirmed !== undefined) r.dispatch_date_confirmed = row.dispatchDateConfirmed;
+  if (row.orderConfirmationWithCustomer !== undefined) r.order_confirmation_with_customer = row.orderConfirmationWithCustomer;
   if (row.revertRemarks !== undefined) r.revert_planning_remarks = row.revertRemarks;
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
+  if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
+  if (row.dispatchPlanningUser !== undefined) r.dispatch_planning_user = row.dispatchPlanningUser;
+  // Set when this line was reopened by a "revert to Dispatch Planning" split
+  // and has no approval row of its own — the names above were resolved from
+  // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
+  if (row.approvalInherited !== undefined) r.approval_inherited = row.approvalInherited;
   return r;
 }
 
@@ -174,6 +215,17 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Earlier-gate audit trail — the dispatch slip/voucher printout's
+  // Pre-Approve / Approve By block reads these (order_punch_at/_user come
+  // through base() already).
+  if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
+  if (row.preApprovalActualAt !== undefined) r.pre_approval_at = row.preApprovalActualAt ?? null;
+  if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
+  if (row.orderApprovalActualAt !== undefined) r.order_approval_at = row.orderApprovalActualAt ?? null;
+  // Set when this line was reopened by a "revert to Dispatch Planning" split
+  // and has no approval row of its own — the names above were resolved from
+  // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
+  if (row.approvalInherited !== undefined) r.approval_inherited = row.approvalInherited;
   return r;
 }
 
@@ -186,6 +238,8 @@ export function flattenSecurityStage(row: any): Record<string, any> {
   r.security_check_id = chk.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.planned_1 = dsp.plannedAt ?? null;
+  r.actual_1 = dsp.actualAt ?? null;
   r.planned_4 = chk.plannedAt ?? null;
   r.actual_4 = chk.actualAt ?? null;
   r.security_guard_status = chk.verdictStatus ?? null;
@@ -203,6 +257,9 @@ export function flattenInvoiceStage(row: any): Record<string, any> {
   r.invoice_id = inv.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.planned_1 = dsp.plannedAt ?? null;
+  r.actual_1 = dsp.actualAt ?? null;
+  r.lrc_actual_1 = dsp.actualAt ?? null;
   r.bill_type = inv.billType ?? null;
   r.invoice_no = inv.invoiceNo ?? null;
   r.invoice_date = inv.invoiceDate ?? null;
@@ -227,6 +284,9 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   r.gate_out_id = g.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.planned_1 = dsp.plannedAt ?? null;
+  r.actual_1 = dsp.actualAt ?? null;
+  r.lrc_actual_1 = dsp.actualAt ?? null;
   r.gate_pass_copy = g.gatePassCopy ?? null;
   r.vehicle_loaded_image = g.vehicleLoadedImage ?? null;
   r.planned_7 = g.plannedAt ?? null;
@@ -243,6 +303,8 @@ export function flattenMaterialReceiptStage(row: any): Record<string, any> {
   r.material_receipt_id = mr.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.planned_1 = dsp.plannedAt ?? null;
+  r.actual_1 = dsp.actualAt ?? null;
   r.material_received_date = mr.materialReceivedDate ?? null;
   r.received_image_proof = mr.receivedImageProof ?? null;
   r.damage_status = mr.damageStatus ?? null;
@@ -263,6 +325,8 @@ export function flattenDamageStage(row: any): Record<string, any> {
   r.damage_adjustment_id = da.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.planned_1 = dsp.plannedAt ?? null;
+  r.actual_1 = dsp.actualAt ?? null;
   r.status_2 = da.status ?? null;
   r.credit_note_date = da.creditNoteDate ?? null;
   r.credit_note_no = da.creditNoteNo ?? null;

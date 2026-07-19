@@ -30,7 +30,7 @@ import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuDetailsApi, depotApi } from "@/lib/api-service"
+import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -295,7 +295,7 @@ export default function CommitmentPunchPage() {
   // Fetch SKU options — only show SKUs with tag = "Yes"
   const fetchSkuOptions = useCallback(async (search: string, _page: number) => {
     try {
-      const res = await skuDetailsApi.getAll({ search: search || "", limit: 100 })
+      const res = await skuApi.getAll({ search: search || "", limit: 100 })
       const items = res.success
         ? (res.data.skuDetails || res.data.skus || res.data.sku_details || (Array.isArray(res.data) ? res.data : []))
         : []
@@ -389,14 +389,29 @@ export default function CommitmentPunchPage() {
 
     setIsSubmitting(true)
     try {
+      // The backend links a commitment to the customer via a real FK
+      // (customerId), not the name string the combobox tracks - resolve it
+      // the same way pre-approval resolves a SKU name to an id.
+      let customerId = customerList.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
+      if (!customerId) {
+        const res = await customerApi.getAll({ search: partyName, limit: 5 })
+        const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
+        customerId = items.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
+      }
+      if (!customerId) {
+        toast({ title: "Unknown Customer", description: `Could not match "${partyName}" to a known customer. Please pick one from the list.`, variant: "destructive" })
+        setIsSubmitting(false)
+        return
+      }
+
       const payload = {
-        commitment_date: commitmentDate,
-        party_name: partyName,
-        customer_contact_person_name: contactPerson || null,
-        whatsapp_no: whatsappNo || null,
+        commitmentDate: commitmentDate,
+        customerId,
+        customerContactPersonName: contactPerson || null,
+        whatsappNo: whatsappNo || null,
         address: customerAddress || null,
         rows: rows.map(r => ({
-          oil_type: r.oil_type,
+          oilType: r.oil_type,
           quantity: parseFloat(r.quantity),
           unit: r.unit || null,
           rate: parseFloat(r.rate),
@@ -506,34 +521,64 @@ export default function CommitmentPunchPage() {
         } catch { /* ignore upload error */ }
       }
 
+      // The backend links depot/broker/salesperson via real FKs (depotId/
+      // brokerId/salespersonId), not the name strings these comboboxes track -
+      // resolve them once up front, same pattern as the customerId resolution
+      // above. Broker/salesperson are gated on processOrderTypeThrough (the
+      // combobox that actually drives their visibility in this dialog) - NOT
+      // the unrelated top-level `orderType` state, which has no control bound
+      // to it in this dialog and can never be "broker"/"salesperson" here.
+      const depotRes = await depotApi.getAll({ search: processDepoName, all: "true" })
+      const depotItems = depotRes.success ? (depotRes.data.depots || (Array.isArray(depotRes.data) ? depotRes.data : [])) : []
+      const depotId = depotItems.find((d: any) => (d.depot_name || "").toLowerCase() === processDepoName.toLowerCase())?.id ?? null
+
+      let brokerId: number | null = null
+      if (processOrderTypeThrough === "broker" && brokerName) {
+        const brokerRes = await brokerApi.getAll({ search: brokerName, limit: 30 })
+        const brokerItems = brokerRes.success ? (brokerRes.data.brokers || (Array.isArray(brokerRes.data) ? brokerRes.data : [])) : []
+        brokerId = brokerItems.find((b: any) => (b.salesman_name || b.broker_name || "").toLowerCase() === brokerName.toLowerCase())?.id ?? null
+      }
+      let salespersonId: number | null = null
+      if (processOrderTypeThrough === "salesperson" && salespersonName) {
+        const spRes = await salespersonApi.getAll({ search: salespersonName, limit: 30 })
+        const spItems = spRes.success ? (spRes.data.salespersons || spRes.data.brokers || (Array.isArray(spRes.data) ? spRes.data : [])) : []
+        salespersonId = spItems.find((s: any) => (s.salesman_name || s.salesperson_name || "").toLowerCase() === salespersonName.toLowerCase())?.id ?? null
+      }
+
+      const orderThroughMap: Record<string, string> = { direct: "Direct", broker: "Broker", salesperson: "Salesperson" }
+
       for (const id of ids) {
         // For each selected commitment, submit each SKU row as a separate detail record
         for (const skuRow of skuRows) {
+          const skuId = skuRegistry[skuRow.sku]?.id ?? null
+          if (!skuId) {
+            errorMsgs.push(`Could not match "${skuRow.sku}" to a known SKU. Please pick one from the list.`)
+            continue
+          }
           const payload = {
-            po_no: processPoNo,
-            po_date: processPoDate,
-            sku: skuRow.sku,
-            sku_quantity: parseFloat(skuRow.qty),
-            sku_rate: parseFloat(skuRow.rate),
-            order_type: orderType || null,
-            transport_type: transportType || null,
-            broker_name: orderType === "broker" ? brokerName : null,
-            salesperson_name: orderType === "salesperson" ? salespersonName : null,
-            order_type_delivery_purpose: processDeliveryPurpose,
-            depo_name: processDepoName,
-            advance_payment: processAdvancePayment,
-            advance_payment_taken: processAdvancePaymentTaken,
-            payment_terms: processPaymentTerms,
-            is_order_through: processOrderTypeThrough || null,
-            order_type_regular_preapproval: processOrderType || null,
-            start_date: processStartDate || null,
-            end_date: processEndDate || null,
-            actual_delivery_date: processActualDeliveryDate || null,
-            future_period_date: processFuturePeriodDate || null,
-            upload_copy: uploadedCopyUrl,
+            poNo: processPoNo,
+            poDate: processPoDate,
+            skuId,
+            skuQuantity: parseFloat(skuRow.qty),
+            skuRate: parseFloat(skuRow.rate),
+            orderType: processOrderType || null,
+            typeOfTransporting: transportType || null,
+            brokerId,
+            salespersonId,
+            deliveryPurpose: processDeliveryPurpose,
+            depotId,
+            advanceAmount: processAdvancePayment ? parseFloat(processAdvancePayment) : null,
+            advancePaymentToBeTaken: processAdvancePaymentTaken === "YES",
+            paymentTerms: processPaymentTerms,
+            orderThrough: orderThroughMap[processOrderTypeThrough] ?? null,
+            startDate: processStartDate || null,
+            endDate: processEndDate || null,
+            deliveryDate: processActualDeliveryDate || null,
+            futurePeriodDate: processFuturePeriodDate || null,
+            uploadCopy: uploadedCopyUrl,
             remarks: processRemarks || null,
-            order_category: processOrderCategory,
-            user_id: user?.id || null, // Track acting user's login id (stamps order_punch_user)
+            orderCategory: processOrderCategory,
+            userId: user?.id || null, // Track acting user's login id (stamps order_punch_user)
           }
           const res = await commitmentPunchApi.processCommitment(id, payload)
           if (res.success) {

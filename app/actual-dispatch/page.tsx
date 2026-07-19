@@ -34,6 +34,143 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
+function formatDate(dateStr: string) {
+  if (!dateStr) return "—";
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+// Groups raw pending-dispatch rows (from the API) by base DO number. Pulled out
+// of the component so it can be reused both for the currently-loaded page
+// (`displayRows`) and for a targeted, complete re-fetch of one specific DO (see
+// `fetchCompleteGroupsForKeys` below) — the two need identical grouping logic.
+// Pass `depoFilter` = "" to skip the depot-tab filter (used for the targeted
+// fetch, where depot scoping is already enforced server-side).
+function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
+  const grouped: { [key: string]: any } = {}
+
+  orders.forEach((order: any) => {
+    const custName = (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.customerName || "Unknown")
+    const doNumber = order.so_no || order.soNo || "DO/26-27/0001"
+    // Group by Base DO (e.g. DO/26-27/0001 from DO/26-27/0001A)
+    const baseDoMatch = doNumber.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
+    const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : doNumber
+
+    // Group by DO Date (party_so_date)
+    const groupKey = baseDo;
+
+    if (!grouped[groupKey]) {
+      grouped[groupKey] = {
+        customerName: custName,
+        _rowKey: groupKey,
+        _allProducts: [],
+        _productCount: 0,
+        _ordersMap: {},
+        _allBaseDos: new Set()
+      }
+    }
+
+    grouped[groupKey]._allBaseDos.add(baseDo)
+
+    if (!grouped[groupKey]._ordersMap[baseDo]) {
+      const internalOrder = order.data?.orderData || order;
+      const checklist = order.data?.checklistResults || {};
+
+      grouped[groupKey]._ordersMap[baseDo] = {
+        ...order,
+        baseDo,
+        _products: [],
+        // Detailed Fields (Robust Mapping)
+        deliveryPurpose: internalOrder.order_type_delivery_purpose || internalOrder.orderPurpose || "—",
+        startDate: internalOrder.start_date || internalOrder.startDate || "—",
+        endDate: internalOrder.end_date || internalOrder.endDate || "—",
+        deliveryDate: internalOrder.delivery_date || internalOrder.deliveryDate || internalOrder.timestamp || "—",
+        orderType: internalOrder.order_type || internalOrder.orderType || "—",
+        customerType: internalOrder.customer_type || internalOrder.customerType || "—",
+        partySoDate: formatDate(internalOrder.party_so_date || internalOrder.partySoDate),
+        totalWithGst: internalOrder.total_amount_with_gst || internalOrder.totalWithGst || "—",
+        transportType: internalOrder.type_of_transporting || internalOrder.transportType || "—",
+        contactPerson: internalOrder.customer_contact_person_name || internalOrder.contactPerson || "—",
+        whatsapp: internalOrder.customer_contact_person_whatsapp_no || internalOrder.whatsapp || "—",
+        address: internalOrder.customer_address || internalOrder.address || "—",
+        paymentTerms: internalOrder.payment_terms || internalOrder.paymentTerms || "—",
+        advanceTaken: internalOrder.advance_payment_to_be_taken || internalOrder.advanceTaken || false,
+        advanceAmount: internalOrder.advance_amount || internalOrder.advanceAmount || "—",
+        isBroker: internalOrder.is_order_through_broker || internalOrder.isBroker || false,
+        brokerName: internalOrder.broker_name || internalOrder.brokerName || "—",
+        depoName: internalOrder.depo_name || internalOrder.depoName || "—",
+        orderPunchRemarks: internalOrder.order_punch_remarks || internalOrder.orderPunchRemarks || "—",
+        uploadSo: internalOrder.upload_so || internalOrder.uploadSo || null,
+        rateRightly: internalOrder.rate_is_rightly_as_per_current_market_rate || checklist.rate || "—",
+        dealingInOrder: internalOrder.we_are_dealing_in_ordered_sku || checklist.sku || "—",
+        partyCredit: internalOrder.party_credit_status || checklist.credit || "—",
+        dispatchConfirmed: internalOrder.dispatch_date_confirmed || checklist.dispatch || "—",
+        overallStatus: internalOrder.overall_status_of_order || checklist.overall || "—",
+        orderConfirmation: internalOrder.order_confirmation_with_customer || checklist.confirm || "—",
+        revertSecurityRemarks: order.revert_security_remarks || internalOrder.revert_security_remarks || order.revertSecurityRemarks || "—",
+        grossWeight: internalOrder.gross_weight || "—",
+        tareWeight: internalOrder.tare_weight || "—",
+        netWeight: internalOrder.net_weight || "—",
+        weightDiff: internalOrder.weight_diff || "—",
+        extraWeight: internalOrder.extra_weight || "—",
+        weightmentSlip: internalOrder.weightment_slip_copy || null,
+        rstNo: internalOrder.rst_no || "—",
+        weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—"
+      }
+    }
+
+    // Add individual product to the group
+    const productQty = parseFloat(order.qty_to_be_dispatched || order.qtyToDispatch || 0);
+    const productMeta = {
+      ...order,
+      _rowKey: `${custName}-${baseDo}-${order.d_sr_number || order.id}`,
+      orderNo: order.so_no || order.soNo,
+      productName: order.product_name || order.productName,
+      qtyToDispatch: order.qty_to_be_dispatched || order.qtyToDispatch,
+      deliveryFrom: order.dispatch_from || order.deliveryFrom,
+      dsrNumber: order.d_sr_number,
+      rate: order.final_rate || order.rate_of_material,
+      processid: order.processid || null,
+      uploadSo: order.upload_so || order.uploadSo || null,
+      // Ensure party details are present on each product for the slip generator
+      customerName: custName,
+      address: order.customer_delivery_address || order.customer_address || order.address || grouped[groupKey]._ordersMap[baseDo]?.address || "—",
+      whatsapp: order.customer_contact_person_whatsapp_no || order.whatsapp || grouped[groupKey]._ordersMap[baseDo]?.whatsapp || "—",
+      brokerName: order.broker_name || order.brokerName || grouped[groupKey]._ordersMap[baseDo]?.brokerName || "—"
+    }
+
+    grouped[groupKey]._ordersMap[baseDo]._products.push(productMeta)
+    grouped[groupKey]._allProducts.push(productMeta)
+  })
+
+  return Object.values(grouped).map((group: any) => {
+    const firstOrderDetails = Object.values(group._ordersMap)[0] as any || {};
+    return {
+      ...group,
+      ...firstOrderDetails, // Flatten all detail fields into the group object
+      orderNo: Array.from(group._allBaseDos).join(", "),
+      processId: group._allProducts[0]?.processid || "—",
+      uploadSo: group._allProducts[0]?.uploadSo || group._allProducts[0]?.upload_so || null,
+      qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qtyToDispatch || 0), 0),
+      orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
+      _productCount: group._allProducts.length
+    };
+  }).filter(group => {
+    if (group._productCount <= 0) return false;
+    if (!depoFilter) return true;
+    return (group.depoName || "").trim().toUpperCase() === depoFilter.trim().toUpperCase();
+  })
+}
+
 export default function ActualDispatchPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
@@ -251,20 +388,6 @@ export default function ActualDispatchPage() {
   }
 
   // --- Helper Functions ---
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "—";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    } catch (e) {
-      return dateStr;
-    }
-  };
 
   const getSkuWeight = (productName: string): number => {
     if (!productName || skus.length === 0) return 0
@@ -634,131 +757,58 @@ export default function ActualDispatchPage() {
 
 
   const displayRows = useMemo(() => {
-    const grouped: { [key: string]: any } = {}
-
-    filteredPendingOrders.forEach((order: any) => {
-      const custName = (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.customerName || "Unknown")
-      const doNumber = order.so_no || order.soNo || "DO/26-27/0001"
-      // Group by Base DO (e.g. DO/26-27/0001 from DO/26-27/0001A)
-      const baseDoMatch = doNumber.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
-      const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : doNumber
-
-      // Group by DO Date (party_so_date)
-      const groupKey = baseDo;
-
-      if (!grouped[groupKey]) {
-        grouped[groupKey] = {
-          customerName: custName,
-          _rowKey: groupKey,
-          _allProducts: [],
-          _productCount: 0,
-          _ordersMap: {},
-          _allBaseDos: new Set()
-        }
-      }
-
-      grouped[groupKey]._allBaseDos.add(baseDo)
-
-      if (!grouped[groupKey]._ordersMap[baseDo]) {
-        const internalOrder = order.data?.orderData || order;
-        const checklist = order.data?.checklistResults || {};
-
-        grouped[groupKey]._ordersMap[baseDo] = {
-          ...order,
-          baseDo,
-          _products: [],
-          // Detailed Fields (Robust Mapping)
-          deliveryPurpose: internalOrder.order_type_delivery_purpose || internalOrder.orderPurpose || "—",
-          startDate: internalOrder.start_date || internalOrder.startDate || "—",
-          endDate: internalOrder.end_date || internalOrder.endDate || "—",
-          deliveryDate: internalOrder.delivery_date || internalOrder.deliveryDate || internalOrder.timestamp || "—",
-          orderType: internalOrder.order_type || internalOrder.orderType || "—",
-          customerType: internalOrder.customer_type || internalOrder.customerType || "—",
-          partySoDate: formatDate(internalOrder.party_so_date || internalOrder.partySoDate),
-          totalWithGst: internalOrder.total_amount_with_gst || internalOrder.totalWithGst || "—",
-          transportType: internalOrder.type_of_transporting || internalOrder.transportType || "—",
-          contactPerson: internalOrder.customer_contact_person_name || internalOrder.contactPerson || "—",
-          whatsapp: internalOrder.customer_contact_person_whatsapp_no || internalOrder.whatsapp || "—",
-          address: internalOrder.customer_address || internalOrder.address || "—",
-          paymentTerms: internalOrder.payment_terms || internalOrder.paymentTerms || "—",
-          advanceTaken: internalOrder.advance_payment_to_be_taken || internalOrder.advanceTaken || false,
-          advanceAmount: internalOrder.advance_amount || internalOrder.advanceAmount || "—",
-          isBroker: internalOrder.is_order_through_broker || internalOrder.isBroker || false,
-          brokerName: internalOrder.broker_name || internalOrder.brokerName || "—",
-          depoName: internalOrder.depo_name || internalOrder.depoName || "—",
-          orderPunchRemarks: internalOrder.order_punch_remarks || internalOrder.orderPunchRemarks || "—",
-          uploadSo: internalOrder.upload_so || internalOrder.uploadSo || null,
-          rateRightly: internalOrder.rate_is_rightly_as_per_current_market_rate || checklist.rate || "—",
-          dealingInOrder: internalOrder.we_are_dealing_in_ordered_sku || checklist.sku || "—",
-          partyCredit: internalOrder.party_credit_status || checklist.credit || "—",
-          dispatchConfirmed: internalOrder.dispatch_date_confirmed || checklist.dispatch || "—",
-          overallStatus: internalOrder.overall_status_of_order || checklist.overall || "—",
-          orderConfirmation: internalOrder.order_confirmation_with_customer || checklist.confirm || "—",
-          revertSecurityRemarks: order.revert_security_remarks || internalOrder.revert_security_remarks || order.revertSecurityRemarks || "—",
-          grossWeight: internalOrder.gross_weight || "—",
-          tareWeight: internalOrder.tare_weight || "—",
-          netWeight: internalOrder.net_weight || "—",
-          weightDiff: internalOrder.weight_diff || "—",
-          extraWeight: internalOrder.extra_weight || "—",
-          weightmentSlip: internalOrder.weightment_slip_copy || null,
-          rstNo: internalOrder.rst_no || "—",
-          weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—"
-        }
-      }
-
-      // Add individual product to the group
-      const productQty = parseFloat(order.qty_to_be_dispatched || order.qtyToDispatch || 0);
-      const productMeta = {
-        ...order,
-        _rowKey: `${custName}-${baseDo}-${order.d_sr_number || order.id}`,
-        orderNo: order.so_no || order.soNo,
-        productName: order.product_name || order.productName,
-        qtyToDispatch: order.qty_to_be_dispatched || order.qtyToDispatch,
-        deliveryFrom: order.dispatch_from || order.deliveryFrom,
-        dsrNumber: order.d_sr_number,
-        rate: order.final_rate || order.rate_of_material,
-        processid: order.processid || null,
-        uploadSo: order.upload_so || order.uploadSo || null,
-        // Ensure party details are present on each product for the slip generator
-        customerName: custName,
-        address: order.customer_delivery_address || order.customer_address || order.address || grouped[groupKey]._ordersMap[baseDo]?.address || "—",
-        whatsapp: order.customer_contact_person_whatsapp_no || order.whatsapp || grouped[groupKey]._ordersMap[baseDo]?.whatsapp || "—",
-        brokerName: order.broker_name || order.brokerName || grouped[groupKey]._ordersMap[baseDo]?.brokerName || "—"
-      }
-
-      grouped[groupKey]._ordersMap[baseDo]._products.push(productMeta)
-      grouped[groupKey]._allProducts.push(productMeta)
-    })
-
-    return Object.values(grouped).map((group: any) => {
-      const firstOrderDetails = Object.values(group._ordersMap)[0] as any || {};
-      return {
-        ...group,
-        ...firstOrderDetails, // Flatten all detail fields into the group object
-        orderNo: Array.from(group._allBaseDos).join(", "),
-        processId: group._allProducts[0]?.processid || "—",
-        uploadSo: group._allProducts[0]?.uploadSo || group._allProducts[0]?.upload_so || null,
-        qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qtyToDispatch || 0), 0),
-        orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
-        _productCount: group._allProducts.length
-      };
-    }).filter(group => {
-      if (group._productCount <= 0) return false;
-      if (!selectedDepoTab) return true;
-      return (group.depoName || "").trim().toUpperCase() === selectedDepoTab.trim().toUpperCase();
-    })
+    return groupOrdersByBaseDo(filteredPendingOrders, selectedDepoTab)
   }, [filteredPendingOrders, selectedDepoTab])
 
   // Accumulates every group ever rendered, keyed by _rowKey, across page/search
   // changes — displayRows only reflects the current server page, but a DO
   // selected on an earlier page/search still needs to be resolvable here so
-  // Confirm Dispatch can include it.
+  // Confirm Dispatch can include it. Kept only as a fallback now — see
+  // fetchCompleteGroupsForKeys below, which is the primary source of truth.
   const selectedGroupsCacheRef = useRef<Record<string, any>>({})
   useEffect(() => {
     displayRows.forEach((row: any) => {
       selectedGroupsCacheRef.current[row._rowKey] = row
     })
   }, [displayRows])
+
+  // A single DO's pending shipments can be split across pages of the general
+  // list (one shipment planned weeks ago, a sibling created just now after a
+  // revert/re-plan cycle) — the page you happen to be viewing, or the cache
+  // above, may only hold PART of that DO. Before confirming dispatch, fetch a
+  // fresh, complete, authoritative set of every pending shipment for each
+  // requested base-DO key directly from the server, so a sibling shipment can
+  // never be silently left out just because it's not on the current page.
+  const fetchCompleteGroupsForKeys = useCallback(async (keys: string[]): Promise<Record<string, any>> => {
+    const allowedDepots = user?.depo_access?.['Actual Dispatch'] || []
+    const byKey: Record<string, any> = {}
+    await Promise.all(keys.map(async (key) => {
+      try {
+        const response = await actualDispatchApi.getPending({
+          page: 1,
+          limit: 200,
+          search: key,
+          depo_names: allowedDepots,
+        })
+        if (!response.success) return
+        // The search above is a fuzzy match server-side — filter down to rows
+        // whose base DO is an EXACT match for `key`, so a longer DO number that
+        // happens to contain this one as a substring can't sneak in.
+        const rows = (response.data?.dispatches || []).filter((order: any) => {
+          const doNumber = order.so_no || order.soNo || ""
+          const baseDoMatch = doNumber.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
+          const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : doNumber.toUpperCase()
+          return baseDo === key
+        })
+        const groups = groupOrdersByBaseDo(rows, "") // depot already scoped server-side above
+        const match = groups.find((g: any) => g._rowKey === key)
+        if (match) byKey[key] = match
+      } catch {
+        // Swallow — the caller falls back to the cache/passed-in group below.
+      }
+    }))
+    return byKey
+  }, [user?.depo_access])
 
   // ── Pending Table Sorting ─────────────────────────────────────
   const [pendingSortField, setPendingSortField] = useState<string>("")
@@ -890,10 +940,16 @@ export default function ActualDispatchPage() {
   };
 
   const handleOpenDialog = async (group?: any) => {
-    // Resolve selected DOs from the cross-page cache, not just the currently
-    // loaded page/search results — displayRows only holds what's on screen now.
-    const targetGroups = group ? [group] : selectedOrders
-      .map((key) => selectedGroupsCacheRef.current[key])
+    // Resolve selected DOs to a fresh, complete, authoritative set fetched
+    // directly from the server (see fetchCompleteGroupsForKeys) — a DO's
+    // pending shipments can be split across pages of the general list, so
+    // neither the current page nor the cross-page cache can be trusted to be
+    // complete. Fall back to the cache (or the passed-in group) only if that
+    // fetch comes back empty for a given key, e.g. a transient network error.
+    const keys = group ? [group._rowKey] : [...selectedOrders]
+    const fetchedByKey = await fetchCompleteGroupsForKeys(keys)
+    const targetGroups = keys
+      .map((key) => fetchedByKey[key] || selectedGroupsCacheRef.current[key] || (group && group._rowKey === key ? group : null))
       .filter(Boolean);
 
     if (targetGroups.length > 0) {
@@ -1102,8 +1158,13 @@ export default function ActualDispatchPage() {
           const firstProd = partyProducts[0];
           const date = new Date().toLocaleDateString('en-GB');
           const commitmentNo = firstProd.orderNo || "—";
-          const isBroker = firstProd.isBroker || firstProd.is_order_through_broker;
-          const brokerName = isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—";
+          const orderThrough = firstProd.orderThrough || firstProd.is_order_through || "Direct";
+          const referenceLabel = orderThrough === "Broker" ? "Broker" : orderThrough === "Salesperson" ? "Salesperson" : "";
+          const referenceValue = orderThrough === "Broker"
+            ? (firstProd.brokerName || firstProd.broker_name || "—")
+            : orderThrough === "Salesperson"
+              ? (firstProd.salespersonName || firstProd.salesperson_name || "—")
+              : "Direct";
           const rawAddress = firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "";
           const place = rawAddress || "—";
           const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—";
@@ -1150,7 +1211,7 @@ export default function ActualDispatchPage() {
                 <div className="border-b border-r border-black p-1.5"><span className="font-bold">DO no.:</span> {commitmentNo}</div>
                 <div className="border-b border-black p-1.5"><span className="font-bold">DO Date:</span> {date}</div>
                 <div className="border-b border-r border-black p-1.5"><span className="font-bold">Customer:</span> {party}</div>
-                <div className="border-b border-black p-1.5"><span className="font-bold">Broker:</span> {brokerName}</div>
+                <div className="border-b border-black p-1.5">{referenceLabel ? <><span className="font-bold">{referenceLabel}:</span> {referenceValue}</> : referenceValue}</div>
                 <div className="border-b border-r border-black p-1.5"><span className="font-bold">Address:</span> {place}</div>
                 <div className="border-b border-black p-1.5">
                   <span className="font-bold">Mob.:</span> {partyMo}<br />
@@ -1233,12 +1294,19 @@ export default function ActualDispatchPage() {
     });
     return Object.entries(partyGroups).map(([party, partyProducts]) => {
       const firstProd = partyProducts[0];
-      const isBroker = firstProd.isBroker || firstProd.is_order_through_broker;
+      const orderThrough = firstProd.orderThrough || firstProd.is_order_through || "Direct";
+      const referenceLabel = orderThrough === "Broker" ? "Broker" : orderThrough === "Salesperson" ? "Salesperson" : "";
+      const referenceValue = orderThrough === "Broker"
+        ? (firstProd.brokerName || firstProd.broker_name || "—")
+        : orderThrough === "Salesperson"
+          ? (firstProd.salespersonName || firstProd.salesperson_name || "—")
+          : "Direct";
       return {
         party,
         commitmentNo: firstProd.orderNo || "—",
         date: new Date().toLocaleDateString('en-GB'),
-        brokerName: isBroker ? (firstProd.brokerName || firstProd.broker_name || "—") : "—",
+        referenceLabel,
+        referenceValue,
         place: firstProd.address || firstProd.customer_delivery_address || firstProd.customer_address || "—",
         partyMo: firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—",
         status: firstProd.has_prior_dispatch ? "Pending" : "Original",
@@ -1946,7 +2014,10 @@ export default function ActualDispatchPage() {
                         />
                       </TableCell>
                       {orderedVisibleCols.map((col) => (
-                        <TableCell key={col.id} className="whitespace-nowrap text-center">
+                        <TableCell key={col.id} className={cn(
+                          "whitespace-nowrap text-center text-xs",
+                          col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
+                        )}>
                           {col.id === "status" ? (
                             <div className="flex justify-center flex-col items-center gap-1">
                               {row.has_draft ? (
@@ -2002,7 +2073,7 @@ export default function ActualDispatchPage() {
                         />
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{row.partySoDate || row.date || "—"}</p>
-                          <p className="text-sm font-black text-blue-800">{row.orderNo || "—"}</p>
+                          <p className="font-mono text-sm font-black text-blue-700 break-all">{row.orderNo || "—"}</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -2063,8 +2134,9 @@ export default function ActualDispatchPage() {
               Showing Page <span className="text-slate-900 mx-1">{displayRows.length > 0 ? pendingPage : 0}</span>
               {displayRows.length > 0 && (
                 <> of <span className="text-slate-900 mx-1">
-                  {/* Use raw backend row count to detect last page, not grouped displayRows */}
-                  {pendingOrders.length < limit ? pendingPage : (pendingResult?.pagination?.totalPages || 1)}
+                  {/* Backend paginates pending rows by whole order now, so totalPages is
+                      authoritative — no need to guess from raw row count vs limit. */}
+                  {pendingResult?.pagination?.totalPages || 1}
                 </span></>
               )}
               <span className="ml-2 text-slate-300">|</span>
@@ -2086,7 +2158,6 @@ export default function ActualDispatchPage() {
                 onClick={() => setPendingPage(p => p + 1)}
                 disabled={
                   displayRows.length === 0 ||
-                  pendingOrders.length < limit || // backend returned less than a full page = last page
                   pendingPage >= (pendingResult?.pagination?.totalPages || 1)
                 }
                 className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"

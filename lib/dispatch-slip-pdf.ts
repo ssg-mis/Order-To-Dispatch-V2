@@ -137,7 +137,7 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
       [banner("Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)", { halign: "center", fontStyle: "normal", fontSize: 8, textColor: [90, 90, 90] })],
       [banner("Oil Dispatch Voucher", { halign: "center", fontStyle: "bold", fontSize: 12 })],
       [info([{ label: "DO no.:", value: party.commitmentNo }]), info([{ label: "DO Date:", value: party.date }])],
-      [info([{ label: "Customer:", value: party.party }]), info([{ label: `${party.referenceLabel || "Broker"}:`, value: party.referenceValue || "—" }])],
+      [info([{ label: "Customer:", value: party.party }]), info([{ label: party.referenceLabel ? `${party.referenceLabel}:` : "", value: party.referenceValue || "—" }])],
       [
         info([{ label: "Address:", value: party.place }], 8),
         info([{ label: "Mob.:", value: party.partyMo }, { label: "Status:", value: party.status || "—" }]),

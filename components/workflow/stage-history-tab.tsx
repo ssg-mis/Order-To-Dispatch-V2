@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useQuery } from "@tanstack/react-query"
-import { FIELD_GROUPS, STAGE_NAMES, fieldOrderPriority } from "./workflow-stage-shell"
+import { FIELD_GROUPS, STAGE_NAMES, FIELD_LABELS, fieldOrderPriority } from "./workflow-stage-shell"
 import { ISTDateTime } from "@/components/ui/ist-datetime"
 import { isTimestamp } from "@/lib/date-utils"
 
@@ -230,7 +230,7 @@ export function StageHistoryTab({
       .filter(([key]) => !["rawData", "_rowKey", "id"].includes(key))
       .filter(([key]) => {
         const fieldLevel = FIELD_GROUPS[key]
-        return fieldLevel === undefined || fieldLevel <= stageLevel
+        return fieldLevel !== undefined && fieldLevel <= stageLevel
       })
       .filter(([key, value]) => {
         if (!historySearch) return true
@@ -258,14 +258,21 @@ export function StageHistoryTab({
   }, [selectedHistoryItem, historySearch, stageLevel])
 
   const formatKey = (key: string) => {
+    if (/^planned_\d+$/.test(key)) return "Planned At"
+    if (/^actual_\d+$/.test(key)) return "Actual At"
+    if (FIELD_LABELS[key]) return FIELD_LABELS[key]
     return key
       .split("_")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ")
   }
 
-  const renderValue = (value: any) => {
+  const renderValue = (value: any, key?: string) => {
     if (value === null || value === undefined) return "—"
+    if (key === "overall_status_of_order") {
+      const v = String(value).toLowerCase()
+      return v === "true" || v === "approved" ? "Approved" : "Rejected"
+    }
     if (typeof value === "boolean") return value ? "Yes" : "No"
     if (typeof value === "string" && (value.startsWith("http") || value.includes("/uploads/"))) {
       return (
@@ -682,7 +689,7 @@ export function StageHistoryTab({
                               {formatKey(key)}
                             </TableCell>
                             <TableCell className="py-3 text-xs font-bold text-slate-800">
-                              {renderValue(value)}
+                              {renderValue(value, key)}
                             </TableCell>
                           </TableRow>
                         ))}

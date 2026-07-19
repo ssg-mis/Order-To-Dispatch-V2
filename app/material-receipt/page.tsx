@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
+import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -25,9 +26,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { confirmMaterialReceiptApi, orderApi, depotApi, skuDetailsApi } from "@/lib/api-service"
+import { confirmMaterialReceiptApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, ChevronLeft, ChevronRight, Settings2, CheckCircle, Upload, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
@@ -213,9 +214,9 @@ export default function MaterialReceiptPage() {
   const router = useRouter()
   const { user, isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const { toast } = useToast()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
   const limit = 25;
 
   const [filterValues, setFilterValues] = useState({
@@ -299,7 +300,7 @@ export default function MaterialReceiptPage() {
   const { data: skuDetailsData } = useQuery({
     queryKey: ["sku-details-all"],
     queryFn: async () => {
-      const res = await skuDetailsApi.getAll({ all: "true" })
+      const res = await skuApi.getAll({ all: "true" })
       return res.success ? res.data?.skuDetails ?? [] : []
     },
     staleTime: 5 * 60 * 1000,
@@ -324,35 +325,9 @@ export default function MaterialReceiptPage() {
     return skuWt * qty
   }
 
-  // History Query
-  const {
-    data: historyData,
-    isLoading: isHistoryLoading,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ["material-receipt-history", filterValues.search, filterValues.manualSaudaNo, filterValues.startDate, filterValues.endDate, filterValues.partyName, user?.depo_access?.[activeTab === "pending" ? 'Confirm Material Receipt' : 'Confirm Material Receipt'], historyPage],
-    queryFn: async () => {
-      const response = await confirmMaterialReceiptApi.getHistory({
-        page: historyPage,
-        limit: limit,
-        search: filterValues.search,
-        manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        depo_names: user?.depo_access ? (user.depo_access['Confirm Material Receipt'] || []) : undefined
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
-    },
-    enabled: activeTab === "history",
-  });
-
-  const historyOrders = historyData?.orders || [];
-
   // Reset to page 1 on filter change
   useEffect(() => {
     setPendingPage(1);
-    setHistoryPage(1);
   }, [filterValues.search, filterValues.partyName]);
 
   const handleFileUpload = (file: File, type: 'damage' | 'proof', rowKey?: string) => {
@@ -665,15 +640,14 @@ export default function MaterialReceiptPage() {
           : null
 
         const submitData = {
-          material_received_date: receiptData.receivedDate,
-          damage_status: isItemDamaged ? "Damaged" : "Delivered",
-          received_image_proof: receivedProofUrl,
-          sku: null,
-          damage_qty: isItemDamaged ? pDamage.damageQty : null,
-          damage_image: isItemDamaged ? damageImageUrl : null,
-          remarks_3: receiptData.remarks || null,
-          bill_amount: product.billAmount ? parseFloat(product.billAmount) : null,
-          user_id: user?.id || null
+          materialReceivedDate: receiptData.receivedDate,
+          damageStatus: isItemDamaged ? "Damaged" : "Delivered",
+          receivedImageProof: receivedProofUrl,
+          damageQty: isItemDamaged ? pDamage.damageQty : null,
+          damageImage: isItemDamaged ? damageImageUrl : null,
+          remarks: receiptData.remarks || null,
+          billAmount: product.billAmount ? parseFloat(product.billAmount) : null,
+          userId: user?.id || null
         };
 
         const response = await confirmMaterialReceiptApi.submit(product.id, submitData);
@@ -683,7 +657,7 @@ export default function MaterialReceiptPage() {
       if (successfulSubmissions.length > 0) {
         toast({ title: "Receipt Confirmed", description: `Processed ${successfulSubmissions.length} items.` })
         await refetchPending();
-        await refetchHistory();
+        queryClient.invalidateQueries({ queryKey: ["material-receipt-history"] });
         setIsDialogOpen(false)
         setSelectedItems([])
       }
@@ -742,55 +716,52 @@ export default function MaterialReceiptPage() {
       description="Confirm material receipt and report any damages."
       searchPlaceholder="Search DO Number..."
       pendingCount={pendingData?.pagination?.total || 0}
-      historyData={historyOrders.map((order: any) => ({
-        ...order,
-        date: order.actual_8 ? formatDate(order.actual_8) : "-",
-        orderNo: order.so_no,
-        stage: "Material Receipt",
-        customerName: order.party_name || "—",
-        status: order.damage_status || "Completed",
-        remarks: order.damage_status === "Damaged" ? `Damaged: ${order.damage_qty}` : "Received OK",
-        rawData: order,
-      }))}
+      historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={true}
       stageLevel={9}
       onTabChange={setActiveTab}
-      isHistoryLoading={isHistoryLoading}
       showDateFilters={true}
       showSaudaFilter={true}
       dateLabel="DO Date"
-      historyFooter={
-        <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between font-bold">
-          <div className="text-[10px] sm:text-xs text-slate-400 uppercase tracking-widest leading-none text-center sm:text-left">
-            Showing Page <span className="text-slate-900 mx-1">{historyPage}</span>
-            {historyData?.pagination?.total && (
-              <> of <span className="text-slate-900 mx-1">{Math.ceil(historyData.pagination.total / limit)}</span></>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button variant="outline" size="sm" onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1 || isHistoryLoading} className="h-8 rounded-lg gap-1 px-3">
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setHistoryPage(p => p + 1)} disabled={isHistoryLoading || (historyPage * limit >= (historyData?.pagination?.total || 0))} className="h-8 rounded-lg gap-1 px-3">
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      historyContent={
+        <StageHistoryTab
+          queryKeyPrefix="material-receipt-history"
+          getHistoryApi={(params: any) => confirmMaterialReceiptApi.getHistory({
+            page: params.page,
+            limit: params.limit,
+            search: params.order_no,
+            manual_sauda_no: filterValues.manualSaudaNo,
+            do_date_from: params.start_date,
+            do_date_to: params.end_date,
+            party_name: params.customer_name,
+            depo_names: user?.depo_access ? (user.depo_access['Confirm Material Receipt'] || []) : undefined,
+          })}
+          filterValues={filterValues}
+          activeTab={activeTab}
+          stageName="Material Receipt"
+          stageLevel={9}
+          remarksColName="Remarks"
+          orderListKey="orders"
+          mapOrderNo={(order: any) => order.so_no || "-"}
+          mapCustomerName={(order: any) => order.party_name || "—"}
+          mapStatus={(order: any) => order.damage_status || "Completed"}
+          mapRemarks={(order: any) => order.damage_status === "Damaged" ? `Damaged: ${order.damage_qty}` : "Received OK"}
+          getDate={(order: any) => order.actual_8 || order.timestamp || null}
+        />
       }
     >
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
-          {selectedItems.length > 0 && (
-            <Button 
-              onClick={handleOpenDialog} 
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 font-bold shadow-lg shadow-blue-200"
-              title={isReadOnly ? "View Receipt Details" : "Confirm Receipt"}
-            >
-              <CheckCircle className="mr-2 h-4 w-4" />
-              Confirm Receipt ({selectedItems.length})
-            </Button>
-          )}
+          <Button
+            onClick={handleOpenDialog}
+            disabled={selectedItems.length === 0}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 font-bold shadow-lg shadow-blue-200"
+            title={isReadOnly ? "View Receipt Details" : "Confirm Receipt"}
+          >
+            <CheckCircle className="mr-2 h-4 w-4" />
+            Confirm Receipt ({selectedItems.length})
+          </Button>
 
           {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
             <DropdownMenu>

@@ -90,13 +90,13 @@ async function compressImageForUpload(file: File): Promise<File> {
 }
 
 const PAGE_COLUMNS = [
-  { id: "partySoDate",       label: "DO DATE" },
-  { id: "actualDispatchDate", label: "ACTUAL DISPATCH DATE" },
-  { id: "orderNo",           label: "DO NUMBERS" },
-  { id: "processid",         label: "MANUAL SAUDA NO." },
-  { id: "customerName",      label: "CUSTOMER NAME" },
-  { id: "vehicleNo",         label: "VEHICLE NO." },
-  { id: "orderPunchRemarks", label: "ORDER PUNCH REMARKS" },
+  { id: "partySoDate",       label: "DO Date" },
+  { id: "actualDispatchDate", label: "Actual Dispatch Date" },
+  { id: "orderNo",           label: "DO Numbers" },
+  { id: "processid",         label: "Manual Sauda No." },
+  { id: "customerName",      label: "Customer Name" },
+  { id: "vehicleNo",         label: "Vehicle No." },
+  { id: "orderPunchRemarks", label: "Order Punch Remarks" },
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
 
@@ -340,11 +340,11 @@ export default function SecurityApprovalPage() {
         try {
           if (recordId) {
             const submitData = {
-              bilty_no: uploadData.biltyNo || null,
-              bilty_image: biltyImageUrl,
-              vehicle_image_attachemrnt: vehicleImageUrls.length > 0 ? vehicleImageUrls.join(',') : null,
-              verdict_status: uploadData.verdict, // Adding verdict to API 
-              user_id: user?.id || null, // Track acting user's login id
+              biltyNo: uploadData.biltyNo || null,
+              biltyImage: biltyImageUrl,
+              vehicleImageAttachment: vehicleImageUrls.length > 0 ? vehicleImageUrls.join(',') : null,
+              verdictStatus: uploadData.verdict, // Adding verdict to API
+              userId: user?.id || null, // Track acting user's login id
               remarks: uploadData.verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
             };
 
@@ -673,13 +673,13 @@ export default function SecurityApprovalPage() {
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
-        return <TableCell key={colId} className="p-4 text-center text-xs font-medium">{group.partySoDate}</TableCell>
+        return <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
       case "actualDispatchDate": {
         const dispatchedDates = group.doDetails && group.doDetails.length > 0
           ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
           : [group.actualDispatchDate]
         return (
-          <TableCell key={colId} className="p-4 text-center text-xs font-bold text-purple-700">
+          <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">
             <div className="flex flex-col gap-1.5">
               {dispatchedDates.map((date: any, idx: number) => (
                 <span key={`${date}-${idx}`}>{date}</span>
@@ -690,10 +690,10 @@ export default function SecurityApprovalPage() {
       }
       case "orderNo":
         return (
-          <TableCell key={colId} className="p-4">
-            <div className="flex flex-col gap-1.5 max-w-sm">
+          <TableCell key={colId} className="p-4 text-center">
+            <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
-                <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-white text-purple-700 border-purple-200 font-bold text-[10px]">{d.doNumber}</Badge>
+                <span key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-blue-700">{d.doNumber}</span>
               ))}
             </div>
           </TableCell>
@@ -703,21 +703,21 @@ export default function SecurityApprovalPage() {
           <TableCell key={colId} className="p-4">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
-                <span key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-slate-600">{d.processId}</span>
+                <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.processId}</span>
               ))}
             </div>
           </TableCell>
         )
       case "customerName":
-        return <TableCell key={colId} className="p-4 font-black text-slate-700 uppercase tracking-tighter italic">{group.customerName}</TableCell>
+        return <TableCell key={colId} className="p-4 text-xs text-slate-600"><span className="font-medium text-slate-700">{group.customerName}</span></TableCell>
       case "vehicleNo":
-        return <TableCell key={colId} className="text-center p-4"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
+        return <TableCell key={colId} className="text-center p-4"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
       case "orderPunchRemarks":
         return (
           <TableCell key={colId} className="text-center p-4">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
-                <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600 font-medium">{d.orderPunchRemarks}</span>
+                <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
               ))}
             </div>
           </TableCell>
@@ -824,7 +824,7 @@ export default function SecurityApprovalPage() {
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
-            className="bg-purple-600 hover:bg-purple-700 shadow-lg font-black uppercase tracking-tighter italic"
+            className="bg-blue-600 hover:bg-blue-700 shadow-lg font-black uppercase tracking-tighter italic"
           >
             <Upload className="mr-2 h-4 w-4" />
             Process Security ({selectedItems.length})
@@ -865,7 +865,7 @@ export default function SecurityApprovalPage() {
                       <SortableTableHead
                         key={col.id}
                         id={col.id}
-                        className={`text-[10px] uppercase font-black text-slate-500 tracking-wider whitespace-nowrap${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}${CENTER_COLS.includes(col.id) ? " text-center" : ""}`}
+                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
                         onClick={sf ? () => handlePendingSort(sf) : undefined}
                       >
                         {col.label}{sf && <PendingSortIcon field={sf} />}
@@ -876,14 +876,14 @@ export default function SecurityApprovalPage() {
                     const col = ALL_COLUMNS.find(c => c.id === colId)
                     if (!col) return null
                     return (
-                      <SortableTableHead key={colId} id={colId} className="text-[10px] uppercase font-black text-slate-500 tracking-wider cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
+                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
                         {col.label}
                         <PendingSortIcon field={colId} />
                       </SortableTableHead>
                     )
                   })}
                 </ColumnDragProvider>
-                <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">STATUS</TableHead>
+                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -903,7 +903,7 @@ export default function SecurityApprovalPage() {
                 ))
               ) : displayRows.length > 0 ? (
                 displayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={cn("hover:bg-purple-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-purple-50/50" : "")}>
+                  <TableRow key={group._rowKey} className={cn("hover:bg-blue-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : "")}>
                     <TableCell className="text-center p-4">
                       <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </TableCell>
@@ -913,7 +913,7 @@ export default function SecurityApprovalPage() {
                       if (!col) return null
                       return (
                         <TableCell key={colId} className="text-center p-4">
-                          <span className="text-xs font-medium text-slate-700">{String(getDynamicColumnValue(group, colId))}</span>
+                          <span className="text-xs text-slate-600">{String(getDynamicColumnValue(group, colId))}</span>
                         </TableCell>
                       )
                     })}
@@ -984,8 +984,8 @@ export default function SecurityApprovalPage() {
             ))
           ) : displayRows.length > 0 ? (
             sortedDisplayRows.map((group) => (
-              <Card key={group._rowKey} className={cn("p-4 border-2 transition-all relative overflow-hidden", selectedItems.includes(group._rowKey) ? "border-purple-500 bg-purple-50/30 shadow-lg" : "border-slate-100 bg-white shadow-sm")}>
-                <div className="absolute top-0 left-0 w-1 h-full bg-purple-500" />
+              <Card key={group._rowKey} className={cn("p-4 border-2 transition-all relative overflow-hidden", selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-lg" : "border-slate-100 bg-white shadow-sm")}>
+                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 space-y-3">
                     <div className="flex items-center justify-between">
@@ -994,7 +994,7 @@ export default function SecurityApprovalPage() {
                         disabled={group.isDisabled} 
                         checked={selectedItems.includes(group._rowKey)} 
                         onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        className="h-5 w-5 border-2 border-purple-200 data-[state=checked]:bg-purple-600"
+                        className="h-5 w-5 border-2 border-blue-200 data-[state=checked]:bg-blue-600"
                       />
                     </div>
                     
@@ -1002,7 +1002,7 @@ export default function SecurityApprovalPage() {
                       <h4 className="text-sm font-black text-slate-800 uppercase leading-tight italic">{group.customerName}</h4>
                       <div className="flex flex-col gap-1">
                         {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
-                          <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-purple-50 text-purple-700 border-purple-100 font-bold text-[9px] px-1.5 py-0">#{d.doNumber}</Badge>
+                          <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-blue-50 text-blue-700 border-blue-100 font-bold text-[9px] px-1.5 py-0">#{d.doNumber}</Badge>
                         ))}
                       </div>
                     </div>
@@ -1015,7 +1015,7 @@ export default function SecurityApprovalPage() {
                             ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
                             : [group.actualDispatchDate]
                           ).map((date: any, idx: number) => (
-                            <p key={`${date}-${idx}`} className="text-xs font-bold text-purple-700">{date}</p>
+                            <p key={`${date}-${idx}`} className="text-xs font-bold text-slate-700">{date}</p>
                           ))}
                         </div>
                       </div>
@@ -1572,7 +1572,7 @@ export default function SecurityApprovalPage() {
             <Button
               onClick={handleBulkSubmit}
               disabled={isProcessing || selectedProducts.length === 0 || isReadOnly}
-              className="bg-purple-600 hover:bg-purple-700 h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none"
+              className="bg-blue-600 hover:bg-blue-700 h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none"
             >
               {isProcessing ? "WAIT..." : `Authorize Gatepass (${selectedProducts.length})`}
             </Button>

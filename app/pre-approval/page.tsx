@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Badge } from "@/components/ui/badge"
-import { Settings2, Loader2, ChevronDown, ChevronUp, Trash2, Plus, Check, Search, Package, Calculator, Save, Calendar, ChevronLeft, ChevronRight, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Settings2, Loader2, ChevronDown, ChevronUp, Plus, Check, Search, Package, Calculator, Save, Calendar, ChevronLeft, ChevronRight, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
 import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, customerApi, depotApi } from "@/lib/api-service"
@@ -155,7 +155,7 @@ export default function PreApprovalPage() {
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
-  const limit = 25
+  const limit = 20
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [dialogNewProducts, setDialogNewProducts] = useState<{ [key: string]: any[] }>({})
 
@@ -928,7 +928,7 @@ export default function PreApprovalPage() {
       // budget below funds them by deducting from siblings. Submitted in the SAME
       // atomic submitBatch call as the approvals, so a bad SKU/order rolls back
       // everything instead of leaving an orphaned, unbudgeted row.
-      const newItemPayloads: Array<Record<string, any>> = [];
+      const newItemPayloads: Array<{ orderId: number; skuId: number;[key: string]: any }> = [];
       for (const item of itemsToApprove.filter((i: any) => i._product._isNew)) {
         const product = item._product
         const rateData: any = productRates[item._rowKey]
@@ -1043,7 +1043,10 @@ export default function PreApprovalPage() {
       }
 
       if (otherApprovals.length > 0) {
-        toast({ title: "Failed", description: "Some items failed to process.", variant: "destructive" });
+        // Surface the real backend reason (e.g. "cannot change the product of a line
+        // that already has dispatched shipments") instead of a generic count.
+        const messages = Array.from(new Set(otherApprovals.map((f: any) => f.error).filter(Boolean)));
+        toast({ title: "Failed", description: messages[0] || "Some items failed to process.", variant: "destructive" });
       }
 
       setSelectedRows([])
@@ -1053,30 +1056,6 @@ export default function PreApprovalPage() {
       setIsApproving(false)
     }
   }
-
-  const handleDeleteProduct = async (id: number, displayDo: string) => {
-    if (!window.confirm(`Are you sure you want to delete product from ${displayDo}?`)) return;
-
-    try {
-      const { orderApi } = await import('@/lib/api-service');
-      const response = await orderApi.delete(id);
-
-      if (response.success) {
-        toast({
-          title: "Product Deleted",
-          description: `Product from ${displayDo} has been removed.`,
-        });
-        refetchPending();
-      }
-    } catch (error: any) {
-      console.error("Failed to delete product:", error);
-      toast({
-        title: "Delete Failed",
-        description: error?.message || "Could not delete the product.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleSkuSelection = async (sku: string, rowKey: string, product: any, orderContext: any) => {
     // Normalize SKU for better matching
@@ -1807,23 +1786,25 @@ export default function PreApprovalPage() {
     >
       <div className="space-y-4">
         <div className="flex flex-col justify-end gap-2 sm:flex-row">
-          {selectedRows.length > 0 && (
-            <Dialog
-              open={isBulkDialogOpen}
-              onOpenChange={(open) => {
-                setIsBulkDialogOpen(open)
-                if (!open) {
-                  setQtyValidationErrors({})
-                  setRateValidationErrors({})
-                  setSelectedProductRows([])
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button className="w-full bg-blue-600 hover:bg-blue-700 shadow-md sm:w-auto">
-                  Process Selected ({selectedRows.length})
-                </Button>
-              </DialogTrigger>
+          <Dialog
+            open={isBulkDialogOpen}
+            onOpenChange={(open) => {
+              setIsBulkDialogOpen(open)
+              if (!open) {
+                setQtyValidationErrors({})
+                setRateValidationErrors({})
+                setSelectedProductRows([])
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                disabled={selectedRows.length === 0}
+                className="w-full bg-blue-600 hover:bg-blue-700 shadow-md transition-all active:scale-95 sm:w-auto"
+              >
+                Process Selected ({selectedRows.length})
+              </Button>
+            </DialogTrigger>
               <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl lg:max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-2 sm:p-6 [overflow-wrap:anywhere]">
                 <DialogHeader className="min-w-0 border-b pb-4 px-1 sm:px-0">
                   <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words">Complete Pre-Approval ({allProductsFromSelectedOrders.length} Products)</DialogTitle>
@@ -2078,7 +2059,6 @@ export default function PreApprovalPage() {
                                             <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Appr. Qty</TableHead>
                                             <TableHead className="min-w-[140px] text-[10px] uppercase font-black text-slate-500 tracking-wider">Final Rate</TableHead>
                                             <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Remarks</TableHead>
-                                            {/* <TableHead className="w-10 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">Action</TableHead> */}
                                           </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -2414,34 +2394,6 @@ export default function PreApprovalPage() {
                                                     placeholder="Add review remark..."
                                                   />
                                                 </TableCell>
-                                                {/* <TableCell className="p-2 text-center">
-                                                  {!isNew && (
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="icon"
-                                                      onClick={() => handleDeleteProduct(product.id, product._originalOrderId)}
-                                                      className="h-8 w-8 text-destructive hover:text-red-700 hover:bg-red-50"
-                                                    >
-                                                      <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                  )}
-                                                  {isNew && (
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="icon"
-                                                      onClick={() => {
-                                                        setDialogNewProducts(prev => ({
-                                                          ...prev,
-                                                          [baseDo]: prev[baseDo].filter(p => p._pid !== product._pid)
-                                                        }));
-                                                        setSelectedProductRows(prev => prev.filter(k => k !== rowKey));
-                                                      }}
-                                                      className="h-8 w-8 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                                                    >
-                                                      <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                  )}
-                                                </TableCell> */}
                                               </TableRow>
                                             )
                                           })}
@@ -2785,12 +2737,11 @@ export default function PreApprovalPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-          )}
 
           {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full bg-transparent shadow-sm sm:w-auto">
+                <Button variant="outline" className="w-full bg-transparent sm:w-auto">
                   <Settings2 className="mr-2 h-4 w-4" />
                   Columns
                 </Button>
@@ -2856,8 +2807,13 @@ export default function PreApprovalPage() {
                           />
                         </TableCell>
                         {orderedVisibleCols.map((col) => (
-                          <TableCell key={col.id} className="whitespace-nowrap text-center">
-                            {row[col.id as keyof typeof row]}
+                          <TableCell key={col.id} className={cn(
+                            "whitespace-nowrap text-center text-xs",
+                            col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
+                          )}>
+                            {col.id === "productName" ? (
+                              <span className="font-medium text-slate-700">{row.productName}</span>
+                            ) : row[col.id as keyof typeof row]}
                           </TableCell>
                         ))}
                       </TableRow>
@@ -2946,34 +2902,37 @@ export default function PreApprovalPage() {
                 })}
               </div>
 
-              <div className="px-3 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-slate-500 font-bold uppercase tracking-tighter">
-                  Showing Page {pendingPage} of {pendingData?.pagination?.totalPages || 1} ({pendingData?.pagination?.total || 0} Groups)
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={pendingPage === 1}
-                    className="font-bold uppercase tracking-widest text-[10px]"
-                    onClick={() => setPendingPage(p => p - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="font-bold uppercase tracking-widest text-[10px]"
-                    disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
-                    onClick={() => setPendingPage(p => p + 1)}
-                  >
-                    Next <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </div>
-              </div>
             </Card>
           </div>
 
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingData?.pagination?.totalPages || 1}</span>
+            <span className="mx-2 text-slate-300">|</span>
+            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Groups
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
+              disabled={pendingPage === 1}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => p + 1)}
+              disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
         </div>
 
         {/* SKU Price List Modal */}

@@ -55,7 +55,8 @@ interface Customer {
 }
 
 interface Depot {
-  depot_id: string
+  id: number // real serial PK (v2) — all mutations key off this
+  depot_id: string // legacy text business code, display-only
   status: string
   depot_name: string
   depot_address: string
@@ -64,7 +65,8 @@ interface Depot {
 }
 
 interface Broker {
-  broker_id: string
+  id: number // real serial PK (v2) — all mutations key off this
+  broker_id: string // legacy text business code, display-only
   status: string
   salesman_name: string
   email_id: string
@@ -74,7 +76,8 @@ interface Broker {
 }
 
 interface Salesperson {
-  broker_id: string
+  id: number // real serial PK (v2) — all mutations key off this
+  broker_id: string // legacy text business code, display-only
   status: string
   salesman_name: string
   email_id: string
@@ -963,19 +966,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
       } else if (activeTab === "depots") {
         if (editingItem) {
-          res = await depotApi.update(editingItem.depot_id, depotForm)
+          // v2 keys mutations off the real serial id — depot_id is the legacy text business code
+          res = await depotApi.update(editingItem.id, depotForm)
         } else {
           res = await depotApi.create(depotForm)
         }
       } else if (activeTab === "brokers") {
         if (editingItem) {
-          res = await brokerApi.update(editingItem.broker_id, brokerForm)
+          res = await brokerApi.update(editingItem.id, brokerForm)
         } else {
           res = await brokerApi.create(brokerForm)
         }
       } else if (activeTab === "salespersons") {
         if (editingItem) {
-          res = await salespersonApi.update(editingItem.broker_id, salespersonForm)
+          res = await salespersonApi.update(editingItem.id, salespersonForm)
         } else {
           res = await salespersonApi.create(salespersonForm)
         }
@@ -1097,11 +1101,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       if (activeTab === "customers") {
         res = await customerApi.delete(deletingItem.id)
       } else if (activeTab === "depots") {
-        res = await depotApi.delete(deletingItem.depot_id)
+        // v2 keys mutations off the real serial id — depot_id/broker_id are legacy text business codes
+        res = await depotApi.delete(deletingItem.id)
       } else if (activeTab === "brokers") {
-        res = await brokerApi.delete(deletingItem.broker_id)
+        res = await brokerApi.delete(deletingItem.id)
       } else if (activeTab === "salespersons") {
-        res = await salespersonApi.delete(deletingItem.broker_id)
+        res = await salespersonApi.delete(deletingItem.id)
       } else if (activeTab === "sku_details") {
         res = await skuDetailsApi.delete(deletingItem.id)
       } else if (activeTab === "sku_selling_price") {
@@ -2845,7 +2850,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               </div>
                               <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
                                 <Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
-                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
                               </div>
                             </div>
                           )
@@ -2889,7 +2894,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                   <Button size="sm" onClick={() => openApprovalModal('depots', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
                                     <Check className="h-3.5 w-3.5 mr-1" /> Approve
                                   </Button>
-                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.depot_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'depots', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
                                     <X className="h-3.5 w-3.5 mr-1" /> Reject
                                   </Button>
                                 </div>
@@ -3081,7 +3086,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               </div>
                               <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
                                 <Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
-                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
                               </div>
                             </div>
                           )
@@ -3125,7 +3130,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                   <Button size="sm" onClick={() => openApprovalModal('brokers', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
                                     <Check className="h-3.5 w-3.5 mr-1" /> Approve
                                   </Button>
-                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'brokers', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
                                     <X className="h-3.5 w-3.5 mr-1" /> Reject
                                   </Button>
                                 </div>
@@ -3315,7 +3320,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               </div>
                               <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
                                 <Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
-                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
                               </div>
                             </div>
                           )
@@ -3359,7 +3364,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                   <Button size="sm" onClick={() => openApprovalModal('salespersons', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
                                     <Check className="h-3.5 w-3.5 mr-1" /> Approve
                                   </Button>
-                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.broker_id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'salespersons', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
                                     <X className="h-3.5 w-3.5 mr-1" /> Reject
                                   </Button>
                                 </div>
@@ -4824,11 +4829,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Button
               onClick={() => {
                 if (!approvalReviewModal) return
+                // Every master reviews by the real serial id in v2 (the legacy
+                // depot_id/broker_id text business codes are display-only now).
                 const idMap: Record<string, any> = {
                   customers: approvalReviewModal.item.id,
-                  depots: approvalReviewModal.item.depot_id,
-                  brokers: approvalReviewModal.item.broker_id,
-                  salespersons: approvalReviewModal.item.broker_id,
+                  depots: approvalReviewModal.item.id,
+                  brokers: approvalReviewModal.item.id,
+                  salespersons: approvalReviewModal.item.id,
                   sku_details: approvalReviewModal.item.id,
                   vehicle_master: approvalReviewModal.item.id,
                   driver_master: approvalReviewModal.item.id,

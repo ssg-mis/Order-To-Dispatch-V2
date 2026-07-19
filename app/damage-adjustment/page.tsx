@@ -491,14 +491,14 @@ export default function DamageAdjustmentPage() {
 
       for (const product of productsToSubmit) {
         const submitData = {
-          credit_note_date: adjustmentData.creditNoteDate,
-          credit_note_no: adjustmentData.creditNoteNo,
-          credit_note_qty: 0,
-          credit_note_amount: 0,
-          net_banalce: 0,
-          status_2: "Completed",
-          credit_note_copy: creditNoteCopyUrl,
-          user_id: user?.id || null // Track acting user's login id
+          creditNoteDate: adjustmentData.creditNoteDate,
+          creditNoteNo: adjustmentData.creditNoteNo,
+          creditNoteQty: 0,
+          creditNoteAmount: 0,
+          netBalance: 0,
+          status: "Completed",
+          creditNoteCopy: creditNoteCopyUrl,
+          userId: user?.id || null // Track acting user's login id
         };
 
         try {

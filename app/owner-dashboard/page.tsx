@@ -250,7 +250,7 @@ export default function OwnerDashboardPage() {
   const partyRes              = raw?.partyView       ?? { data: [], total: 0 }
   const oilTypes:  any[]      = raw?.oilTypeView     ?? []
   const agingRes              = raw?.agingReport     ?? { data: [], total: 0 }
-  const depots:    string[]   = raw?.depots          ?? []
+  const depots:    {id:number;name:string}[] = raw?.depots          ?? []
   const clientFreq:any[]      = raw?.clientFreq      ?? []
   const productFreq:any[]     = raw?.productFreq     ?? []
   const deliveryPerf:any      = raw?.deliveryPerf    ?? { avg_delivery_hours: 0, on_time_percent: 0 }
@@ -331,7 +331,7 @@ export default function OwnerDashboardPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Depots</SelectItem>
-                    {depots.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    {depots.map(d => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -920,7 +920,7 @@ export default function OwnerDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {clientFreq.map((c, i) => (
-                    <TableRow key={i} onClick={() => openDrill('customer', c.customer_name, c.customer_name)} className="hover:bg-indigo-50/40 transition-colors cursor-pointer group">
+                    <TableRow key={i} onClick={() => openDrill('customer', String(c.customer_id ?? ''), c.customer_name || '—')} className="hover:bg-indigo-50/40 transition-colors cursor-pointer group">
                       <TableCell className="pl-8 py-4 font-bold text-slate-700 text-sm group-hover:text-indigo-700 transition-colors">{c.customer_name}</TableCell>
                       <TableCell className="text-center">
                         <Badge className="bg-indigo-50 text-indigo-600 border-none font-black text-[10px]">{c.order_count} Orders</Badge>
@@ -1050,7 +1050,7 @@ export default function OwnerDashboardPage() {
               </TableHeader>
               <TableBody>
                 {parties.filter((p: any) => !partySearch || p.customerName?.toLowerCase().includes(partySearch.toLowerCase())).map((p: any, i: number) => (
-                  <TableRow key={i} onClick={() => openDrill('customer', p.customerName, p.customerName)} className="hover:bg-indigo-50/40 transition-colors border-slate-50 cursor-pointer group">
+                  <TableRow key={i} onClick={() => openDrill('customer', String(p.customerId ?? ''), p.customerName || '—')} className="hover:bg-indigo-50/40 transition-colors border-slate-50 cursor-pointer group">
                     <TableCell className="pl-8 py-4">
                       <div className="flex flex-col">
                         <span className="font-bold text-slate-900 text-sm truncate max-w-[200px] group-hover:text-indigo-700 transition-colors">{p.customerName}</span>

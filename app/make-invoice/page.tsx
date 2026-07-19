@@ -26,7 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { makeInvoiceApi, orderApi, skuDetailsApi, depotApi } from "@/lib/api-service"
+import { makeInvoiceApi, orderApi, skuApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -250,7 +250,7 @@ export default function MakeInvoicePage() {
   const { data: skuDetailsData } = useQuery({
     queryKey: ["sku-details-all"],
     queryFn: async () => {
-      const res = await skuDetailsApi.getAll({ all: "true" })
+      const res = await skuApi.getAll({ all: "true" })
       return res.success ? res.data?.skuDetails ?? [] : []
     },
     staleTime: 5 * 60 * 1000,
@@ -696,14 +696,14 @@ export default function MakeInvoicePage() {
       // Submit each selected product
       for (const product of allProductsToSubmit) {
         const submitData = {
-          bill_type: invoiceType,
-          invoice_no: invoiceData.invoiceNo,
-          invoice_date: invoiceType === 'independent' ? invoiceData.invoiceDate : null,
+          billType: invoiceType,
+          invoiceNo: invoiceData.invoiceNo,
+          invoiceDate: invoiceType === 'independent' ? invoiceData.invoiceDate : null,
           qty: invoiceData.qty || null,
-          bill_amount: invoiceType === 'independent' ? invoiceData.billAmount : null,
-          invoice_copy: invoiceData.invoiceFile || null,
-          user_id: user?.id || null, // Track acting user's login id
-          cd_amount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
+          billAmount: invoiceType === 'independent' ? invoiceData.billAmount : null,
+          invoiceCopy: invoiceData.invoiceFile || null,
+          userId: user?.id || null, // Track acting user's login id
+          cdAmount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
         };
 
         try {

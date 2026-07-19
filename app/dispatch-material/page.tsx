@@ -41,7 +41,7 @@ export default function DispatchMaterialPage() {
   const { isReadOnly, user, isAdmin, isFeatureEnabled, role } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
-  const limit = 25;
+  const limit = 20;
 
   const [filterValues, setFilterValues] = useState({
     search: "",
@@ -220,7 +220,7 @@ export default function DispatchMaterialPage() {
           const partyMo = firstProd.whatsapp || firstProd.customer_contact_person_whatsapp_no || firstProd.party_mo || firstProd.mobile || "—"
           const processId = firstProd.processid || firstProd.process_id || firstProd.processId || "—"
           const punchBy = firstProd.order_punch_user || "—"
-          const punchAt = firstProd.created_at || null
+          const punchAt = firstProd.order_punch_at || null
           const preApproveBy = firstProd.pre_approval_user || "—"
           const preApproveAt = firstProd.actual_1 || null
           const approveBy = firstProd.order_approval_user || "—"
@@ -345,7 +345,7 @@ export default function DispatchMaterialPage() {
         status: firstProd.has_prior_dispatch ? "Pending" : "Original",
         processId: firstProd.processid || firstProd.process_id || firstProd.processId || "—",
         punchBy: firstProd.order_punch_user || "—",
-        punchAt: firstProd.created_at || null,
+        punchAt: firstProd.order_punch_at || null,
         preApproveBy: firstProd.pre_approval_user || "—",
         preApproveAt: firstProd.actual_1 || null,
         approveBy: firstProd.order_approval_user || "—",
@@ -651,15 +651,15 @@ export default function DispatchMaterialPage() {
           if (orderId) {
             const tData = dispatchDetails[rowKey]?.transferData;
             const dispatchData = {
-              dispatch_from: deliveryVal,
-              dispatch_qty: dispatchQty,
-              user_id: user?.id || null,
+              dispatchFrom: deliveryVal,
+              dispatchQty: dispatchQty,
+              userId: user?.id || null,
               transfer: dispatchDetails[rowKey]?.transfer || item.transfer || 'no',
-              bill_company_name: (tData?.billTo?.company ? tData.billTo.company.split('|')[0] : item.bill_company_name) || null,
-              bill_address: tData?.billTo?.address || item.bill_address || null,
-              ship_company_name: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
-              ship_address: tData?.shipTo?.address || item.ship_address || null,
-              freight_rate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0)
+              billCompanyName: (tData?.billTo?.company ? tData.billTo.company.split('|')[0] : item.bill_company_name) || null,
+              billAddress: tData?.billTo?.address || item.bill_address || null,
+              shipCompanyName: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
+              shipAddress: tData?.shipTo?.address || item.ship_address || null,
+              freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0)
             };
 
             const response = await dispatchPlanningApi.submit(orderId, dispatchData);
@@ -750,15 +750,20 @@ export default function DispatchMaterialPage() {
 
       const successfulReverts: any[] = [];
       const failedReverts: any[] = [];
+      let splitCount = 0;
 
       for (const item of itemsToRevert) {
         const orderId = item.id;
         if (!orderId) continue;
 
         try {
-          const res = await dispatchPlanningApi.revert(orderId, user?.username || 'system', revertRemarks.trim());
+          const res = await dispatchPlanningApi.revert(orderId, user?.id || null, revertRemarks.trim());
           if (res.success) {
             successfulReverts.push(orderId);
+            // Backend splits when the line already has shipments: the shipped boxes
+            // stay on the original (now-completed) line and only the un-dispatched
+            // remainder moves to Pre-Approval. Flag it so the toast can explain.
+            if ((res as any).split) splitCount++;
           } else {
             failedReverts.push({ orderId, message: res.message });
           }
@@ -770,7 +775,9 @@ export default function DispatchMaterialPage() {
       if (successfulReverts.length > 0) {
         toast({
           title: "Revert Successful",
-          description: `${successfulReverts.length} item(s) reverted to Pre-Approval.`,
+          description: splitCount > 0
+            ? `${successfulReverts.length} item(s) reverted. Already-dispatched quantity was kept on the original line; only the un-dispatched remainder moved to Pre-Approval — change the product there.`
+            : `${successfulReverts.length} item(s) reverted to Pre-Approval.`,
         });
 
         setIsDialogOpen(false);
@@ -838,7 +845,7 @@ export default function DispatchMaterialPage() {
         if (!orderId) continue;
 
         try {
-          const res = await dispatchPlanningApi.cancel(orderId, user?.username || 'system', revertRemarks.trim());
+          const res = await dispatchPlanningApi.cancel(orderId, user?.id || null, revertRemarks.trim());
           if (res.success) {
             successfulCancels.push(orderId);
           } else {
@@ -894,10 +901,10 @@ export default function DispatchMaterialPage() {
     setIsProcessing(true);
     try {
       const res = await dispatchPlanningApi.preclose(id, {
-        preclose_qty: qty,
-        username: user?.username || 'system',
+        precloseQty: qty,
+        userId: user?.id || null,
         action,
-        preclose_remarks: remarks.trim()
+        precloseRemarks: remarks.trim()
       });
       if (res.success) {
         toast({ title: "Success", description: `Successfully preclosed ${qty} items.` });
@@ -1280,7 +1287,10 @@ export default function DispatchMaterialPage() {
                     </TableCell>
 
                     {orderedVisibleCols.map((col) => (
-                      <TableCell key={col.id} className="whitespace-nowrap text-center text-xs">
+                      <TableCell key={col.id} className={cn(
+                        "whitespace-nowrap text-center text-xs",
+                        col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
+                      )}>
                         {col.id === "status" ? (
                           <div className="flex justify-center flex-col items-center gap-1">
                             <Badge className="bg-orange-100 text-orange-700">Pending</Badge>
@@ -1399,7 +1409,7 @@ export default function DispatchMaterialPage() {
               <> of <span className="text-slate-900 mx-1">{pendingData.pagination.totalPages}</span></>
             )}
             <span className="ml-2 text-slate-300">|</span>
-            <span className="ml-2">{pendingData?.pagination?.total || 0} item{(pendingData?.pagination?.total || 0) !== 1 ? 's' : ''} in this depot</span>
+            <span className="ml-2">{pendingData?.pagination?.total || 0} order{(pendingData?.pagination?.total || 0) !== 1 ? 's' : ''} in this depot</span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             <Button

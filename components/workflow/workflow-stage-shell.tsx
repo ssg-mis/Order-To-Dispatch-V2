@@ -5,26 +5,16 @@ import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Eye, Search, Filter, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronUp } from "lucide-react"
+import { Search, Filter, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { customerApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
-import { ISTDateTime } from "@/components/ui/ist-datetime"
-import { isTimestamp } from "@/lib/date-utils"
 import { Check, ChevronsUpDown } from "lucide-react"
 import {
   Command,
@@ -71,20 +61,18 @@ export const FIELD_GROUPS: Record<string, number> = {
   order_type: 0, customer_type: 0, customer_address: 0, payment_terms: 0, advance_amount: 0,
   broker_name: 0, order_punch_remarks: 0, final_rate: 0, transfer: 0, bill_company_name: 0,
   bill_address: 0, ship_company_name: 0, ship_address: 0,
-  sku_name: 0, approval_qty: 0, delivery_date: 0, order_type_delivery_purpose: 0,
-  rate_per_ltr: 0, rate_per_15kg: 0, rate_of_material: 0, remark: 0, pre_approval_user: 1,
+  sku_name: 0, delivery_date: 0, order_type_delivery_purpose: 0,
+  rate_per_ltr: 0, rate_per_15kg: 0, rate_of_material: 0, remark: 0,
   party_so_date: 0, start_date: 0, end_date: 0, depo_name: 0, futureperioddate: 0,
   upload_so: 0, customer_contact_person_name: 0, customer_contact_person_whatsapp_no: 0,
   customer_name: 0, order_punch_user: 0,
 
   // Level 1: Pre-Approval
-  d_sr_number: 1, pre_approval_qty: 1, pre_approval_remarks: 1, timestamp_1: 1, status_1: 1, planned_1: 1, actual_1: 1,
+  d_sr_number: 1, approved_qty: 1, pre_approval_remarks: 1, pre_approval_user: 1, timestamp_1: 1, status_1: 1, planned_1: 1, actual_1: 1,
 
   // Level 2: Approval of Order
-  rate_is_rightly_as_per_current_market_rate: 2, we_are_dealing_in_ordered_sku: 2, party_credit_status: 2,
-  dispatch_date_confirmed: 2, overall_status_of_order: 2, order_confirmation_with_customer: 2,
-  processid: 2, order_approval_user: 2, planned_2: 2, actual_2: 2, delay_2: 2,
-  actual_approval_qty: 2, status_2: 2,
+  overall_status_of_order: 2, approval_qty: 2,
+  order_approval_user: 2, planned_2: 2, actual_2: 2,
 
   // Level 3: Dispatch Planning
   dispatch_from: 3, dispatch_planning_user: 3, revert_planning_remarks: 3,
@@ -124,7 +112,8 @@ export const FIELD_GROUPS: Record<string, number> = {
 
 // Human-readable stage name for each FIELD_GROUPS level — drives the
 // section headers in the history "View" dialog so users can tell which
-// stage each field belongs to. Level 999 = fields not mapped to any stage.
+// stage each field belongs to. Fields not mapped to any stage are dropped
+// from the dialog entirely (no catch-all section).
 export const STAGE_NAMES: Record<number, string> = {
   0: "Order Punch",
   1: "Pre-Approval",
@@ -137,17 +126,27 @@ export const STAGE_NAMES: Record<number, string> = {
   8: "Gate Out",
   9: "Material Receipt",
   10: "Damage Adjustment",
-  999: "Other Details",
 }
 
-// Within each stage group, order fields as: Planned -> Actual -> Time Delay ->
-// Doer (whoever performed the stage, e.g. *_user columns) -> everything else.
+// Friendly overrides for field labels in the history "View" dialog, where the
+// auto-generated (underscore-split, title-cased) label reads awkwardly.
+export const FIELD_LABELS: Record<string, string> = {
+  approved_qty: "Pre Approved Quantity",
+  approval_qty: "Approval Quantity",
+  overall_status_of_order: "Approval Status",
+  order_punch_user: "Order Punch Doer",
+  pre_approval_user: "Pre-Approval Doer",
+  order_approval_user: "Approval Doer",
+}
+
+// Within each stage group, order fields alphabetically, except Doer (whoever
+// performed the stage, e.g. *_user columns) always sits immediately before
+// the scheduling fields, and Planned -> Actual are always the last two.
 export const fieldOrderPriority = (key: string): number => {
-  if (/^planned_\d+$/.test(key)) return 0
-  if (/^actual_\d+$/.test(key)) return 1
-  if (/^delay_\d+$/.test(key)) return 2
-  if (/_user$/.test(key)) return 3
-  return 4
+  if (/^planned_\d+$/.test(key)) return 2
+  if (/^actual_\d+$/.test(key)) return 3
+  if (/_user$/.test(key)) return 1
+  return 0
 }
 
 export function WorkflowStageShell({
@@ -181,140 +180,7 @@ export function WorkflowStageShell({
     manualSaudaNo: ""
   })
 
-  const [selectedHistoryItem, setSelectedHistoryItem] = React.useState<any>(null)
-  const [historySearch, setHistorySearch] = React.useState("")
   const [partySearchOpen, setPartySearchOpen] = React.useState(false)
-  const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>({})
-
-  // Helper to extract base order no
-  const getBaseOrderNo = (orderNo: string): string => {
-    if (!orderNo) return "";
-    return orderNo.replace(/[A-Za-z]$/, "");
-  };
-
-  const toggleGroup = (baseOrderNo: string) => {
-    setExpandedGroups(prev => ({
-      ...prev,
-      [baseOrderNo]: !prev[baseOrderNo]
-    }))
-  }
-
-  // History table sorting
-  const [historySortField, setHistorySortField] = React.useState<string>("date")
-  const [historySortDir, setHistorySortDir] = React.useState<"asc" | "desc">("desc")
-
-  const handleHistorySort = (field: string) => {
-    if (historySortField === field) {
-      setHistorySortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setHistorySortField(field)
-      setHistorySortDir("asc")
-    }
-  }
-
-  const HistorySortIcon = ({ field }: { field: string }) => {
-    if (historySortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return historySortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  const sortedHistoryData = React.useMemo(() => {
-    if (!historyData || historyData.length === 0) return historyData
-    return [...historyData].sort((a, b) => {
-      let aVal: any = ""
-      let bVal: any = ""
-      if (historySortField === "date") {
-        aVal = new Date(a.date || "").getTime() || 0
-        bVal = new Date(b.date || "").getTime() || 0
-      } else if (historySortField === "orderNo") {
-        aVal = String(a.orderNo || "").toLowerCase()
-        bVal = String(b.orderNo || "").toLowerCase()
-      } else if (historySortField === "customerName") {
-        aVal = String(a.customerName || "").toLowerCase()
-        bVal = String(b.customerName || "").toLowerCase()
-      } else if (historySortField === "status") {
-        aVal = String(a.status || "").toLowerCase()
-        bVal = String(b.status || "").toLowerCase()
-      } else if (historySortField === "remarks") {
-        aVal = String(a.remarks || "").toLowerCase()
-        bVal = String(b.remarks || "").toLowerCase()
-      }
-      if (aVal < bVal) return historySortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return historySortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [historyData, historySortField, historySortDir])
-
-  // Group history data by base order number if enabled
-  const groupedHistoryData = React.useMemo(() => {
-    if (!sortedHistoryData || sortedHistoryData.length === 0) return [];
-    if (!groupBySiblingDo) return sortedHistoryData;
-
-    const groupsMap: Record<string, any[]> = {};
-    sortedHistoryData.forEach((item) => {
-      const base = getBaseOrderNo(item.orderNo) || item.orderNo || "unknown";
-      if (!groupsMap[base]) {
-        groupsMap[base] = [];
-      }
-      groupsMap[base].push(item);
-    });
-
-    return Object.entries(groupsMap).map(([baseOrderNo, items]) => {
-      // Representative properties are from the first item
-      const rep = items[0] || {};
-      return {
-        isGroup: true,
-        baseOrderNo,
-        items,
-        // Match history fields for rendering & sorting
-        date: rep.date || "-",
-        orderNo: baseOrderNo,
-        customerName: rep.customerName || "-",
-        status: rep.status || "Completed",
-        remarks: rep.remarks || "-",
-        rawData: rep.rawData || rep,
-      };
-    });
-  }, [sortedHistoryData, groupBySiblingDo]);
-
-  // Group the selected record's fields by stage so the "View" dialog shows
-  // section-wise history (which fields came from which stage) instead of one
-  // flat alphabetical dump. Mirrors the visibility + search filters below.
-  const groupedHistoryFields = React.useMemo(() => {
-    if (!selectedHistoryItem) return [] as { level: number; label: string; entries: [string, any][] }[]
-    const s = historySearch.toLowerCase()
-    const groups: Record<number, [string, any][]> = {}
-    Object.entries(selectedHistoryItem)
-      .filter(([key]) => !['rawData', '_rowKey', 'id'].includes(key))
-      .filter(([key]) => {
-        // Cumulative visibility filter
-        const fieldLevel = FIELD_GROUPS[key]
-        return fieldLevel === undefined || fieldLevel <= stageLevel
-      })
-      .filter(([key, value]) => {
-        if (!historySearch) return true
-        return key.toLowerCase().includes(s) || String(value).toLowerCase().includes(s)
-      })
-      .forEach(([key, value]) => {
-        const level = FIELD_GROUPS[key] ?? 999
-        if (!groups[level]) groups[level] = []
-        groups[level].push([key, value])
-      })
-    return Object.keys(groups)
-      .map(Number)
-      .sort((a, b) => a - b)
-      .map(level => ({
-        level,
-        label: STAGE_NAMES[level] || "Other Details",
-        entries: groups[level].sort(([a], [b]) => {
-          const pa = fieldOrderPriority(a)
-          const pb = fieldOrderPriority(b)
-          if (pa !== pb) return pa - pb
-          return a.localeCompare(b)
-        }),
-      }))
-  }, [selectedHistoryItem, historySearch, stageLevel])
 
   const updateFilter = (key: keyof typeof filters, value: string) => {
     const newFilters = { ...filters, [key]: value }
@@ -322,27 +188,6 @@ export function WorkflowStageShell({
     if (onFilterChange) {
       onFilterChange(newFilters)
     }
-  }
-
-  const formatKey = (key: string) => {
-    return key
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ')
-  }
-
-  const renderValue = (value: any) => {
-    if (value === null || value === undefined) return "—"
-    if (typeof value === 'boolean') return value ? "Yes" : "No"
-    if (typeof value === 'string' && (value.startsWith('http') || value.includes('/uploads/'))) {
-      return (
-        <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">
-          View Attachment
-        </a>
-      )
-    }
-    if (isTimestamp(value)) return <ISTDateTime value={value} />
-    return String(value)
   }
 
   return (
@@ -563,309 +408,7 @@ export function WorkflowStageShell({
             ) : (
               <Card className="border-none shadow-sm overflow-hidden">
                 {isHistoryLoading ? (
-                  <div className="p-0 border-none shadow-none">
-                    <table className="w-full text-sm table-fixed">
-                      <thead className="border-b text-[10px] uppercase font-black text-slate-500 tracking-wider">
-                        <tr>
-                          <th className="px-4 py-3 text-left w-[12%]">Date</th>
-                          <th className="px-4 py-3 text-left w-[18%]">Order No.</th>
-                          <th className="px-4 py-3 text-left w-[18%]">Party Name</th>
-                          <th className="px-4 py-3 text-left text-center w-[12%]">Status</th>
-                          <th className="px-4 py-3 text-left w-[25%]">Remarks</th>
-                          <th className="px-4 py-3 text-center w-[15%]">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...Array(5)].map((_, i) => (
-                          <tr key={i} className="border-b transition-colors opacity-60">
-                            <td className="px-4 py-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></td>
-                            <td className="px-4 py-4"><div className="h-3 w-24 bg-blue-100 animate-pulse rounded-full" /></td>
-                            <td className="px-4 py-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></td>
-                            <td className="px-4 py-4 flex justify-center"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded-full" /></td>
-                            <td className="px-4 py-4"><div className="h-3 w-full bg-slate-100 animate-pulse rounded-full" /></td>
-                            <td className="px-4 py-4 flex justify-center"><div className="h-7 w-12 bg-slate-200 animate-pulse rounded-full" /></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : historyData && historyData.length > 0 ? (
-                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto relative">
-                    {/* Desktop Table View */}
-                    <table className="w-full text-sm table-fixed hidden md:table">
-                      <thead className="bg-muted/30 border-b text-[10px] uppercase font-black text-slate-500 tracking-wider sticky top-0 z-10 shadow-sm">
-                        <tr>
-                          <th className="px-4 py-3 text-left w-[12%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("date")}>Date<HistorySortIcon field="date" /></th>
-                          <th className="px-4 py-3 text-left w-[18%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("orderNo")}>Order No.<HistorySortIcon field="orderNo" /></th>
-                          <th className="px-4 py-3 text-left w-[18%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("customerName")}>Party Name<HistorySortIcon field="customerName" /></th>
-                          <th className="px-4 py-3 text-center w-[12%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("status")}>Status<HistorySortIcon field="status" /></th>
-                          <th className="px-4 py-3 text-left w-[25%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("remarks")}>{remarksColName || "Remarks"}<HistorySortIcon field="remarks" /></th>
-                          <th className="px-4 py-3 text-center w-[15%]">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {groupedHistoryData.map((item, i) => {
-                          if (item.isGroup && item.items.length > 1) {
-                            const isExpanded = !!expandedGroups[item.baseOrderNo];
-                            return (
-                              <React.Fragment key={item.baseOrderNo}>
-                                {/* Main Group Row */}
-                                <TableRow className="bg-slate-50/50 hover:bg-slate-100/50 border-b transition-colors font-semibold">
-                                  <TableCell className="px-4 py-3 text-xs">{item.date}</TableCell>
-                                  <TableCell className="px-4 py-3 text-xs flex items-center gap-1.5 font-bold text-slate-800">
-                                    <span>{item.baseOrderNo}</span>
-                                    <Badge className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase">
-                                      {item.items.length} Items
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="px-4 py-3 text-xs capitalize text-slate-600">{item.customerName}</TableCell>
-                                  <TableCell className="px-4 py-3 text-center">
-                                    <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
-                                      Grouped
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
-                                    Multiple siblings grouped
-                                  </TableCell>
-                                  <TableCell className="px-4 py-3 text-center">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                      onClick={() => toggleGroup(item.baseOrderNo)}
-                                    >
-                                      {isExpanded ? (
-                                        <>
-                                          <ChevronUp className="mr-1 h-3 w-3" /> Collapse
-                                        </>
-                                      ) : (
-                                        <>
-                                          <ChevronDown className="mr-1 h-3 w-3" /> Expand
-                                        </>
-                                      )}
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-
-                                {/* Child rows when expanded */}
-                                {isExpanded && item.items.map((sibling: any) => (
-                                  <TableRow key={sibling.orderNo} className="bg-white hover:bg-blue-50/10 border-b transition-colors">
-                                    <TableCell className="px-4 py-2.5 text-xs text-slate-400 pl-8">{sibling.date || "-"}</TableCell>
-                                    <TableCell className="px-4 py-2.5 font-bold text-blue-700 text-xs pl-8 flex items-center gap-1">
-                                      <span className="text-slate-300 font-normal">↳</span>
-                                      {sibling.orderNo || "-"}
-                                    </TableCell>
-                                    <TableCell className="px-4 py-2.5 text-xs text-slate-500 capitalize pl-8">{sibling.customerName || "-"}</TableCell>
-                                    <TableCell className="px-4 py-2.5 text-center">
-                                      <span
-                                        className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
-                                          ? "bg-green-100 text-green-700 border border-green-200"
-                                          : sibling.status === "Rejected"
-                                            ? "bg-red-100 text-red-700 border border-red-200"
-                                            : "bg-slate-100 text-slate-700 border border-slate-200"
-                                          }`}
-                                      >
-                                        {sibling.status || "Completed"}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="px-4 py-2.5 text-[10px] text-muted-foreground font-medium italic pl-8">
-                                      {sibling.remarks || "-"}
-                                    </TableCell>
-                                    <TableCell className="px-4 py-2.5 text-center">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                        onClick={() => setSelectedHistoryItem(sibling.rawData || sibling)}
-                                      >
-                                        <Eye className="mr-1 h-3 w-3" />
-                                        View
-                                      </Button>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </React.Fragment>
-                            );
-                          } else {
-                            // Normal single row (either flat single row, or a group with 1 item)
-                            const rowItem = item.isGroup ? item.items[0] : item;
-                            return (
-                              <TableRow key={rowItem.orderNo} className="border-b hover:bg-muted/20 transition-colors">
-                                <TableCell className="px-4 py-3 text-xs">{rowItem.date || "-"}</TableCell>
-                                <TableCell className="px-4 py-3 font-bold text-blue-700 text-xs">{rowItem.orderNo || "-"}</TableCell>
-                                <TableCell className="px-4 py-3 text-xs font-semibold capitalize">{rowItem.customerName || "-"}</TableCell>
-                                <TableCell className="px-4 py-3 text-center">
-                                  <span
-                                    className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
-                                      ? "bg-green-100 text-green-700 border border-green-200"
-                                      : rowItem.status === "Rejected"
-                                        ? "bg-red-100 text-red-700 border border-red-200"
-                                        : "bg-slate-100 text-slate-700 border border-slate-200"
-                                      }`}
-                                  >
-                                    {rowItem.status || "Completed"}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
-                                  {rowItem.remarks || "-"}
-                                </TableCell>
-                                <TableCell className="px-4 py-3 text-center">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 px-2 text-[10px] font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                    onClick={() => setSelectedHistoryItem(rowItem.rawData || rowItem)}
-                                  >
-                                    <Eye className="mr-1 h-3 w-3" />
-                                    View
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          }
-                        })}
-                      </tbody>
-                    </table>
-
-                    {/* Mobile Card View */}
-                    <div className="grid grid-cols-1 gap-4 p-4 md:hidden">
-                      {groupedHistoryData.map((item, i) => {
-                        if (item.isGroup && item.items.length > 1) {
-                          const isExpanded = !!expandedGroups[item.baseOrderNo];
-                          return (
-                            <div key={item.baseOrderNo} className="space-y-2">
-                              {/* Group Header Card */}
-                              <Card className="p-4 border-2 border-slate-200 bg-slate-50/50 shadow-sm space-y-3">
-                                <div className="flex justify-between items-start">
-                                  <div className="space-y-1">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{item.date}</p>
-                                    <p className="text-sm font-black text-slate-800 font-bold">{item.baseOrderNo}</p>
-                                  </div>
-                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
-                                    {item.items.length} Items
-                                  </span>
-                                </div>
-                                <div className="space-y-1">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Party Name</p>
-                                  <p className="text-sm font-bold text-slate-800 capitalize">{item.customerName}</p>
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full h-9 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                  onClick={() => toggleGroup(item.baseOrderNo)}
-                                >
-                                  {isExpanded ? (
-                                    <>
-                                      <ChevronUp className="mr-2 h-4 w-4" /> Hide Siblings
-                                    </>
-                                  ) : (
-                                    <>
-                                      <ChevronDown className="mr-2 h-4 w-4" /> Show Siblings ({item.items.length})
-                                    </>
-                                  )}
-                                </Button>
-                              </Card>
-
-                              {/* Nested Sibling Cards */}
-                              {isExpanded && (
-                                <div className="pl-4 border-l-2 border-slate-200 space-y-2">
-                                  {item.items.map((sibling: any) => (
-                                    <Card key={sibling.orderNo} className="p-3 border border-slate-100 bg-white shadow-sm space-y-3">
-                                      <div className="flex justify-between items-start">
-                                        <div className="space-y-1">
-                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{sibling.date || "-"}</p>
-                                          <p className="text-xs font-black text-blue-700">{sibling.orderNo || "-"}</p>
-                                        </div>
-                                        <span
-                                          className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
-                                            ? "bg-green-100 text-green-700 border border-green-200"
-                                            : sibling.status === "Rejected"
-                                              ? "bg-red-100 text-red-700 border border-red-200"
-                                              : "bg-slate-100 text-slate-700 border border-slate-200"
-                                            }`}
-                                        >
-                                          {sibling.status || "Completed"}
-                                        </span>
-                                      </div>
-                                      <div className="space-y-1">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest font-bold">Remarks</p>
-                                        <p className="text-xs text-slate-600 italic leading-relaxed">{sibling.remarks || "-"}</p>
-                                      </div>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full h-8 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter text-[10px]"
-                                        onClick={() => setSelectedHistoryItem(sibling.rawData || sibling)}
-                                      >
-                                        <Eye className="mr-2 h-3.5 w-3.5" /> View Full Details
-                                      </Button>
-                                    </Card>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        } else {
-                          // Normal single row/card
-                          const rowItem = item.isGroup ? item.items[0] : item;
-                          return (
-                            <Card key={rowItem.orderNo} className="p-4 border-2 border-slate-100 shadow-sm space-y-3">
-                              <div className="flex justify-between items-start">
-                                <div className="space-y-1">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{rowItem.date || "-"}</p>
-                                  <p className="text-sm font-black text-blue-700">{rowItem.orderNo || "-"}</p>
-                                </div>
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
-                                    ? "bg-green-100 text-green-700 border border-green-200"
-                                    : rowItem.status === "Rejected"
-                                      ? "bg-red-100 text-red-700 border border-red-200"
-                                      : "bg-slate-100 text-slate-700 border border-slate-200"
-                                    }`}
-                                >
-                                  {rowItem.status || "Completed"}
-                                </span>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">Party Name</p>
-                                <p className="text-sm font-bold text-slate-800 capitalize">{rowItem.customerName || "-"}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">Remarks</p>
-                                <p className="text-xs text-slate-600 italic leading-relaxed">{rowItem.remarks || "-"}</p>
-                              </div>
-
-                              {/* Show specific remarks if available in data */}
-                              {(rowItem.rawData?.order_punch_remarks || rowItem.order_punch_remarks) && (
-                                <div className="space-y-1 border-l-2 border-slate-100 pl-3">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Order Punch Remarks</p>
-                                  <p className="text-xs text-slate-800 font-bold leading-tight">{rowItem.rawData?.order_punch_remarks || rowItem.order_punch_remarks}</p>
-                                </div>
-                              )}
-                              {(rowItem.rawData?.revert_security_remarks || rowItem.revert_security_remarks) && (
-                                <div className="space-y-1 border-l-2 border-red-100 pl-3">
-                                  <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-none mb-1">Security Remarks</p>
-                                  <p className="text-xs text-red-700 font-bold leading-tight">{rowItem.rawData?.revert_security_remarks || rowItem.revert_security_remarks}</p>
-                                </div>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full h-9 font-black bg-white hover:bg-blue-50 hover:text-blue-700 border-2 transition-all uppercase italic tracking-tighter"
-                                onClick={() => setSelectedHistoryItem(rowItem.rawData || rowItem)}
-                              >
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Full Details
-                              </Button>
-                            </Card>
-                          );
-                        }
-                      })}
-                    </div>
-
-                    {historyFooter}
-                  </div>
+                  <div className="p-8 text-center text-muted-foreground">Loading history…</div>
                 ) : (
                   <div className="p-8 text-center text-muted-foreground">No history records found.</div>
                 )}
@@ -873,86 +416,8 @@ export function WorkflowStageShell({
             )}
           </TabsContent>
         </Tabs>
-
-        {/* History Detail Dialog */}
-        <Dialog open={!!selectedHistoryItem} onOpenChange={(open) => !open && setSelectedHistoryItem(null)}>
-          <DialogContent className="max-w-6xl! w-full max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-3xl border-none shadow-2xl">
-            <DialogHeader className="p-6 pb-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
-              <div className="flex justify-between items-start">
-                <div>
-                  <Badge className="bg-white/15 hover:bg-white/15 text-white border-white/30 text-xs font-black uppercase tracking-widest px-3 py-1 mb-2">
-                    DO No: {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || selectedHistoryItem?.order_no || "—"}
-                  </Badge>
-                  <DialogTitle className="text-2xl font-black uppercase tracking-tight italic">Record Details</DialogTitle>
-                  <DialogDescription className="text-blue-100 font-bold mt-1 uppercase text-[10px] tracking-widest">
-                    Comprehensive audit trail
-                  </DialogDescription>
-                </div>
-              </div>
-            </DialogHeader>
-
-            <div className="p-6 flex-1 overflow-y-auto space-y-6 bg-slate-50">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Search fields or values..."
-                  className="pl-9 bg-white border-2 focus:border-blue-400 rounded-xl h-10 shadow-sm"
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                />
-              </div>
-
-              {groupedHistoryFields.length > 0 ? (
-                <div className="space-y-5">
-                  {groupedHistoryFields.map((group) => (
-                    <div key={group.level} className="border-2 border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                      <div className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200">
-                        <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
-                        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-700">{group.label}</h3>
-                        <span className="ml-auto text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                          {group.entries.length} {group.entries.length === 1 ? "field" : "fields"}
-                        </span>
-                      </div>
-                      <Table>
-                        <TableHeader className="bg-slate-100/50">
-                          <TableRow>
-                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider w-1/3">Field Name</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Value</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {group.entries.map(([key, value]) => (
-                            <TableRow key={key} className="hover:bg-blue-50/30 transition-colors border-slate-100">
-                              <TableCell className="font-black text-slate-500 text-[10px] uppercase tracking-tight py-3">
-                                {formatKey(key)}
-                              </TableCell>
-                              <TableCell className="py-3 text-xs font-bold text-slate-800">
-                                {renderValue(value)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="border-2 border-slate-200 rounded-2xl bg-white shadow-sm p-8 text-center text-muted-foreground text-sm font-medium">
-                  No matching fields found.
-                </div>
-              )}
-            </div>
-            <div className="p-4 bg-white border-t flex justify-end">
-              <Button
-                onClick={() => setSelectedHistoryItem(null)}
-                className="bg-slate-900 hover:bg-black text-white px-8 font-black uppercase italic tracking-tighter"
-              >
-                Close
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </SidebarInset>
   )
 }
+

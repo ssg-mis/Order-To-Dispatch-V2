@@ -30,7 +30,7 @@ import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, Arrow
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { checkInvoiceApi, skuDetailsApi, depotApi } from "@/lib/api-service"
+import { checkInvoiceApi, skuApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -251,7 +251,7 @@ export default function CheckInvoicePage() {
   const { data: skuDetailsData } = useQuery({
     queryKey: ["sku-details-all"],
     queryFn: async () => {
-      const res = await skuDetailsApi.getAll({ all: "true" })
+      const res = await skuApi.getAll({ all: "true" })
       return res.success ? res.data?.skuDetails ?? [] : []
     },
     staleTime: 5 * 60 * 1000,
@@ -619,9 +619,9 @@ export default function CheckInvoicePage() {
 
       for (const product of productsToSubmit) {
         const submitData = {
-          status_1: checkData.status,
-          remarks_2: checkData.remarks,
-          user_id: user?.id || null // Track acting user's login id
+          status: checkData.status,
+          remarks: checkData.remarks,
+          userId: user?.id || null // Track acting user's login id
         };
 
         try {

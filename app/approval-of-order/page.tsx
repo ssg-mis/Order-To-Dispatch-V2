@@ -334,7 +334,7 @@ export default function CommitmentReviewPage() {
               partyCreditStatus: checklistValues.credit === "approve",
               dispatchDateConfirmed: checklistValues.dispatch === "approve",
               orderConfirmationWithCustomer: checklistValues.confirm === "approve",
-              processId: processId || null, // Manual Sauda No.
+              manualSaudaNo: processId || null, // Manual Sauda No.
               userId: user?.id || null // Track acting user's login id
             };
 

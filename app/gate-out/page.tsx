@@ -24,7 +24,7 @@ import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, CheckSquare, Ey
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { gateOutApi, orderApi, depotApi, skuDetailsApi } from "@/lib/api-service"
+import { gateOutApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -226,7 +226,7 @@ export default function GateOutPage() {
   const { data: skuDetailsData } = useQuery({
     queryKey: ["sku-details-all"],
     queryFn: async () => {
-      const res = await skuDetailsApi.getAll({ all: "true" })
+      const res = await skuApi.getAll({ all: "true" })
       return res.success ? res.data?.skuDetails ?? [] : []
     },
     staleTime: 5 * 60 * 1000,
@@ -656,9 +656,9 @@ export default function GateOutPage() {
 
       for (const product of productsToSubmit) {
         const submitData = {
-          gate_pass: gatePassFileUrl || "",
-          vehicle_image: vehicleLoadedImageUrl || "",
-          user_id: user?.id || null // Track acting user's login id
+          gatePassCopy: gatePassFileUrl || "",
+          vehicleLoadedImage: vehicleLoadedImageUrl || "",
+          userId: user?.id || null // Track acting user's login id
         };
 
         try {
