@@ -119,6 +119,8 @@ function base(row: any): Record<string, any> {
   r.depot_address = d.depotAddress ?? null;
   r.broker_name = b.brokerName ?? null;
   r.salesperson_name = sp.salespersonName ?? null;
+  r.truck_no = r.registration_no ?? null; // legacy name — pages read order.truck_no for Vehicle No.
+  r.driver_mobile_no = r.mobile_no ?? null; // legacy name — drivers.mobileNo snakeifies to mobile_no
 
   // SKU + line item quantities/rates
   r.sku_name = s.skuName ?? null;
@@ -130,6 +132,7 @@ function base(row: any): Record<string, any> {
   r.order_quantity = oi.orderQuantity ?? null;
   r.approval_qty = oi.approvedQty ?? null;
   r.approved_qty = oi.approvedQty ?? null;
+  r.actual_approval_qty = oi.approvedQty ?? null; // legacy name — same field as approved_qty
   r.remaining_dispatch_qty = oi.remainingQty ?? null;
   r.remaining_qty = oi.remainingQty ?? null;
   r.preclose_qty = oi.precloseQty ?? null;
@@ -214,6 +217,7 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   r.actual_qty = dsp.actualQty ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
+  r.reason_of_difference_in_weight_if_any_speacefic = dsp.reasonOfWeightDifference ?? null; // legacy name
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
   // Earlier-gate audit trail — the dispatch slip/voucher printout's
   // Pre-Approve / Approve By block reads these (order_punch_at/_user come
@@ -222,6 +226,7 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   if (row.preApprovalActualAt !== undefined) r.pre_approval_at = row.preApprovalActualAt ?? null;
   if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
   if (row.orderApprovalActualAt !== undefined) r.order_approval_at = row.orderApprovalActualAt ?? null;
+  if (row.actualDispatchUser !== undefined) r.actual_dispatch_user = row.actualDispatchUser;
   // Set when this line was reopened by a "revert to Dispatch Planning" split
   // and has no approval row of its own — the names above were resolved from
   // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
@@ -245,6 +250,9 @@ export function flattenSecurityStage(row: any): Record<string, any> {
   r.security_guard_status = chk.verdictStatus ?? null;
   r.bilty_no = chk.biltyNo ?? null;
   r.bilty_image = chk.biltyImage ?? null;
+  r.vehicle_image_attachemrnt = chk.vehicleImageAttachment ?? null; // legacy typo'd name pages expect
+  r.revert_security_remarks = chk.revertRemarks ?? null; // legacy name
+  if (row.securityGuardUser !== undefined) r.security_guard_user = row.securityGuardUser;
   return r;
 }
 
@@ -267,6 +275,8 @@ export function flattenInvoiceStage(row: any): Record<string, any> {
   r.qty = inv.qty ?? null;
   r.bill_amount = inv.billAmount ?? null;
   r.status_1 = inv.status ?? null;
+  r.verification_status = inv.status ?? null; // legacy name — same field as status_1
+  if (row.makeInvoiceUser !== undefined) r.make_invoice_user = row.makeInvoiceUser;
   r.remarks_2 = inv.checkRemarks ?? null;
   r.planned_5 = inv.plannedMadeAt ?? null;
   r.actual_5 = inv.madeAt ?? null;

@@ -488,6 +488,7 @@ export default function GateOutPage() {
       return {
         ...g,
         customerName: customers.length > 1 ? `Multiple Parties (${customers.length})` : customers[0] || g.customerName,
+        customerNames: customers,
         partySoDate: formatDate(g._allProducts[0]?.party_so_date),
         doNumber: Array.from(g.doNumberList as Set<string>).join(", "),
         orderNo: Array.from(g.doNumberList as Set<string>).join(", "),
@@ -820,17 +821,17 @@ export default function GateOutPage() {
                   </TableHead>
                   <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                     {orderedVisible.map(id => {
-                      const cls = "text-[10px] font-black uppercase tracking-widest cursor-pointer select-none hover:text-blue-600 transition-colors"
+                      const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
                       if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                      if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer<PendingSortIcon field="customerName" /></SortableTableHead>
-                      if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number(s)<PendingSortIcon field="orderNo" /></SortableTableHead>
-                      if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls + " text-center"} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
+                      if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
+                      if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number<PendingSortIcon field="orderNo" /></SortableTableHead>
+                      if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
                       if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
-                      if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No<PendingSortIcon field="invoiceNo" /></SortableTableHead>
-                      if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No<PendingSortIcon field="vehicleNo" /></SortableTableHead>
+                      if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No.<PendingSortIcon field="invoiceNo" /></SortableTableHead>
+                      if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
                       if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                      if (id === "status") return <SortableTableHead key={id} id={id} className="text-[10px] font-black uppercase tracking-widest text-center">Status</SortableTableHead>
-                      if (id === "products") return <SortableTableHead key={id} id={id} className="text-[10px] font-black uppercase tracking-widest text-center">Items</SortableTableHead>
+                      if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
+                      if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
                       const dynCol = ALL_COLUMNS.find(c => c.id === id)
                       if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
                       return null
@@ -864,31 +865,39 @@ export default function GateOutPage() {
                         <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                       </TableCell>
                       {orderedVisible.map(id => {
-                        if (id === "partySoDate") return <TableCell key={id} className="text-xs text-slate-500 font-medium whitespace-nowrap">{group.partySoDate}</TableCell>
-                        if (id === "customerName") return <TableCell key={id} className="text-xs font-black text-slate-900 uppercase">{group.customerName}</TableCell>
-                        if (id === "orderNo") return (
-                          <TableCell key={id}>
-                            <div className="flex flex-wrap gap-1">
-                              {String(group.doNumber || "—").split(", ").map((doNo: string) => (
-                                <Badge key={doNo} variant="outline" className="bg-white text-blue-700 border-blue-100 text-[10px] font-bold whitespace-nowrap">{doNo}</Badge>
+                        if (id === "partySoDate") return <TableCell key={id} className="text-xs text-slate-600 whitespace-nowrap">{group.partySoDate}</TableCell>
+                        if (id === "customerName") return (
+                          <TableCell key={id} className="text-xs text-slate-600">
+                            <div className="flex flex-col gap-1">
+                              {(group.customerNames && group.customerNames.length > 0 ? group.customerNames : [group.customerName]).map((name: string, idx: number) => (
+                                <span key={`${name}-${idx}`} className="font-medium text-slate-700">{name}</span>
                               ))}
                             </div>
                           </TableCell>
                         )
-                        if (id === "actual1Date") return <TableCell key={id} className="text-center text-xs font-bold text-blue-700 whitespace-nowrap">{group.actual1Date}</TableCell>
-                        if (id === "processid") return <TableCell key={id} className="text-xs font-bold text-slate-700">{group.processId}</TableCell>
+                        if (id === "orderNo") return (
+                          <TableCell key={id} className="text-xs">
+                            <div className="flex flex-col gap-1.5">
+                              {String(group.doNumber || "—").split(", ").map((doNo: string) => (
+                                <span key={doNo} className="text-blue-700 font-bold whitespace-nowrap">{doNo}</span>
+                              ))}
+                            </div>
+                          </TableCell>
+                        )
+                        if (id === "actual1Date") return <TableCell key={id} className="text-center text-xs text-slate-600 whitespace-nowrap">{group.actual1Date}</TableCell>
+                        if (id === "processid") return <TableCell key={id} className="text-xs text-slate-600">{group.processId}</TableCell>
                         if (id === "invoiceNo") return (
-                          <TableCell key={id} className="text-xs font-bold text-slate-700">
+                          <TableCell key={id} className="text-xs text-slate-600">
                             {group._allProducts?.[0]?.invoice_copy ? (
-                              <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-black">{group.invoiceNo}</a>
+                              <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
                             ) : group.invoiceNo}
                           </TableCell>
                         )
-                        if (id === "vehicleNo") return <TableCell key={id} className="text-xs font-black text-slate-800 whitespace-nowrap">{group.vehicleNo}</TableCell>
-                        if (id === "orderPunchRemarks") return <TableCell key={id} className="text-xs text-slate-600 font-medium">{group.orderPunchRemarks}</TableCell>
+                        if (id === "vehicleNo") return <TableCell key={id} className="text-xs text-slate-600 whitespace-nowrap">{group.vehicleNo}</TableCell>
+                        if (id === "orderPunchRemarks") return <TableCell key={id} className="text-xs text-slate-600">{group.orderPunchRemarks}</TableCell>
                         if (id === "status") return (
                           <TableCell key={id} className="text-center">
-                            <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 text-[10px] font-black whitespace-nowrap">Ready</Badge>
+                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap">Ready</Badge>
                           </TableCell>
                         )
                         if (id === "products") return (
@@ -899,7 +908,7 @@ export default function GateOutPage() {
                         return null
                       })}
                       {dynamicColumns.map((colId) => (
-                        <TableCell key={colId} className="text-xs font-bold text-slate-700">
+                        <TableCell key={colId} className="text-xs text-slate-600">
                           {String(getDynamicColumnValue(group, colId))}
                         </TableCell>
                       ))}
@@ -947,17 +956,21 @@ export default function GateOutPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-1">
                         {visibleColumns.includes("partySoDate") && <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{group.partySoDate}</p>}
-                        {visibleColumns.includes("customerName") && <h3 className="text-sm font-black uppercase tracking-tight text-slate-900 leading-tight break-words">{group.customerName}</h3>}
+                        {visibleColumns.includes("customerName") && (
+                          <div className="flex flex-col gap-0.5">
+                            {(group.customerNames && group.customerNames.length > 0 ? group.customerNames : [group.customerName]).map((name: string, idx: number) => (
+                              <h3 key={`${name}-${idx}`} className="text-sm font-bold text-slate-900 leading-tight break-words">{name}</h3>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} className="mt-1 h-5 w-5" />
                     </div>
 
                     {visibleColumns.includes("orderNo") && (
-                      <div className="mt-4 flex flex-wrap gap-1.5">
+                      <div className="mt-4 flex flex-col gap-1">
                         {String(group.doNumber || "—").split(", ").map((doNo: string) => (
-                          <Badge key={doNo} variant="outline" className="bg-white text-blue-700 border-blue-100 text-[10px] font-bold">
-                            {doNo}
-                          </Badge>
+                          <p key={doNo} className="font-mono text-sm font-black text-blue-700 break-all">{doNo}</p>
                         ))}
                       </div>
                     )}
@@ -966,7 +979,7 @@ export default function GateOutPage() {
                       {visibleColumns.includes("actual1Date") && (
                         <div>
                           <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dispatched Date</p>
-                          <p className="text-xs font-bold text-blue-700">{group.actual1Date}</p>
+                          <p className="text-xs font-bold text-slate-700">{group.actual1Date}</p>
                         </div>
                       )}
                       {visibleColumns.includes("processid") && (
@@ -990,14 +1003,14 @@ export default function GateOutPage() {
                       {visibleColumns.includes("vehicleNo") && (
                         <div>
                           <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Vehicle No.</p>
-                          <p className="text-xs font-black text-slate-800">{group.vehicleNo}</p>
+                          <p className="text-xs font-bold text-slate-700">{group.vehicleNo}</p>
                         </div>
                       )}
                     </div>
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                       <Badge variant="secondary" className="font-black">{group._productCount} items</Badge>
-                      {visibleColumns.includes("status") && <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100">Ready for Gate Out</Badge>}
+                      {visibleColumns.includes("status") && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Ready for Gate Out</Badge>}
                     </div>
 
                     {visibleColumns.includes("orderPunchRemarks") && group.orderPunchRemarks && group.orderPunchRemarks !== "—" && (

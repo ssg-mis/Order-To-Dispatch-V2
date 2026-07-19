@@ -925,13 +925,13 @@ export default function MakeInvoicePage() {
                       <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </TableCell>
                     {orderedVisible.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
+                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
                       if (id === "actual1Date") {
                         const dispatchedDates = group.doDetails && group.doDetails.length > 0
                           ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
                           : [group.actual1Date]
                         return (
-                          <TableCell key={id} className="text-center text-xs font-medium text-blue-700">
+                          <TableCell key={id} className="text-center text-xs text-slate-600">
                             <div className="flex flex-col gap-1.5">
                               {dispatchedDates.map((date: any, idx: number) => (
                                 <span key={`${date}-${idx}`}>{date}</span>
@@ -941,30 +941,30 @@ export default function MakeInvoicePage() {
                         )
                       }
                       if (id === "orderNo") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
+                        <TableCell key={id} className="text-center text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`}>{d.doNumber}</span>
+                              <span key={`${d.doNumber}-${idx}`} className="text-blue-700 font-bold">{d.doNumber}</span>
                             ))}
                           </div>
                         </TableCell>
                       )
                       if (id === "processid") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
+                        <TableCell key={id} className="text-center text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`}>{d.processId}</span>
+                              <span key={`${d.doNumber}-${idx}`} className="text-slate-600">{d.processId}</span>
                             ))}
                           </div>
                         </TableCell>
                       )
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
+                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.customerName}</TableCell>
+                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
                         <TableCell key={id} className="text-center">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600 font-medium">{d.orderPunchRemarks}</span>
+                              <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
                             ))}
                           </div>
                         </TableCell>
@@ -987,12 +987,12 @@ export default function MakeInvoicePage() {
                       )
                       if (id === "products") return (
                         <TableCell key={id} className="text-center">
-                          <span className="text-[10px] font-black text-slate-700 uppercase leading-tight block max-w-[150px] mx-auto">
+                          <span className="text-xs font-medium text-slate-700 leading-tight block max-w-[150px] mx-auto">
                             {group._allProducts[0]?.productName || "—"}
                           </span>
                         </TableCell>
                       )
-                      return <TableCell key={id} className="text-center text-xs font-medium text-slate-700">{String(getDynamicColumnValue(group, id))}</TableCell>
+                      return <TableCell key={id} className="text-center text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                     })}
                   </TableRow>
                 ))
@@ -1049,7 +1049,7 @@ export default function MakeInvoicePage() {
                             ? Array.from(new Set(display.doDetails.map((d: any) => d.dispatchedDate)))
                             : [display.actual1Date]
                           ).map((date: any, idx: number) => (
-                            <p key={`${date}-${idx}`} className="font-bold text-blue-700">{date}</p>
+                            <p key={`${date}-${idx}`} className="font-bold">{date}</p>
                           ))}
                         </div>
                       </div>

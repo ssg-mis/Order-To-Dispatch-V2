@@ -865,20 +865,20 @@ export default function CheckInvoicePage() {
                       )}
                     </TableCell>
                     {orderedVisible.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
+                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
                       if (id === "orderNo") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
+                        <TableCell key={id} className="text-center text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.orderNo }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`}>{d.doNumber}</span>
+                              <span key={`${d.doNumber}-${idx}`} className="text-blue-700 font-bold">{d.doNumber}</span>
                             ))}
                           </div>
                         </TableCell>
                       )
-                      if (id === "processid") return <TableCell key={id} className="text-center text-xs font-medium">{group.processid}</TableCell>
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
+                      if (id === "processid") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.processid}</TableCell>
+                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.customerName}</TableCell>
                       if (id === "actual1Date") return (
-                        <TableCell key={id} className="text-center text-xs font-medium text-blue-700">
+                        <TableCell key={id} className="text-center text-xs text-slate-600">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actual1Date }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
@@ -893,12 +893,12 @@ export default function CheckInvoicePage() {
                           ) : group.invoiceNo}
                         </TableCell>
                       )
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
+                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
                         <TableCell key={id} className="text-center">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
-                              <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600 font-medium">{d.orderPunchRemarks}</span>
+                              <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
                             ))}
                           </div>
                         </TableCell>
@@ -919,7 +919,7 @@ export default function CheckInvoicePage() {
                           <Badge variant="secondary">{group._productCount} items</Badge>
                         </TableCell>
                       )
-                      return <TableCell key={id} className="text-center text-xs font-medium text-slate-700">{String(getDynamicColumnValue(group, id))}</TableCell>
+                      return <TableCell key={id} className="text-center text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                     })}
                   </TableRow>
                 ))

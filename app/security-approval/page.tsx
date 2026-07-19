@@ -1000,9 +1000,9 @@ export default function SecurityApprovalPage() {
                     
                     <div className="space-y-1">
                       <h4 className="text-sm font-black text-slate-800 uppercase leading-tight italic">{group.customerName}</h4>
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-0.5">
                         {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
-                          <Badge key={`${d.doNumber}-${idx}`} variant="outline" className="w-fit bg-blue-50 text-blue-700 border-blue-100 font-bold text-[9px] px-1.5 py-0">#{d.doNumber}</Badge>
+                          <p key={`${d.doNumber}-${idx}`} className="font-mono text-sm font-black text-blue-700 break-all">{d.doNumber}</p>
                         ))}
                       </div>
                     </div>
