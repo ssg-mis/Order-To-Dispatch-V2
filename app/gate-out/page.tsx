@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
@@ -28,10 +28,8 @@ import { gateOutApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { useInView } from "react-intersection-observer"
-import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -210,7 +208,6 @@ export default function GateOutPage() {
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -290,20 +287,19 @@ export default function GateOutPage() {
     vehicleLoadedImageName: "",
   })
 
-  // Pending query with infinite pagination
+  // Pending query with numeric pagination
+  const [pendingPage, setPendingPage] = useState(1)
+  const limit = 20
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["gate-out-pending", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["gate-out-pending", filterValues, pendingPage],
+    queryFn: async () => {
       const response = await gateOutApi.getPending({
-        page: pageParam,
-        limit: 20,
+        page: pendingPage,
+        limit,
         search: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
         do_date_from: filterValues.startDate,
@@ -312,22 +308,15 @@ export default function GateOutPage() {
       });
       return response.success ? response.data : { orders: [], pagination: { total: 0 } };
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.orders?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
-    },
   });
 
-  const pendingOrders = useMemo(() => {
-    return pendingData?.pages.flatMap((page) => page.orders) || [];
-  }, [pendingData]);
-
   useEffect(() => {
-    if (pendingInView && hasNextPending) {
-      fetchNextPending();
-    }
-  }, [pendingInView, hasNextPending, fetchNextPending]);
+    setPendingPage(1);
+  }, [filterValues]);
+
+  const pendingOrders = useMemo(() => {
+    return pendingData?.orders || [];
+  }, [pendingData]);
 
   const handleFileUpload = (file: File, type: 'gatePass' | 'vehicleImage') => {
     if (!file) return;
@@ -727,7 +716,7 @@ export default function GateOutPage() {
 
 
 
-  const customerNames = Array.from(new Set(pendingOrders.map(order => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer"))))
+  const customerNames = Array.from(new Set(pendingOrders.map((order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer")))) as string[]
 
   return (
     <WorkflowStageShell
@@ -1042,15 +1031,35 @@ export default function GateOutPage() {
               </div>
             )}
           </div>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
         </Card>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingData?.pagination?.totalPages || 1}</span>
+            <span className="mx-2 text-slate-300">|</span>
+            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Loads
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
+              disabled={pendingPage === 1}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => p + 1)}
+              disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Split-View Dialog */}
@@ -1080,7 +1089,7 @@ export default function GateOutPage() {
                         <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
                           <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                             <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
-                              DETAILS FOR {group.invoiceNo} — {group.customerName}
+                              DETAILS FOR {group.invoiceNo && group.invoiceNo !== "—" ? `INVOICE ${group.invoiceNo} — ` : ""}{group.customerName}
                             </Badge>
                             <div className="flex flex-col">
                               <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">GROUP {groupIdx + 1} | {group.doNumber}</span>
@@ -1385,7 +1394,6 @@ export default function GateOutPage() {
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">AMOUNT</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE NO</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE DATE</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE COPY</TableHead>
                                   <TableHead className="text-[10px] uppercase font-black text-center h-10">TRUCK NO</TableHead>
                                 </TableRow>
                               </TableHeader>
@@ -1453,20 +1461,16 @@ export default function GateOutPage() {
                                       {product.amount ? `₹${product.amount.toFixed(2)}` : "—"}
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-green-700">
-                                      {product.invoiceNo || "—"}
+                                      {product.invoice_copy ? (
+                                        <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline">
+                                          {product.invoiceNo || "View Invoice"}
+                                        </a>
+                                      ) : (
+                                        <span>{product.invoiceNo || "—"}</span>
+                                      )}
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-black">
                                       {product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}
-                                    </TableCell>
-                                    <TableCell className="text-center p-2">
-                                      {product.invoice_copy ? (
-                                        <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="inline-block">
-                                          <img src={product.invoice_copy} alt="Invoice" className="h-10 w-14 object-cover rounded border border-slate-200 hover:opacity-80 transition-opacity cursor-pointer mx-auto" onError={(e: any) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'inline'; }} />
-                                          <span style={{ display: 'none' }} className="text-[10px] text-blue-600 underline font-bold">View Invoice</span>
-                                        </a>
-                                      ) : (
-                                        <span className="text-[10px] text-slate-400 font-bold italic tracking-tighter">NO FILE</span>
-                                      )}
                                     </TableCell>
                                     <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
                                       {(product.truckNo || "—").toUpperCase()}
@@ -1590,13 +1594,12 @@ export default function GateOutPage() {
                                     <div className="col-span-2 rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Invoice</p>
                                       <div className="mt-1 flex flex-wrap items-center gap-2">
-                                        <span className="text-xs font-bold text-green-700">{product.invoiceNo || "—"}</span>
                                         {product.invoice_copy ? (
-                                          <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-blue-600 underline">
-                                            View Invoice
+                                          <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-green-700 underline">
+                                            {product.invoiceNo || "View Invoice"}
                                           </a>
                                         ) : (
-                                          <span className="text-[10px] text-slate-400 font-bold italic tracking-tighter">NO FILE</span>
+                                          <span className="text-xs font-bold text-green-700">{product.invoiceNo || "—"}</span>
                                         )}
                                       </div>
                                     </div>

@@ -313,7 +313,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   useEffect(() => {
     if (isAdmin || !user || orderThrough !== "Broker" || !allowedBrokerNames) return
     const activeBrokerSet = new Set(
-      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.broker_name || "").toLowerCase())
+      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.salesman_name || "").toLowerCase())
     )
     const activeAllowedBrokerNames = allowedBrokerNames.filter(b => activeBrokerSet.has(b.toLowerCase()))
     if (activeAllowedBrokerNames.length === 0) {
@@ -327,7 +327,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   useEffect(() => {
     if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
     const activeSalespersonSet = new Set(
-      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesperson_name || "").toLowerCase())
+      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesman_name || "").toLowerCase())
     )
     const activeAllowedSalespersonNames = allowedSalespersonNames.filter(s => activeSalespersonSet.has(s.toLowerCase()))
     if (activeAllowedSalespersonNames.length === 0) {
@@ -604,10 +604,10 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       }
 
       const selectedBrokerRecord = isBrokerOrder === "Broker"
-        ? brokers.find((b: any) => (b.broker_name || "").toLowerCase() === (brokerName || "").toLowerCase())
+        ? brokers.find((b: any) => (b.salesman_name || "").toLowerCase() === (brokerName || "").toLowerCase())
         : null
       const selectedSalespersonRecord = isBrokerOrder === "Salesperson"
-        ? salespersons.find((s: any) => (s.salesperson_name || "").toLowerCase() === (salespersonName || "").toLowerCase())
+        ? salespersons.find((s: any) => (s.salesman_name || "").toLowerCase() === (salespersonName || "").toLowerCase())
         : null
 
       // Prepare common order data (v2 schema: real FK ids, not name strings)
@@ -1748,21 +1748,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       if (allowedBrokerNames) {
                         const allowedSet = new Set(allowedBrokerNames.map(b => b.toLowerCase()))
                         const filtered = brokers.filter(b =>
-                          allowedSet.has((b.broker_name || "").toLowerCase()) &&
+                          allowedSet.has((b.salesman_name || "").toLowerCase()) &&
                           (b.status || "").toLowerCase() === "active" &&
-                          (!search || (b.broker_name || "").toLowerCase().includes(search.toLowerCase()))
+                          (!search || (b.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20
                         const pageItems = filtered.slice(start, start + 20)
                         return {
-                          options: pageItems.map((b: any) => ({ value: b.broker_name, label: b.broker_name, original: b })),
+                          options: pageItems.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
                           hasMore: start + 20 < filtered.length
                         };
                       }
                       const res = await brokerApi.getAll({ search, page, limit: 20 });
                       const list = res.data.brokers || [];
                       return {
-                        options: list.map((b: any) => ({ value: b.broker_name, label: b.broker_name, original: b })),
+                        options: list.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
                         hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}
@@ -1791,21 +1791,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       if (allowedSalespersonNames) {
                         const allowedSet = new Set(allowedSalespersonNames.map(s => s.toLowerCase()))
                         const filtered = salespersons.filter(s =>
-                          allowedSet.has((s.salesperson_name || "").toLowerCase()) &&
+                          allowedSet.has((s.salesman_name || "").toLowerCase()) &&
                           (s.status || "").toLowerCase() === "active" &&
-                          (!search || (s.salesperson_name || "").toLowerCase().includes(search.toLowerCase()))
+                          (!search || (s.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
                         )
                         const start = (page - 1) * 20
                         const pageItems = filtered.slice(start, start + 20)
                         return {
-                          options: pageItems.map((s: any) => ({ value: s.salesperson_name, label: s.salesperson_name, original: s })),
+                          options: pageItems.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
                           hasMore: start + 20 < filtered.length
                         };
                       }
                       const res = await salespersonApi.getAll({ search, page, limit: 20 });
                       const list = res.data.salespersons || [];
                       return {
-                        options: list.map((s: any) => ({ value: s.salesperson_name, label: s.salesperson_name, original: s })),
+                        options: list.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
                         hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
                       };
                     }}

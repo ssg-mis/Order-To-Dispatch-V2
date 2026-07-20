@@ -217,7 +217,7 @@ export default function MaterialReceiptPage() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
-  const limit = 25;
+  const limit = 20;
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -541,22 +541,22 @@ export default function MaterialReceiptPage() {
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
-        return <TableCell key={colId} className="text-center text-xs font-bold text-slate-600">{group.formattedPartySoDate}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.formattedPartySoDate}</TableCell>
       case "doNumber":
-        return <TableCell key={colId} className="text-center text-xs font-black text-slate-900 leading-none">{group.doNumber.replace(/[A-Za-z]+$/, '')}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-blue-700 font-bold">{group.doNumber.replace(/[A-Za-z]+$/, '')}</TableCell>
       case "processId":
-        return <TableCell key={colId} className="text-center text-xs font-black text-blue-600 leading-none">{group.processId}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.processId}</TableCell>
       case "customerName":
-        return <TableCell key={colId} className="text-center text-xs font-black text-slate-800 uppercase italic tracking-tighter">{group.customerName}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs"><span className="font-medium text-slate-700">{group.customerName}</span></TableCell>
       case "products":
         return (
-          <TableCell key={colId} className="text-center">
+          <TableCell key={colId} className="whitespace-nowrap text-center text-xs">
             <Badge className="bg-slate-100 text-slate-600 font-black text-[10px] uppercase border-none ring-1 ring-inset ring-slate-200">{group._productCount} items</Badge>
           </TableCell>
         )
       case "invoiceNo":
         return (
-          <TableCell key={colId} className="text-center text-xs font-black text-blue-800">
+          <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">
             {group._allProducts?.[0]?.invoice_copy ? (
               <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">
                 {group.invoiceNo}
@@ -567,9 +567,9 @@ export default function MaterialReceiptPage() {
           </TableCell>
         )
       case "vehicleNo":
-        return <TableCell key={colId} className="text-center"><span className="text-xs font-black text-slate-700 tracking-tighter">{group.vehicleNo}</span></TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.vehicleNo}</TableCell>
       case "orderPunchRemarks":
-        return <TableCell key={colId} className="text-center"><span className="text-xs text-slate-500 font-bold truncate max-w-[150px] block mx-auto">{group.orderPunchRemarks}</span></TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600"><span className="truncate max-w-[150px] block mx-auto">{group.orderPunchRemarks}</span></TableCell>
       default:
         return null
     }
@@ -862,24 +862,6 @@ export default function MaterialReceiptPage() {
               No orders pending for receipt confirmation
             </Card>
           )}
-          <Card className="border border-slate-100 rounded-2xl bg-white">
-            <div className="px-3 py-4 flex flex-col gap-3 font-bold">
-              <div className="text-[10px] text-slate-400 uppercase tracking-widest leading-none text-center">
-                Showing Page <span className="text-slate-900 mx-1">{pendingPage}</span>
-                {pendingData?.pagination?.total && (
-                  <> of <span className="text-slate-900 mx-1">{Math.ceil(pendingData.pagination.total / limit)}</span></>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1 || isPendingLoading} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-                  <ChevronLeft className="h-4 w-4" /> Previous
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={isPendingLoading || (pendingPage * limit >= (pendingData?.pagination?.total || 0))} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-                  Next <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </Card>
         </div>
 
         <Card className="hidden md:block border-none shadow-xl rounded-[2rem] overflow-hidden bg-white/50 backdrop-blur-sm">
@@ -896,7 +878,7 @@ export default function MaterialReceiptPage() {
                       <SortableTableHead
                         key={col.id}
                         id={col.id}
-                        className={`text-[10px] font-black uppercase tracking-widest text-slate-400 text-center whitespace-nowrap${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
+                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
                         onClick={sf ? () => handlePendingSort(sf) : undefined}
                       >
                         {col.label}{sf && <PendingSortIcon field={sf} />}
@@ -907,13 +889,13 @@ export default function MaterialReceiptPage() {
                     const col = ALL_COLUMNS.find((c) => c.id === colId)
                     if (!col) return null
                     return (
-                      <SortableTableHead key={colId} id={colId} className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
+                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
                         {col.label}<PendingSortIcon field={colId} />
                       </SortableTableHead>
                     )
                   })}
                 </ColumnDragProvider>
-                <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Status</TableHead>
+                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -940,12 +922,12 @@ export default function MaterialReceiptPage() {
                     </TableCell>
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
                     {dynamicColumns.map((colId) => (
-                      <TableCell key={colId} className="text-center text-xs font-medium text-slate-700">
+                      <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">
                         {String(getDynamicColumnValue(group, colId))}
                       </TableCell>
                     ))}
                     <TableCell className="text-center">
-                      <Badge className="bg-cyan-100 text-cyan-700 font-black text-[9px] uppercase tracking-widest px-3 py-1 ring-1 ring-inset ring-cyan-200">In Transit</Badge>
+                      <Badge className="bg-cyan-100 text-cyan-700 font-black text-[10px] uppercase tracking-tighter px-3 py-1 ring-1 ring-inset ring-cyan-200">In Transit</Badge>
                     </TableCell>
                   </TableRow>
                 ))
@@ -957,30 +939,24 @@ export default function MaterialReceiptPage() {
                 </TableRow>
               )}
             </TableBody>
-            <TableFooter className="bg-slate-50/80 border-t border-slate-100">
-              <TableRow>
-                <TableCell colSpan={orderedVisibleCols.length + 2 + dynamicColumns.length} className="p-0">
-                  <div className="px-3 sm:px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between font-bold">
-                    <div className="text-[10px] sm:text-xs text-slate-400 uppercase tracking-widest leading-none text-center sm:text-left">
-                      Showing Page <span className="text-slate-900 mx-1">{pendingPage}</span>
-                      {pendingData?.pagination?.total && (
-                        <> of <span className="text-slate-900 mx-1">{Math.ceil(pendingData.pagination.total / limit)}</span></>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                      <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1 || isPendingLoading} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-                        <ChevronLeft className="h-4 w-4" /> Previous
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={isPendingLoading || (pendingPage * limit >= (pendingData?.pagination?.total || 0))} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-                        Next <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableFooter>
           </Table>
         </Card>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-slate-100">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50 text-center sm:text-left">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{Math.ceil((pendingData?.pagination?.total || 0) / limit) || 1}</span>
+            <span className="mx-2 text-slate-300">|</span>
+            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Invoices
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1 || isPendingLoading} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
+              <ChevronLeft className="h-4 w-4" /> Previous
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={isPendingLoading || (pendingPage * limit >= (pendingData?.pagination?.total || 0))} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
+              Next <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
 
         {/* Restore Previous Design Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

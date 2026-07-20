@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown } from "lucide-react"
+import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
@@ -35,10 +35,8 @@ import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { useInView } from "react-intersection-observer"
-import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -162,7 +160,6 @@ export default function CheckInvoicePage() {
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -284,20 +281,19 @@ export default function CheckInvoicePage() {
     remarks: "",
   })
 
-  // Pending query with infinite pagination
+  // Pending query with numeric pagination
+  const [pendingPage, setPendingPage] = useState(1)
+  const limit = 20
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["check-invoice-pending", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["check-invoice-pending", filterValues, pendingPage],
+    queryFn: async () => {
       const response = await checkInvoiceApi.getPending({
-        page: pageParam,
-        limit: 20,
+        page: pendingPage,
+        limit,
         search: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
         do_date_from: filterValues.startDate,
@@ -306,22 +302,15 @@ export default function CheckInvoicePage() {
       });
       return response.success ? response.data : { invoices: [], pagination: { total: 0 } };
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.invoices?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
-    },
   });
 
-  const pendingOrders = useMemo(() => {
-    return pendingData?.pages.flatMap((page) => page.invoices) || [];
-  }, [pendingData]);
-
   useEffect(() => {
-    if (pendingInView && hasNextPending) {
-      fetchNextPending();
-    }
-  }, [pendingInView, hasNextPending, fetchNextPending]);
+    setPendingPage(1);
+  }, [filterValues]);
+
+  const pendingOrders = useMemo(() => {
+    return pendingData?.invoices || [];
+  }, [pendingData]);
 
   /* Filter Logic */
 
@@ -694,7 +683,7 @@ export default function CheckInvoicePage() {
 
 
 
-  const customerNames = Array.from(new Set(pendingOrders.map(order => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer"))))
+  const customerNames = Array.from(new Set(pendingOrders.map((order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer")))) as string[]
 
   const buildCheckInvoiceDisplay = (group: any) => ({
     doNumber: group.doNumber || "—",
@@ -1076,15 +1065,35 @@ export default function CheckInvoicePage() {
               </div>
             )}
           </div>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
         </Card>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingData?.pagination?.totalPages || 1}</span>
+            <span className="mx-2 text-slate-300">|</span>
+            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Invoices
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
+              disabled={pendingPage === 1}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => p + 1)}
+              disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Split-View Dialog */}

@@ -290,6 +290,7 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   const r = base(row);
   const dsp = row.dispatch || {};
   const g = row.gateOut || {};
+  const inv = row.invoice || {};
   r.id = g.id ?? null;
   r.gate_out_id = g.id ?? null;
   r.dispatch_id = dsp.id ?? null;
@@ -301,6 +302,10 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   r.vehicle_loaded_image = g.vehicleLoadedImage ?? null;
   r.planned_7 = g.plannedAt ?? null;
   r.actual_7 = g.actualAt ?? null;
+  r.invoice_no = inv.invoiceNo ?? null;
+  r.invoice_date = inv.invoiceDate ?? null;
+  r.invoice_copy = inv.invoiceCopy ?? null;
+  r.bill_amount = inv.billAmount ?? null;
   return r;
 }
 
@@ -309,10 +314,12 @@ export function flattenMaterialReceiptStage(row: any): Record<string, any> {
   const r = base(row);
   const dsp = row.dispatch || {};
   const mr = row.materialReceipt || {};
+  const inv = row.invoice || {};
   r.id = mr.id ?? null;
   r.material_receipt_id = mr.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
+  r.invoice_no = inv.invoiceNo ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
   r.material_received_date = mr.materialReceivedDate ?? null;
