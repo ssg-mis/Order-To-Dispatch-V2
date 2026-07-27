@@ -157,48 +157,47 @@ function ImageUploadCard({ label, capture, value, fileName, isUploading, onFile,
 }
 
 const PAGE_COLUMNS = [
-  { id: "advanceAmount",         label: "Advance Amount" },
-  { id: "advanceTaken",          label: "Advance Payment to be Taken" },
-  { id: "altQty",                label: "Alt Qty (Kg)" },
-  { id: "altUom",                label: "Alt UOM" },
-  { id: "approvalQty",           label: "Approval Qty" },
-  { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
-  { id: "address",               label: "Customer Address" },
-  { id: "contactPerson",         label: "Customer Contact Person Name" },
-  { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
-  { id: "customerName",          label: "Customer Name" },
-  { id: "customerType",          label: "Customer Type" },
-  { id: "deliveryDate",          label: "Delivery Date" },
-  { id: "deliveryFrom",          label: "Delivery From" },
   { id: "partySoDate",           label: "DO Date" },
   { id: "orderNo",               label: "DO Number" },
-  { id: "driver_name",           label: "Driver Name" },
-  { id: "endDate",               label: "End Date" },
-  { id: "isBroker",              label: "Is this order Through Broker" },
-  { id: "processId",             label: "Manual Sauda No." },
-  { id: "oilType",               label: "Oil Type" },
-  { id: "order_key",             label: "Order Key (DO No.)" },
-  { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
-  { id: "orderQty",              label: "Order Qty" },
-  { id: "orderType",             label: "Order Type" },
   { id: "deliveryPurpose",       label: "Order Type (Delivery Purpose)" },
-  { id: "paymentTerms",          label: "Payment Terms" },
-  { id: "productName",           label: "Product Name" },
-  { id: "products",              label: "Products" },
-  { id: "qtyToDispatch",         label: "Qty to Dispatch" },
-  { id: "rate",                  label: "Rate" },
-  { id: "rateOfMaterial",        label: "Rate of Material" },
+  { id: "orderType",             label: "Order Type" },
+  { id: "customerType",          label: "Customer Type" },
+  { id: "customerName",          label: "Customer Name" },
+  { id: "startDate",             label: "Start Date" },
+  { id: "endDate",               label: "End Date" },
+  { id: "deliveryDate",          label: "Delivery Date" },
+  { id: "oilType",               label: "Oil Type" },
   { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
   { id: "ratePerLtr",            label: "Rate Per Ltr." },
-  { id: "remark",                label: "Remark" },
-  { id: "saved_at",              label: "Saved At" },
-  { id: "saved_by",              label: "Saved By" },
+  { id: "productName",           label: "Product Name" },
+  { id: "products",              label: "Products" },
+  { id: "uom",                   label: "UOM" },
+  { id: "orderQty",              label: "Order Qty" },
+  { id: "altUom",                label: "Alt UOM" },
+  { id: "altQty",                label: "Alt Qty (Kg)" },
+  { id: "rateOfMaterial",        label: "Rate of Material" },
+  { id: "rate",                  label: "Rate" },
   { id: "skuName",               label: "SKU Name" },
-  { id: "startDate",             label: "Start Date" },
+  { id: "approvalQty",           label: "Approval Qty" },
+  { id: "qtyToDispatch",         label: "Qty to Dispatch" },
+  { id: "deliveryFrom",          label: "Delivery From" },
+  { id: "processId",             label: "Manual Sauda No." },
+  { id: "vehicle_no",            label: "Vehicle No." },
+  { id: "driver_name",           label: "Driver Name" },
   { id: "totalWithGst",          label: "Total Amount with GST" },
   { id: "transportType",         label: "Type of Transporting" },
-  { id: "uom",                   label: "UOM" },
-  { id: "vehicle_no",            label: "Vehicle No." },
+  { id: "contactPerson",         label: "Customer Contact Person Name" },
+  { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
+  { id: "address",               label: "Customer Address" },
+  { id: "paymentTerms",          label: "Payment Terms" },
+  { id: "advanceTaken",          label: "Advance Payment to be Taken" },
+  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "isBroker",              label: "Is this order Through Broker" },
+  { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
+  { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
+  { id: "remark",                label: "Remark" },
+  { id: "saved_by",              label: "Saved By" },
+  { id: "saved_at",              label: "Saved At" },
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
 
@@ -499,7 +498,7 @@ export default function GateInPage() {
     return Array.from(groups.values())
   }, [sortedPendingRecords])
 
-  const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", ["order_key", "vehicle_no", "driver_name", "saved_by", "saved_at", "products"])
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", ["partySoDate", "orderNo", "vehicle_no", "driver_name", "saved_by", "saved_at", "products"])
   const [columnOrder, setColumnOrder] = useColumnOrder("gate-in", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = useMemo(() =>
     columnOrder
@@ -513,7 +512,6 @@ export default function GateInPage() {
   }, [columnOrder, visibleColumns, setColumnOrder])
 
   const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    order_key:   "order_key",
     vehicle_no:  "vehicle_no",
     driver_name: "driver_name",
     saved_by:    "saved_by",
@@ -529,6 +527,18 @@ export default function GateInPage() {
     setSelectedRows(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     )
+  }
+
+  // ── Open dialog (bulk, from toolbar) ───────────────────────────────────────
+  const handleOpenSelectedDialog = () => {
+    const selectedGroups = groupedPendingRecords.filter(group =>
+      group.records.some((r: any) => selectedRows.includes(r.order_key))
+    )
+    if (selectedGroups.length === 0) return
+
+    const groupRecords = selectedGroups.flatMap(group => group.records)
+    const groupKeys = groupRecords.map((r: any) => r.order_key)
+    handleOpenDialog(groupRecords[0], groupKeys, groupRecords)
   }
 
   // ── Open dialog ────────────────────────────────────────────────────────────
@@ -727,21 +737,30 @@ export default function GateInPage() {
       }
     >
       <div className="space-y-4">
-        {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-          <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            onClick={handleOpenSelectedDialog}
+            disabled={selectedRows.length === 0 || isReadOnly}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <Truck className="mr-2 h-4 w-4" />
+            Gate In Selected ({selectedRows.length})
+          </Button>
+
+          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent h-9 text-xs">
+                <Button variant="outline" className="bg-transparent">
                   <Settings2 className="mr-2 h-4 w-4" />
                   Columns
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-62.5" collisionPadding={16}>
+              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
                 <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
-        )}
+          )}
+        </div>
         {/* Pending cards for mobile */}
         <div className="md:hidden space-y-3">
           {isPendingLoading && pendingRecords.length === 0 ? (
@@ -755,7 +774,7 @@ export default function GateInPage() {
               </Card>
             ))
           ) : pendingRecords.length === 0 ? (
-            <Card className="border-slate-200 p-6 text-center text-sm font-semibold text-slate-400 shadow-sm">
+            <Card className="border-slate-200 p-6 text-center text-muted-foreground shadow-sm">
               No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
             </Card>
           ) : (
@@ -768,11 +787,11 @@ export default function GateInPage() {
               return (
                 <Card
                   key={orderKeys.join(",")}
-                  className={`border-slate-200 p-4 shadow-sm ${allSelected ? "bg-blue-50 border-blue-200" : "bg-white"}`}
+                  className={`gap-0 border-slate-200 p-4 shadow-sm ${allSelected ? "bg-blue-50 border-blue-200" : "bg-white"}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Key(s)</div>
+                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">DO Number(s)</div>
                       <div className="mt-1 font-black text-blue-700">{orderKeys.join(", ")}</div>
                     </div>
                     <Checkbox
@@ -805,15 +824,7 @@ export default function GateInPage() {
                   </div>
 
                   <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                    <Badge variant="outline" className="text-xs font-bold">{totalProducts} item(s)</Badge>
-                    <Button
-                      size="sm"
-                      disabled={isReadOnly}
-                      onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key), group.records)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm"
-                    >
-                      Gate In
-                    </Button>
+                    <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">{totalProducts} item(s)</Badge>
                   </div>
                 </Card>
               )
@@ -839,7 +850,7 @@ export default function GateInPage() {
                       <SortableTableHead
                         key={col.id}
                         id={col.id}
-                        className={`text-[10px] uppercase font-black text-slate-500 tracking-wider whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
+                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
                         onClick={sf ? () => handlePendingSort(sf) : undefined}
                       >
                         {col.label}{sf && <PendingSortIcon field={sf} />}
@@ -847,16 +858,13 @@ export default function GateInPage() {
                     )
                   })}
                 </ColumnDragProvider>
-                <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-right pr-6 whitespace-nowrap">
-                  Action
-                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isPendingLoading && pendingRecords.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40">
-                    {[...Array(orderedVisibleCols.length + 2)].map((_, j) => (
+                    {[...Array(orderedVisibleCols.length + 1)].map((_, j) => (
                       <TableCell key={j} className="py-4">
                         <div className="h-4 w-full bg-slate-200 animate-pulse rounded" />
                       </TableCell>
@@ -865,7 +873,7 @@ export default function GateInPage() {
                 ))
               ) : pendingRecords.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2} className="text-center py-16 text-slate-400 font-semibold text-sm">
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
                     No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
                   </TableCell>
                 </TableRow>
@@ -892,42 +900,36 @@ export default function GateInPage() {
                       </TableCell>
                       {orderedVisibleCols.map(col => {
                         switch (col.id) {
-                          case "order_key":
-                            return <TableCell key={col.id} className="text-center font-black text-blue-700 text-sm">{orderKeys.join(", ")}</TableCell>
+                          case "orderNo":
+                            return (
+                              <TableCell key={col.id} className="text-center text-xs text-blue-700 font-bold">
+                                {orderKeys.map(k => <div key={k} className="whitespace-nowrap">{k}</div>)}
+                              </TableCell>
+                            )
                           case "vehicle_no":
-                            return <TableCell key={col.id} className="text-center font-semibold text-slate-700">{draft.vehicleNumber || "—"}</TableCell>
+                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.vehicleNumber || "—"}</TableCell>
                           case "driver_name":
-                            return <TableCell key={col.id} className="text-center font-bold text-slate-700 italic">{draft.driverName || "—"}</TableCell>
+                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.driverName || "—"}</TableCell>
                           case "saved_by":
-                            return <TableCell key={col.id} className="text-center text-slate-600 text-sm">{first.username}</TableCell>
+                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{first.username}</TableCell>
                           case "saved_at":
-                            return <TableCell key={col.id} className="text-center text-slate-500 text-xs">{group.date}</TableCell>
+                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{group.date}</TableCell>
                           case "products":
-                            return <TableCell key={col.id} className="text-center"><Badge variant="outline" className="text-xs font-bold">{totalProducts} item(s)</Badge></TableCell>
+                            return <TableCell key={col.id} className="text-center"><Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">{totalProducts} item(s)</Badge></TableCell>
                           default: {
                             const fieldName = COL_FIELD_MAP[col.id as ColId]
                             if (!fieldName) return null
                             const val = first[fieldName]
                             if (DATE_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="text-center text-slate-600 text-xs whitespace-nowrap">{formatDate(val)}</TableCell>
+                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{formatDate(val)}</TableCell>
                             }
                             if (BOOL_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="text-center text-slate-600 text-xs">{val ? "Yes" : "No"}</TableCell>
+                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
                             }
-                            return <TableCell key={col.id} className="text-center text-slate-600 text-xs">{val ?? "—"}</TableCell>
+                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ?? "—"}</TableCell>
                           }
                         }
                       })}
-                      <TableCell className="text-right pr-6">
-                        <Button
-                          size="sm"
-                          disabled={isReadOnly}
-                          onClick={() => handleOpenDialog(first, group.records.map((r: any) => r.order_key), group.records)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm"
-                        >
-                          Gate In
-                        </Button>
-                      </TableCell>
                     </TableRow>
                   )
                 })
@@ -937,21 +939,22 @@ export default function GateInPage() {
         </Card>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between px-2 py-3 border-t bg-slate-50/50 rounded-b-xl">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            Page <span className="text-slate-900 mx-1">{pendingPage}</span>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span>
             {pendingResult?.pagination?.totalPages && (
-              <> of <span className="text-slate-900 mx-1">{pendingResult.pagination.totalPages}</span></>
+              <> of <span className="text-blue-600 px-1">{pendingResult.pagination.totalPages}</span></>
             )}
-            <span className="ml-2 text-[9px] lowercase italic font-normal">({pendingResult?.pagination?.total || 0} items)</span>
+            <span className="mx-2 text-slate-300">|</span>
+            Total <span className="text-blue-600 px-1">{pendingResult?.pagination?.total || 0}</span> items
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-3 sm:flex">
             <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600">
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30">
               <ChevronLeft className="h-4 w-4 mr-1" /> Previous
             </Button>
             <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
-              className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600">
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold">
               Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           </div>
@@ -963,11 +966,11 @@ export default function GateInPage() {
         <DialogContent className="sm:max-w-[90vw] max-w-[95vw]! max-h-[95vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-0">
           <div className="p-8">
             <DialogHeader className="border-b pb-6 mb-6">
-              <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                <Truck className="h-7 w-7 text-blue-600" />
+              <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words flex items-center gap-3">
+                <Truck className="h-6 w-6 text-blue-600 shrink-0" />
                 Gate In — {selectedGroupKeys.join(", ")}
               </DialogTitle>
-              <DialogDescription className="text-slate-500 font-medium text-base mt-2">
+              <DialogDescription className="text-slate-500 mt-1.5">
                 Upload vehicle photos for this order. Saved draft details are shown below.
               </DialogDescription>
             </DialogHeader>
@@ -1310,7 +1313,7 @@ export default function GateInPage() {
             <Button
               onClick={handleSubmit}
               disabled={isProcessing || isReadOnly}
-              className="bg-emerald-600 hover:bg-emerald-700 font-black"
+              className="bg-emerald-600 hover:bg-emerald-700 font-bold"
             >
               {isProcessing ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...</>
