@@ -787,19 +787,6 @@ export default function GateOutPage() {
 
         {/* Main Card View (Grouped) */}
         <Card className="border-none shadow-sm overflow-hidden">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b bg-slate-50/70 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
-              <div>
-                <p className="text-xs font-black uppercase tracking-widest text-slate-700">Gate Out Loads</p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{selectedItems.length} selected</p>
-              </div>
-            </div>
-            <Badge className="w-fit bg-rose-100 text-rose-700 hover:bg-rose-100">
-              {displayRows.length} Ready
-            </Badge>
-          </div>
-
           {/* Desktop Table View */}
           <div className="hidden md:block max-h-[600px] overflow-auto">
             <Table>

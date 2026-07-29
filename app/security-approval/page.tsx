@@ -824,7 +824,7 @@ export default function SecurityApprovalPage() {
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 shadow-lg font-black uppercase tracking-tighter italic"
+            className="bg-blue-600 hover:bg-blue-700 shadow-md transition-all active:scale-95"
           >
             <Upload className="mr-2 h-4 w-4" />
             Process Security ({selectedItems.length})

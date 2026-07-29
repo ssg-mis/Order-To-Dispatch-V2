@@ -21,7 +21,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { format } from "date-fns"
-import { cn } from "@/lib/utils"
+import { cn, fuzzyMatch } from "@/lib/utils"
 import {
   Table,
   TableBody,
@@ -1534,10 +1534,14 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                                 }
                               }}
                               fetchOptions={async (search: string, page: number) => {
-                                // Manual check for pre-approval filter
-                                const res = await skuApi.getAll({ search, page, limit: 20 });
-                                let list = res.data.skuDetails || [];
-                                
+                                // Fuzzy search needs the whole list, so filter the SKUs we already
+                                // hold locally and page through them; fall back to the server only
+                                // if that list hasn't loaded.
+                                let list: any[] = skus.length > 0
+                                  ? skus.filter((s: any) => fuzzyMatch(search, s.sku_name || ""))
+                                  : ((await skuApi.getAll({ all: "true" })).data.skuDetails || [])
+                                      .filter((s: any) => fuzzyMatch(search, s.sku_name || ""));
+
                                 // Local filter for pre-approval types if needed
                                 if (orderType === "pre-approval" && preApprovalProducts.length > 0) {
                                   list = list.filter((s: any) => {
@@ -1552,13 +1556,16 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                                   });
                                 }
 
+                                const pageSize = 20;
+                                const slice = list.slice((page - 1) * pageSize, page * pageSize);
+
                                 return {
-                                  options: list.map((sku: any) => ({
+                                  options: slice.map((sku: any) => ({
                                     value: sku.sku_name,
                                     label: sku.sku_name,
                                     original: sku
                                   })),
-                                  hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
+                                  hasMore: page * pageSize < list.length
                                 };
                               }}
                               className="h-10"
