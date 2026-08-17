@@ -17,7 +17,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
 import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext } from "@/lib/api-service"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
 import { useAuth } from "@/hooks/use-auth"
@@ -280,6 +280,7 @@ const renderDocCell = (expiry?: string, image?: string, type?: string) => {
 export default function MasterPage() {
   const { toast } = useToast()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState("customers")
 
   const visibleTabs = useMemo(() => {
@@ -990,6 +991,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await skuDetailsApi.create(skuDetailsForm)
         }
         if (res?.success && skuDetailsForm.sku_name) {
+          const isStaged = !isAdminOrSuper || res?.data?.staged === true;
           await Promise.allSettled(
             Object.entries(openingStockByDepot)
               .filter(([_, qty]) => qty !== '')
@@ -998,6 +1000,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   depo_name: depotName,
                   product_name: skuDetailsForm.sku_name as string,
                   opening_qty: parseInt(qty) || 0,
+                  is_staged: isStaged,
                 })
               )
           )
@@ -1176,7 +1179,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (tab === 'depots') { refetchPendingDepots(); refetchDepot() }
         else if (tab === 'brokers') { refetchPendingBrokers(); refetchBroker() }
         else if (tab === 'salespersons') { refetchPendingSalespersons(); refetchSalesperson() }
-        else if (tab === 'sku_details') { refetchPendingSku(); refetchSku() }
+        else if (tab === 'sku_details') { refetchPendingSku(); refetchSku(); queryClient.invalidateQueries({ queryKey: ['inventory-data'] }) }
         else if (tab === 'vehicle_master') { refetchPendingVehicles(); refetchVehicle() }
         else if (tab === 'driver_master') { refetchPendingDrivers(); refetchDriver() }
         else if (tab === 'transport_master') { refetchPendingTransport(); refetchTransport() }
@@ -1270,18 +1273,25 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     } else if (tab === "sku_details") {
       setSkuDetailsForm({ ...data })
       setOpeningStockByDepot({})
-      try {
-        const res = await inventoryApi.getData()
-        if (res.success) {
-          const stockMap: Record<string, string> = {}
-          res.data
-            .filter((row: any) => row.product_name?.toLowerCase() === data.sku_name?.toLowerCase())
-            .forEach((row: any) => {
-              if (row.opening_qty) stockMap[row.depot_name] = String(row.opening_qty)
-            })
-          setOpeningStockByDepot(stockMap)
-        }
-      } catch (_) {}
+      const stockMap: Record<string, string> = {}
+      if (data.pending_opening_stock && Object.keys(data.pending_opening_stock).length > 0) {
+        Object.entries(data.pending_opening_stock).forEach(([depot, qty]) => {
+          stockMap[depot] = String(qty)
+        })
+        setOpeningStockByDepot(stockMap)
+      } else {
+        try {
+          const res = await inventoryApi.getData()
+          if (res.success) {
+            res.data
+              .filter((row: any) => row.product_name?.toLowerCase() === data.sku_name?.toLowerCase())
+              .forEach((row: any) => {
+                if (row.opening_qty !== null && row.opening_qty !== undefined) stockMap[row.depot_name] = String(row.opening_qty)
+              })
+            setOpeningStockByDepot(stockMap)
+          }
+        } catch (_) {}
+      }
     } else if (tab === "sku_selling_price") {
       setSkuSellingPrice({ ...data })
     } else if (tab === "vehicle_master") {
