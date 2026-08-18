@@ -63,7 +63,9 @@ export function Combobox({
             className
           )}
         >
-          {selectedOption ? selectedOption.label : placeholder}
+          <span className="min-w-0 flex-1 truncate text-left" title={selectedOption?.label}>
+            {selectedOption ? selectedOption.label : placeholder}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -81,9 +83,9 @@ export function Combobox({
               {options.map((option, index) => (
                 <CommandItem
                   key={`${option.value}-${index}`}
-                  value={option.value}
-                  onSelect={(currentValue) => {
-                    onValueChange?.(currentValue === value ? "" : currentValue)
+                  value={option.label ? `${option.label} ${option.value}` : option.value}
+                  onSelect={() => {
+                    onValueChange?.(option.value === value ? "" : option.value)
                     setOpen(false)
                   }}
                 >

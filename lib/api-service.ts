@@ -1119,6 +1119,13 @@ export const customerApi = {
       body: JSON.stringify(data),
     });
   },
+
+  /**
+   * Get a customer's effective-dated GST registration history (read-only)
+   */
+  getGstHistory: async (id: number): Promise<ApiResponse> => {
+    return request(`/customers/${id}/gst-history`);
+  },
 };
 
 /**
@@ -1219,6 +1226,149 @@ export const depotApi = {
   getPending: async (): Promise<ApiResponse> => request('/depots/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/depots/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
+
+/**
+ * State API (new reference master - customer master overhaul plan Phase 1)
+ */
+export const stateApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/states${queryString}`);
+  },
+  getById: async (id: string | number): Promise<ApiResponse> => request(`/states/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/states', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/states/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/states/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/states/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/states/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * District API (new reference master - customer master overhaul plan Phase 1).
+ * getAll accepts { state_id } to narrow the cascading dropdown to one state.
+ */
+export const districtApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/districts${queryString}`);
+  },
+  getById: async (id: string | number): Promise<ApiResponse> => request(`/districts/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/districts', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/districts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/districts/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/districts/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/districts/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Sub-District API (new reference master - customer master overhaul plan Phase 1).
+ * getAll accepts { district_id } to narrow the cascading dropdown to one district.
+ */
+export const subDistrictApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/sub-districts${queryString}`);
+  },
+  getById: async (id: string | number): Promise<ApiResponse> => request(`/sub-districts/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/sub-districts', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/sub-districts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/sub-districts/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/sub-districts/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/sub-districts/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Shared reference-data lookup API.
+ * Covers all 20 reference data lookup types:
+ * - is_gst_registered
+ * - gst_registration_type
+ * - city
+ * - post
+ * - thana
+ * - sub_district
+ * - district
+ * - state
+ * - msme_registration_type
+ * - fssai_licence_type
+ * - bank_name
+ * - transaction_type
+ * - uqc
+ * - gst_rate
+ * - hsn_code
+ * - sac_code
+ * - type_of_supply
+ * - vehicle_type
+ * - fuel_type
+ * - rto_code
+ */
+export type LookupType =
+  | 'is_gst_registered'
+  | 'gst_registration_type'
+  | 'city'
+  | 'post'
+  | 'thana'
+  | 'sub_district'
+  | 'district'
+  | 'state'
+  | 'msme_registration_type'
+  | 'fssai_licence_type'
+  | 'bank_name'
+  | 'transaction_type'
+  | 'uqc'
+  | 'gst_rate'
+  | 'hsn_code'
+  | 'sac_code'
+  | 'type_of_supply'
+  | 'vehicle_type'
+  | 'fuel_type'
+  | 'rto_code';
+
+export const lookupApi = {
+  getAll: async (type: LookupType, params?: any): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.getAll(params);
+    if (type === 'district') return districtApi.getAll(params);
+    if (type === 'sub_district') return subDistrictApi.getAll(params);
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/lookups/${type}${queryString}`);
+  },
+  getById: async (type: LookupType, id: string | number): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.getById(id);
+    if (type === 'district') return districtApi.getById(id);
+    if (type === 'sub_district') return subDistrictApi.getById(id);
+    return request(`/lookups/${type}/${id}`);
+  },
+  create: async (type: LookupType, data: any): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.create(data);
+    if (type === 'district') return districtApi.create(data);
+    if (type === 'sub_district') return subDistrictApi.create(data);
+    return request(`/lookups/${type}`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  update: async (type: LookupType, id: string | number, data: any): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.update(id, data);
+    if (type === 'district') return districtApi.update(id, data);
+    if (type === 'sub_district') return subDistrictApi.update(id, data);
+    return request(`/lookups/${type}/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+  delete: async (type: LookupType, id: string | number): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.delete(id);
+    if (type === 'district') return districtApi.delete(id);
+    if (type === 'sub_district') return subDistrictApi.delete(id);
+    return request(`/lookups/${type}/${id}`, { method: 'DELETE' });
+  },
+  getPending: async (type: LookupType): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.getPending();
+    if (type === 'district') return districtApi.getPending();
+    if (type === 'sub_district') return subDistrictApi.getPending();
+    return request(`/lookups/${type}/pending`);
+  },
+  review: async (type: LookupType, id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => {
+    if (type === 'state') return stateApi.review(id, data);
+    if (type === 'district') return districtApi.review(id, data);
+    if (type === 'sub_district') return subDistrictApi.review(id, data);
+    return request(`/lookups/${type}/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+};
+
 
 export const processStageApi = {
   getAll: async (): Promise<ApiResponse> => {
@@ -1386,10 +1536,11 @@ export const skuSellingPriceApi = {
  * Common API
  */
 export const commonApi = {
-  getNextId: async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport'): Promise<ApiResponse<{ nextId: string; type: string; prefix: string }>> => {
+  getNextId: async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport' | 'state' | 'district' | 'sub_district'): Promise<ApiResponse<{ nextId: string; type: string; prefix: string }>> => {
     return request(`/common/next-id?type=${type}`);
   },
 };
+
 
 /**
  * Vehicle Master API
@@ -1719,12 +1870,13 @@ export const inventoryApi = {
     return request('/inventory/data');
   },
 
-  upsertOpeningQty: async (data: { depo_name: string; product_name: string; opening_qty: number }): Promise<ApiResponse> => {
+  upsertOpeningQty: async (data: { depo_name: string; product_name: string; opening_qty: number; is_staged?: boolean }): Promise<ApiResponse> => {
     return request('/inventory/opening-qty', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
+
 
   getDetail: async (depot_name: string, product_name: string, type: string): Promise<ApiResponse> => {
     const params = new URLSearchParams({ depot_name, product_name, type });

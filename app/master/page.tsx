@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useCallback, type ComponentType } from "r
 import { matchesSearch } from "@/lib/search-utils"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -12,11 +13,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Combobox } from "@/components/ui/combobox"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
-import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext } from "@/lib/api-service"
+import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
@@ -34,6 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { ReferenceDataTab } from "@/components/reference-data-tab"
 
 // --- Types ---
 
@@ -48,10 +51,28 @@ interface Customer {
   address_line_1: string
   address_line_2: string
   state: string
+  state_id?: number | null
   pincode: string
   pan: string
   gstin: string
   gst_registered: string
+  gst_registration_type?: string | null
+  gst_registration_wef?: string | null
+  msme_registration_no?: string | null
+  msme_registration_type?: string | null
+  msme_registration_wef?: string | null
+  fssai_no?: string | null
+  fssai_valid_upto?: string | null
+  fssai_licence_type?: string | null
+  aadhaar_upload?: string | null
+  pan_upload?: string | null
+  gst_certificate_upload?: string | null
+  msme_certificate_upload?: string | null
+  fssai_certificate_upload?: string | null
+  addresses?: CustomerAddress[]
+  godown_ids?: number[]
+  is_required_for_commitment?: string
+  bank_accounts?: CustomerBankAccount[]
 }
 
 interface Depot {
@@ -61,6 +82,7 @@ interface Depot {
   depot_name: string
   depot_address: string
   state: string
+  state_id?: number | null
   salesman_broker_name: string
 }
 
@@ -166,6 +188,7 @@ interface Driver {
   rto: string
   address_line1: string
   state: string
+  state_id?: number | null
   pincode: string
   aadhaar_no: string
   pan_no: string
@@ -183,6 +206,7 @@ interface Transport {
   email_id: string
   address_line1: string
   state: string
+  state_id?: number | null
   pincode: string
   pan: string
   gstin: string
@@ -192,9 +216,48 @@ interface Transport {
 
 const STATUS_OPTIONS = ["Active", "Inactive"]
 
+// Mirrors validators/customerValidator.js on the backend - the backend is the
+// authoritative gate, this is purely for immediate UX feedback.
+const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
+const PINCODE_REGEX = /^[0-9]{6}$/
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/
+// Mirrors GODOWN_NAMES in services/customerService.js - the only 5 valid
+// "Belongs to Which Godown" options.
+const GODOWN_NAMES = ['Banari', 'Ambikapur', 'Dallirajhara', 'Raigarh', 'Rajnandgaon']
+const normalizeGstField = (v: string) => v.trim().toUpperCase()
+
+interface CustomerAddress {
+  id?: number
+  address_line_1?: string
+  address_line_2?: string
+  city?: string
+  post?: string
+  thana?: string
+  sub_district?: string
+  district?: string
+  state_id?: number | null
+  pincode?: string
+}
+const blankCustomerAddress = (): CustomerAddress => ({
+  address_line_1: "", address_line_2: "", city: "", post: "", thana: "",
+  sub_district: "", district: "", state_id: null, pincode: "",
+})
+
+interface CustomerBankAccount {
+  id?: number
+  bank_name_id?: number | null
+  account_number?: string
+  ifsc_code?: string
+}
+const blankCustomerBankAccount = (): CustomerBankAccount => ({
+  bank_name_id: null, account_number: "", ifsc_code: "",
+})
+
 const ALL_MASTER_TABS = [
   "customers", "depots", "brokers", "salespersons",
-  "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master"
+  "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master",
+  "reference_data"
 ]
 
 const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?: string }>; desc: string }> = {
@@ -207,7 +270,14 @@ const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?
   vehicle_master: { label: "Vehicles", icon: Truck, desc: "Manage your vehicle database and documents" },
   driver_master: { label: "Drivers", icon: User, desc: "Manage your driver records and documents" },
   transport_master: { label: "Transporters", icon: Truck, desc: "Manage your transporter records and details" },
+  reference_data: { label: "Reference Data", icon: List, desc: "Manage lookup references for master records" },
 }
+
+
+
+
+
+
 
 const formatDocDate = (dateStr?: string) => {
   if (!dateStr) return "—"
@@ -282,7 +352,6 @@ export default function MasterPage() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState("customers")
-
   const visibleTabs = useMemo(() => {
     if (!user || user.role === 'super_admin') return ALL_MASTER_TABS
     const masterTabsConfig = (user.features as any)?.master_tabs
@@ -426,6 +495,96 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     () => (allActiveDepotsData || []).filter((d: Depot) => d.status === 'Active'),
     [allActiveDepotsData]
   )
+  // "Belongs to Which Godown" options - exactly these 5, sourced from the real
+  // Depot records (never a hardcoded id list, in case they get re-seeded).
+  const godownDepots = useMemo(
+    () => activeDepots.filter((d: any) => GODOWN_NAMES.includes(d.depot_name)),
+    [activeDepots]
+  )
+
+  // States list - always fetched (backs dropdowns everywhere)
+  const {
+    data: statesData,
+    isLoading: isStatesLoading,
+    refetch: refetchStates,
+  } = useQuery({
+    queryKey: ["master-states"],
+    queryFn: async () => {
+      const res = await stateApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.states || []) : []
+    },
+  })
+  const states = useMemo(() => statesData || [], [statesData])
+  const activeStates = useMemo(() => states.filter((s: any) => s.status === 'Active'), [states])
+
+  // GST Registration Status/Type dropdown options - sourced from Reference Data
+  // (simple_lookups), never hardcoded, same pattern as activeStates above.
+  const { data: gstRegStatusData } = useQuery({
+    queryKey: ["lookup-is_gst_registered"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('is_gst_registered', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeGstRegStatuses = useMemo(
+    () => (gstRegStatusData || []).filter((r: any) => r.status === 'Active'),
+    [gstRegStatusData]
+  )
+  const { data: gstRegTypeData } = useQuery({
+    queryKey: ["lookup-gst_registration_type"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('gst_registration_type', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeGstRegTypes = useMemo(
+    () => (gstRegTypeData || []).filter((r: any) => r.status === 'Active'),
+    [gstRegTypeData]
+  )
+
+  // MSME Registration Type / FSSAI Licence Type dropdown options - same
+  // Reference Data pattern as the GST dropdowns above.
+  const { data: msmeRegTypeData } = useQuery({
+    queryKey: ["lookup-msme_registration_type"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('msme_registration_type', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeMsmeRegTypes = useMemo(
+    () => (msmeRegTypeData || []).filter((r: any) => r.status === 'Active'),
+    [msmeRegTypeData]
+  )
+  const { data: fssaiLicenceTypeData } = useQuery({
+    queryKey: ["lookup-fssai_licence_type"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('fssai_licence_type', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeFssaiLicenceTypes = useMemo(
+    () => (fssaiLicenceTypeData || []).filter((r: any) => r.status === 'Active'),
+    [fssaiLicenceTypeData]
+  )
+
+  // Bank Name dropdown options - Reference Data only, free text is deliberately
+  // not allowed (same pattern as every other Reference-Data-sourced dropdown).
+  const { data: bankNameData } = useQuery({
+    queryKey: ["lookup-bank_name"],
+    queryFn: async () => { const res = await lookupApi.getAll('bank_name', { page: 1, limit: 1000, all: "true" }); return res.success ? (res.data.items || []) : [] },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeBankNames = useMemo(() => (bankNameData || []).filter((r: any) => r.status === 'Active'), [bankNameData])
+
+
+
+
+
+
 
   // All active transporters for Vehicle form (not filtered by searchTerm)
   const { data: allActiveTransportersData } = useQuery({
@@ -655,6 +814,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [skuSellingPriceSort, setSkuSellingPriceSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'packing_material', dir: 'asc' })
   const [driverSort, setDriverSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'driver_master_id', dir: 'asc' })
   const [transportSort, setTransportSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'transport_master_id', dir: 'asc' })
+
+
+
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -668,11 +830,23 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [vehicleSubTab, setVehicleSubTab] = useState<'active' | 'pending'>('active')
   const [driverSubTab, setDriverSubTab] = useState<'active' | 'pending'>('active')
   const [transportSubTab, setTransportSubTab] = useState<'active' | 'pending'>('active')
+
   const [rejectDialogContext, setRejectDialogContext] = useState<{ tab: string; id: any } | null>(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [isReviewing, setIsReviewing] = useState(false)
   const [approvalReviewModal, setApprovalReviewModal] = useState<{ tab: string; item: any } | null>(null)
   const [approvalEditData, setApprovalEditData] = useState<Record<string, any>>({})
+
+  // Read-only GST history for the customer currently open in the Add/Edit dialog
+  // (only meaningful for an existing customer, i.e. editingItem is set).
+  const { data: customerGstHistoryData } = useQuery({
+    queryKey: ["customer-gst-history", editingItem?.id],
+    queryFn: async () => {
+      const res = await customerApi.getGstHistory(editingItem.id)
+      return res.success ? (res.data || []) : []
+    },
+    enabled: activeTab === 'customers' && (isDialogOpen || !!approvalReviewModal) && !!editingItem?.id,
+  })
 
   // Form states
   const [customerForm, setCustomerForm] = useState<Partial<Customer>>({
@@ -688,7 +862,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     pincode: "",
     pan: "",
     gstin: "",
-    gst_registered: "Yes"
+    gst_registered: "",
+    gst_registration_type: "",
+    gst_registration_wef: "",
+    msme_registration_no: "",
+    msme_registration_type: "",
+    msme_registration_wef: "",
+    fssai_no: "",
+    fssai_valid_upto: "",
+    fssai_licence_type: "",
+    aadhaar_upload: "",
+    pan_upload: "",
+    gst_certificate_upload: "",
+    msme_certificate_upload: "",
+    fssai_certificate_upload: "",
+    addresses: [],
+    godown_ids: [],
+    is_required_for_commitment: "No",
+    bank_accounts: []
   })
 
   const [depotForm, setDepotForm] = useState<Partial<Depot>>({
@@ -699,6 +890,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     state: "",
     salesman_broker_name: ""
   })
+
 
   const [brokerForm, setBrokerForm] = useState<Partial<Broker>>({
     broker_id: "",
@@ -747,6 +939,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     life_time_tax_image: ''
   })
   const [vehicleFormErrors, setVehicleFormErrors] = useState<{ registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string }>({})
+  const [customerFormErrors, setCustomerFormErrors] = useState<{ pan?: string; gstin?: string; pincode?: string }>({})
+  const [addressErrors, setAddressErrors] = useState<Record<number, string | undefined>>({})
+  const [bankAccountErrors, setBankAccountErrors] = useState<Record<number, string | undefined>>({})
 
   const [driverForm, setDriverForm] = useState<Partial<Driver>>({
     driver_master_id: "",
@@ -846,8 +1041,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       pincode: "",
       pan: "",
       gstin: "",
-      gst_registered: "Yes"
+      gst_registered: "",
+      gst_registration_type: "",
+      gst_registration_wef: "",
+      msme_registration_no: "",
+      msme_registration_type: "",
+      msme_registration_wef: "",
+      fssai_no: "",
+      fssai_valid_upto: "",
+      fssai_licence_type: "",
+      aadhaar_upload: "",
+      pan_upload: "",
+      gst_certificate_upload: "",
+      msme_certificate_upload: "",
+      fssai_certificate_upload: "",
+      addresses: [],
+      godown_ids: [],
+      is_required_for_commitment: "No",
+      bank_accounts: []
     })
+    setAddressErrors({})
+    setBankAccountErrors({})
     setDepotForm({
       depot_id: "",
       status: "Active",
@@ -955,7 +1169,63 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     setOpeningStockByDepot({})
   }
 
+  // Re-runs PAN/GSTIN validation at submit time (not just on blur) so a pasted
+  // value or a value set via populateFormFromData that was never blurred still
+  // gets caught client-side before hitting the (still-authoritative) backend.
+  const validateCustomerFormForSubmit = (): boolean => {
+    const errors: { pan?: string; gstin?: string; pincode?: string } = {}
+    const pan = (customerForm.pan || '').toString().trim().toUpperCase()
+    if (pan && !PAN_REGEX.test(pan)) errors.pan = 'Invalid PAN format. Expected: ABCDE1234F'
+    const gstin = (customerForm.gstin || '').toString().trim().toUpperCase()
+    if (gstin) {
+      if (!GSTIN_REGEX.test(gstin)) {
+        errors.gstin = 'Invalid GSTIN format. Expected 15 characters, e.g. 22ABCDE1234F1Z5'
+      } else {
+        const selectedState = activeStates.find((s: any) => String(s.id) === String(customerForm.state_id))
+        const gstStateCode = selectedState?.gst_state_code
+        if (gstStateCode && gstin.slice(0, 2) !== gstStateCode) {
+          errors.gstin = `GSTIN state code (${gstin.slice(0, 2)}) does not match the selected State's GST state code (${gstStateCode})`
+        }
+      }
+    }
+    const pincode = (customerForm.pincode || '').toString()
+    if (pincode && !PINCODE_REGEX.test(pincode)) errors.pincode = 'PIN Code must be exactly 6 digits'
+    setCustomerFormErrors(errors)
+
+    const addrErrors: Record<number, string | undefined> = {}
+    ;(customerForm.addresses || []).forEach((addr, i) => {
+      const addrPincode = (addr.pincode || '').toString()
+      if (addrPincode && !PINCODE_REGEX.test(addrPincode)) addrErrors[i] = 'PIN Code must be exactly 6 digits'
+    })
+    setAddressErrors(addrErrors)
+
+    const bankErrors: Record<number, string | undefined> = {}
+    ;(customerForm.bank_accounts || []).forEach((bank, i) => {
+      const ifsc = (bank.ifsc_code || '').toString().trim().toUpperCase()
+      if (ifsc && !IFSC_REGEX.test(ifsc)) bankErrors[i] = 'Invalid IFSC format. Expected 11 characters, e.g. SBIN0001234'
+    })
+    setBankAccountErrors(bankErrors)
+
+    const firstAddrError = Object.values(addrErrors).find(Boolean)
+    const firstBankError = Object.values(bankErrors).find(Boolean)
+    if (errors.pan || errors.gstin || errors.pincode || firstAddrError || firstBankError) {
+      toast({ title: "Validation error", description: errors.pan || errors.gstin || errors.pincode || firstAddrError || firstBankError, variant: "destructive" })
+      return false
+    }
+    if (pan !== customerForm.pan || gstin !== customerForm.gstin) {
+      setCustomerForm(prev => ({ ...prev, pan, gstin }))
+    }
+    if ((customerForm.bank_accounts || []).some(b => (b.ifsc_code || '') !== (b.ifsc_code || '').toString().trim().toUpperCase())) {
+      setCustomerForm(prev => ({
+        ...prev,
+        bank_accounts: (prev.bank_accounts || []).map(b => ({ ...b, ifsc_code: (b.ifsc_code || '').toString().trim().toUpperCase() })),
+      }))
+    }
+    return true
+  }
+
   const handleCreateOrUpdate = async () => {
+    if (activeTab === "customers" && !validateCustomerFormForSubmit()) return
     setIsSubmitting(true)
     try {
       let res
@@ -1069,7 +1339,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await transportMasterApi.create(transportForm)
         }
       }
-
       if (res?.success) {
         toast({ title: "Success", description: res.message || (editingItem ? "Updated successfully" : "Created successfully") })
         setIsDialogOpen(false)
@@ -1083,7 +1352,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
         else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
         else if (activeTab === "driver_master") { refetchDriver(); refetchPendingDrivers() }
-        else if (activeTab === "transport_master") { refetchTransport(); refetchPendingTransport() }
       }
     } catch (error: any) {
       toast({
@@ -1121,7 +1389,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       } else if (activeTab === "transport_master") {
         res = await transportMasterApi.delete(deletingItem.id)
       }
-
       if (res?.success) {
         toast({ title: "Success", description: "Deleted successfully" })
         setIsDeleteDialogOpen(false)
@@ -1135,7 +1402,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
         else if (activeTab === "vehicle_master") refetchVehicle()
         else if (activeTab === "driver_master") refetchDriver()
-        else if (activeTab === "transport_master") refetchTransport()
       }
     } catch (error: any) {
       toast({
@@ -1192,9 +1458,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setRejectionReason("")
       setApprovalReviewModal(null)
       setApprovalEditData({})
+
       resetForms()
     }
   }
+
+
+
 
   const fetchNextId = async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport') => {
     try {
@@ -1255,7 +1525,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       })
     } else if (activeTab === "transport_master") {
       nextId = await fetchNextId('transport')
-      setTransportForm((prev: any) => ({ ...prev, transport_master_id: nextId }))
     }
   }
 
@@ -1310,7 +1579,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const openEditDialog = async (item: any) => {
     setEditingItem(item)
-    await populateFormFromData(activeTab, item)
+    // Customers: the list row doesn't carry the address child-table rows (kept out
+    // of the list query for performance) - fetch full detail so the address section
+    // has something to populate when the dialog opens.
+    if (activeTab === 'customers') {
+      const res = await customerApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else {
+      await populateFormFromData(activeTab, item)
+    }
     setIsDialogOpen(true)
   }
 
@@ -1360,6 +1637,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'vehicle_master': return renderVehicleForm()
       case 'driver_master': return renderDriverForm()
       case 'transport_master': return renderTransportForm()
+      case 'states': return renderStateForm()
+      case 'districts': return renderDistrictForm()
+      case 'sub_districts': return renderSubDistrictForm()
       default: return null
     }
   }
@@ -1367,7 +1647,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const APPROVAL_FIELD_LABELS: Record<string, string> = {
     customer_name: 'Customer Name', status: 'Status', contact_person: 'Contact Person', contact: 'Mobile',
     email: 'Email', email_id: 'Email', address_line_1: 'Address', address_line_2: 'Address 2', state: 'State',
-    pincode: 'Pincode', pan: 'PAN', gstin: 'GSTIN', gst_registered: 'GST Registered',
+    pincode: 'Pincode', pan: 'PAN', gstin: 'GSTIN', gst_registered: 'GST Registration Status',
+    gst_registration_type: 'GST Registration Type', gst_registration_wef: 'GST W.E.F. Date',
+    msme_registration_no: 'MSME Registration No', msme_registration_type: 'MSME Registration Type',
+    msme_registration_wef: 'MSME W.E.F. Date', fssai_no: 'FSSAI No', fssai_valid_upto: 'FSSAI Valid Upto',
+    fssai_licence_type: 'FSSAI Licence Type', pan_upload: 'PAN Card',
+    // aadhaar_upload's label is defined once below (shared with the Driver Master field of
+    // the same name - both are literally "Aadhaar Upload", no need for a second entry).
+    gst_certificate_upload: 'GST Certificate', msme_certificate_upload: 'MSME Certificate',
+    fssai_certificate_upload: 'FSSAI Certificate', is_required_for_commitment: 'Is Required for Commitment',
     depot_name: 'Depot Name', depot_address: 'Depot Address', salesman_broker_name: 'Salesman / Broker',
     salesman_name: 'Name', mobile_no: 'Mobile', sku_name: 'SKU Name', sku_code: 'SKU Code', main_uom: 'Main UOM',
     hsn_code: 'HSN Code', gst_rate: 'GST Rate', registration_no: 'Registration No', vehicle_type: 'Vehicle Type',
@@ -1381,7 +1669,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     national_permit: 'National Permit Expiry', national_permit_image: 'National Permit Certificate',
     driver_name: 'Driver Name', driving_licence_no: 'DL Number', driving_licence_type: 'DL Type', valid_upto: 'Valid Upto',
     transporter_name: 'Transporter Name', contact_number: 'Contact Number',
+    dl_upload: 'Driving Licence Upload', aadhaar_upload: 'Aadhaar Upload',
   }
+
 
   // Compact diff summary shown above the form for an "edit" approval request.
   const renderProposedChanges = () => {
@@ -1389,7 +1679,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     let pc = approvalReviewModal.item.pending_changes
     if (typeof pc === 'string') { try { pc = JSON.parse(pc) } catch { pc = null } }
     if (!pc) return null
-    const changed = Object.keys(pc).filter(k => String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? ''))
+    // 'addresses' is an array of objects, not a scalar - stringifying it here would
+    // just show "[object Object],[object Object]". The full form below already
+    // renders the proposed address list properly, so skip it in this summary.
+    const changed = Object.keys(pc).filter(k => k !== 'addresses' && k !== 'godown_ids' && k !== 'bank_accounts' && String(pc[k] ?? '') !== String(approvalReviewModal.item[k] ?? ''))
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1.5">
         <p className="text-xs font-semibold text-blue-800">Proposed changes to an existing record</p>
@@ -1494,6 +1787,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const sortedCustomers = sortData(filteredCustomers, customerSort.col, customerSort.dir)
   const sortedDepots = sortData(filteredDepots, depotSort.col, depotSort.dir)
+
+
   const sortedBrokers = sortData(filteredBrokers, brokerSort.col, brokerSort.dir)
   const sortedSalespersons = sortData(filteredSalespersons, salespersonSort.col, salespersonSort.dir)
   const sortedSkuDetails = sortData(filteredSkuDetails, skuSort.col, skuSort.dir)
@@ -1512,12 +1807,114 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           setVehicleForm((prev: any) => ({ ...prev, [field]: res.data.url }))
         } else if (activeTab === 'driver_master') {
           setDriverForm((prev: any) => ({ ...prev, [field]: res.data.url }))
+        } else if (activeTab === 'customers') {
+          setCustomerForm((prev: any) => ({ ...prev, [field]: res.data.url }))
         }
         toast({ title: "Success", description: "Image uploaded successfully" })
       }
     } catch (err) {
       toast({ title: "Error", description: "Failed to upload image", variant: "destructive" })
     }
+  }
+
+  // Clears an uploaded file field to null. Submitted like any other edit -
+  // for an approved record this stages as a pending edit an admin must
+  // approve before the file is actually removed live; for a pending record
+  // being reviewed, this is how an admin strips just the upload while
+  // approving everything else (renderFormForTab reuses these same render
+  // functions for the approval-review dialog).
+  const handleFileRemove = (field: string) => {
+    if (activeTab === 'vehicle_master') {
+      setVehicleForm((prev: any) => ({ ...prev, [field]: '' }))
+    } else if (activeTab === 'driver_master') {
+      setDriverForm((prev: any) => ({ ...prev, [field]: '' }))
+    } else if (activeTab === 'customers') {
+      setCustomerForm((prev: any) => ({ ...prev, [field]: '' }))
+    }
+  }
+
+  // Normalizes (trim + uppercase) and format-validates PAN/GSTIN on blur, and
+  // cross-checks the GSTIN's state code against the selected State's GST state
+  // code. Mirrors the backend's authoritative check (validators/customerValidator.js)
+  // for immediate feedback - the backend still re-validates on submit.
+  const handlePanBlur = () => {
+    const raw = (customerForm.pan || '').toString()
+    if (!raw) { setCustomerFormErrors(prev => ({ ...prev, pan: undefined })); return }
+    const normalized = normalizeGstField(raw)
+    if (normalized !== raw) setCustomerForm(prev => ({ ...prev, pan: normalized }))
+    setCustomerFormErrors(prev => ({
+      ...prev,
+      pan: PAN_REGEX.test(normalized) ? undefined : 'Invalid PAN format. Expected: ABCDE1234F'
+    }))
+  }
+
+  const handleGstinBlur = () => {
+    const raw = (customerForm.gstin || '').toString()
+    if (!raw) { setCustomerFormErrors(prev => ({ ...prev, gstin: undefined })); return }
+    const normalized = normalizeGstField(raw)
+    if (normalized !== raw) setCustomerForm(prev => ({ ...prev, gstin: normalized }))
+    if (!GSTIN_REGEX.test(normalized)) {
+      setCustomerFormErrors(prev => ({ ...prev, gstin: 'Invalid GSTIN format. Expected 15 characters, e.g. 22ABCDE1234F1Z5' }))
+      return
+    }
+    const selectedState = activeStates.find((s: any) => String(s.id) === String(customerForm.state_id))
+    const gstStateCode = selectedState?.gst_state_code
+    if (gstStateCode && normalized.slice(0, 2) !== gstStateCode) {
+      setCustomerFormErrors(prev => ({ ...prev, gstin: `GSTIN state code (${normalized.slice(0, 2)}) does not match the selected State's GST state code (${gstStateCode})` }))
+      return
+    }
+    setCustomerFormErrors(prev => ({ ...prev, gstin: undefined }))
+  }
+
+  const handlePincodeBlur = () => {
+    const value = (customerForm.pincode || '').toString()
+    if (!value) { setCustomerFormErrors(prev => ({ ...prev, pincode: undefined })); return }
+    setCustomerFormErrors(prev => ({ ...prev, pincode: PINCODE_REGEX.test(value) ? undefined : 'PIN Code must be exactly 6 digits' }))
+  }
+
+  // Additional-address row management (customer_addresses child table). Cascading
+  // reset: changing State clears District+Sub-District, changing District clears
+  // Sub-District - mirrors the reference-data-tab.tsx parent-picker convention.
+  const addAddressRow = () => {
+    setCustomerForm(prev => ({ ...prev, addresses: [...(prev.addresses || []), blankCustomerAddress()] }))
+  }
+  const removeAddressRow = (index: number) => {
+    setCustomerForm(prev => ({ ...prev, addresses: (prev.addresses || []).filter((_, i) => i !== index) }))
+    setAddressErrors(prev => { const next = { ...prev }; delete next[index]; return next })
+  }
+  const updateAddressRow = (index: number, patch: Partial<CustomerAddress>) => {
+    setCustomerForm(prev => ({
+      ...prev,
+      addresses: (prev.addresses || []).map((a, i) => (i === index ? { ...a, ...patch } : a)),
+    }))
+  }
+  const handleAddressStateChange = (index: number, stateId: string) => {
+    updateAddressRow(index, { state_id: stateId ? parseInt(stateId, 10) : null })
+  }
+  const handleAddressPincodeBlur = (index: number, value: string) => {
+    if (!value) { setAddressErrors(prev => ({ ...prev, [index]: undefined })); return }
+    setAddressErrors(prev => ({ ...prev, [index]: PINCODE_REGEX.test(value) ? undefined : 'PIN Code must be exactly 6 digits' }))
+  }
+
+  // Bank-account row management (customer_bank_accounts child table).
+  const addBankAccountRow = () => {
+    setCustomerForm(prev => ({ ...prev, bank_accounts: [...(prev.bank_accounts || []), blankCustomerBankAccount()] }))
+  }
+  const removeBankAccountRow = (index: number) => {
+    setCustomerForm(prev => ({ ...prev, bank_accounts: (prev.bank_accounts || []).filter((_, i) => i !== index) }))
+    setBankAccountErrors(prev => { const next = { ...prev }; delete next[index]; return next })
+  }
+  const updateBankAccountRow = (index: number, patch: Partial<CustomerBankAccount>) => {
+    setCustomerForm(prev => ({
+      ...prev,
+      bank_accounts: (prev.bank_accounts || []).map((b, i) => (i === index ? { ...b, ...patch } : b)),
+    }))
+  }
+  const handleBankAccountIfscBlur = (index: number, value: string) => {
+    const normalized = value.trim().toUpperCase()
+    if (normalized !== value) updateBankAccountRow(index, { ifsc_code: normalized })
+    if (!normalized) { setBankAccountErrors(prev => ({ ...prev, [index]: undefined })); return }
+    setBankAccountErrors(prev => ({ ...prev, [index]: IFSC_REGEX.test(normalized) ? undefined : 'Invalid IFSC format. Expected 11 characters, e.g. SBIN0001234' }))
   }
 
   // --- Render Helpers ---
@@ -1567,23 +1964,395 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="state">State</Label>
-          <Input id="state" value={customerForm.state} onChange={e => setCustomerForm({...customerForm, state: e.target.value})} placeholder="Enter state" />
+          <Combobox
+            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+            value={customerForm.state_id ? String(customerForm.state_id) : ""}
+            onValueChange={val => {
+              const selected = activeStates.find((s: any) => String(s.id) === val)
+              setCustomerForm({...customerForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || customerForm.state })
+            }}
+            placeholder="Select state"
+            searchPlaceholder="Search state..."
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="pincode">Pincode</Label>
-          <Input id="pincode" value={customerForm.pincode} onChange={e => setCustomerForm({...customerForm, pincode: e.target.value})} placeholder="e.g. 492001" />
+          <Input
+            id="pincode"
+            value={customerForm.pincode}
+            onChange={e => setCustomerForm({...customerForm, pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6)})}
+            onBlur={handlePincodeBlur}
+            placeholder="6-digit PIN code"
+            className={customerFormErrors.pincode ? 'border-red-500 focus-visible:ring-red-400' : ''}
+          />
+          {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pan">PAN</Label>
-          <Input id="pan" value={customerForm.pan} onChange={e => setCustomerForm({...customerForm, pan: e.target.value})} placeholder="Enter PAN" />
+          <Input
+            id="pan"
+            value={customerForm.pan}
+            onChange={e => setCustomerForm({...customerForm, pan: e.target.value})}
+            onBlur={handlePanBlur}
+            placeholder="ABCDE1234F"
+            className={customerFormErrors.pan ? 'border-red-500 focus-visible:ring-red-400' : ''}
+          />
+          {customerFormErrors.pan && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pan}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="gstin">GSTIN</Label>
-          <Input id="gstin" value={customerForm.gstin} onChange={e => setCustomerForm({...customerForm, gstin: e.target.value})} placeholder="Enter GSTIN" />
+          <Input
+            id="gstin"
+            value={customerForm.gstin}
+            onChange={e => setCustomerForm({...customerForm, gstin: e.target.value})}
+            onBlur={handleGstinBlur}
+            placeholder="22ABCDE1234F1Z5"
+            className={customerFormErrors.gstin ? 'border-red-500 focus-visible:ring-red-400' : ''}
+          />
+          {customerFormErrors.gstin && <p className="text-xs text-red-500 mt-1">{customerFormErrors.gstin}</p>}
         </div>
       </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="gst_registered">GST Registration Status</Label>
+          <Combobox
+            options={activeGstRegStatuses.map((r: any) => ({ value: r.name, label: r.name }))}
+            value={customerForm.gst_registered || ""}
+            onValueChange={val => setCustomerForm({
+              ...customerForm,
+              gst_registered: val,
+              // Unregistered has no meaningful type/wef - clear them so stale values
+              // from a prior "Registered" state don't linger.
+              ...(val !== 'Registered' ? { gst_registration_type: '', gst_registration_wef: '' } : {})
+            })}
+            placeholder="Select status"
+            searchPlaceholder="Search..."
+          />
+        </div>
+        {customerForm.gst_registered === 'Registered' && (
+          <div className="space-y-2">
+            <Label htmlFor="gst_registration_type">GST Registration Type</Label>
+            <Combobox
+              options={activeGstRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={customerForm.gst_registration_type || ""}
+              onValueChange={val => setCustomerForm({...customerForm, gst_registration_type: val})}
+              placeholder="Select type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+        )}
+      </div>
+      {customerForm.gst_registered === 'Registered' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="gst_registration_wef">GST W.E.F. Date</Label>
+            <Input
+              id="gst_registration_wef"
+              type="date"
+              value={customerForm.gst_registration_wef?.split('T')[0] || ''}
+              onChange={e => setCustomerForm({...customerForm, gst_registration_wef: e.target.value})}
+            />
+            {customerForm.gst_registration_wef && (
+              <p className="text-xs text-slate-500">{formatDocDate(customerForm.gst_registration_wef)}</p>
+            )}
+          </div>
+        </div>
+      )}
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">MSME Details</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="msme_registration_no">MSME Registration No</Label>
+            <Input
+              id="msme_registration_no"
+              value={customerForm.msme_registration_no || ''}
+              onChange={e => setCustomerForm({...customerForm, msme_registration_no: e.target.value})}
+              placeholder="Enter MSME registration no"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="msme_registration_type">MSME Registration Type</Label>
+            <Combobox
+              options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={customerForm.msme_registration_type || ""}
+              onValueChange={val => setCustomerForm({...customerForm, msme_registration_type: val})}
+              placeholder="Select type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="msme_registration_wef">MSME W.E.F. Date</Label>
+            <Input
+              id="msme_registration_wef"
+              type="date"
+              value={customerForm.msme_registration_wef?.split('T')[0] || ''}
+              onChange={e => setCustomerForm({...customerForm, msme_registration_wef: e.target.value})}
+            />
+            {customerForm.msme_registration_wef && (
+              <p className="text-xs text-slate-500">{formatDocDate(customerForm.msme_registration_wef)}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">FSSAI Details</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="fssai_no">FSSAI No</Label>
+            <Input
+              id="fssai_no"
+              value={customerForm.fssai_no || ''}
+              onChange={e => setCustomerForm({...customerForm, fssai_no: e.target.value})}
+              placeholder="Enter FSSAI no"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fssai_licence_type">FSSAI Licence Type</Label>
+            <Combobox
+              options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={customerForm.fssai_licence_type || ""}
+              onValueChange={val => setCustomerForm({...customerForm, fssai_licence_type: val})}
+              placeholder="Select licence type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="fssai_valid_upto">FSSAI Valid Upto Date</Label>
+            <Input
+              id="fssai_valid_upto"
+              type="date"
+              value={customerForm.fssai_valid_upto?.split('T')[0] || ''}
+              onChange={e => setCustomerForm({...customerForm, fssai_valid_upto: e.target.value})}
+            />
+            {customerForm.fssai_valid_upto && (
+              <p className="text-xs text-slate-500">{formatDocDate(customerForm.fssai_valid_upto)}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">Document Uploads</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <FileUploadField
+            label="Aadhaar Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.aadhaar_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "aadhaar_upload")}
+            onRemove={() => handleFileRemove("aadhaar_upload")}
+          />
+          <FileUploadField
+            label="PAN Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.pan_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "pan_upload")}
+            onRemove={() => handleFileRemove("pan_upload")}
+          />
+          <FileUploadField
+            label="GST Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.gst_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "gst_certificate_upload")}
+            onRemove={() => handleFileRemove("gst_certificate_upload")}
+          />
+          <FileUploadField
+            label="MSME Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.msme_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "msme_certificate_upload")}
+            onRemove={() => handleFileRemove("msme_certificate_upload")}
+          />
+          <FileUploadField
+            label="FSSAI Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.fssai_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "fssai_certificate_upload")}
+            onRemove={() => handleFileRemove("fssai_certificate_upload")}
+          />
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-2 grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Belongs to Which Godown</Label>
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2">
+            {godownDepots.map((d: any) => {
+              const checked = (customerForm.godown_ids || []).includes(d.id)
+              return (
+                <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(val) => {
+                      const current = customerForm.godown_ids || []
+                      setCustomerForm({
+                        ...customerForm,
+                        godown_ids: val ? [...current, d.id] : current.filter((id: number) => id !== d.id),
+                      })
+                    }}
+                  />
+                  {d.depot_name}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="is_required_for_commitment">Is Required for Commitment</Label>
+          <Select value={customerForm.is_required_for_commitment || "No"} onValueChange={val => setCustomerForm({...customerForm, is_required_for_commitment: val})}>
+            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Yes">Yes</SelectItem>
+              <SelectItem value="No">No</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-2 space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-slate-600">Additional Addresses</Label>
+          <Button type="button" variant="outline" size="sm" onClick={addAddressRow}>+ Add Address</Button>
+        </div>
+        {(!customerForm.addresses || customerForm.addresses.length === 0) && (
+          <p className="text-xs text-slate-400">No additional addresses added. The address fields above remain the customer's primary address.</p>
+        )}
+        {(customerForm.addresses || []).map((addr, index) => {
+          const rowState = activeStates.find((s: any) => String(s.id) === String(addr.state_id))
+          return (
+            <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 relative">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Address {index + 1}</span>
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeAddressRow(index)}>Remove</Button>
+              </div>
+              <Input value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
+              <div className="grid grid-cols-3 gap-3">
+                <Input value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
+                <Input value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
+                <Input value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Combobox
+                  options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
+                  value={addr.state_id ? String(addr.state_id) : ""}
+                  onValueChange={val => handleAddressStateChange(index, val)}
+                  placeholder="State" searchPlaceholder="Search state..."
+                />
+                <Input value={addr.district || ''} onChange={e => updateAddressRow(index, { district: e.target.value })} placeholder="District" />
+                <Input value={addr.sub_district || ''} onChange={e => updateAddressRow(index, { sub_district: e.target.value })} placeholder="Sub-District" />
+              </div>
+              {rowState && (
+                <p className="text-[11px] text-slate-400">
+                  State Code: <span className="font-medium text-slate-600">{rowState.gst_state_code}</span>
+                  {" · "}Short Name: <span className="font-medium text-slate-600">{rowState.short_name || '—'}</span>
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Input
+                    value={addr.pincode || ''}
+                    onChange={e => updateAddressRow(index, { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
+                    onBlur={e => handleAddressPincodeBlur(index, e.target.value)}
+                    placeholder="PIN Code (6 digits)"
+                    className={addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                  />
+                  {addressErrors[index] && <p className="text-xs text-red-500 mt-1">{addressErrors[index]}</p>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="border-t pt-4 mt-2 space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-slate-600">Bank Details</Label>
+          <Button type="button" variant="outline" size="sm" onClick={addBankAccountRow}>+ Add Bank Account</Button>
+        </div>
+        {(!customerForm.bank_accounts || customerForm.bank_accounts.length === 0) && (
+          <p className="text-xs text-slate-400">No bank details added.</p>
+        )}
+        {(customerForm.bank_accounts || []).map((bank, index) => (
+          <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500">Bank Account {index + 1}</span>
+              <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeBankAccountRow(index)}>Remove</Button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Combobox
+                options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
+                onValueChange={val => updateBankAccountRow(index, { bank_name_id: val ? parseInt(val, 10) : null })}
+                placeholder="Bank Name"
+                searchPlaceholder="Search bank..."
+              />
+              <Input
+                value={bank.account_number || ''}
+                onChange={e => updateBankAccountRow(index, { account_number: e.target.value })}
+                placeholder="Account Number"
+              />
+              <div>
+                <Input
+                  value={bank.ifsc_code || ''}
+                  onChange={e => updateBankAccountRow(index, { ifsc_code: e.target.value.toUpperCase() })}
+                  onBlur={e => handleBankAccountIfscBlur(index, e.target.value)}
+                  placeholder="IFSC Code"
+                  className={bankAccountErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                />
+                {bankAccountErrors[index] && <p className="text-xs text-red-500 mt-1">{bankAccountErrors[index]}</p>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editingItem?.id && (
+        <div className="space-y-2 border-t pt-4 mt-2">
+          <Label className="text-slate-600">GST History</Label>
+          {!customerGstHistoryData || customerGstHistoryData.length === 0 ? (
+            <p className="text-xs text-slate-400">No GST history recorded yet.</p>
+          ) : (
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="text-left p-2 font-medium text-slate-600">W.E.F. Date</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Status</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Type</th>
+                    <th className="text-left p-2 font-medium text-slate-600">GSTIN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerGstHistoryData.map((h: any) => (
+                    <tr key={h.id} className="border-t">
+                      <td className="p-2">{formatDocDate(h.wefDate)}</td>
+                      <td className="p-2">{h.isGstRegistered || '—'}</td>
+                      <td className="p-2">{h.gstRegistrationType || '—'}</td>
+                      <td className="p-2">{h.gstin || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 
@@ -1611,7 +2380,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label htmlFor="state">State</Label>
-          <Input id="state" value={depotForm.state} onChange={e => setDepotForm({...depotForm, state: e.target.value})} placeholder="Enter state" />
+          <Combobox
+            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+            value={depotForm.state_id ? String(depotForm.state_id) : ""}
+            onValueChange={val => {
+              const selected = activeStates.find((s: any) => String(s.id) === val)
+              setDepotForm({...depotForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || depotForm.state })
+            }}
+            placeholder="Select state"
+            searchPlaceholder="Search state..."
+          />
         </div>
       </div>
       <div className="space-y-2">
@@ -1624,6 +2402,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </div>
     </div>
   )
+
 
   const renderBrokerForm = () => (
     <div className="grid gap-4 py-4 px-1">
@@ -2038,6 +2817,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               helperText="Max file size: 20 MB"
               uploading={false}
               onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "rc_image")}
+              onRemove={() => handleFileRemove("rc_image")}
             />
           </div>
         </div>
@@ -2106,6 +2886,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                     helperText="Max file size: 20 MB"
                     uploading={false}
                     onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "road_tax_image")}
+                    onRemove={() => handleFileRemove("road_tax_image")}
                   />
                 </div>
               </>
@@ -2123,6 +2904,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                     helperText="Max file size: 20 MB"
                     uploading={false}
                     onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "life_time_tax_image")}
+                    onRemove={() => handleFileRemove("life_time_tax_image")}
                   />
                 </div>
               </>
@@ -2153,6 +2935,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               helperText="Max file size: 20 MB"
               uploading={false}
               onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "pollution_image")}
+              onRemove={() => handleFileRemove("pollution_image")}
             />
           </div>
         </div>
@@ -2170,6 +2953,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               helperText="Max file size: 20 MB"
               uploading={false}
               onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "insurance_image")}
+              onRemove={() => handleFileRemove("insurance_image")}
             />
           </div>
         </div>
@@ -2187,6 +2971,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               helperText="Max file size: 20 MB"
               uploading={false}
               onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "fitness_image")}
+              onRemove={() => handleFileRemove("fitness_image")}
             />
           </div>
         </div>
@@ -2223,6 +3008,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   onFilesSelected={(files) => {
                     if (files[0]) { handleFileUpload(files[0], "state_permit_image"); setVehicleFormErrors(prev => ({ ...prev, state_permit_image: undefined })) }
                   }}
+                  onRemove={() => handleFileRemove("state_permit_image")}
                 />
                 {vehicleFormErrors.state_permit_image && (
                   <p className="text-[11px] text-red-500">{vehicleFormErrors.state_permit_image}</p>
@@ -2253,6 +3039,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   helperText="Max file size: 20 MB"
                   uploading={false}
                   onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "national_permit_image")}
+                  onRemove={() => handleFileRemove("national_permit_image")}
                 />
               </div>
             </div>
@@ -2333,6 +3120,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           helperText="Max file size: 20 MB"
           uploading={false}
           onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "dl_upload")}
+          onRemove={() => handleFileRemove("dl_upload")}
         />
 
       <Separator className="my-2" />
@@ -2349,6 +3137,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           helperText="Max file size: 20 MB"
           uploading={false}
           onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "aadhaar_upload")}
+          onRemove={() => handleFileRemove("aadhaar_upload")}
         />
       </div>
 
@@ -2360,7 +3149,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>State</Label>
-          <Input value={driverForm.state} onChange={e => setDriverForm({...driverForm, state: e.target.value})} placeholder="State" />
+          <Combobox
+            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+            value={driverForm.state_id ? String(driverForm.state_id) : ""}
+            onValueChange={val => {
+              const selected = activeStates.find((s: any) => String(s.id) === val)
+              setDriverForm({...driverForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || driverForm.state })
+            }}
+            placeholder="Select state"
+            searchPlaceholder="Search state..."
+          />
         </div>
         <div className="space-y-2">
           <Label>Pincode</Label>
@@ -2420,7 +3218,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>State</Label>
-          <Input value={transportForm.state} onChange={e => setTransportForm({...transportForm, state: e.target.value})} placeholder="State" />
+          <Combobox
+            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+            value={transportForm.state_id ? String(transportForm.state_id) : ""}
+            onValueChange={val => {
+              const selected = activeStates.find((s: any) => String(s.id) === val)
+              setTransportForm({...transportForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || transportForm.state })
+            }}
+            placeholder="Select state"
+            searchPlaceholder="Search state..."
+          />
         </div>
         <div className="space-y-2">
           <Label>Pincode</Label>
@@ -2442,6 +3249,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   )
 
   return (
+
     <div className="p-4 md:p-6 max-w-7xl mx-auto min-h-screen space-y-4 md:space-y-6 animate-in fade-in duration-700">
       <PageHeader
         title="Master Data"
@@ -2508,7 +3316,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   Enter the details for the {activeTab === "sku_details" ? "SKU" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab.slice(0, -1)} record.
                 </DialogDescription>
               </DialogHeader>
-              {activeTab === "customers" ? renderCustomerForm() : activeTab === "depots" ? renderDepotForm() : activeTab === "sku_details" ? renderSkuDetailsForm() : activeTab === "sku_selling_price" ? renderSkuSellingPriceForm() : activeTab === "salespersons" ? renderSalespersonForm() : activeTab === "vehicle_master" ? renderVehicleForm() : activeTab === "driver_master" ? renderDriverForm() : activeTab === "transport_master" ? renderTransportForm() : renderBrokerForm()}
+              {renderFormForTab(activeTab)}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                 <Button onClick={handleCreateOrUpdate} disabled={isSubmitting}>
@@ -2544,6 +3352,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </SelectContent>
           </Select>
         </div>
+
+
 
         {visibleTabs.includes("customers") && (
         <TabsContent value="customers">
@@ -3043,6 +3853,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Card>
         </TabsContent>
         )}
+
 
         {visibleTabs.includes("brokers") && (
         <TabsContent value="brokers">
@@ -4789,6 +5600,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Card>
         </TabsContent>
         )}
+
+        {visibleTabs.includes("reference_data") && (
+        <TabsContent value="reference_data">
+          <ReferenceDataTab activeStates={activeStates} isMasterTabReadOnly={isMasterTabReadOnly} />
+        </TabsContent>
+        )}
+
 
       </Tabs>
 
