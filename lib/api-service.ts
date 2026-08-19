@@ -1279,7 +1279,7 @@ export const subDistrictApi = {
 
 /**
  * Shared reference-data lookup API.
- * Covers all 20 reference data lookup types:
+ * Covers all 22 reference data lookup types:
  * - is_gst_registered
  * - gst_registration_type
  * - city
@@ -1300,6 +1300,8 @@ export const subDistrictApi = {
  * - vehicle_type
  * - fuel_type
  * - rto_code
+ * - stock_category
+ * - oil_type
  */
 export type LookupType =
   | 'is_gst_registered'
@@ -1321,7 +1323,9 @@ export type LookupType =
   | 'type_of_supply'
   | 'vehicle_type'
   | 'fuel_type'
-  | 'rto_code';
+  | 'rto_code'
+  | 'stock_category'
+  | 'oil_type';
 
 export const lookupApi = {
   getAll: async (type: LookupType, params?: any): Promise<ApiResponse> => {
@@ -1536,7 +1540,7 @@ export const skuSellingPriceApi = {
  * Common API
  */
 export const commonApi = {
-  getNextId: async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport' | 'state' | 'district' | 'sub_district'): Promise<ApiResponse<{ nextId: string; type: string; prefix: string }>> => {
+  getNextId: async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport' | 'state' | 'district' | 'sub_district' | 'ledger_group' | 'stock_group' | 'unit' | 'ledger' | 'raw_material' | 'semi_finished_good' | 'insurance_detail' | 'conversion_formula' | 'price_level' | 'petrol_pump' | 'cd_rule' | 'tds_rule' | 'bhada_rate'): Promise<ApiResponse<{ nextId: string; type: string; prefix: string }>> => {
     return request(`/common/next-id?type=${type}`);
   },
 };
@@ -1718,6 +1722,215 @@ export const salespersonApi = {
   },
   getPending: async (): Promise<ApiResponse> => request('/salespersons/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/salespersons/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Ledger Group API (Phase 8)
+ */
+export const ledgerGroupApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/ledger-groups${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/ledger-groups/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/ledger-groups', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/ledger-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/ledger-groups/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/ledger-groups/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledger-groups/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Stock Group API (Phase 8)
+ */
+export const stockGroupApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/stock-groups${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/stock-groups/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/stock-groups', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/stock-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/stock-groups/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/stock-groups/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/stock-groups/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Units Master API (Phase 15)
+ */
+export const unitApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/units${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/units/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/units', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/units/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/units/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/units/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Ledger API (Phase 16 follow-up — accounting-heads picklist)
+ */
+export const ledgerApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/ledgers${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/ledgers/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/ledgers', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/ledgers/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledgers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Raw Materials Master API (Phase 16)
+ */
+export const rawMaterialApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/raw-materials${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/raw-materials/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/raw-materials', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/raw-materials/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/raw-materials/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/raw-materials/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/raw-materials/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Semi-Finished Goods Master API (Phase 17)
+ */
+export const semiFinishedGoodApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/semi-finished-goods${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/semi-finished-goods/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/semi-finished-goods', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/semi-finished-goods/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/semi-finished-goods/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/semi-finished-goods/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/semi-finished-goods/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Insurance Details Master API (Phase 19)
+ */
+export const insuranceDetailApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/insurance-details${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/insurance-details/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/insurance-details', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/insurance-details/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/insurance-details/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/insurance-details/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/insurance-details/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Finished Goods Price Conversion Formula Master API (Phase 20a)
+ */
+export const conversionFormulaApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/conversion-formulas${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/conversion-formulas/${id}`),
+  getHistory: async (id: string | number): Promise<ApiResponse> => request(`/conversion-formulas/${id}/history`),
+  create: async (data: any): Promise<ApiResponse> => request('/conversion-formulas', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/conversion-formulas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/conversion-formulas/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/conversion-formulas/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/conversion-formulas/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Price Levels Master API (Phase 20b)
+ */
+export const priceLevelApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/price-levels${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/price-levels/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/price-levels', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/price-levels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/price-levels/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/price-levels/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/price-levels/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Petrol Pump Master API (Phase 21)
+ */
+export const petrolPumpApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/petrol-pumps${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/petrol-pumps/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/petrol-pumps', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/petrol-pumps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/petrol-pumps/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/petrol-pumps/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/petrol-pumps/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Cash Discount (CD) Master API (Phase 22)
+ */
+export const cdRuleApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/cd-rules${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/cd-rules/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/cd-rules', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/cd-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/cd-rules/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/cd-rules/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/cd-rules/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * TDS Master API (Phase 23) - bare-minimum placeholder, see db-v2/schema/tds_rules.ts.
+ */
+export const tdsRuleApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/tds-rules${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/tds-rules/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/tds-rules', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/tds-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/tds-rules/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/tds-rules/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/tds-rules/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+/**
+ * Bhada Rate Master API (Phase 24) - bare-minimum placeholder, see db-v2/schema/bhada_rates.ts.
+ */
+export const bhadaRateApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/bhada-rates${queryString}`);
+  },
+  getById: async (id: string): Promise<ApiResponse> => request(`/bhada-rates/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/bhada-rates', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/bhada-rates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: string | number): Promise<ApiResponse> => request(`/bhada-rates/${id}`, { method: 'DELETE' }),
+  getPending: async (): Promise<ApiResponse> => request('/bhada-rates/pending'),
+  review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/bhada-rates/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 /**
@@ -1920,6 +2133,9 @@ export default {
   common: commonApi,
   varCalc: varCalcApi,
   salesperson: salespersonApi,
+  ledgerGroup: ledgerGroupApi,
+  stockGroup: stockGroupApi,
+  unit: unitApi,
   commitmentPunch: commitmentPunchApi,
   vehicleMaster: vehicleMasterApi,
   driverMaster: driverMasterApi,

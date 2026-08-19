@@ -278,7 +278,9 @@ export default function ActualDispatchPage() {
     contact_no: "",
     license_no: "",
     license_type: "",
-    valid_upto: ""
+    valid_upto: "",
+    trans_valid_upto: "",
+    lmv_valid_upto: ""
   })
 
   const vehicleOptions = useMemo(() => (
@@ -1019,7 +1021,9 @@ export default function ActualDispatchPage() {
         contact_no: "",
         license_no: "",
         license_type: "",
-        valid_upto: ""
+        valid_upto: "",
+        trans_valid_upto: "",
+        lmv_valid_upto: ""
       })
       setLoadData({
         actualQty: String(targetGroups.flatMap(g => g._allProducts).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)),
@@ -1085,7 +1089,9 @@ export default function ActualDispatchPage() {
                   contact_no: draftDriver.mobile_no || "",
                   license_no: draftDriver.driving_licence_no || "",
                   license_type: draftDriver.driving_licence_type || "",
-                  valid_upto: draftDriver.valid_upto ? new Date(draftDriver.valid_upto).toISOString().split('T')[0] : ""
+                  valid_upto: draftDriver.valid_upto ? new Date(draftDriver.valid_upto).toISOString().split('T')[0] : "",
+                  trans_valid_upto: draftDriver.trans_valid_upto ? new Date(draftDriver.trans_valid_upto).toISOString().split('T')[0] : "",
+                  lmv_valid_upto: draftDriver.lmv_valid_upto ? new Date(draftDriver.lmv_valid_upto).toISOString().split('T')[0] : ""
                 });
               }
             }
@@ -2751,7 +2757,9 @@ export default function ActualDispatchPage() {
                                   contact_no: selectedD.mobile_no || "",
                                   license_no: selectedD.driving_licence_no || "",
                                   license_type: selectedD.driving_licence_type || "",
-                                  valid_upto: selectedD.valid_upto ? new Date(selectedD.valid_upto).toISOString().split('T')[0] : ""
+                                  valid_upto: selectedD.valid_upto ? new Date(selectedD.valid_upto).toISOString().split('T')[0] : "",
+                                  trans_valid_upto: selectedD.trans_valid_upto ? new Date(selectedD.trans_valid_upto).toISOString().split('T')[0] : "",
+                                  lmv_valid_upto: selectedD.lmv_valid_upto ? new Date(selectedD.lmv_valid_upto).toISOString().split('T')[0] : ""
                                 });
                               }
                             }}
@@ -2806,6 +2814,15 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Valid Upto</p>
                             <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{formatDate(driverData.valid_upto) || '---'}</p>
+                          </div>
+                          {/* Trans Valid Upto for Truck/Tanker/Pickup/Hiva/Trailer, LMV Valid Upto otherwise (review Section 10) */}
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">
+                              {['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? 'Trans Valid Upto' : 'LMV Valid Upto'}
+                            </p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
+                              {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
+                            </p>
                           </div>
                         </div>
                       </div>

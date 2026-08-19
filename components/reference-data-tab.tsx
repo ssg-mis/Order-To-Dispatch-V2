@@ -54,7 +54,7 @@ export interface ReferenceDataTabProps {
   isMasterTabReadOnly?: boolean
 }
 
-// 20 Standard Master Categories
+// 22 Standard Master Categories
 interface CategoryMeta {
   key: LookupType
   label: string
@@ -102,6 +102,8 @@ const CATEGORY_GROUPS: CategoryGroup[] = [
       { key: "fssai_licence_type", label: "FSSAI Licence Type", shortDesc: "Registration / State / National", icon: ShieldCheck },
       { key: "bank_name", label: "Bank Name", shortDesc: "Approved banking institutions", icon: CreditCard },
       { key: "transaction_type", label: "Transaction Type", shortDesc: "NEFT, RTGS, UPI, Cheque, Cash", icon: CreditCard },
+      { key: "stock_category", label: "Stock Category", shortDesc: "Bulk Packaging, Retail Packaging", icon: Layers },
+      { key: "oil_type", label: "Oil Type", shortDesc: "Rice Bran, Soya Bean, Palm Olein Refined Oil", icon: Tag },
     ],
   },
   {

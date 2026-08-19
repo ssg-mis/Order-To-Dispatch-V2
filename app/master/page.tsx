@@ -18,12 +18,12 @@ import { Combobox } from "@/components/ui/combobox"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
-import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi } from "@/lib/api-service"
+import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
 import { useAuth } from "@/hooks/use-auth"
-import {   UserPlus, UserMinus, Search, RefreshCw, FileText, Download, Filter, ArrowUpDown, ArrowUp, ArrowDown, Package, Warehouse, Briefcase, Plus, Loader2, Save, Trash2, Edit2, AlertCircle, CheckCircle2, MoreVertical, X, Settings, Calendar, Clock, MapPin, Phone, Mail, User, Users, Info, Check, Eye, Trash, LayoutGrid, ChevronRight, ChevronDown, List, Upload, EyeOff, Layout, Truck, Pencil, UserCircle, Factory,
+import {   UserPlus, UserMinus, Search, RefreshCw, FileText, Download, Filter, ArrowUpDown, ArrowUp, ArrowDown, Package, Warehouse, Briefcase, Plus, Loader2, Save, Trash2, Edit2, AlertCircle, CheckCircle2, MoreVertical, X, Settings, Calendar, Clock, MapPin, Phone, Mail, User, Users, Info, Check, Eye, Trash, LayoutGrid, ChevronRight, ChevronDown, List, Upload, EyeOff, Layout, Truck, Pencil, UserCircle, Factory, BookOpen, Layers, Ruler, Landmark, FlaskConical, Shield, Calculator, Tag, Fuel, Percent, Route,
 } from 'lucide-react'
 import { PageHeader } from "@/components/page-header"
 import {
@@ -73,6 +73,31 @@ interface Customer {
   godown_ids?: number[]
   is_required_for_commitment?: string
   bank_accounts?: CustomerBankAccount[]
+  ledger_group_id?: number | string | null
+}
+
+// Customer-Master field parity fields (Phases 10/11/12/21, review Sections
+// 6/7/8/19) - the exact same set as Customer's GST/MSME/FSSAI/uploads block,
+// mixed into Broker/Salesperson/Transport/PetrolPump below.
+interface PartyParityFields {
+  state?: string
+  state_id?: number | string | null
+  pan?: string
+  gstin?: string
+  gst_registered?: string | null
+  gst_registration_type?: string | null
+  gst_registration_wef?: string | null
+  msme_registration_no?: string | null
+  msme_registration_type?: string | null
+  msme_registration_wef?: string | null
+  fssai_no?: string | null
+  fssai_valid_upto?: string | null
+  fssai_licence_type?: string | null
+  aadhaar_upload?: string | null
+  pan_upload?: string | null
+  gst_certificate_upload?: string | null
+  msme_certificate_upload?: string | null
+  fssai_certificate_upload?: string | null
 }
 
 interface Depot {
@@ -84,9 +109,14 @@ interface Depot {
   state: string
   state_id?: number | null
   salesman_broker_name: string
+  agent_tags?: { agent_type: 'broker' | 'salesperson'; agent_id: number }[]
+  agreement_paper_upload?: string
+  depot_owner_gst_certificate_upload?: string
+  pan_card_upload?: string
+  aadhaar_card_upload?: string
 }
 
-interface Broker {
+interface Broker extends PartyParityFields {
   id: number // real serial PK (v2) — all mutations key off this
   broker_id: string // legacy text business code, display-only
   status: string
@@ -95,9 +125,10 @@ interface Broker {
   mobile_no: string
   depot_name: string
   depot_id: string
+  ledger_group_id?: number | string | null
 }
 
-interface Salesperson {
+interface Salesperson extends PartyParityFields {
   id: number // real serial PK (v2) — all mutations key off this
   broker_id: string // legacy text business code, display-only
   status: string
@@ -106,6 +137,60 @@ interface Salesperson {
   mobile_no: string
   depot_name: string
   depot_id: string
+  ledger_group_id?: number | string | null
+  employee_id?: string | null
+}
+
+interface LedgerGroup {
+  id: number
+  group_code: string
+  group_name: string
+  status: string
+  is_system: boolean
+}
+
+interface StockGroup {
+  id: number
+  group_code: string
+  group_name: string
+  status: string
+  is_system: boolean
+}
+
+interface Unit {
+  id: number
+  unit_code: string
+  unit_name: string
+  status: string
+}
+
+interface Ledger {
+  id: number
+  ledger_code: string
+  ledger_name: string
+  ledger_group_id: number | null
+  status: string
+}
+
+interface RawMaterialAdditionalUom {
+  id?: number
+  uom_id: number | string
+  conversion_ratio: number | string
+}
+
+interface RawMaterial {
+  id: number
+  raw_material_code: string
+  name: string
+  main_uom_id: number | null
+  additional_uoms?: RawMaterialAdditionalUom[]
+  type_of_supply: string | null
+  gst_rate_id: number | null
+  hsn_code_id: number | null
+  sac_code_id: number | null
+  default_accounting_ledger_id: number | null
+  batch_tracking_enabled: boolean
+  status: string
 }
 
 interface SkuDetail {
@@ -126,6 +211,17 @@ interface SkuDetail {
   packing_weight: number | string
   gross_weight: number | string
   tag_name: string
+  // Phase 18 (Finished Goods Master) + Phase 3 fold-in (SKU GST extension).
+  semi_finished_good_id?: number | string | null
+  oil_type_id?: number | string | null
+  stock_category_id?: number | string | null
+  main_uom_id?: number | string | null
+  alternate_uom_id?: number | string | null
+  type_of_supply?: string | null
+  gst_rate_id?: number | string | null
+  hsn_code_id?: number | string | null
+  sac_code_id?: number | string | null
+  uqc_id?: number | string | null
 }
 
 interface SkuSellingPrice {
@@ -186,6 +282,9 @@ interface Driver {
   driving_licence_type: string
   valid_upto: string
   rto: string
+  rto_id?: number | null
+  trans_valid_upto?: string
+  lmv_valid_upto?: string
   address_line1: string
   state: string
   state_id?: number | null
@@ -196,7 +295,7 @@ interface Driver {
   dl_upload: string
 }
 
-interface Transport {
+interface Transport extends PartyParityFields {
   id: number
   transport_master_id: string
   status: string
@@ -210,6 +309,9 @@ interface Transport {
   pincode: string
   pan: string
   gstin: string
+  ledger_group_id?: number | string | null
+  bilty_copy_upload?: string | null
+  linked_customer_id?: number | string | null
 }
 
 // --- Constants ---
@@ -254,9 +356,22 @@ const blankCustomerBankAccount = (): CustomerBankAccount => ({
   bank_name_id: null, account_number: "", ifsc_code: "",
 })
 
+// Customer-Master field parity block (Phases 10/11/12/21) - the same blank
+// defaults spread into Broker/Salesperson/Transport/PetrolPump form state.
+const blankPartyParityFields = (): PartyParityFields => ({
+  state: "", state_id: null, pan: "", gstin: "",
+  gst_registered: "", gst_registration_type: "", gst_registration_wef: "",
+  msme_registration_no: "", msme_registration_type: "", msme_registration_wef: "",
+  fssai_no: "", fssai_valid_upto: "", fssai_licence_type: "",
+  aadhaar_upload: "", pan_upload: "", gst_certificate_upload: "", msme_certificate_upload: "", fssai_certificate_upload: "",
+})
+
 const ALL_MASTER_TABS = [
   "customers", "depots", "brokers", "salespersons",
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master",
+  "ledger_groups", "stock_groups", "units", "raw_materials", "semi_finished_goods",
+  "insurance_details", "conversion_formulas", "price_levels", "petrol_pumps", "cd_rules",
+  "tds_rules", "bhada_rates",
   "reference_data"
 ]
 
@@ -265,7 +380,19 @@ const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?
   depots: { label: "Depots", icon: Warehouse, desc: "Manage your depot locations and details" },
   brokers: { label: "Brokers", icon: Briefcase, desc: "Manage your broker records and details" },
   salespersons: { label: "Salesperson", icon: Users, desc: "Manage your salesperson records and details" },
-  sku_details: { label: "SKU List", icon: Package, desc: "Manage your SKU list and product details" },
+  ledger_groups: { label: "Ledger Groups", icon: BookOpen, desc: "Categorize party masters under Ledger Groups" },
+  stock_groups: { label: "Stock Groups", icon: Layers, desc: "Categorize stock item masters under Stock Groups" },
+  units: { label: "Units", icon: Ruler, desc: "Manage units of measurement (UOM)" },
+  raw_materials: { label: "Raw Materials", icon: FlaskConical, desc: "Manage your raw material records and details" },
+  semi_finished_goods: { label: "Semi-Finished Goods", icon: Factory, desc: "Manage your semi-finished goods records and details" },
+  insurance_details: { label: "Insurance Details", icon: Shield, desc: "Manage vehicle/cargo insurance policies" },
+  conversion_formulas: { label: "Conversion Formulas", icon: Calculator, desc: "Define price conversion formulas between Finished Goods" },
+  price_levels: { label: "Price Levels", icon: Tag, desc: "Maintain dated Finished Goods price lists" },
+  petrol_pumps: { label: "Petrol Pumps", icon: Fuel, desc: "Manage your petrol pump records and details" },
+  cd_rules: { label: "Cash Discount", icon: Percent, desc: "Maintain Cash Discount rules by Stock Category" },
+  tds_rules: { label: "TDS", icon: Landmark, desc: "TDS rate placeholder — minimum fields only, pending client scoping" },
+  bhada_rates: { label: "Bhada Rate", icon: Route, desc: "Freight/Bhada rate placeholder — minimum fields only, pending client scoping" },
+  sku_details: { label: "Finished Goods", icon: Package, desc: "Manage your Finished Goods list and product details" },
   sku_selling_price: { label: "Pricing", icon: Package, desc: "Manage SKU selling prices and rates" },
   vehicle_master: { label: "Vehicles", icon: Truck, desc: "Manage your vehicle database and documents" },
   driver_master: { label: "Drivers", icon: User, desc: "Manage your driver records and documents" },
@@ -390,6 +517,12 @@ export default function MasterPage() {
     setCustomerSubTab('active'); setDepotSubTab('active'); setBrokerSubTab('active')
     setSalespersonSubTab('active'); setSkuSubTab('active'); setVehicleSubTab('active')
     setDriverSubTab('active'); setTransportSubTab('active')
+    setLedgerGroupSubTab('active'); setStockGroupSubTab('active'); setUnitSubTab('active')
+    setRawMaterialSubTab('active'); setSemiFinishedGoodSubTab('active')
+    setInsuranceDetailSubTab('active'); setConversionFormulaSubTab('active')
+    setPriceLevelSubTab('active'); setPetrolPumpSubTab('active')
+    setCdRuleSubTab('active')
+    setTdsRuleSubTab('active'); setBhadaRateSubTab('active')
     setSelectedVehicleType('all')
     return () => { setMasterTabContext(null) }
   }, [activeTab])
@@ -401,6 +534,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const { ref: depotEndRef, inView: depotInView } = useInView()
   const { ref: brokerEndRef, inView: brokerInView } = useInView()
   const { ref: salespersonEndRef, inView: salespersonInView } = useInView()
+  const { ref: ledgerGroupEndRef, inView: ledgerGroupInView } = useInView()
+  const { ref: stockGroupEndRef, inView: stockGroupInView } = useInView()
+  const { ref: unitEndRef, inView: unitInView } = useInView()
+  const { ref: rawMaterialEndRef, inView: rawMaterialInView } = useInView()
+  const { ref: semiFinishedGoodEndRef, inView: semiFinishedGoodInView } = useInView()
+  const { ref: insuranceDetailEndRef, inView: insuranceDetailInView } = useInView()
+  const { ref: conversionFormulaEndRef, inView: conversionFormulaInView } = useInView()
+  const { ref: priceLevelEndRef, inView: priceLevelInView } = useInView()
+  const { ref: petrolPumpEndRef, inView: petrolPumpInView } = useInView()
+  const { ref: cdRuleEndRef, inView: cdRuleInView } = useInView()
+  const { ref: tdsRuleEndRef, inView: tdsRuleInView } = useInView()
+  const { ref: bhadaRateEndRef, inView: bhadaRateInView } = useInView()
   const { ref: vehicleEndRef, inView: vehicleInView } = useInView()
   const { ref: driverEndRef, inView: driverInView } = useInView()
   const { ref: skuEndRef, inView: skuInView } = useInView()
@@ -448,6 +593,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const { data: pendingDepotsData, refetch: refetchPendingDepots } = useQuery({ queryKey: ['pending-depots'], queryFn: async () => { const res = await depotApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'depots' })
   const { data: pendingBrokersData, refetch: refetchPendingBrokers } = useQuery({ queryKey: ['pending-brokers'], queryFn: async () => { const res = await brokerApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'brokers' })
   const { data: pendingSalespersonsData, refetch: refetchPendingSalespersons } = useQuery({ queryKey: ['pending-salespersons'], queryFn: async () => { const res = await salespersonApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'salespersons' })
+  const { data: pendingLedgerGroupsData, refetch: refetchPendingLedgerGroups } = useQuery({ queryKey: ['pending-ledger-groups'], queryFn: async () => { const res = await ledgerGroupApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'ledger_groups' })
+  const { data: pendingStockGroupsData, refetch: refetchPendingStockGroups } = useQuery({ queryKey: ['pending-stock-groups'], queryFn: async () => { const res = await stockGroupApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'stock_groups' })
+  const { data: pendingUnitsData, refetch: refetchPendingUnits } = useQuery({ queryKey: ['pending-units'], queryFn: async () => { const res = await unitApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'units' })
+  const { data: pendingRawMaterialsData, refetch: refetchPendingRawMaterials } = useQuery({ queryKey: ['pending-raw-materials'], queryFn: async () => { const res = await rawMaterialApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'raw_materials' })
+  const { data: pendingSemiFinishedGoodsData, refetch: refetchPendingSemiFinishedGoods } = useQuery({ queryKey: ['pending-semi-finished-goods'], queryFn: async () => { const res = await semiFinishedGoodApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'semi_finished_goods' })
   const { data: pendingSkuData, refetch: refetchPendingSku } = useQuery({ queryKey: ['pending-sku-details'], queryFn: async () => { const res = await skuDetailsApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'sku_details' })
   const { data: pendingVehiclesData, refetch: refetchPendingVehicles } = useQuery({ queryKey: ['pending-vehicles'], queryFn: async () => { const res = await vehicleMasterApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'vehicle_master' })
   const { data: pendingDriversData, refetch: refetchPendingDrivers } = useQuery({ queryKey: ['pending-drivers'], queryFn: async () => { const res = await driverMasterApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'driver_master' })
@@ -456,6 +606,203 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const pendingDepots: any[] = pendingDepotsData || []
   const pendingBrokers: any[] = pendingBrokersData || []
   const pendingSalespersons: any[] = pendingSalespersonsData || []
+  const pendingLedgerGroups: any[] = pendingLedgerGroupsData || []
+  const pendingStockGroups: any[] = pendingStockGroupsData || []
+  const pendingUnits: any[] = pendingUnitsData || []
+  const pendingRawMaterials: any[] = pendingRawMaterialsData || []
+  const pendingSemiFinishedGoods: any[] = pendingSemiFinishedGoodsData || []
+  const { data: pendingInsuranceDetailsData, refetch: refetchPendingInsuranceDetails } = useQuery({ queryKey: ['pending-insurance-details'], queryFn: async () => { const res = await insuranceDetailApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'insurance_details' })
+  const pendingInsuranceDetails: any[] = pendingInsuranceDetailsData || []
+  const { data: pendingConversionFormulasData, refetch: refetchPendingConversionFormulas } = useQuery({ queryKey: ['pending-conversion-formulas'], queryFn: async () => { const res = await conversionFormulaApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'conversion_formulas' })
+  const pendingConversionFormulas: any[] = pendingConversionFormulasData || []
+  const { data: pendingPriceLevelsData, refetch: refetchPendingPriceLevels } = useQuery({ queryKey: ['pending-price-levels'], queryFn: async () => { const res = await priceLevelApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'price_levels' })
+  const pendingPriceLevels: any[] = pendingPriceLevelsData || []
+  const { data: pendingPetrolPumpsData, refetch: refetchPendingPetrolPumps } = useQuery({ queryKey: ['pending-petrol-pumps'], queryFn: async () => { const res = await petrolPumpApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'petrol_pumps' })
+  const pendingPetrolPumps: any[] = pendingPetrolPumpsData || []
+  const { data: pendingCdRulesData, refetch: refetchPendingCdRules } = useQuery({ queryKey: ['pending-cd-rules'], queryFn: async () => { const res = await cdRuleApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'cd_rules' })
+  const pendingCdRules: any[] = pendingCdRulesData || []
+  const { data: pendingTdsRulesData, refetch: refetchPendingTdsRules } = useQuery({ queryKey: ['pending-tds-rules'], queryFn: async () => { const res = await tdsRuleApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'tds_rules' })
+  const pendingTdsRules: any[] = pendingTdsRulesData || []
+  const { data: pendingBhadaRatesData, refetch: refetchPendingBhadaRates } = useQuery({ queryKey: ['pending-bhada-rates'], queryFn: async () => { const res = await bhadaRateApi.getPending(); return res.success ? (res.data as any[]) : [] }, enabled: isAdminOrSuper && activeTab === 'bhada_rates' })
+  const pendingBhadaRates: any[] = pendingBhadaRatesData || []
+
+  // Lightweight, unpaginated Ledger Group list for the "Ledger Group" picker on
+  // Customer/Broker/Salesperson/Transporter forms (Phase 8) - independent of the
+  // Ledger Groups tab's own paginated/search-filtered list above.
+  const { data: ledgerGroupOptionsData } = useQuery({
+    queryKey: ['ledger-group-options'],
+    queryFn: async () => {
+      const res = await ledgerGroupApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.ledger_groups || []) : []
+    },
+  })
+  const ledgerGroupOptions: any[] = ledgerGroupOptionsData || []
+
+  // Lightweight, unpaginated Units / Ledgers lists for the pickers on the
+  // Raw Materials form (Phase 16) - independent of those tabs' own
+  // paginated/search-filtered lists.
+  const { data: unitOptionsData } = useQuery({
+    queryKey: ['unit-options'],
+    queryFn: async () => {
+      const res = await unitApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.units || []) : []
+    },
+  })
+  const unitOptions: any[] = unitOptionsData || []
+
+  const { data: ledgerOptionsData } = useQuery({
+    queryKey: ['ledger-options'],
+    queryFn: async () => {
+      const res = await ledgerApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.ledgers || []) : []
+    },
+  })
+  const ledgerOptions: any[] = ledgerOptionsData || []
+
+  // Lightweight, unpaginated Semi-Finished Goods list for the Finished Goods
+  // (SKU) form's SFG-link picker (Phase 18) - independent of the SFG tab's
+  // own paginated/search-filtered list.
+  const { data: semiFinishedGoodOptionsData } = useQuery({
+    queryKey: ['semi-finished-good-options'],
+    queryFn: async () => {
+      const res = await semiFinishedGoodApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.semi_finished_goods || []) : []
+    },
+  })
+  const semiFinishedGoodOptions: any[] = semiFinishedGoodOptionsData || []
+
+  // Lightweight, unpaginated Stock Group list for the picker on the Raw
+  // Materials / Semi-Finished Goods forms (Phase 17 - also retrofit onto
+  // Raw Materials, see that schema's stockGroupId comment).
+  const { data: stockGroupOptionsData } = useQuery({
+    queryKey: ['stock-group-options'],
+    queryFn: async () => {
+      const res = await stockGroupApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.stock_groups || []) : []
+    },
+  })
+  const stockGroupOptions: any[] = stockGroupOptionsData || []
+
+  // Lightweight, unpaginated Transporter list for the multi-transporter
+  // tagging checklist on the Vehicle form (Phase 13) - independent of the
+  // Transporters tab's own paginated/search-filtered list.
+  const { data: transporterOptionsData } = useQuery({
+    queryKey: ['transporter-options'],
+    queryFn: async () => {
+      const res = await transportMasterApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.transporters || []) : []
+    },
+  })
+  const transporterOptions: any[] = transporterOptionsData || []
+
+  // Lightweight, unpaginated Broker/Salesperson lists for the combined
+  // "Salesman / Broker Name" checklist on the Depot form (Phase 9).
+  const { data: brokerOptionsData } = useQuery({
+    queryKey: ['broker-options'],
+    queryFn: async () => {
+      const res = await brokerApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.brokers || []) : []
+    },
+  })
+  const brokerOptions: any[] = brokerOptionsData || []
+
+  const { data: salespersonOptionsData } = useQuery({
+    queryKey: ['salesperson-options'],
+    queryFn: async () => {
+      const res = await salespersonApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.salespersons || []) : []
+    },
+  })
+  const salespersonOptions: any[] = salespersonOptionsData || []
+
+  // Lightweight, unpaginated Finished Goods (skus) list for the item pickers
+  // on Conversion Formula / Price Levels forms (Phase 20a/20b).
+  const { data: skuOptionsData } = useQuery({
+    queryKey: ['sku-options'],
+    queryFn: async () => {
+      const res = await skuDetailsApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.skuDetails || []) : []
+    },
+  })
+  const skuOptions: any[] = skuOptionsData || []
+
+  // RTO Code Reference Data options for the Vehicle form's rto_id picker (Phase 13).
+  const { data: rtoCodeData } = useQuery({
+    queryKey: ["lookup-rto_code"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('rto_code', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeRtoCodes = useMemo(() => (rtoCodeData || []).filter((r: any) => r.status === 'Active'), [rtoCodeData])
+
+  // GST Rate / HSN Code / SAC Code dropdown options for Raw Materials (Phase
+  // 16) - same Reference Data pattern as the UQC dropdown above.
+  const { data: gstRateData } = useQuery({
+    queryKey: ["lookup-gst_rate"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('gst_rate', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeGstRates = useMemo(() => (gstRateData || []).filter((r: any) => r.status === 'Active'), [gstRateData])
+
+  const { data: hsnCodeData } = useQuery({
+    queryKey: ["lookup-hsn_code"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('hsn_code', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeHsnCodes = useMemo(() => (hsnCodeData || []).filter((r: any) => r.status === 'Active'), [hsnCodeData])
+
+  const { data: sacCodeData } = useQuery({
+    queryKey: ["lookup-sac_code"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('sac_code', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeSacCodes = useMemo(() => (sacCodeData || []).filter((r: any) => r.status === 'Active'), [sacCodeData])
+
+  // Stock Category Reference Data options for the CD (Cash Discount) Rule
+  // form's stock_category_id picker (Phase 22) - same Reference Data pattern
+  // as GST Rate/HSN/SAC above.
+  const { data: stockCategoryData } = useQuery({
+    queryKey: ["lookup-stock_category"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('stock_category', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeStockCategories = useMemo(() => (stockCategoryData || []).filter((r: any) => r.status === 'Active'), [stockCategoryData])
+
+  // Oil Type / UQC Reference Data options for the Finished Goods (SKU) form
+  // (Phase 18 + Phase 3 fold-in) - same Reference Data pattern as above.
+  const { data: oilTypeData } = useQuery({
+    queryKey: ["lookup-oil_type"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('oil_type', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeOilTypes = useMemo(() => (oilTypeData || []).filter((r: any) => r.status === 'Active'), [oilTypeData])
+
+  const { data: uqcData } = useQuery({
+    queryKey: ["lookup-uqc"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('uqc', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeUqcCodes = useMemo(() => (uqcData || []).filter((r: any) => r.status === 'Active'), [uqcData])
   const pendingSkus: any[] = pendingSkuData || []
   const pendingVehicles: any[] = pendingVehiclesData || []
   const pendingDrivers: any[] = pendingDriversData || []
@@ -660,6 +1007,258 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     }
   })
 
+  // Ledger Groups
+  const {
+    data: ledgerGroupData,
+    fetchNextPage: fetchNextLedgerGroup,
+    hasNextPage: hasNextLedgerGroup,
+    isFetchingNextPage: isFetchingNextLedgerGroup,
+    isLoading: isLedgerGroupLoading,
+    refetch: refetchLedgerGroup,
+  } = useInfiniteQuery({
+    queryKey: ["master-ledger-groups", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await ledgerGroupApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { ledger_groups: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.ledger_groups?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Stock Groups
+  const {
+    data: stockGroupData,
+    fetchNextPage: fetchNextStockGroup,
+    hasNextPage: hasNextStockGroup,
+    isFetchingNextPage: isFetchingNextStockGroup,
+    isLoading: isStockGroupLoading,
+    refetch: refetchStockGroup,
+  } = useInfiniteQuery({
+    queryKey: ["master-stock-groups", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await stockGroupApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { stock_groups: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.stock_groups?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Units
+  const {
+    data: unitData,
+    fetchNextPage: fetchNextUnit,
+    hasNextPage: hasNextUnit,
+    isFetchingNextPage: isFetchingNextUnit,
+    isLoading: isUnitLoading,
+    refetch: refetchUnit,
+  } = useInfiniteQuery({
+    queryKey: ["master-units", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await unitApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { units: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.units?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Raw Materials
+  const {
+    data: rawMaterialData,
+    fetchNextPage: fetchNextRawMaterial,
+    hasNextPage: hasNextRawMaterial,
+    isFetchingNextPage: isFetchingNextRawMaterial,
+    isLoading: isRawMaterialLoading,
+    refetch: refetchRawMaterial,
+  } = useInfiniteQuery({
+    queryKey: ["master-raw-materials", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await rawMaterialApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { raw_materials: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.raw_materials?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Semi-Finished Goods
+  const {
+    data: semiFinishedGoodData,
+    fetchNextPage: fetchNextSemiFinishedGood,
+    hasNextPage: hasNextSemiFinishedGood,
+    isFetchingNextPage: isFetchingNextSemiFinishedGood,
+    isLoading: isSemiFinishedGoodLoading,
+    refetch: refetchSemiFinishedGood,
+  } = useInfiniteQuery({
+    queryKey: ["master-semi-finished-goods", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await semiFinishedGoodApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { semi_finished_goods: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.semi_finished_goods?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Insurance Details
+  const {
+    data: insuranceDetailData,
+    fetchNextPage: fetchNextInsuranceDetail,
+    hasNextPage: hasNextInsuranceDetail,
+    isFetchingNextPage: isFetchingNextInsuranceDetail,
+    isLoading: isInsuranceDetailLoading,
+    refetch: refetchInsuranceDetail,
+  } = useInfiniteQuery({
+    queryKey: ["master-insurance-details", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await insuranceDetailApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { insurance_details: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.insurance_details?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Conversion Formulas
+  const {
+    data: conversionFormulaData,
+    fetchNextPage: fetchNextConversionFormula,
+    hasNextPage: hasNextConversionFormula,
+    isFetchingNextPage: isFetchingNextConversionFormula,
+    isLoading: isConversionFormulaLoading,
+    refetch: refetchConversionFormula,
+  } = useInfiniteQuery({
+    queryKey: ["master-conversion-formulas", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await conversionFormulaApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { conversion_formulas: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.conversion_formulas?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Price Levels
+  const {
+    data: priceLevelData,
+    fetchNextPage: fetchNextPriceLevel,
+    hasNextPage: hasNextPriceLevel,
+    isFetchingNextPage: isFetchingNextPriceLevel,
+    isLoading: isPriceLevelLoading,
+    refetch: refetchPriceLevel,
+  } = useInfiniteQuery({
+    queryKey: ["master-price-levels", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await priceLevelApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { price_levels: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.price_levels?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Petrol Pumps
+  const {
+    data: petrolPumpData,
+    fetchNextPage: fetchNextPetrolPump,
+    hasNextPage: hasNextPetrolPump,
+    isFetchingNextPage: isFetchingNextPetrolPump,
+    isLoading: isPetrolPumpLoading,
+    refetch: refetchPetrolPump,
+  } = useInfiniteQuery({
+    queryKey: ["master-petrol-pumps", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await petrolPumpApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { petrol_pumps: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.petrol_pumps?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // CD (Cash Discount) Rules
+  const {
+    data: cdRuleData,
+    fetchNextPage: fetchNextCdRule,
+    hasNextPage: hasNextCdRule,
+    isFetchingNextPage: isFetchingNextCdRule,
+    isLoading: isCdRuleLoading,
+    refetch: refetchCdRule,
+  } = useInfiniteQuery({
+    queryKey: ["master-cd-rules", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await cdRuleApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { cd_rules: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.cd_rules?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // TDS Rules (Phase 23 - bare-minimum placeholder)
+  const {
+    data: tdsRuleData,
+    fetchNextPage: fetchNextTdsRule,
+    hasNextPage: hasNextTdsRule,
+    isFetchingNextPage: isFetchingNextTdsRule,
+    isLoading: isTdsRuleLoading,
+    refetch: refetchTdsRule,
+  } = useInfiniteQuery({
+    queryKey: ["master-tds-rules", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await tdsRuleApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { tds_rules: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.tds_rules?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
+  // Bhada Rates (Phase 24 - bare-minimum placeholder)
+  const {
+    data: bhadaRateData,
+    fetchNextPage: fetchNextBhadaRate,
+    hasNextPage: hasNextBhadaRate,
+    isFetchingNextPage: isFetchingNextBhadaRate,
+    isLoading: isBhadaRateLoading,
+    refetch: refetchBhadaRate,
+  } = useInfiniteQuery({
+    queryKey: ["master-bhada-rates", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await bhadaRateApi.getAll({ page: pageParam, limit: 20, search: searchTerm, all: "true" })
+      return res.success ? res.data : { bhada_rates: [], pagination: { total: 0 } }
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, page) => sum + (page.bhada_rates?.length || 0), 0)
+      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
+    }
+  })
+
   // SKU Details
   const {
     data: skuData,
@@ -751,6 +1350,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const depots = useMemo(() => depotData?.pages.flatMap(p => p?.depots || []) || [], [depotData])
   const brokers = useMemo(() => brokerData?.pages.flatMap(p => p?.brokers || []) || [], [brokerData])
   const salespersons = useMemo(() => salespersonData?.pages.flatMap(p => p?.salespersons || []) || [], [salespersonData])
+  const ledgerGroupsList = useMemo(() => ledgerGroupData?.pages.flatMap(p => p?.ledger_groups || []) || [], [ledgerGroupData])
+  const stockGroupsList = useMemo(() => stockGroupData?.pages.flatMap(p => p?.stock_groups || []) || [], [stockGroupData])
+  const unitsList = useMemo(() => unitData?.pages.flatMap(p => p?.units || []) || [], [unitData])
+  const rawMaterialsList = useMemo(() => rawMaterialData?.pages.flatMap(p => p?.raw_materials || []) || [], [rawMaterialData])
+  const semiFinishedGoodsList = useMemo(() => semiFinishedGoodData?.pages.flatMap(p => p?.semi_finished_goods || []) || [], [semiFinishedGoodData])
+  const insuranceDetailsList = useMemo(() => insuranceDetailData?.pages.flatMap(p => p?.insurance_details || []) || [], [insuranceDetailData])
+  const conversionFormulasList = useMemo(() => conversionFormulaData?.pages.flatMap(p => p?.conversion_formulas || []) || [], [conversionFormulaData])
+  const priceLevelsList = useMemo(() => priceLevelData?.pages.flatMap(p => p?.price_levels || []) || [], [priceLevelData])
+  const petrolPumpsList = useMemo(() => petrolPumpData?.pages.flatMap(p => p?.petrol_pumps || []) || [], [petrolPumpData])
+  const cdRulesList = useMemo(() => cdRuleData?.pages.flatMap(p => p?.cd_rules || []) || [], [cdRuleData])
+  const tdsRulesList = useMemo(() => tdsRuleData?.pages.flatMap(p => p?.tds_rules || []) || [], [tdsRuleData])
+  const bhadaRatesList = useMemo(() => bhadaRateData?.pages.flatMap(p => p?.bhada_rates || []) || [], [bhadaRateData])
   const transporters = useMemo(() => transportData?.pages.flatMap(p => p?.transporters || []) || [], [transportData])
   const skuDetails = useMemo(() => skuData?.pages.flatMap(p => p?.skuDetails || []) || [], [skuData])
   const skuSellingPrices = useMemo(() => skuSellingPriceData?.pages.flatMap(p => p?.skus || []) || [], [skuSellingPriceData])
@@ -761,6 +1372,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   useEffect(() => { if (depotInView && hasNextDepot) fetchNextDepot() }, [depotInView, hasNextDepot, fetchNextDepot])
   useEffect(() => { if (brokerInView && hasNextBroker) fetchNextBroker() }, [brokerInView, hasNextBroker, fetchNextBroker])
   useEffect(() => { if (salespersonInView && hasNextSalesperson) fetchNextSalesperson() }, [salespersonInView, hasNextSalesperson, fetchNextSalesperson])
+  useEffect(() => { if (ledgerGroupInView && hasNextLedgerGroup) fetchNextLedgerGroup() }, [ledgerGroupInView, hasNextLedgerGroup, fetchNextLedgerGroup])
+  useEffect(() => { if (stockGroupInView && hasNextStockGroup) fetchNextStockGroup() }, [stockGroupInView, hasNextStockGroup, fetchNextStockGroup])
+  useEffect(() => { if (unitInView && hasNextUnit) fetchNextUnit() }, [unitInView, hasNextUnit, fetchNextUnit])
+  useEffect(() => { if (rawMaterialInView && hasNextRawMaterial) fetchNextRawMaterial() }, [rawMaterialInView, hasNextRawMaterial, fetchNextRawMaterial])
+  useEffect(() => { if (semiFinishedGoodInView && hasNextSemiFinishedGood) fetchNextSemiFinishedGood() }, [semiFinishedGoodInView, hasNextSemiFinishedGood, fetchNextSemiFinishedGood])
+  useEffect(() => { if (insuranceDetailInView && hasNextInsuranceDetail) fetchNextInsuranceDetail() }, [insuranceDetailInView, hasNextInsuranceDetail, fetchNextInsuranceDetail])
+  useEffect(() => { if (conversionFormulaInView && hasNextConversionFormula) fetchNextConversionFormula() }, [conversionFormulaInView, hasNextConversionFormula, fetchNextConversionFormula])
+  useEffect(() => { if (priceLevelInView && hasNextPriceLevel) fetchNextPriceLevel() }, [priceLevelInView, hasNextPriceLevel, fetchNextPriceLevel])
+  useEffect(() => { if (petrolPumpInView && hasNextPetrolPump) fetchNextPetrolPump() }, [petrolPumpInView, hasNextPetrolPump, fetchNextPetrolPump])
+  useEffect(() => { if (cdRuleInView && hasNextCdRule) fetchNextCdRule() }, [cdRuleInView, hasNextCdRule, fetchNextCdRule])
+  useEffect(() => { if (tdsRuleInView && hasNextTdsRule) fetchNextTdsRule() }, [tdsRuleInView, hasNextTdsRule, fetchNextTdsRule])
+  useEffect(() => { if (bhadaRateInView && hasNextBhadaRate) fetchNextBhadaRate() }, [bhadaRateInView, hasNextBhadaRate, fetchNextBhadaRate])
   useEffect(() => { if (skuInView && hasNextSku) fetchNextSku() }, [skuInView, hasNextSku, fetchNextSku])
   useEffect(() => { if (skuSellingPriceInView && hasNextSkuSellingPrice) fetchNextSkuSellingPrice() }, [skuSellingPriceInView, hasNextSkuSellingPrice, fetchNextSkuSellingPrice])
   useEffect(() => { if (driverInView && hasNextDriver) fetchNextDriver() }, [driverInView, hasNextDriver, fetchNextDriver])
@@ -800,7 +1423,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     if (driverInView && hasNextDriver && !isFetchingNextDriver) fetchNextDriver()
   }, [driverInView, hasNextDriver, isFetchingNextDriver, fetchNextDriver])
 
-  const isLoading = isCustomerLoading || isDepotLoading || isBrokerLoading || isSalespersonLoading || isSkuLoading || isSkuSellingPriceLoading || isVehicleLoading || isDriverLoading || isTransportLoading
+  const isLoading = isCustomerLoading || isDepotLoading || isBrokerLoading || isSalespersonLoading || isSkuLoading || isSkuSellingPriceLoading || isVehicleLoading || isDriverLoading || isTransportLoading || isLedgerGroupLoading || isStockGroupLoading || isUnitLoading || isRawMaterialLoading || isSemiFinishedGoodLoading || isInsuranceDetailLoading || isConversionFormulaLoading || isPriceLevelLoading || isPetrolPumpLoading || isCdRuleLoading || isTdsRuleLoading || isBhadaRateLoading
 
   // Sort states
   const [customerSort, setCustomerSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'customer_id', dir: 'asc' })
@@ -814,6 +1437,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [skuSellingPriceSort, setSkuSellingPriceSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'packing_material', dir: 'asc' })
   const [driverSort, setDriverSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'driver_master_id', dir: 'asc' })
   const [transportSort, setTransportSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'transport_master_id', dir: 'asc' })
+  const [ledgerGroupSort, setLedgerGroupSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'group_code', dir: 'asc' })
+  const [stockGroupSort, setStockGroupSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'group_code', dir: 'asc' })
+  const [unitSort, setUnitSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'unit_code', dir: 'asc' })
+  const [rawMaterialSort, setRawMaterialSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'raw_material_code', dir: 'asc' })
+  const [semiFinishedGoodSort, setSemiFinishedGoodSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'semi_finished_good_code', dir: 'asc' })
+  const [insuranceDetailSort, setInsuranceDetailSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'insurance_code', dir: 'asc' })
+  const [conversionFormulaSort, setConversionFormulaSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'conversion_formula_code', dir: 'asc' })
+  const [priceLevelSort, setPriceLevelSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'effective_date', dir: 'desc' })
+  const [petrolPumpSort, setPetrolPumpSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'petrol_pump_code', dir: 'asc' })
+  const [cdRuleSort, setCdRuleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'cd_rule_code', dir: 'asc' })
+  const [tdsRuleSort, setTdsRuleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'tds_rule_code', dir: 'asc' })
+  const [bhadaRateSort, setBhadaRateSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'bhada_rate_code', dir: 'asc' })
 
 
 
@@ -826,6 +1461,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [depotSubTab, setDepotSubTab] = useState<'active' | 'pending'>('active')
   const [brokerSubTab, setBrokerSubTab] = useState<'active' | 'pending'>('active')
   const [salespersonSubTab, setSalespersonSubTab] = useState<'active' | 'pending'>('active')
+  const [ledgerGroupSubTab, setLedgerGroupSubTab] = useState<'active' | 'pending'>('active')
+  const [stockGroupSubTab, setStockGroupSubTab] = useState<'active' | 'pending'>('active')
+  const [unitSubTab, setUnitSubTab] = useState<'active' | 'pending'>('active')
+  const [rawMaterialSubTab, setRawMaterialSubTab] = useState<'active' | 'pending'>('active')
+  const [semiFinishedGoodSubTab, setSemiFinishedGoodSubTab] = useState<'active' | 'pending'>('active')
+  const [insuranceDetailSubTab, setInsuranceDetailSubTab] = useState<'active' | 'pending'>('active')
+  const [conversionFormulaSubTab, setConversionFormulaSubTab] = useState<'active' | 'pending'>('active')
+  const [priceLevelSubTab, setPriceLevelSubTab] = useState<'active' | 'pending'>('active')
+  const [petrolPumpSubTab, setPetrolPumpSubTab] = useState<'active' | 'pending'>('active')
+  const [cdRuleSubTab, setCdRuleSubTab] = useState<'active' | 'pending'>('active')
+  const [tdsRuleSubTab, setTdsRuleSubTab] = useState<'active' | 'pending'>('active')
+  const [bhadaRateSubTab, setBhadaRateSubTab] = useState<'active' | 'pending'>('active')
   const [skuSubTab, setSkuSubTab] = useState<'active' | 'pending'>('active')
   const [vehicleSubTab, setVehicleSubTab] = useState<'active' | 'pending'>('active')
   const [driverSubTab, setDriverSubTab] = useState<'active' | 'pending'>('active')
@@ -836,6 +1483,100 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [isReviewing, setIsReviewing] = useState(false)
   const [approvalReviewModal, setApprovalReviewModal] = useState<{ tab: string; item: any } | null>(null)
   const [approvalEditData, setApprovalEditData] = useState<Record<string, any>>({})
+
+  // Generic inline "quick add" popover for Select fields (UOM, Additional
+  // UOM, Default Accounting Ledger on the Raw Materials form) - lets the
+  // user create a Unit/Ledger without leaving the current dialog.
+  const [quickAddDialog, setQuickAddDialog] = useState<{ type: 'unit' | 'ledger' | 'hsn_code' | 'sac_code'; onCreated: (id: number, label: string) => void } | null>(null)
+  const [quickAddForm, setQuickAddForm] = useState<any>({})
+  const [isQuickAdding, setIsQuickAdding] = useState(false)
+
+  // Inline "add row" inputs for the Raw Materials form's repeatable
+  // Additional UOM list (rawMaterialForm.additional_uoms) - not part of that
+  // form state itself since it's just the pending entry being composed.
+  const [newAdditionalUom, setNewAdditionalUom] = useState<{ uom_id: string; conversion_ratio: string }>({ uom_id: '', conversion_ratio: '' })
+  // Additional UOM card starts collapsed (behind an "+ Add Additional UOM"
+  // button) unless the record already has rows - a raw material with none is
+  // a fully valid save, this is purely a reveal toggle.
+  const [showAdditionalUomSection, setShowAdditionalUomSection] = useState(false)
+
+  // Inline "add row" inputs for the Conversion Formula form's repeatable
+  // steps list and the Price Levels form's repeatable items list - same
+  // pattern as newAdditionalUom.
+  const [newFormulaStep, setNewFormulaStep] = useState<{ operation: string; operand_type: string; operand_value: string }>({ operation: 'subtract', operand_type: 'literal', operand_value: '' })
+  const [newPriceLevelItem, setNewPriceLevelItem] = useState<{ sku_id: string; price: string }>({ sku_id: '', price: '' })
+
+  const openQuickAdd = async (type: 'unit' | 'ledger' | 'hsn_code' | 'sac_code', onCreated: (id: number, label: string) => void) => {
+    if (type === 'hsn_code' || type === 'sac_code') {
+      setQuickAddForm({ code: '', name: '', status: 'Active' })
+    } else {
+      const nextId = await fetchNextId(type)
+      setQuickAddForm(
+        type === 'unit'
+          ? { unit_code: nextId, unit_name: '', status: 'Active' }
+          : { ledger_code: nextId, ledger_name: '', ledger_group_id: '', status: 'Active' }
+      )
+    }
+    setQuickAddDialog({ type, onCreated })
+  }
+
+  const submitQuickAdd = async () => {
+    if (!quickAddDialog) return
+    if (quickAddDialog.type === 'unit' && !quickAddForm.unit_name?.trim()) {
+      toast({ title: "Error", description: "Unit Name is required", variant: "destructive" })
+      return
+    }
+    if (quickAddDialog.type === 'ledger' && !quickAddForm.ledger_name?.trim()) {
+      toast({ title: "Error", description: "Ledger Name is required", variant: "destructive" })
+      return
+    }
+    if (quickAddDialog.type === 'sac_code') {
+      if (!/^[0-9]{6}$/.test(String(quickAddForm.code || '').trim())) {
+        toast({ title: "Error", description: "SAC Code must be exactly 6 numeric digits (e.g. 996511)", variant: "destructive" })
+        return
+      }
+      if (!quickAddForm.name?.trim()) {
+        toast({ title: "Error", description: "Description is required", variant: "destructive" })
+        return
+      }
+    }
+    if (quickAddDialog.type === 'hsn_code') {
+      if (!/^[0-9]{8}$/.test(String(quickAddForm.code || '').trim())) {
+        toast({ title: "Error", description: "HSN Code must be exactly 8 numeric digits (e.g. 73269099)", variant: "destructive" })
+        return
+      }
+      if (!quickAddForm.name?.trim()) {
+        toast({ title: "Error", description: "Description is required", variant: "destructive" })
+        return
+      }
+    }
+    setIsQuickAdding(true)
+    try {
+      const res = quickAddDialog.type === 'unit'
+        ? await unitApi.create(quickAddForm)
+        : quickAddDialog.type === 'ledger'
+        ? await ledgerApi.create(quickAddForm)
+        : await lookupApi.create(quickAddDialog.type, quickAddForm)
+      if (res?.success) {
+        const created = res.data
+        const label = quickAddDialog.type === 'unit' ? created.unit_name : quickAddDialog.type === 'ledger' ? created.ledger_name : created.name
+        const queryKey = quickAddDialog.type === 'unit' ? ['unit-options'] : quickAddDialog.type === 'ledger' ? ['ledger-options'] : [`lookup-${quickAddDialog.type}`]
+        // Patch the cache directly (rather than just invalidating) so the new
+        // row's label renders immediately even if it's pending approval and
+        // wouldn't otherwise pass the options query's approved-only filter.
+        queryClient.setQueryData(queryKey, (old: any[] | undefined) => [...(old || []), created])
+        toast({ title: "Success", description: res.message || "Created successfully" })
+        quickAddDialog.onCreated(created.id, label)
+        setQuickAddDialog(null)
+      } else {
+        toast({ title: "Error", description: res?.message || "Failed to create", variant: "destructive" })
+      }
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to create", variant: "destructive" })
+    } finally {
+      setIsQuickAdding(false)
+    }
+  }
 
   // Read-only GST history for the customer currently open in the Add/Edit dialog
   // (only meaningful for an existing customer, i.e. editingItem is set).
@@ -888,7 +1629,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     depot_name: "",
     depot_address: "",
     state: "",
-    salesman_broker_name: ""
+    salesman_broker_name: "",
+    agent_tags: [],
+    agreement_paper_upload: "",
+    depot_owner_gst_certificate_upload: "",
+    pan_card_upload: "",
+    aadhaar_card_upload: "",
   })
 
 
@@ -899,7 +1645,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     email_id: "",
     mobile_no: "",
     depot_name: "",
-    depot_id: ""
+    depot_id: "",
+    ledger_group_id: "",
+    ...blankPartyParityFields(),
   })
 
   const [salespersonForm, setSalespersonForm] = useState<any>({
@@ -907,7 +1655,127 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     salesman_name: '',
     status: 'Active',
     mobile_no: '',
-    email_id: ''
+    email_id: '',
+    ledger_group_id: '',
+    employee_id: '',
+    ...blankPartyParityFields(),
+  })
+
+  const [ledgerGroupForm, setLedgerGroupForm] = useState<any>({
+    group_code: '',
+    group_name: '',
+    status: 'Active',
+  })
+
+  const [stockGroupForm, setStockGroupForm] = useState<any>({
+    group_code: '',
+    group_name: '',
+    status: 'Active',
+  })
+
+  const [unitForm, setUnitForm] = useState<any>({
+    unit_code: '',
+    unit_name: '',
+    status: 'Active',
+  })
+
+  const [rawMaterialForm, setRawMaterialForm] = useState<any>({
+    raw_material_code: '',
+    name: '',
+    main_uom_id: '',
+    stock_group_id: '',
+    additional_uoms: [] as RawMaterialAdditionalUom[],
+    type_of_supply: '',
+    gst_rate_id: '',
+    hsn_code_id: '',
+    sac_code_id: '',
+    default_accounting_ledger_id: '',
+    batch_tracking_enabled: false,
+    status: 'Active',
+  })
+
+  const [semiFinishedGoodForm, setSemiFinishedGoodForm] = useState<any>({
+    semi_finished_good_code: '',
+    name: '',
+    main_uom_id: '',
+    stock_group_id: '',
+    type_of_supply: '',
+    gst_rate_id: '',
+    hsn_code_id: '',
+    sac_code_id: '',
+    default_accounting_ledger_id: '',
+    batch_tracking_enabled: false,
+    oil_filling_per_unit: '',
+    filling_unit_id: '',
+    converted_kg: '',
+    packing_weight_per_main_unit: '',
+    packing_weight_unit_id: '',
+    weight_difference: '',
+    standard_weight: '',
+    standard_weight_unit_id: '',
+    status: 'Active',
+  })
+
+  const [insuranceDetailForm, setInsuranceDetailForm] = useState<any>({
+    insurance_code: '',
+    status: 'Active',
+    insurance_company_name: '',
+    short_name: '',
+    policy_number: '',
+    valid_from: '',
+    valid_upto: '',
+    type_of_policy: '',
+    sum_insured: '',
+    owner_type: 'Company',
+    customer_ids: [] as number[],
+  })
+
+  const [conversionFormulaForm, setConversionFormulaForm] = useState<any>({
+    conversion_formula_code: '',
+    base_item_id: '',
+    child_item_id: '',
+    status: 'Active',
+    steps: [] as { step_order: number; operation: string; operand_type: string; operand_value: string }[],
+  })
+
+  const [priceLevelForm, setPriceLevelForm] = useState<any>({
+    price_level_code: '',
+    effective_date: '',
+    status: 'Active',
+    items: [] as { sku_id: string; price: string }[],
+  })
+
+  const [petrolPumpForm, setPetrolPumpForm] = useState<any>({
+    petrol_pump_code: '',
+    petrol_pump_name: '',
+    email_id: '',
+    mobile_no: '',
+    ledger_group_id: '',
+    status: 'Active',
+    ...blankPartyParityFields(),
+  })
+
+  const [cdRuleForm, setCdRuleForm] = useState<any>({
+    cd_rule_code: '',
+    wef_date: '',
+    stock_category_id: '',
+    discount_rate_per_main_uom: '',
+    payment_condition_days: '',
+    status: 'Active',
+  })
+
+  const [tdsRuleForm, setTdsRuleForm] = useState<any>({
+    tds_rule_code: '',
+    name: '',
+    rate: '',
+    status: 'Active',
+  })
+
+  const [bhadaRateForm, setBhadaRateForm] = useState<any>({
+    bhada_rate_code: '',
+    name: '',
+    rate: '',
+    status: 'Active',
   })
 
   const [vehicleForm, setVehicleForm] = useState<any>({
@@ -916,6 +1784,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     vehicle_type: '',
     transporter: '',
     rto: '',
+    rto_id: '',
+    additional_transporter_ids: [] as number[],
+    gps_company: '',
+    gps_api_tracking_link: '',
+    gps_valid_upto: '',
+    gps_type: '',
+    gps_installed_by: '',
     status: 'Active',
     rc_image: '',
     road_tax: '',
@@ -940,6 +1815,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   })
   const [vehicleFormErrors, setVehicleFormErrors] = useState<{ registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string }>({})
   const [customerFormErrors, setCustomerFormErrors] = useState<{ pan?: string; gstin?: string; pincode?: string }>({})
+  // Shared PAN/GSTIN error state for the Broker/Salesperson/Transport/Petrol
+  // Pump forms (Customer-Master field parity) - only one of these forms is
+  // ever open at a time, so one error object covers all four.
+  const [partyFormErrors, setPartyFormErrors] = useState<{ pan?: string; gstin?: string }>({})
   const [addressErrors, setAddressErrors] = useState<Record<number, string | undefined>>({})
   const [bankAccountErrors, setBankAccountErrors] = useState<Record<number, string | undefined>>({})
 
@@ -950,6 +1829,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     driving_licence_type: "",
     valid_upto: "",
     rto: "",
+    rto_id: null,
+    trans_valid_upto: "",
+    lmv_valid_upto: "",
     driver_name: "",
     mobile_no: "",
     email_id: "",
@@ -963,6 +1845,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   })
 
   const [transportForm, setTransportForm] = useState<Partial<Transport>>({
+    ...blankPartyParityFields(),
     transport_master_id: "",
     status: "Active",
     transporter_name: "",
@@ -970,10 +1853,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     contact_number: "",
     email_id: "",
     address_line1: "",
-    state: "",
+    state_id: null,
     pincode: "",
-    pan: "",
-    gstin: ""
+    ledger_group_id: "",
+    bilty_copy_upload: "",
+    linked_customer_id: "",
   })
 
   const [skuDetailsForm, setSkuDetailsForm] = useState<Partial<SkuDetail>>({
@@ -992,7 +1876,17 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     sku_weight: "",
     packing_weight: "",
     gross_weight: "",
-    tag_name: ""
+    tag_name: "",
+    semi_finished_good_id: "",
+    oil_type_id: "",
+    stock_category_id: "",
+    main_uom_id: "",
+    alternate_uom_id: "",
+    type_of_supply: "",
+    gst_rate_id: "",
+    hsn_code_id: "",
+    sac_code_id: "",
+    uqc_id: "",
   })
 
   const [skuSellingPriceForm, setSkuSellingPrice] = useState<Partial<SkuSellingPrice>>({
@@ -1068,7 +1962,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       depot_name: "",
       depot_address: "",
       state: "",
-      salesman_broker_name: ""
+      salesman_broker_name: "",
+      agent_tags: [],
+      agreement_paper_upload: "",
+      depot_owner_gst_certificate_upload: "",
+      pan_card_upload: "",
+      aadhaar_card_upload: "",
     })
     setBrokerForm({
       broker_id: "",
@@ -1077,7 +1976,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       email_id: "",
       mobile_no: "",
       depot_name: "",
-      depot_id: ""
+      depot_id: "",
+      ledger_group_id: "",
+      ...blankPartyParityFields(),
     })
     setSalespersonForm({
       broker_id: "",
@@ -1086,8 +1987,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       email_id: "",
       mobile_no: "",
       depot_name: "",
-      depot_id: ""
+      depot_id: "",
+      ledger_group_id: "",
+      employee_id: "",
+      ...blankPartyParityFields(),
     })
+    setLedgerGroupForm({ group_code: "", group_name: "", status: "Active" })
+    setStockGroupForm({ group_code: "", group_name: "", status: "Active" })
+    setUnitForm({ unit_code: "", unit_name: "", status: "Active" })
+    setRawMaterialForm({ raw_material_code: "", name: "", main_uom_id: "", stock_group_id: "", additional_uoms: [], type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, status: "Active" })
+    setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
+    setShowAdditionalUomSection(false)
+    setSemiFinishedGoodForm({ semi_finished_good_code: "", name: "", main_uom_id: "", stock_group_id: "", type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, oil_filling_per_unit: "", filling_unit_id: "", converted_kg: "", packing_weight_per_main_unit: "", packing_weight_unit_id: "", weight_difference: "", standard_weight: "", standard_weight_unit_id: "", status: "Active" })
+    setInsuranceDetailForm({ insurance_code: "", status: "Active", insurance_company_name: "", short_name: "", policy_number: "", valid_from: "", valid_upto: "", type_of_policy: "", sum_insured: "", owner_type: "Company", customer_ids: [] })
+    setConversionFormulaForm({ conversion_formula_code: "", base_item_id: "", child_item_id: "", status: "Active", steps: [] })
+    setNewFormulaStep({ operation: 'subtract', operand_type: 'literal', operand_value: '' })
+    setPriceLevelForm({ price_level_code: "", effective_date: "", status: "Active", items: [] })
+    setNewPriceLevelItem({ sku_id: '', price: '' })
+    setPetrolPumpForm({ petrol_pump_code: "", petrol_pump_name: "", email_id: "", mobile_no: "", ledger_group_id: "", status: "Active", ...blankPartyParityFields() })
+    setCdRuleForm({ cd_rule_code: "", wef_date: "", stock_category_id: "", discount_rate_per_main_uom: "", payment_condition_days: "", status: "Active" })
+    setTdsRuleForm({ tds_rule_code: "", name: "", rate: "", status: "Active" })
+    setBhadaRateForm({ bhada_rate_code: "", name: "", rate: "", status: "Active" })
     setSkuDetailsForm({
       status: "Active",
       sku_code: "",
@@ -1103,7 +2023,17 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       weight_difference: "",
       sku_weight: "",
       packing_weight: "",
-      gross_weight: ""
+      gross_weight: "",
+      semi_finished_good_id: "",
+      oil_type_id: "",
+      stock_category_id: "",
+      main_uom_id: "",
+      alternate_uom_id: "",
+      type_of_supply: "",
+      gst_rate_id: "",
+      hsn_code_id: "",
+      sac_code_id: "",
+      uqc_id: "",
     })
     setVehicleForm({
       vehicle_master_id: '',
@@ -1111,6 +2041,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       vehicle_type: '',
       transporter: '',
       rto: '',
+      rto_id: '',
+      additional_transporter_ids: [],
+      gps_company: '',
+      gps_api_tracking_link: '',
+      gps_valid_upto: '',
+      gps_type: '',
+      gps_installed_by: '',
       status: 'Active',
       rc_image: '',
       road_tax: '',
@@ -1142,6 +2079,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       driving_licence_type: "",
       valid_upto: "",
       rto: "",
+      rto_id: null,
+      trans_valid_upto: "",
+      lmv_valid_upto: "",
       driver_name: "",
       mobile_no: "",
       email_id: "",
@@ -1153,6 +2093,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       aadhaar_upload: ""
     })
     setTransportForm({
+      ...blankPartyParityFields(),
       transport_master_id: "",
       status: "Active",
       transporter_name: "",
@@ -1160,10 +2101,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       contact_number: "",
       email_id: "",
       address_line1: "",
-      state: "",
+      state_id: null,
       pincode: "",
-      pan: "",
-      gstin: ""
+      ledger_group_id: "",
+      bilty_copy_upload: "",
+      linked_customer_id: "",
     })
     setEditingItem(null)
     setOpeningStockByDepot({})
@@ -1253,6 +2195,78 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await salespersonApi.update(editingItem.id, salespersonForm)
         } else {
           res = await salespersonApi.create(salespersonForm)
+        }
+      } else if (activeTab === "ledger_groups") {
+        if (editingItem) {
+          res = await ledgerGroupApi.update(editingItem.id, ledgerGroupForm)
+        } else {
+          res = await ledgerGroupApi.create(ledgerGroupForm)
+        }
+      } else if (activeTab === "stock_groups") {
+        if (editingItem) {
+          res = await stockGroupApi.update(editingItem.id, stockGroupForm)
+        } else {
+          res = await stockGroupApi.create(stockGroupForm)
+        }
+      } else if (activeTab === "units") {
+        if (editingItem) {
+          res = await unitApi.update(editingItem.id, unitForm)
+        } else {
+          res = await unitApi.create(unitForm)
+        }
+      } else if (activeTab === "raw_materials") {
+        if (editingItem) {
+          res = await rawMaterialApi.update(editingItem.id, rawMaterialForm)
+        } else {
+          res = await rawMaterialApi.create(rawMaterialForm)
+        }
+      } else if (activeTab === "semi_finished_goods") {
+        if (editingItem) {
+          res = await semiFinishedGoodApi.update(editingItem.id, semiFinishedGoodForm)
+        } else {
+          res = await semiFinishedGoodApi.create(semiFinishedGoodForm)
+        }
+      } else if (activeTab === "insurance_details") {
+        if (editingItem) {
+          res = await insuranceDetailApi.update(editingItem.id, insuranceDetailForm)
+        } else {
+          res = await insuranceDetailApi.create(insuranceDetailForm)
+        }
+      } else if (activeTab === "conversion_formulas") {
+        if (editingItem) {
+          res = await conversionFormulaApi.update(editingItem.id, conversionFormulaForm)
+        } else {
+          res = await conversionFormulaApi.create(conversionFormulaForm)
+        }
+      } else if (activeTab === "price_levels") {
+        if (editingItem) {
+          res = await priceLevelApi.update(editingItem.id, priceLevelForm)
+        } else {
+          res = await priceLevelApi.create(priceLevelForm)
+        }
+      } else if (activeTab === "petrol_pumps") {
+        if (editingItem) {
+          res = await petrolPumpApi.update(editingItem.id, petrolPumpForm)
+        } else {
+          res = await petrolPumpApi.create(petrolPumpForm)
+        }
+      } else if (activeTab === "cd_rules") {
+        if (editingItem) {
+          res = await cdRuleApi.update(editingItem.id, cdRuleForm)
+        } else {
+          res = await cdRuleApi.create(cdRuleForm)
+        }
+      } else if (activeTab === "tds_rules") {
+        if (editingItem) {
+          res = await tdsRuleApi.update(editingItem.id, tdsRuleForm)
+        } else {
+          res = await tdsRuleApi.create(tdsRuleForm)
+        }
+      } else if (activeTab === "bhada_rates") {
+        if (editingItem) {
+          res = await bhadaRateApi.update(editingItem.id, bhadaRateForm)
+        } else {
+          res = await bhadaRateApi.create(bhadaRateForm)
         }
       } else if (activeTab === "sku_details") {
         if (editingItem) {
@@ -1348,6 +2362,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "depots") { refetchDepot(); refetchPendingDepots() }
         else if (activeTab === "brokers") { refetchBroker(); refetchPendingBrokers() }
         else if (activeTab === "salespersons") { refetchSalesperson(); refetchPendingSalespersons() }
+        else if (activeTab === "ledger_groups") { refetchLedgerGroup(); refetchPendingLedgerGroups() }
+        else if (activeTab === "stock_groups") { refetchStockGroup(); refetchPendingStockGroups() }
+        else if (activeTab === "units") { refetchUnit(); refetchPendingUnits() }
+        else if (activeTab === "raw_materials") { refetchRawMaterial(); refetchPendingRawMaterials() }
+        else if (activeTab === "semi_finished_goods") { refetchSemiFinishedGood(); refetchPendingSemiFinishedGoods() }
+        else if (activeTab === "insurance_details") { refetchInsuranceDetail(); refetchPendingInsuranceDetails() }
+        else if (activeTab === "conversion_formulas") { refetchConversionFormula(); refetchPendingConversionFormulas() }
+        else if (activeTab === "price_levels") { refetchPriceLevel(); refetchPendingPriceLevels() }
+        else if (activeTab === "petrol_pumps") { refetchPetrolPump(); refetchPendingPetrolPumps() }
+        else if (activeTab === "cd_rules") { refetchCdRule(); refetchPendingCdRules() }
+        else if (activeTab === "tds_rules") { refetchTdsRule(); refetchPendingTdsRules() }
+        else if (activeTab === "bhada_rates") { refetchBhadaRate(); refetchPendingBhadaRates() }
         else if (activeTab === "sku_details") { refetchSku(); refetchPendingSku() }
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
         else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
@@ -1378,6 +2404,30 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         res = await brokerApi.delete(deletingItem.id)
       } else if (activeTab === "salespersons") {
         res = await salespersonApi.delete(deletingItem.id)
+      } else if (activeTab === "ledger_groups") {
+        res = await ledgerGroupApi.delete(deletingItem.id)
+      } else if (activeTab === "stock_groups") {
+        res = await stockGroupApi.delete(deletingItem.id)
+      } else if (activeTab === "units") {
+        res = await unitApi.delete(deletingItem.id)
+      } else if (activeTab === "raw_materials") {
+        res = await rawMaterialApi.delete(deletingItem.id)
+      } else if (activeTab === "semi_finished_goods") {
+        res = await semiFinishedGoodApi.delete(deletingItem.id)
+      } else if (activeTab === "insurance_details") {
+        res = await insuranceDetailApi.delete(deletingItem.id)
+      } else if (activeTab === "conversion_formulas") {
+        res = await conversionFormulaApi.delete(deletingItem.id)
+      } else if (activeTab === "price_levels") {
+        res = await priceLevelApi.delete(deletingItem.id)
+      } else if (activeTab === "petrol_pumps") {
+        res = await petrolPumpApi.delete(deletingItem.id)
+      } else if (activeTab === "cd_rules") {
+        res = await cdRuleApi.delete(deletingItem.id)
+      } else if (activeTab === "tds_rules") {
+        res = await tdsRuleApi.delete(deletingItem.id)
+      } else if (activeTab === "bhada_rates") {
+        res = await bhadaRateApi.delete(deletingItem.id)
       } else if (activeTab === "sku_details") {
         res = await skuDetailsApi.delete(deletingItem.id)
       } else if (activeTab === "sku_selling_price") {
@@ -1398,6 +2448,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "depots") refetchDepot()
         else if (activeTab === "brokers") refetchBroker()
         else if (activeTab === "salespersons") refetchSalesperson()
+        else if (activeTab === "ledger_groups") refetchLedgerGroup()
+        else if (activeTab === "stock_groups") refetchStockGroup()
+        else if (activeTab === "units") refetchUnit()
+        else if (activeTab === "raw_materials") refetchRawMaterial()
+        else if (activeTab === "semi_finished_goods") refetchSemiFinishedGood()
+        else if (activeTab === "insurance_details") refetchInsuranceDetail()
+        else if (activeTab === "conversion_formulas") refetchConversionFormula()
+        else if (activeTab === "price_levels") refetchPriceLevel()
+        else if (activeTab === "petrol_pumps") refetchPetrolPump()
+        else if (activeTab === "cd_rules") refetchCdRule()
+        else if (activeTab === "tds_rules") refetchTdsRule()
+        else if (activeTab === "bhada_rates") refetchBhadaRate()
         else if (activeTab === "sku_details") refetchSku()
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
         else if (activeTab === "vehicle_master") refetchVehicle()
@@ -1435,6 +2497,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       else if (tab === 'depots') res = await depotApi.review(id, payload)
       else if (tab === 'brokers') res = await brokerApi.review(id, payload)
       else if (tab === 'salespersons') res = await salespersonApi.review(id, payload)
+      else if (tab === 'ledger_groups') res = await ledgerGroupApi.review(id, payload)
+      else if (tab === 'stock_groups') res = await stockGroupApi.review(id, payload)
+      else if (tab === 'units') res = await unitApi.review(id, payload)
+      else if (tab === 'raw_materials') res = await rawMaterialApi.review(id, payload)
+      else if (tab === 'semi_finished_goods') res = await semiFinishedGoodApi.review(id, payload)
+      else if (tab === 'insurance_details') res = await insuranceDetailApi.review(id, payload)
+      else if (tab === 'conversion_formulas') res = await conversionFormulaApi.review(id, payload)
+      else if (tab === 'price_levels') res = await priceLevelApi.review(id, payload)
+      else if (tab === 'petrol_pumps') res = await petrolPumpApi.review(id, payload)
+      else if (tab === 'cd_rules') res = await cdRuleApi.review(id, payload)
+      else if (tab === 'tds_rules') res = await tdsRuleApi.review(id, payload)
+      else if (tab === 'bhada_rates') res = await bhadaRateApi.review(id, payload)
       else if (tab === 'sku_details') res = await skuDetailsApi.review(id, payload)
       else if (tab === 'vehicle_master') res = await vehicleMasterApi.review(id, payload)
       else if (tab === 'driver_master') res = await driverMasterApi.review(id, payload)
@@ -1445,6 +2519,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (tab === 'depots') { refetchPendingDepots(); refetchDepot() }
         else if (tab === 'brokers') { refetchPendingBrokers(); refetchBroker() }
         else if (tab === 'salespersons') { refetchPendingSalespersons(); refetchSalesperson() }
+        else if (tab === 'ledger_groups') { refetchPendingLedgerGroups(); refetchLedgerGroup() }
+        else if (tab === 'stock_groups') { refetchPendingStockGroups(); refetchStockGroup() }
+        else if (tab === 'units') { refetchPendingUnits(); refetchUnit() }
+        else if (tab === 'raw_materials') { refetchPendingRawMaterials(); refetchRawMaterial() }
+        else if (tab === 'semi_finished_goods') { refetchPendingSemiFinishedGoods(); refetchSemiFinishedGood() }
+        else if (tab === 'insurance_details') { refetchPendingInsuranceDetails(); refetchInsuranceDetail() }
+        else if (tab === 'conversion_formulas') { refetchPendingConversionFormulas(); refetchConversionFormula() }
+        else if (tab === 'price_levels') { refetchPendingPriceLevels(); refetchPriceLevel() }
+        else if (tab === 'petrol_pumps') { refetchPendingPetrolPumps(); refetchPetrolPump() }
+        else if (tab === 'cd_rules') { refetchPendingCdRules(); refetchCdRule() }
+        else if (tab === 'tds_rules') { refetchPendingTdsRules(); refetchTdsRule() }
+        else if (tab === 'bhada_rates') { refetchPendingBhadaRates(); refetchBhadaRate() }
         else if (tab === 'sku_details') { refetchPendingSku(); refetchSku(); queryClient.invalidateQueries({ queryKey: ['inventory-data'] }) }
         else if (tab === 'vehicle_master') { refetchPendingVehicles(); refetchVehicle() }
         else if (tab === 'driver_master') { refetchPendingDrivers(); refetchDriver() }
@@ -1466,7 +2552,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
 
 
-  const fetchNextId = async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport') => {
+  const fetchNextId = async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport' | 'ledger_group' | 'stock_group' | 'unit' | 'ledger' | 'raw_material' | 'semi_finished_good' | 'insurance_detail' | 'conversion_formula' | 'price_level' | 'petrol_pump' | 'cd_rule' | 'tds_rule' | 'bhada_rate') => {
     try {
       const res = await commonApi.getNextId(type)
       if (res.success) {
@@ -1496,6 +2582,42 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     } else if (activeTab === "salespersons") {
       nextId = await fetchNextId('salesperson')
       setSalespersonForm((prev: any) => ({ ...prev, broker_id: nextId }))
+    } else if (activeTab === "ledger_groups") {
+      nextId = await fetchNextId('ledger_group')
+      setLedgerGroupForm((prev: any) => ({ ...prev, group_code: nextId }))
+    } else if (activeTab === "stock_groups") {
+      nextId = await fetchNextId('stock_group')
+      setStockGroupForm((prev: any) => ({ ...prev, group_code: nextId }))
+    } else if (activeTab === "units") {
+      nextId = await fetchNextId('unit')
+      setUnitForm((prev: any) => ({ ...prev, unit_code: nextId }))
+    } else if (activeTab === "raw_materials") {
+      nextId = await fetchNextId('raw_material')
+      setRawMaterialForm((prev: any) => ({ ...prev, raw_material_code: nextId }))
+    } else if (activeTab === "semi_finished_goods") {
+      nextId = await fetchNextId('semi_finished_good')
+      setSemiFinishedGoodForm((prev: any) => ({ ...prev, semi_finished_good_code: nextId }))
+    } else if (activeTab === "insurance_details") {
+      nextId = await fetchNextId('insurance_detail')
+      setInsuranceDetailForm((prev: any) => ({ ...prev, insurance_code: nextId }))
+    } else if (activeTab === "conversion_formulas") {
+      nextId = await fetchNextId('conversion_formula')
+      setConversionFormulaForm((prev: any) => ({ ...prev, conversion_formula_code: nextId }))
+    } else if (activeTab === "price_levels") {
+      nextId = await fetchNextId('price_level')
+      setPriceLevelForm((prev: any) => ({ ...prev, price_level_code: nextId }))
+    } else if (activeTab === "petrol_pumps") {
+      nextId = await fetchNextId('petrol_pump')
+      setPetrolPumpForm((prev: any) => ({ ...prev, petrol_pump_code: nextId }))
+    } else if (activeTab === "cd_rules") {
+      nextId = await fetchNextId('cd_rule')
+      setCdRuleForm((prev: any) => ({ ...prev, cd_rule_code: nextId }))
+    } else if (activeTab === "tds_rules") {
+      nextId = await fetchNextId('tds_rule')
+      setTdsRuleForm((prev: any) => ({ ...prev, tds_rule_code: nextId }))
+    } else if (activeTab === "bhada_rates") {
+      nextId = await fetchNextId('bhada_rate')
+      setBhadaRateForm((prev: any) => ({ ...prev, bhada_rate_code: nextId }))
     } else if (activeTab === "sku_details") {
       nextId = await fetchNextId('sku')
       setSkuDetailsForm((prev: any) => ({ ...prev, sku_code: nextId }))
@@ -1539,6 +2661,30 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setBrokerForm({ ...data })
     } else if (tab === "salespersons") {
       setSalespersonForm({ ...data })
+    } else if (tab === "ledger_groups") {
+      setLedgerGroupForm({ ...data })
+    } else if (tab === "stock_groups") {
+      setStockGroupForm({ ...data })
+    } else if (tab === "units") {
+      setUnitForm({ ...data })
+    } else if (tab === "raw_materials") {
+      setRawMaterialForm({ ...data })
+    } else if (tab === "semi_finished_goods") {
+      setSemiFinishedGoodForm({ ...data })
+    } else if (tab === "insurance_details") {
+      setInsuranceDetailForm({ ...data })
+    } else if (tab === "conversion_formulas") {
+      setConversionFormulaForm({ ...data })
+    } else if (tab === "price_levels") {
+      setPriceLevelForm({ ...data })
+    } else if (tab === "petrol_pumps") {
+      setPetrolPumpForm({ ...data })
+    } else if (tab === "cd_rules") {
+      setCdRuleForm({ ...data })
+    } else if (tab === "tds_rules") {
+      setTdsRuleForm({ ...data })
+    } else if (tab === "bhada_rates") {
+      setBhadaRateForm({ ...data })
     } else if (tab === "sku_details") {
       setSkuDetailsForm({ ...data })
       setOpeningStockByDepot({})
@@ -1579,11 +2725,36 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const openEditDialog = async (item: any) => {
     setEditingItem(item)
-    // Customers: the list row doesn't carry the address child-table rows (kept out
-    // of the list query for performance) - fetch full detail so the address section
-    // has something to populate when the dialog opens.
+    // Customers / Raw Materials: the list row doesn't carry the child-table
+    // rows (kept out of the list query for performance) - fetch full detail
+    // so the addresses / Additional UOM section has something to populate
+    // when the dialog opens.
     if (activeTab === 'customers') {
       const res = await customerApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'raw_materials') {
+      const res = await rawMaterialApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'vehicle_master') {
+      // The list row doesn't carry additional_transporter_ids (kept out of
+      // the list query for performance) - fetch full detail so the
+      // multi-transporter checklist has something to populate.
+      const res = await vehicleMasterApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'depots') {
+      // The list row doesn't carry agent_tags (kept out of the list query
+      // for performance) - fetch full detail so the Broker/Salesperson
+      // checklist has something to populate.
+      const res = await depotApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'insurance_details') {
+      const res = await insuranceDetailApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'conversion_formulas') {
+      const res = await conversionFormulaApi.getById(item.id)
+      await populateFormFromData(activeTab, res.success ? res.data : item)
+    } else if (activeTab === 'price_levels') {
+      const res = await priceLevelApi.getById(item.id)
       await populateFormFromData(activeTab, res.success ? res.data : item)
     } else {
       await populateFormFromData(activeTab, item)
@@ -1598,6 +2769,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'depots': return depotForm
       case 'brokers': return brokerForm
       case 'salespersons': return salespersonForm
+      case 'ledger_groups': return ledgerGroupForm
+      case 'stock_groups': return stockGroupForm
+      case 'units': return unitForm
+      case 'raw_materials': return rawMaterialForm
+      case 'semi_finished_goods': return semiFinishedGoodForm
+      case 'insurance_details': return insuranceDetailForm
+      case 'conversion_formulas': return conversionFormulaForm
+      case 'price_levels': return priceLevelForm
+      case 'petrol_pumps': return petrolPumpForm
+      case 'cd_rules': return cdRuleForm
+      case 'tds_rules': return tdsRuleForm
+      case 'bhada_rates': return bhadaRateForm
       case 'sku_details': return skuDetailsForm
       case 'vehicle_master': {
         const payload = { ...vehicleForm }
@@ -1633,6 +2816,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'depots': return renderDepotForm()
       case 'brokers': return renderBrokerForm()
       case 'salespersons': return renderSalespersonForm()
+      case 'ledger_groups': return renderLedgerGroupForm()
+      case 'stock_groups': return renderStockGroupForm()
+      case 'units': return renderUnitForm()
+      case 'raw_materials': return renderRawMaterialForm()
+      case 'semi_finished_goods': return renderSemiFinishedGoodForm()
+      case 'insurance_details': return renderInsuranceDetailForm()
+      case 'conversion_formulas': return renderConversionFormulaForm()
+      case 'price_levels': return renderPriceLevelForm()
+      case 'petrol_pumps': return renderPetrolPumpForm()
+      case 'cd_rules': return renderCdRuleForm()
+      case 'tds_rules': return renderTdsRuleForm()
+      case 'bhada_rates': return renderBhadaRateForm()
       case 'sku_details': return renderSkuDetailsForm()
       case 'vehicle_master': return renderVehicleForm()
       case 'driver_master': return renderDriverForm()
@@ -1731,6 +2926,62 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     matchesSearch(s?.broker_id, searchTerm)
   )
 
+  const filteredLedgerGroups = ledgerGroupsList.filter((g: any) =>
+    matchesSearch(g?.group_name, searchTerm) ||
+    matchesSearch(g?.group_code, searchTerm)
+  )
+
+  const filteredStockGroups = stockGroupsList.filter((g: any) =>
+    matchesSearch(g?.group_name, searchTerm) ||
+    matchesSearch(g?.group_code, searchTerm)
+  )
+
+  const filteredUnits = unitsList.filter((u: any) =>
+    matchesSearch(u?.unit_name, searchTerm) ||
+    matchesSearch(u?.unit_code, searchTerm)
+  )
+
+  const filteredRawMaterials = rawMaterialsList.filter((r: any) =>
+    matchesSearch(r?.name, searchTerm) ||
+    matchesSearch(r?.raw_material_code, searchTerm)
+  )
+
+  const filteredSemiFinishedGoods = semiFinishedGoodsList.filter((r: any) =>
+    matchesSearch(r?.name, searchTerm) ||
+    matchesSearch(r?.semi_finished_good_code, searchTerm)
+  )
+
+  const filteredInsuranceDetails = insuranceDetailsList.filter((r: any) =>
+    matchesSearch(r?.insurance_company_name, searchTerm) ||
+    matchesSearch(r?.insurance_code, searchTerm) ||
+    matchesSearch(r?.policy_number, searchTerm)
+  )
+
+  const filteredConversionFormulas = conversionFormulasList.filter((r: any) =>
+    matchesSearch(r?.conversion_formula_code, searchTerm)
+  )
+
+  const filteredPriceLevels = priceLevelsList.filter((r: any) =>
+    matchesSearch(r?.price_level_code, searchTerm)
+  )
+
+  const filteredPetrolPumps = petrolPumpsList.filter((r: any) =>
+    matchesSearch(r?.petrol_pump_name, searchTerm) ||
+    matchesSearch(r?.petrol_pump_code, searchTerm)
+  )
+
+  const filteredCdRules = cdRulesList.filter((r: any) =>
+    matchesSearch(r?.cd_rule_code, searchTerm)
+  )
+
+  const filteredTdsRules = tdsRulesList.filter((r: any) =>
+    matchesSearch(r?.name, searchTerm) || matchesSearch(r?.tds_rule_code, searchTerm)
+  )
+
+  const filteredBhadaRates = bhadaRatesList.filter((r: any) =>
+    matchesSearch(r?.name, searchTerm) || matchesSearch(r?.bhada_rate_code, searchTerm)
+  )
+
   const filteredSkuSellingPrices = skuSellingPrices.filter(s =>
     matchesSearch(s?.packing_material, searchTerm)
   )
@@ -1791,6 +3042,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const sortedBrokers = sortData(filteredBrokers, brokerSort.col, brokerSort.dir)
   const sortedSalespersons = sortData(filteredSalespersons, salespersonSort.col, salespersonSort.dir)
+  const sortedLedgerGroups = sortData(filteredLedgerGroups, ledgerGroupSort.col, ledgerGroupSort.dir)
+  const sortedStockGroups = sortData(filteredStockGroups, stockGroupSort.col, stockGroupSort.dir)
+  const sortedUnits = sortData(filteredUnits, unitSort.col, unitSort.dir)
+  const sortedRawMaterials = sortData(filteredRawMaterials, rawMaterialSort.col, rawMaterialSort.dir)
+  const sortedSemiFinishedGoods = sortData(filteredSemiFinishedGoods, semiFinishedGoodSort.col, semiFinishedGoodSort.dir)
+  const sortedInsuranceDetails = sortData(filteredInsuranceDetails, insuranceDetailSort.col, insuranceDetailSort.dir)
+  const sortedConversionFormulas = sortData(filteredConversionFormulas, conversionFormulaSort.col, conversionFormulaSort.dir)
+  const sortedPriceLevels = sortData(filteredPriceLevels, priceLevelSort.col, priceLevelSort.dir)
+  const sortedPetrolPumps = sortData(filteredPetrolPumps, petrolPumpSort.col, petrolPumpSort.dir)
+  const sortedCdRules = sortData(filteredCdRules, cdRuleSort.col, cdRuleSort.dir)
+  const sortedTdsRules = sortData(filteredTdsRules, tdsRuleSort.col, tdsRuleSort.dir)
+  const sortedBhadaRates = sortData(filteredBhadaRates, bhadaRateSort.col, bhadaRateSort.dir)
   const sortedSkuDetails = sortData(filteredSkuDetails, skuSort.col, skuSort.dir)
   const sortedSkuSellingPrices = sortData(filteredSkuSellingPrices, skuSellingPriceSort.col, skuSellingPriceSort.dir)
   const sortedVehicles = sortData(filteredVehicles, vehicleSort.col, vehicleSort.dir)
@@ -1809,6 +3072,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           setDriverForm((prev: any) => ({ ...prev, [field]: res.data.url }))
         } else if (activeTab === 'customers') {
           setCustomerForm((prev: any) => ({ ...prev, [field]: res.data.url }))
+        } else if (activeTab === 'depots') {
+          setDepotForm((prev: any) => ({ ...prev, [field]: res.data.url }))
+        } else if (activeTab === 'brokers' || activeTab === 'salespersons' || activeTab === 'transport_master' || activeTab === 'petrol_pumps') {
+          setPartyForm({ [field]: res.data.url })
         }
         toast({ title: "Success", description: "Image uploaded successfully" })
       }
@@ -1830,6 +3097,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setDriverForm((prev: any) => ({ ...prev, [field]: '' }))
     } else if (activeTab === 'customers') {
       setCustomerForm((prev: any) => ({ ...prev, [field]: '' }))
+    } else if (activeTab === 'depots') {
+      setDepotForm((prev: any) => ({ ...prev, [field]: '' }))
+    } else if (activeTab === 'brokers' || activeTab === 'salespersons' || activeTab === 'transport_master' || activeTab === 'petrol_pumps') {
+      setPartyForm({ [field]: '' })
     }
   }
 
@@ -1870,6 +3141,48 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     const value = (customerForm.pincode || '').toString()
     if (!value) { setCustomerFormErrors(prev => ({ ...prev, pincode: undefined })); return }
     setCustomerFormErrors(prev => ({ ...prev, pincode: PINCODE_REGEX.test(value) ? undefined : 'PIN Code must be exactly 6 digits' }))
+  }
+
+  // Same PAN/GSTIN validation as Customer's, generalized across the four
+  // Customer-Master-field-parity forms (Broker/Salesperson/Transport/Petrol
+  // Pump) - only one of these tabs is ever open at a time.
+  const getPartyForm = (): any => {
+    if (activeTab === 'brokers') return brokerForm
+    if (activeTab === 'salespersons') return salespersonForm
+    if (activeTab === 'transport_master') return transportForm
+    if (activeTab === 'petrol_pumps') return petrolPumpForm
+    return {}
+  }
+  const setPartyForm = (patch: any) => {
+    if (activeTab === 'brokers') setBrokerForm((prev: any) => ({ ...prev, ...patch }))
+    else if (activeTab === 'salespersons') setSalespersonForm((prev: any) => ({ ...prev, ...patch }))
+    else if (activeTab === 'transport_master') setTransportForm((prev: any) => ({ ...prev, ...patch }))
+    else if (activeTab === 'petrol_pumps') setPetrolPumpForm((prev: any) => ({ ...prev, ...patch }))
+  }
+  const handlePartyPanBlur = () => {
+    const raw = (getPartyForm().pan || '').toString()
+    if (!raw) { setPartyFormErrors(prev => ({ ...prev, pan: undefined })); return }
+    const normalized = normalizeGstField(raw)
+    if (normalized !== raw) setPartyForm({ pan: normalized })
+    setPartyFormErrors(prev => ({ ...prev, pan: PAN_REGEX.test(normalized) ? undefined : 'Invalid PAN format. Expected: ABCDE1234F' }))
+  }
+  const handlePartyGstinBlur = () => {
+    const form = getPartyForm()
+    const raw = (form.gstin || '').toString()
+    if (!raw) { setPartyFormErrors(prev => ({ ...prev, gstin: undefined })); return }
+    const normalized = normalizeGstField(raw)
+    if (normalized !== raw) setPartyForm({ gstin: normalized })
+    if (!GSTIN_REGEX.test(normalized)) {
+      setPartyFormErrors(prev => ({ ...prev, gstin: 'Invalid GSTIN format. Expected 15 characters, e.g. 22ABCDE1234F1Z5' }))
+      return
+    }
+    const selectedState = activeStates.find((s: any) => String(s.id) === String(form.state_id))
+    const gstStateCode = selectedState?.gst_state_code
+    if (gstStateCode && normalized.slice(0, 2) !== gstStateCode) {
+      setPartyFormErrors(prev => ({ ...prev, gstin: `GSTIN state code (${normalized.slice(0, 2)}) does not match the selected State's GST state code (${gstStateCode})` }))
+      return
+    }
+    setPartyFormErrors(prev => ({ ...prev, gstin: undefined }))
   }
 
   // Additional-address row management (customer_addresses child table). Cascading
@@ -1936,7 +3249,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={customerForm.status} onValueChange={val => setCustomerForm({...customerForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -2216,7 +3529,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="is_required_for_commitment">Is Required for Commitment</Label>
           <Select value={customerForm.is_required_for_commitment || "No"} onValueChange={val => setCustomerForm({...customerForm, is_required_for_commitment: val})}>
-            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="Yes">Yes</SelectItem>
               <SelectItem value="No">No</SelectItem>
@@ -2322,6 +3635,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         ))}
       </div>
 
+      <div className="space-y-2 border-t pt-4 mt-2">
+        <Label htmlFor="ledger_group_id">Ledger Group</Label>
+        <Select value={customerForm.ledger_group_id ? String(customerForm.ledger_group_id) : ''} onValueChange={val => setCustomerForm({...customerForm, ledger_group_id: val})}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+          <SelectContent>
+            {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
       {editingItem?.id && (
         <div className="space-y-2 border-t pt-4 mt-2">
           <Label className="text-slate-600">GST History</Label>
@@ -2372,7 +3695,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={depotForm.status} onValueChange={val => setDepotForm({...depotForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -2400,9 +3723,277 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <Label htmlFor="salesman_ref">Salesman/Broker Name</Label>
         <Input id="salesman_ref" value={depotForm.salesman_broker_name} onChange={e => setDepotForm({...depotForm, salesman_broker_name: e.target.value})} placeholder="Enter name" />
       </div>
+
+      <div className="space-y-2 border-t pt-4 mt-2">
+        <Label>Salesman / Broker Tags</Label>
+        <p className="text-xs text-slate-400">Tag brokers and/or salespersons assigned to this depot (combined list, multi-select).</p>
+        <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2 max-h-40 overflow-y-auto">
+          {brokerOptions.map((b: any) => {
+            const checked = (depotForm.agent_tags || []).some(t => t.agent_type === 'broker' && t.agent_id === b.id)
+            return (
+              <label key={`broker-${b.id}`} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(val) => {
+                    const current = depotForm.agent_tags || []
+                    setDepotForm({
+                      ...depotForm,
+                      agent_tags: val
+                        ? [...current, { agent_type: 'broker', agent_id: b.id }]
+                        : current.filter(t => !(t.agent_type === 'broker' && t.agent_id === b.id)),
+                    })
+                  }}
+                />
+                {b.salesman_name} <span className="text-slate-400">(Broker)</span>
+              </label>
+            )
+          })}
+          {salespersonOptions.map((s: any) => {
+            const checked = (depotForm.agent_tags || []).some(t => t.agent_type === 'salesperson' && t.agent_id === s.id)
+            return (
+              <label key={`salesperson-${s.id}`} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(val) => {
+                    const current = depotForm.agent_tags || []
+                    setDepotForm({
+                      ...depotForm,
+                      agent_tags: val
+                        ? [...current, { agent_type: 'salesperson', agent_id: s.id }]
+                        : current.filter(t => !(t.agent_type === 'salesperson' && t.agent_id === s.id)),
+                    })
+                  }}
+                />
+                {s.salesman_name} <span className="text-slate-400">(Salesperson)</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">Document Uploads</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <FileUploadField
+            label="Agreement Paper"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={depotForm.agreement_paper_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "agreement_paper_upload")}
+            onRemove={() => handleFileRemove("agreement_paper_upload")}
+          />
+          <FileUploadField
+            label="Depot Owner GST Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={depotForm.depot_owner_gst_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "depot_owner_gst_certificate_upload")}
+            onRemove={() => handleFileRemove("depot_owner_gst_certificate_upload")}
+          />
+          <FileUploadField
+            label="PAN Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={depotForm.pan_card_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "pan_card_upload")}
+            onRemove={() => handleFileRemove("pan_card_upload")}
+          />
+          <FileUploadField
+            label="Aadhaar Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={depotForm.aadhaar_card_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "aadhaar_card_upload")}
+            onRemove={() => handleFileRemove("aadhaar_card_upload")}
+          />
+        </div>
+      </div>
     </div>
   )
 
+
+  // Customer-Master field parity block (Phases 10/11/12/21, review Sections
+  // 6/7/8/19) - "include the same applicable fields as Customer Master
+  // because some [brokers/salespersons/transporters/petrol pumps] may have
+  // GST registration." Shared across all four forms since the field set and
+  // behavior (PAN/GSTIN format + state-code validation) is identical.
+  const renderPartyParityFields = (form: any) => {
+    const setForm = setPartyForm
+    return (
+    <>
+      <div className="border-t pt-4 mt-2 grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>State</Label>
+          <Combobox
+            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+            value={form.state_id ? String(form.state_id) : ""}
+            onValueChange={val => {
+              const selected = activeStates.find((s: any) => String(s.id) === val)
+              setForm({ state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || form.state })
+            }}
+            placeholder="Select state"
+            searchPlaceholder="Search state..."
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>PAN</Label>
+          <Input
+            value={form.pan || ''}
+            onChange={e => setForm({ pan: e.target.value })}
+            onBlur={handlePartyPanBlur}
+            placeholder="ABCDE1234F"
+            className={partyFormErrors.pan ? 'border-red-500 focus-visible:ring-red-400' : ''}
+          />
+          {partyFormErrors.pan && <p className="text-xs text-red-500 mt-1">{partyFormErrors.pan}</p>}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>GSTIN</Label>
+          <Input
+            value={form.gstin || ''}
+            onChange={e => setForm({ gstin: e.target.value })}
+            onBlur={handlePartyGstinBlur}
+            placeholder="22ABCDE1234F1Z5"
+            className={partyFormErrors.gstin ? 'border-red-500 focus-visible:ring-red-400' : ''}
+          />
+          {partyFormErrors.gstin && <p className="text-xs text-red-500 mt-1">{partyFormErrors.gstin}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label>GST Registration Status</Label>
+          <Combobox
+            options={activeGstRegStatuses.map((r: any) => ({ value: r.name, label: r.name }))}
+            value={form.gst_registered || ""}
+            onValueChange={val => setForm({
+              gst_registered: val,
+              ...(val !== 'Registered' ? { gst_registration_type: '', gst_registration_wef: '' } : {})
+            })}
+            placeholder="Select status"
+            searchPlaceholder="Search..."
+          />
+        </div>
+      </div>
+      {form.gst_registered === 'Registered' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>GST Registration Type</Label>
+            <Combobox
+              options={activeGstRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={form.gst_registration_type || ""}
+              onValueChange={val => setForm({ gst_registration_type: val })}
+              placeholder="Select type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>GST W.E.F. Date</Label>
+            <Input type="date" value={form.gst_registration_wef?.split('T')[0] || ''} onChange={e => setForm({ gst_registration_wef: e.target.value })} />
+          </div>
+        </div>
+      )}
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">MSME Details</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>MSME Registration No</Label>
+            <Input value={form.msme_registration_no || ''} onChange={e => setForm({ msme_registration_no: e.target.value })} placeholder="Enter MSME registration no" />
+          </div>
+          <div className="space-y-2">
+            <Label>MSME Registration Type</Label>
+            <Combobox
+              options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={form.msme_registration_type || ""}
+              onValueChange={val => setForm({ msme_registration_type: val })}
+              placeholder="Select type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>MSME W.E.F. Date</Label>
+          <Input type="date" value={form.msme_registration_wef?.split('T')[0] || ''} onChange={e => setForm({ msme_registration_wef: e.target.value })} />
+        </div>
+      </div>
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">FSSAI Details</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>FSSAI No</Label>
+            <Input value={form.fssai_no || ''} onChange={e => setForm({ fssai_no: e.target.value })} placeholder="Enter FSSAI no" />
+          </div>
+          <div className="space-y-2">
+            <Label>FSSAI Licence Type</Label>
+            <Combobox
+              options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={form.fssai_licence_type || ""}
+              onValueChange={val => setForm({ fssai_licence_type: val })}
+              placeholder="Select licence type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>FSSAI Valid Upto Date</Label>
+          <Input type="date" value={form.fssai_valid_upto?.split('T')[0] || ''} onChange={e => setForm({ fssai_valid_upto: e.target.value })} />
+        </div>
+      </div>
+      <div className="border-t pt-4 mt-2 space-y-4">
+        <Label className="text-slate-600">Document Uploads</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <FileUploadField
+            label="Aadhaar Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={form.aadhaar_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "aadhaar_upload")}
+            onRemove={() => handleFileRemove("aadhaar_upload")}
+          />
+          <FileUploadField
+            label="PAN Card"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={form.pan_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "pan_upload")}
+            onRemove={() => handleFileRemove("pan_upload")}
+          />
+          <FileUploadField
+            label="GST Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={form.gst_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "gst_certificate_upload")}
+            onRemove={() => handleFileRemove("gst_certificate_upload")}
+          />
+          <FileUploadField
+            label="MSME Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={form.msme_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "msme_certificate_upload")}
+            onRemove={() => handleFileRemove("msme_certificate_upload")}
+          />
+          <FileUploadField
+            label="FSSAI Certificate"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={form.fssai_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "fssai_certificate_upload")}
+            onRemove={() => handleFileRemove("fssai_certificate_upload")}
+          />
+        </div>
+      </div>
+    </>
+  )
+  }
 
   const renderBrokerForm = () => (
     <div className="grid gap-4 py-4 px-1">
@@ -2420,7 +4011,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={brokerForm.status} onValueChange={val => setBrokerForm({...brokerForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -2431,10 +4022,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="mobile_no" value={brokerForm.mobile_no} onChange={e => setBrokerForm({...brokerForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="email_id">Email ID</Label>
-        <Input id="email_id" value={brokerForm.email_id} onChange={e => setBrokerForm({...brokerForm, email_id: e.target.value})} placeholder="email@example.com" />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="email_id">Email ID</Label>
+          <Input id="email_id" value={brokerForm.email_id} onChange={e => setBrokerForm({...brokerForm, email_id: e.target.value})} placeholder="email@example.com" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ledger_group_id">Ledger Group</Label>
+          <Select value={brokerForm.ledger_group_id ? String(brokerForm.ledger_group_id) : ''} onValueChange={val => setBrokerForm({...brokerForm, ledger_group_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+            <SelectContent>
+              {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+      {renderPartyParityFields(brokerForm)}
     </div>
   )
 
@@ -2454,7 +4057,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={salespersonForm.status} onValueChange={val => setSalespersonForm({...salespersonForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -2465,10 +4068,913 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="mobile_no" value={salespersonForm.mobile_no} onChange={e => setSalespersonForm({...salespersonForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
-        <div className="space-y-2">
-          <Label htmlFor="email_id">Email ID</Label>
-          <Input id="email_id" value={salespersonForm.email_id} onChange={e => setSalespersonForm({...salespersonForm, email_id: e.target.value})} placeholder="email@example.com" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="email_id">Email ID</Label>
+            <Input id="email_id" value={salespersonForm.email_id} onChange={e => setSalespersonForm({...salespersonForm, email_id: e.target.value})} placeholder="email@example.com" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="employee_id">Employee ID</Label>
+            <Input id="employee_id" value={salespersonForm.employee_id || ''} onChange={e => setSalespersonForm({...salespersonForm, employee_id: e.target.value})} placeholder="Enter employee ID" />
+          </div>
         </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="ledger_group_id">Ledger Group</Label>
+            <Select value={salespersonForm.ledger_group_id ? String(salespersonForm.ledger_group_id) : ''} onValueChange={val => setSalespersonForm({...salespersonForm, ledger_group_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+              <SelectContent>
+                {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      {renderPartyParityFields(salespersonForm)}
+    </div>
+  )
+
+  const renderLedgerGroupForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="group_code">Group Code *</Label>
+          <Input id="group_code" value={ledgerGroupForm.group_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="group_name">Group Name *</Label>
+          <Input id="group_name" value={ledgerGroupForm.group_name} onChange={e => setLedgerGroupForm({...ledgerGroupForm, group_name: e.target.value})} placeholder="Enter ledger group name" />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="status">Status</Label>
+        <Select value={ledgerGroupForm.status} onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, status: val})}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+
+  const renderStockGroupForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="group_code">Group Code *</Label>
+          <Input id="group_code" value={stockGroupForm.group_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="group_name">Group Name *</Label>
+          <Input id="group_name" value={stockGroupForm.group_name} onChange={e => setStockGroupForm({...stockGroupForm, group_name: e.target.value})} placeholder="Enter stock group name" />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="status">Status</Label>
+        <Select value={stockGroupForm.status} onValueChange={val => setStockGroupForm({...stockGroupForm, status: val})}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+
+  const renderUnitForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="space-y-2">
+        <Label htmlFor="unit_code">Unit Code *</Label>
+        <Input id="unit_code" value={unitForm.unit_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="unit_name">UOM *</Label>
+        <Input id="unit_name" value={unitForm.unit_name} onChange={e => setUnitForm({...unitForm, unit_name: e.target.value})} placeholder="e.g. Kilograms" />
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox id="unit_is_active" checked={unitForm.status === 'Active'} onCheckedChange={checked => setUnitForm({...unitForm, status: checked === true ? 'Active' : 'Inactive'})} />
+        <Label htmlFor="unit_is_active" className="cursor-pointer">Is Active?</Label>
+      </div>
+    </div>
+  )
+
+  const renderRawMaterialForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="raw_material_code">Raw Material Code *</Label>
+          <Input id="raw_material_code" value={rawMaterialForm.raw_material_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="name">Name *</Label>
+          <Input id="name" value={rawMaterialForm.name} onChange={e => setRawMaterialForm({...rawMaterialForm, name: e.target.value})} placeholder="Enter raw material name" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="main_uom_id">UOM</Label>
+          <div className="flex items-center gap-2">
+            <Select value={rawMaterialForm.main_uom_id ? String(rawMaterialForm.main_uom_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, main_uom_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select UOM" /></SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openQuickAdd('unit', (id) => setRawMaterialForm((prev: any) => ({ ...prev, main_uom_id: String(id) })))}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="stock_group_id">Stock Group</Label>
+          <Select value={rawMaterialForm.stock_group_id ? String(rawMaterialForm.stock_group_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, stock_group_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select stock group" /></SelectTrigger>
+            <SelectContent>
+              {stockGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {(showAdditionalUomSection || (rawMaterialForm.additional_uoms || []).length > 0) ? (
+        <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+          <p className="font-semibold text-sm text-slate-800">Additional UOM</p>
+          {(rawMaterialForm.additional_uoms || []).length > 0 && (
+            <div className="space-y-2">
+              {(rawMaterialForm.additional_uoms || []).map((row: RawMaterialAdditionalUom, idx: number) => {
+                const uom = unitOptions.find((u: any) => String(u.id) === String(row.uom_id))
+                return (
+                  <div key={idx} className="flex items-center justify-between gap-2 bg-slate-50 rounded-md px-3 py-2 text-sm">
+                    <span>{uom?.unit_name || `UOM #${row.uom_id}`} — 1 = {row.conversion_ratio} base UOM</span>
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-red-50" onClick={() => setRawMaterialForm((prev: any) => ({ ...prev, additional_uoms: prev.additional_uoms.filter((_: any, i: number) => i !== idx) }))}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {showAdditionalUomSection ? (
+          <div className="bg-slate-50/60 rounded-lg p-4 space-y-4">
+            <div className="space-y-2 min-w-0">
+              <Label htmlFor="new_additional_uom_id">Additional UOM</Label>
+              <div className="flex items-center gap-2">
+                <Select value={newAdditionalUom.uom_id} onValueChange={val => setNewAdditionalUom({...newAdditionalUom, uom_id: val})}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select UOM" /></SelectTrigger>
+                  <SelectContent>
+                    {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openQuickAdd('unit', (id) => setNewAdditionalUom(prev => ({ ...prev, uom_id: String(id) })))}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new_additional_uom_ratio">How many base UOM in 1 additional UOM?</Label>
+              <Input id="new_additional_uom_ratio" type="number" min={0} value={newAdditionalUom.conversion_ratio} onChange={e => setNewAdditionalUom({...newAdditionalUom, conversion_ratio: e.target.value})} placeholder="e.g. 10" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => {
+                setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
+                setShowAdditionalUomSection(false)
+              }}>Cancel</Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (!newAdditionalUom.uom_id || !newAdditionalUom.conversion_ratio) {
+                    toast({ title: "Error", description: "Select a UOM and enter the conversion ratio", variant: "destructive" })
+                    return
+                  }
+                  setRawMaterialForm((prev: any) => ({ ...prev, additional_uoms: [...(prev.additional_uoms || []), { uom_id: newAdditionalUom.uom_id, conversion_ratio: newAdditionalUom.conversion_ratio }] }))
+                  setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
+                  setShowAdditionalUomSection(false)
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+          ) : (
+            <Button type="button" variant="outline" className="w-fit" onClick={() => setShowAdditionalUomSection(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Add Another UOM
+            </Button>
+          )}
+        </div>
+      ) : (
+        <Button type="button" variant="outline" className="w-fit" onClick={() => setShowAdditionalUomSection(true)}>
+          <Plus className="h-4 w-4 mr-1" /> Add Additional UOM
+        </Button>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="type_of_supply">Type of Supply</Label>
+          <Select value={rawMaterialForm.type_of_supply || ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, type_of_supply: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Goods">Goods</SelectItem>
+              <SelectItem value="Services">Services</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="gst_rate_id">GST Rate</Label>
+          <Select value={rawMaterialForm.gst_rate_id ? String(rawMaterialForm.gst_rate_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, gst_rate_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select GST rate" /></SelectTrigger>
+            <SelectContent>
+              {activeGstRates.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.rate != null ? `${r.rate}%` : r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        {rawMaterialForm.type_of_supply === 'Services' ? (
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="sac_code_id">SAC Code</Label>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => openQuickAdd('sac_code', (id) => setRawMaterialForm((prev: any) => ({ ...prev, sac_code_id: String(id) })))}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <Select value={rawMaterialForm.sac_code_id ? String(rawMaterialForm.sac_code_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, sac_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select SAC code" /></SelectTrigger>
+              <SelectContent>
+                {activeSacCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="hsn_code_id">HSN Code</Label>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => openQuickAdd('hsn_code', (id) => setRawMaterialForm((prev: any) => ({ ...prev, hsn_code_id: String(id) })))}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <Select value={rawMaterialForm.hsn_code_id ? String(rawMaterialForm.hsn_code_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, hsn_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select HSN code" /></SelectTrigger>
+              <SelectContent>
+                {activeHsnCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="default_accounting_ledger_id">Default Accounting Ledger</Label>
+          <div className="flex items-center gap-2">
+            <Select value={rawMaterialForm.default_accounting_ledger_id ? String(rawMaterialForm.default_accounting_ledger_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, default_accounting_ledger_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger" /></SelectTrigger>
+              <SelectContent>
+                {ledgerOptions.map((l: any) => <SelectItem key={l.id} value={String(l.id)}>{l.ledger_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openQuickAdd('ledger', (id) => setRawMaterialForm((prev: any) => ({ ...prev, default_accounting_ledger_id: String(id) })))}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="status">Status</Label>
+          <Select value={rawMaterialForm.status} onValueChange={val => setRawMaterialForm({...rawMaterialForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox id="batch_tracking_enabled" checked={!!rawMaterialForm.batch_tracking_enabled} onCheckedChange={checked => setRawMaterialForm({...rawMaterialForm, batch_tracking_enabled: checked === true})} />
+        <Label htmlFor="batch_tracking_enabled" className="cursor-pointer">Enable batch tracking for this item</Label>
+      </div>
+    </div>
+  )
+
+  // weightDifference is server-computed (converted_kg - packing_weight_per_main_unit,
+  // see semiFinishedGoodService.js) - this local recompute is display-only, purely so
+  // the form preview updates live as the user types, before the record is saved.
+  const setSfgFieldRecomputeWeightDiff = (patch: Partial<typeof semiFinishedGoodForm>) => {
+    setSemiFinishedGoodForm((prev: any) => {
+      const next = { ...prev, ...patch }
+      const ck = parseFloat(next.converted_kg)
+      const pw = parseFloat(next.packing_weight_per_main_unit)
+      next.weight_difference = !isNaN(ck) && !isNaN(pw) ? (ck - pw).toFixed(4) : ''
+      return next
+    })
+  }
+
+  const renderSemiFinishedGoodForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="semi_finished_good_code">SFG Code *</Label>
+          <Input id="semi_finished_good_code" value={semiFinishedGoodForm.semi_finished_good_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="sfg_name">Name *</Label>
+          <Input id="sfg_name" value={semiFinishedGoodForm.name} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, name: e.target.value})} placeholder="e.g. HK RBO 700 MLT PP (1x12)" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_main_uom_id">UOM</Label>
+          <div className="flex items-center gap-2">
+            <Select value={semiFinishedGoodForm.main_uom_id ? String(semiFinishedGoodForm.main_uom_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, main_uom_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select UOM" /></SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openQuickAdd('unit', (id) => setSemiFinishedGoodForm((prev: any) => ({ ...prev, main_uom_id: String(id) })))}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_stock_group_id">Stock Group</Label>
+          <Select value={semiFinishedGoodForm.stock_group_id ? String(semiFinishedGoodForm.stock_group_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, stock_group_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select stock group" /></SelectTrigger>
+            <SelectContent>
+              {stockGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+        <p className="font-semibold text-sm text-slate-800">Weight Conversion (review Section 13)</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="oil_filling_per_unit">Oil Filling per Unit</Label>
+            <Input id="oil_filling_per_unit" type="number" value={semiFinishedGoodForm.oil_filling_per_unit} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, oil_filling_per_unit: e.target.value})} placeholder="0.00" />
+          </div>
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="filling_unit_id">Filling Unit</Label>
+            <Select value={semiFinishedGoodForm.filling_unit_id ? String(semiFinishedGoodForm.filling_unit_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, filling_unit_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select unit" /></SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="converted_kg">Converted Kg</Label>
+            <Input id="converted_kg" type="number" value={semiFinishedGoodForm.converted_kg} onChange={e => setSfgFieldRecomputeWeightDiff({ converted_kg: e.target.value })} placeholder="0.00" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="packing_weight_per_main_unit">Packing Weight per Main Unit</Label>
+            <Input id="packing_weight_per_main_unit" type="number" value={semiFinishedGoodForm.packing_weight_per_main_unit} onChange={e => setSfgFieldRecomputeWeightDiff({ packing_weight_per_main_unit: e.target.value })} placeholder="0.00" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="packing_weight_unit_id">Packing Weight Unit</Label>
+            <Select value={semiFinishedGoodForm.packing_weight_unit_id ? String(semiFinishedGoodForm.packing_weight_unit_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, packing_weight_unit_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select unit" /></SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="weight_difference">Weight Difference</Label>
+            <Input id="weight_difference" value={semiFinishedGoodForm.weight_difference} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="standard_weight">Standard Weight</Label>
+            <Input id="standard_weight" type="number" value={semiFinishedGoodForm.standard_weight} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, standard_weight: e.target.value})} placeholder="0.00" />
+          </div>
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="standard_weight_unit_id">Standard Weight Unit</Label>
+            <Select value={semiFinishedGoodForm.standard_weight_unit_id ? String(semiFinishedGoodForm.standard_weight_unit_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, standard_weight_unit_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select unit" /></SelectTrigger>
+              <SelectContent>
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_type_of_supply">Type of Supply</Label>
+          <Select value={semiFinishedGoodForm.type_of_supply || ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, type_of_supply: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Goods">Goods</SelectItem>
+              <SelectItem value="Services">Services</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_gst_rate_id">GST Rate</Label>
+          <Select value={semiFinishedGoodForm.gst_rate_id ? String(semiFinishedGoodForm.gst_rate_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, gst_rate_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select GST rate" /></SelectTrigger>
+            <SelectContent>
+              {activeGstRates.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.rate != null ? `${r.rate}%` : r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        {semiFinishedGoodForm.type_of_supply === 'Services' ? (
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="sfg_sac_code_id">SAC Code</Label>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => openQuickAdd('sac_code', (id) => setSemiFinishedGoodForm((prev: any) => ({ ...prev, sac_code_id: String(id) })))}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <Select value={semiFinishedGoodForm.sac_code_id ? String(semiFinishedGoodForm.sac_code_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, sac_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select SAC code" /></SelectTrigger>
+              <SelectContent>
+                {activeSacCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="sfg_hsn_code_id">HSN Code</Label>
+            <Select value={semiFinishedGoodForm.hsn_code_id ? String(semiFinishedGoodForm.hsn_code_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, hsn_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select HSN code" /></SelectTrigger>
+              <SelectContent>
+                {activeHsnCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_default_accounting_ledger_id">Default Accounting Ledger</Label>
+          <div className="flex items-center gap-2">
+            <Select value={semiFinishedGoodForm.default_accounting_ledger_id ? String(semiFinishedGoodForm.default_accounting_ledger_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, default_accounting_ledger_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger" /></SelectTrigger>
+              <SelectContent>
+                {ledgerOptions.map((l: any) => <SelectItem key={l.id} value={String(l.id)}>{l.ledger_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openQuickAdd('ledger', (id) => setSemiFinishedGoodForm((prev: any) => ({ ...prev, default_accounting_ledger_id: String(id) })))}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="sfg_status">Status</Label>
+          <Select value={semiFinishedGoodForm.status} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox id="sfg_batch_tracking_enabled" checked={!!semiFinishedGoodForm.batch_tracking_enabled} onCheckedChange={checked => setSemiFinishedGoodForm({...semiFinishedGoodForm, batch_tracking_enabled: checked === true})} />
+        <Label htmlFor="sfg_batch_tracking_enabled" className="cursor-pointer">Enable batch tracking for this item</Label>
+      </div>
+    </div>
+  )
+
+  const renderPetrolPumpForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="petrol_pump_code">Petrol Pump Code *</Label>
+          <Input id="petrol_pump_code" value={petrolPumpForm.petrol_pump_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="petrol_pump_name">Name *</Label>
+          <Input id="petrol_pump_name" value={petrolPumpForm.petrol_pump_name} onChange={e => setPetrolPumpForm({...petrolPumpForm, petrol_pump_name: e.target.value})} placeholder="Enter name" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="pp_status">Status</Label>
+          <Select value={petrolPumpForm.status} onValueChange={val => setPetrolPumpForm({...petrolPumpForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="pp_mobile_no">Mobile Number</Label>
+          <Input id="pp_mobile_no" value={petrolPumpForm.mobile_no} onChange={e => setPetrolPumpForm({...petrolPumpForm, mobile_no: e.target.value})} placeholder="Enter number" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="pp_email_id">Email ID</Label>
+          <Input id="pp_email_id" value={petrolPumpForm.email_id} onChange={e => setPetrolPumpForm({...petrolPumpForm, email_id: e.target.value})} placeholder="email@example.com" />
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="pp_ledger_group_id">Ledger Group</Label>
+          <Select value={petrolPumpForm.ledger_group_id ? String(petrolPumpForm.ledger_group_id) : ''} onValueChange={val => setPetrolPumpForm({...petrolPumpForm, ledger_group_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+            <SelectContent>
+              {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {renderPartyParityFields(petrolPumpForm)}
+    </div>
+  )
+
+  const renderCdRuleForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="cd_rule_code">CD Rule Code *</Label>
+          <Input id="cd_rule_code" value={cdRuleForm.cd_rule_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cd_wef_date">W.E.F. Date *</Label>
+          <Input id="cd_wef_date" type="date" value={cdRuleForm.wef_date?.split('T')[0] || ''} onChange={e => setCdRuleForm({...cdRuleForm, wef_date: e.target.value})} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="cd_stock_category_id">Stock Category *</Label>
+          <Select value={cdRuleForm.stock_category_id ? String(cdRuleForm.stock_category_id) : ''} onValueChange={val => setCdRuleForm({...cdRuleForm, stock_category_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select stock category" /></SelectTrigger>
+            <SelectContent>
+              {activeStockCategories.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cd_status">Status</Label>
+          <Select value={cdRuleForm.status} onValueChange={val => setCdRuleForm({...cdRuleForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="cd_discount_rate_per_main_uom">Discount Rate (per Main UOM) *</Label>
+          <Input id="cd_discount_rate_per_main_uom" type="number" step="0.01" value={cdRuleForm.discount_rate_per_main_uom} onChange={e => setCdRuleForm({...cdRuleForm, discount_rate_per_main_uom: e.target.value})} placeholder="0.00" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cd_payment_condition_days">Payment Condition (Days) *</Label>
+          <Input id="cd_payment_condition_days" type="number" step="1" value={cdRuleForm.payment_condition_days} onChange={e => setCdRuleForm({...cdRuleForm, payment_condition_days: e.target.value})} placeholder="e.g. 30" />
+        </div>
+      </div>
+    </div>
+  )
+
+  // Phase 23 - TDS Master. Bare-minimum placeholder per explicit user
+  // decision (the source review gives zero fields/rules for this master) -
+  // no calculation logic, just a name+rate picklist for a future scoping
+  // conversation to extend.
+  const renderTdsRuleForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified TDS rules/sections yet. Only Name, Rate and Status exist until that's scoped.</p>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="tds_rule_code">TDS Rule Code *</Label>
+          <Input id="tds_rule_code" value={tdsRuleForm.tds_rule_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="tds_name">Name *</Label>
+          <Input id="tds_name" value={tdsRuleForm.name} onChange={e => setTdsRuleForm({...tdsRuleForm, name: e.target.value})} placeholder="e.g. 194Q Purchase TDS" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="tds_rate">Rate (%)</Label>
+          <Input id="tds_rate" type="number" step="0.01" value={tdsRuleForm.rate} onChange={e => setTdsRuleForm({...tdsRuleForm, rate: e.target.value})} placeholder="0.00" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="tds_status">Status</Label>
+          <Select value={tdsRuleForm.status} onValueChange={val => setTdsRuleForm({...tdsRuleForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  )
+
+  // Phase 24 - Bhada Rate Master. Same bare-minimum placeholder situation as
+  // Phase 23 - see that render function's comment.
+  const renderBhadaRateForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified Bhada/freight rate rules yet. Only Name, Rate and Status exist until that's scoped.</p>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="bhada_rate_code">Bhada Rate Code *</Label>
+          <Input id="bhada_rate_code" value={bhadaRateForm.bhada_rate_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="bhada_name">Name *</Label>
+          <Input id="bhada_name" value={bhadaRateForm.name} onChange={e => setBhadaRateForm({...bhadaRateForm, name: e.target.value})} placeholder="e.g. Local Route Rate" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="bhada_rate">Rate</Label>
+          <Input id="bhada_rate" type="number" step="0.01" value={bhadaRateForm.rate} onChange={e => setBhadaRateForm({...bhadaRateForm, rate: e.target.value})} placeholder="0.00" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="bhada_status">Status</Label>
+          <Select value={bhadaRateForm.status} onValueChange={val => setBhadaRateForm({...bhadaRateForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderInsuranceDetailForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="insurance_code">Insurance Code *</Label>
+          <Input id="insurance_code" value={insuranceDetailForm.insurance_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="insurance_company_name">Insurance Company Name *</Label>
+          <Input id="insurance_company_name" value={insuranceDetailForm.insurance_company_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, insurance_company_name: e.target.value})} placeholder="Enter company name" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="short_name">Short Name</Label>
+          <Input id="short_name" value={insuranceDetailForm.short_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, short_name: e.target.value})} placeholder="e.g. ICICI" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="policy_number">Policy Number</Label>
+          <Input id="policy_number" value={insuranceDetailForm.policy_number} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, policy_number: e.target.value})} placeholder="Enter policy number" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="valid_from">Valid From</Label>
+          <Input id="valid_from" type="date" value={insuranceDetailForm.valid_from?.split('T')[0] || ''} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, valid_from: e.target.value})} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="insurance_valid_upto">Valid Upto</Label>
+          <Input id="insurance_valid_upto" type="date" value={insuranceDetailForm.valid_upto?.split('T')[0] || ''} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, valid_upto: e.target.value})} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="type_of_policy">Type of Policy</Label>
+          <Select value={insuranceDetailForm.type_of_policy || ''} onValueChange={val => setInsuranceDetailForm({...insuranceDetailForm, type_of_policy: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Marine Cargo">Marine Cargo</SelectItem>
+              <SelectItem value="Open Policy">Open Policy</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="sum_insured">Sum Insured (₹)</Label>
+          <Input id="sum_insured" type="number" value={insuranceDetailForm.sum_insured} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, sum_insured: e.target.value})} placeholder="0.00" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="owner_type">Owner of Policy</Label>
+          <Select value={insuranceDetailForm.owner_type || 'Company'} onValueChange={val => setInsuranceDetailForm({...insuranceDetailForm, owner_type: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select owner" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Company">Company</SelectItem>
+              <SelectItem value="Customer">Customer</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="insurance_status">Status</Label>
+          <Select value={insuranceDetailForm.status} onValueChange={val => setInsuranceDetailForm({...insuranceDetailForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Active">Active</SelectItem>
+              <SelectItem value="Inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {insuranceDetailForm.owner_type === 'Customer' && (
+        <div className="space-y-2">
+          <Label>Linked Customers</Label>
+          <p className="text-xs text-slate-400">Select the customer(s) that own this policy (multi-select).</p>
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2 max-h-40 overflow-y-auto">
+            {customers.map((c: any) => {
+              const checked = (insuranceDetailForm.customer_ids || []).includes(c.id)
+              return (
+                <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(val) => {
+                      const current = insuranceDetailForm.customer_ids || []
+                      setInsuranceDetailForm({
+                        ...insuranceDetailForm,
+                        customer_ids: val ? [...current, c.id] : current.filter((id: number) => id !== c.id),
+                      })
+                    }}
+                  />
+                  {c.customer_name}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderConversionFormulaForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="conversion_formula_code">Formula Code *</Label>
+          <Input id="conversion_formula_code" value={conversionFormulaForm.conversion_formula_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="cf_status">Status</Label>
+          <Select value={conversionFormulaForm.status} onValueChange={val => setConversionFormulaForm({...conversionFormulaForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="base_item_id">Base / Parent Item</Label>
+          <Select value={conversionFormulaForm.base_item_id ? String(conversionFormulaForm.base_item_id) : ''} onValueChange={val => setConversionFormulaForm({...conversionFormulaForm, base_item_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select base item" /></SelectTrigger>
+            <SelectContent>
+              {skuOptions.map((s: any) => <SelectItem key={s.id} value={String(s.id)}>{s.sku_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="child_item_id">Child Item</Label>
+          <Select value={conversionFormulaForm.child_item_id ? String(conversionFormulaForm.child_item_id) : ''} onValueChange={val => setConversionFormulaForm({...conversionFormulaForm, child_item_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select child item" /></SelectTrigger>
+            <SelectContent>
+              {skuOptions.map((s: any) => <SelectItem key={s.id} value={String(s.id)}>{s.sku_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+        <p className="font-semibold text-sm text-slate-800">Formula Steps</p>
+        {(conversionFormulaForm.steps || []).length > 0 && (
+          <div className="space-y-2">
+            {(conversionFormulaForm.steps || []).map((s: any, idx: number) => (
+              <div key={idx} className="flex items-center justify-between gap-2 bg-slate-50 rounded-md px-3 py-2 text-sm">
+                <span>Step {idx + 1}: <span className="font-medium">{s.operation}</span> — {s.operand_type === 'literal' ? s.operand_value : s.operand_type.replace(/_/g, ' ')}</span>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-red-50" onClick={() => setConversionFormulaForm((prev: any) => ({ ...prev, steps: prev.steps.filter((_: any, i: number) => i !== idx) }))}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="bg-slate-50/60 rounded-lg p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2 min-w-0">
+              <Label>Operation</Label>
+              <Select value={newFormulaStep.operation} onValueChange={val => setNewFormulaStep({...newFormulaStep, operation: val})}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="add">Add</SelectItem>
+                  <SelectItem value="subtract">Subtract</SelectItem>
+                  <SelectItem value="multiply">Multiply</SelectItem>
+                  <SelectItem value="divide">Divide</SelectItem>
+                  <SelectItem value="round_up">Round Up (2 decimals)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 min-w-0">
+              <Label>Operand</Label>
+              <Select value={newFormulaStep.operand_type} onValueChange={val => setNewFormulaStep({...newFormulaStep, operand_type: val})}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="literal">A number</SelectItem>
+                  <SelectItem value="rate_of_base_item">Rate of Base Item</SelectItem>
+                  <SelectItem value="converted_kg_of_base_item">Converted KGS of Base Item</SelectItem>
+                  <SelectItem value="converted_kg_of_child_item">Converted KGS of Child Item</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {newFormulaStep.operand_type === 'literal' && (
+            <div className="space-y-2">
+              <Label>Value</Label>
+              <Input type="number" value={newFormulaStep.operand_value} onChange={e => setNewFormulaStep({...newFormulaStep, operand_value: e.target.value})} placeholder="e.g. 6.5" />
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                if (newFormulaStep.operand_type === 'literal' && !newFormulaStep.operand_value) {
+                  toast({ title: "Error", description: "Enter a value for this step", variant: "destructive" })
+                  return
+                }
+                setConversionFormulaForm((prev: any) => ({
+                  ...prev,
+                  steps: [...(prev.steps || []), { step_order: (prev.steps || []).length + 1, operation: newFormulaStep.operation, operand_type: newFormulaStep.operand_type, operand_value: newFormulaStep.operand_type === 'literal' ? newFormulaStep.operand_value : null }],
+                }))
+                setNewFormulaStep({ operation: 'subtract', operand_type: 'literal', operand_value: '' })
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" /> Add Step
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderPriceLevelForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="price_level_code">Price Level Code *</Label>
+          <Input id="price_level_code" value={priceLevelForm.price_level_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="effective_date">Effective Date *</Label>
+          <Input id="effective_date" type="date" value={priceLevelForm.effective_date?.split('T')[0] || ''} onChange={e => setPriceLevelForm({...priceLevelForm, effective_date: e.target.value})} />
+        </div>
+      </div>
+      <div className="space-y-2 min-w-0">
+        <Label htmlFor="pl_status">Status</Label>
+        <Select value={priceLevelForm.status} onValueChange={val => setPriceLevelForm({...priceLevelForm, status: val})}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+        <p className="font-semibold text-sm text-slate-800">Finished Goods Prices</p>
+        {(priceLevelForm.items || []).length > 0 && (
+          <div className="space-y-2">
+            {(priceLevelForm.items || []).map((it: any, idx: number) => {
+              const sku = skuOptions.find((s: any) => String(s.id) === String(it.sku_id))
+              return (
+                <div key={idx} className="flex items-center justify-between gap-2 bg-slate-50 rounded-md px-3 py-2 text-sm">
+                  <span>{sku?.sku_name || `SKU #${it.sku_id}`} — ₹{it.price}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-red-50" onClick={() => setPriceLevelForm((prev: any) => ({ ...prev, items: prev.items.filter((_: any, i: number) => i !== idx) }))}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div className="bg-slate-50/60 rounded-lg p-4 space-y-4">
+          <div className="space-y-2 min-w-0">
+            <Label>Finished Good</Label>
+            <Select value={newPriceLevelItem.sku_id} onValueChange={val => setNewPriceLevelItem({...newPriceLevelItem, sku_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select Finished Good" /></SelectTrigger>
+              <SelectContent>
+                {skuOptions.map((s: any) => <SelectItem key={s.id} value={String(s.id)}>{s.sku_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Price (₹)</Label>
+            <Input type="number" min={0} value={newPriceLevelItem.price} onChange={e => setNewPriceLevelItem({...newPriceLevelItem, price: e.target.value})} placeholder="e.g. 120.50" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                if (!newPriceLevelItem.sku_id || !newPriceLevelItem.price) {
+                  toast({ title: "Error", description: "Select a Finished Good and enter a price", variant: "destructive" })
+                  return
+                }
+                setPriceLevelForm((prev: any) => ({ ...prev, items: [...(prev.items || []), { sku_id: newPriceLevelItem.sku_id, price: newPriceLevelItem.price }] }))
+                setNewPriceLevelItem({ sku_id: '', price: '' })
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" /> Add Price
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 
@@ -2476,11 +4982,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="sku_code">SKU Code *</Label>
+          <Label htmlFor="sku_code">Finished Goods Code *</Label>
           <Input id="sku_code" value={skuDetailsForm.sku_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="sku_name">SKU Name *</Label>
+          <Label htmlFor="sku_name">Finished Goods Name *</Label>
           <Input id="sku_name" value={skuDetailsForm.sku_name} onChange={e => setSkuDetailsForm({...skuDetailsForm, sku_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
@@ -2488,16 +4994,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={skuDetailsForm.status} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="tag_name">Tags</Label>
+          <Label htmlFor="tag_name">Tag for Reliance</Label>
           <Select value={skuDetailsForm.tag_name || ""} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, tag_name: val})}>
-            <SelectTrigger id="tag_name"><SelectValue placeholder="Select" /></SelectTrigger>
+            <SelectTrigger id="tag_name" className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="Yes">Yes</SelectItem>
               <SelectItem value="No">No</SelectItem>
@@ -2516,6 +5022,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="main_uom_id">Main UOM (Reference Data)</Label>
+          <Select value={skuDetailsForm.main_uom_id ? String(skuDetailsForm.main_uom_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, main_uom_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select unit (optional)" /></SelectTrigger>
+            <SelectContent>
+              {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="alternate_uom_id">Alternate UOM (Reference Data)</Label>
+          <Select value={skuDetailsForm.alternate_uom_id ? String(skuDetailsForm.alternate_uom_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, alternate_uom_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select unit (optional)" /></SelectTrigger>
+            <SelectContent>
+              {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 -mt-2">The Reference Data pickers above are additive - the free-text Main/Alternate UOM fields keep working unchanged.</p>
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="nos_per_main_uom">Nos per Main UOM</Label>
           <Input id="nos_per_main_uom" type="number" value={skuDetailsForm.nos_per_main_uom} onChange={e => setSkuDetailsForm({...skuDetailsForm, nos_per_main_uom: e.target.value})} placeholder="0" />
@@ -2525,34 +5052,58 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="units" value={skuDetailsForm.units} onChange={e => setSkuDetailsForm({...skuDetailsForm, units: e.target.value})} placeholder="e.g. Kg" />
         </div>
       </div>
+
+      <Separator />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="semi_finished_good_id">Semi-Finished Good (link)</Label>
+          <p className="text-xs text-slate-400 mb-1">When linked (nos per main UOM &gt; 1), the weight fields below auto-fill from this SFG on save.</p>
+          <Combobox
+            options={semiFinishedGoodOptions.map((s: any) => ({ value: String(s.id), label: s.name }))}
+            value={skuDetailsForm.semi_finished_good_id ? String(skuDetailsForm.semi_finished_good_id) : ""}
+            onValueChange={val => setSkuDetailsForm({...skuDetailsForm, semi_finished_good_id: val ? parseInt(val, 10) : null})}
+            placeholder="Select Semi-Finished Good (optional)"
+            searchPlaceholder="Search Semi-Finished Goods..."
+          />
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="oil_type_id">Oil Type</Label>
+          <Select value={skuDetailsForm.oil_type_id ? String(skuDetailsForm.oil_type_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, oil_type_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select oil type" /></SelectTrigger>
+            <SelectContent>
+              {activeOilTypes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="oil_filling_per_unit">Oil Filling per Unit</Label>
-          <Input id="oil_filling_per_unit" type="number" value={skuDetailsForm.oil_filling_per_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, oil_filling_per_unit: e.target.value})} placeholder="0.00" />
+          <Input id="oil_filling_per_unit" type="number" value={skuDetailsForm.oil_filling_per_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, oil_filling_per_unit: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
         <div className="space-y-2">
           <Label htmlFor="filling_units">Filling Units</Label>
-          <Input id="filling_units" value={skuDetailsForm.filling_units} onChange={e => setSkuDetailsForm({...skuDetailsForm, filling_units: e.target.value})} placeholder="e.g. Ltr" />
+          <Input id="filling_units" value={skuDetailsForm.filling_units} onChange={e => setSkuDetailsForm({...skuDetailsForm, filling_units: e.target.value})} placeholder="e.g. Ltr" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="converted_kg">Converted Kg</Label>
-          <Input id="converted_kg" type="number" value={skuDetailsForm.converted_kg} onChange={e => setSkuDetailsForm({...skuDetailsForm, converted_kg: e.target.value})} placeholder="0.00" />
+          <Input id="converted_kg" type="number" value={skuDetailsForm.converted_kg} onChange={e => setSkuDetailsForm({...skuDetailsForm, converted_kg: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
         <div className="space-y-2">
           <Label htmlFor="packing_weight_per_main_unit">Packing Weight/Main Unit</Label>
-          <Input id="packing_weight_per_main_unit" type="number" value={skuDetailsForm.packing_weight_per_main_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, packing_weight_per_main_unit: e.target.value})} placeholder="0.00" />
+          <Input id="packing_weight_per_main_unit" type="number" value={skuDetailsForm.packing_weight_per_main_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, packing_weight_per_main_unit: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="weight_difference">Weight Difference</Label>
-          <Input id="weight_difference" type="number" value={skuDetailsForm.weight_difference} onChange={e => setSkuDetailsForm({...skuDetailsForm, weight_difference: e.target.value})} placeholder="0.00" />
+          <Input id="weight_difference" type="number" value={skuDetailsForm.weight_difference} onChange={e => setSkuDetailsForm({...skuDetailsForm, weight_difference: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
         <div className="space-y-2">
           <Label htmlFor="sku_weight">SKU Weight</Label>
-          <Input id="sku_weight" type="number" value={skuDetailsForm.sku_weight} onChange={e => setSkuDetailsForm({...skuDetailsForm, sku_weight: e.target.value})} placeholder="0.00" />
+          <Input id="sku_weight" type="number" value={skuDetailsForm.sku_weight} onChange={e => setSkuDetailsForm({...skuDetailsForm, sku_weight: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -2563,6 +5114,73 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label htmlFor="gross_weight">Gross Weight</Label>
           <Input id="gross_weight" type="number" value={skuDetailsForm.gross_weight} onChange={e => setSkuDetailsForm({...skuDetailsForm, gross_weight: e.target.value})} placeholder="0.00" />
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 -mt-2">Packing Weight and Gross Weight always stay manual entry - not derived from the linked Semi-Finished Good.</p>
+
+      <Separator />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="stock_category_id">Stock Category</Label>
+          <Select value={skuDetailsForm.stock_category_id ? String(skuDetailsForm.stock_category_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, stock_category_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select stock category" /></SelectTrigger>
+            <SelectContent>
+              {activeStockCategories.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="type_of_supply">Type of Supply</Label>
+          <Select value={skuDetailsForm.type_of_supply || ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, type_of_supply: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Goods">Goods</SelectItem>
+              <SelectItem value="Services">Services</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="gst_rate_id">GST Rate</Label>
+          <Select value={skuDetailsForm.gst_rate_id ? String(skuDetailsForm.gst_rate_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, gst_rate_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select GST rate" /></SelectTrigger>
+            <SelectContent>
+              {activeGstRates.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.rate != null ? `${r.rate}%` : r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        {skuDetailsForm.type_of_supply === 'Services' ? (
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="sac_code_id">SAC Code</Label>
+            <Select value={skuDetailsForm.sac_code_id ? String(skuDetailsForm.sac_code_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, sac_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select SAC code" /></SelectTrigger>
+              <SelectContent>
+                {activeSacCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.description || r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <div className="space-y-2 min-w-0">
+            <Label htmlFor="hsn_code_id">HSN Code</Label>
+            <Select value={skuDetailsForm.hsn_code_id ? String(skuDetailsForm.hsn_code_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, hsn_code_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select HSN code" /></SelectTrigger>
+              <SelectContent>
+                {activeHsnCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.description || r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label htmlFor="uqc_id">UQC – Unit Quantity Code</Label>
+          <Select value={skuDetailsForm.uqc_id ? String(skuDetailsForm.uqc_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, uqc_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select UQC" /></SelectTrigger>
+            <SelectContent>
+              {activeUqcCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -2786,7 +5404,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <div className="space-y-2">
             <Label>Status</Label>
             <Select value={vehicleForm.status} onValueChange={val => setVehicleForm({...vehicleForm, status: val})}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
               </SelectContent>
@@ -2795,7 +5413,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <div className="space-y-2">
             <Label>Fuel Type</Label>
             <Select value={vehicleForm.fuel_type || 'Diesel'} onValueChange={val => setVehicleForm((prev: any) => ({...prev, fuel_type: val, ...(val === 'Electrical' ? { pollution: '' } : {})}))}>
-              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="Diesel">Diesel</SelectItem>
                 <SelectItem value="Petrol">Petrol</SelectItem>
@@ -2863,7 +5481,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <div className="space-y-2">
             <Label>Road Tax Option</Label>
             <Select value={roadTaxType} onValueChange={(val: 'expiry' | 'lifetime') => setRoadTaxType(val)}>
-              <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="expiry">Expiry Date</SelectItem>
                 <SelectItem value="lifetime">Life time tax</SelectItem>
@@ -3045,6 +5663,80 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </div>
           </div>
         </div>
+
+        <Separator className="my-2" />
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2 min-w-0">
+            <Label>RTO Code</Label>
+            <Select value={vehicleForm.rto_id ? String(vehicleForm.rto_id) : ''} onValueChange={val => setVehicleForm({...vehicleForm, rto_id: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select RTO code" /></SelectTrigger>
+              <SelectContent>
+                {activeRtoCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Additional Transporters</Label>
+          <p className="text-xs text-slate-400">Tag more transporters this vehicle can be associated with, alongside the primary Transporter above.</p>
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2 max-h-40 overflow-y-auto">
+            {transporterOptions.map((t: any) => {
+              const checked = (vehicleForm.additional_transporter_ids || []).includes(t.id)
+              return (
+                <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(val) => {
+                      const current = vehicleForm.additional_transporter_ids || []
+                      setVehicleForm({
+                        ...vehicleForm,
+                        additional_transporter_ids: val ? [...current, t.id] : current.filter((id: number) => id !== t.id),
+                      })
+                    }}
+                  />
+                  {t.transporter_name}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 p-4 space-y-4">
+          <p className="font-semibold text-sm text-slate-800">GPS Tracking</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>GPS Company</Label>
+              <Input value={vehicleForm.gps_company || ''} onChange={e => setVehicleForm({...vehicleForm, gps_company: e.target.value})} placeholder="e.g. Trackwell" />
+            </div>
+            <div className="space-y-2">
+              <Label>GPS Type</Label>
+              <Input value={vehicleForm.gps_type || ''} onChange={e => setVehicleForm({...vehicleForm, gps_type: e.target.value})} placeholder="e.g. OBD, hardwired" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>GPS API / Tracking Link</Label>
+            <Input value={vehicleForm.gps_api_tracking_link || ''} onChange={e => setVehicleForm({...vehicleForm, gps_api_tracking_link: e.target.value})} placeholder="https://..." />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>GPS Valid Upto</Label>
+              <Input type="date" value={vehicleForm.gps_valid_upto?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, gps_valid_upto: e.target.value})} />
+            </div>
+            <div className="space-y-2 min-w-0">
+              <Label>GPS Installed By</Label>
+              <Select value={vehicleForm.gps_installed_by || ''} onValueChange={val => setVehicleForm({...vehicleForm, gps_installed_by: val})}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Company">Company</SelectItem>
+                  <SelectItem value="Vehicle Owner">Vehicle Owner</SelectItem>
+                  <SelectItem value="Transporter">Transporter</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
@@ -3059,7 +5751,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label>Status</Label>
           <Select value={driverForm.status} onValueChange={val => setDriverForm({...driverForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -3110,6 +5802,29 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label>RTO</Label>
           <Input value={driverForm.rto} onChange={e => setDriverForm({...driverForm, rto: e.target.value})} placeholder="RTO" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Trans Valid Upto</Label>
+          <Input type="date" value={driverForm.trans_valid_upto?.split('T')[0] || ''} onChange={e => setDriverForm({...driverForm, trans_valid_upto: e.target.value})} />
+        </div>
+        <div className="space-y-2">
+          <Label>LMV Valid Upto</Label>
+          <Input type="date" value={driverForm.lmv_valid_upto?.split('T')[0] || ''} onChange={e => setDriverForm({...driverForm, lmv_valid_upto: e.target.value})} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2 min-w-0">
+          <Label>RTO Code</Label>
+          <Select value={driverForm.rto_id ? String(driverForm.rto_id) : ''} onValueChange={val => setDriverForm({...driverForm, rto_id: val ? parseInt(val, 10) : null})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select RTO code" /></SelectTrigger>
+            <SelectContent>
+              {activeRtoCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} - {r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -3178,7 +5893,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label>Status</Label>
           <Select value={transportForm.status} onValueChange={val => setTransportForm({...transportForm, status: val})}>
-            <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
             </SelectContent>
@@ -3217,34 +5932,45 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>State</Label>
-          <Combobox
-            options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
-            value={transportForm.state_id ? String(transportForm.state_id) : ""}
-            onValueChange={val => {
-              const selected = activeStates.find((s: any) => String(s.id) === val)
-              setTransportForm({...transportForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || transportForm.state })
-            }}
-            placeholder="Select state"
-            searchPlaceholder="Search state..."
-          />
-        </div>
-        <div className="space-y-2">
           <Label>Pincode</Label>
           <Input value={transportForm.pincode} onChange={e => setTransportForm({...transportForm, pincode: e.target.value})} placeholder="6-digit PIN" />
+        </div>
+        <div className="space-y-2">
+          <Label>Ledger Group</Label>
+          <Select value={transportForm.ledger_group_id ? String(transportForm.ledger_group_id) : ''} onValueChange={val => setTransportForm({...transportForm, ledger_group_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+            <SelectContent>
+              {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>PAN</Label>
-          <Input value={transportForm.pan} onChange={e => setTransportForm({...transportForm, pan: e.target.value})} placeholder="Business PAN" />
+        <div className="space-y-2 min-w-0">
+          <Label>Linked Customer</Label>
+          <p className="text-xs text-slate-400 mb-1">If this transporter is also a customer, link them so they don't need a separate ledger.</p>
+          <Combobox
+            options={customers.map((c: any) => ({ value: String(c.id), label: c.customer_name }))}
+            value={transportForm.linked_customer_id ? String(transportForm.linked_customer_id) : ""}
+            onValueChange={val => setTransportForm({...transportForm, linked_customer_id: val ? parseInt(val, 10) : null})}
+            placeholder="Select customer (optional)"
+            searchPlaceholder="Search customer..."
+          />
         </div>
         <div className="space-y-2">
-          <Label>GSTIN</Label>
-          <Input value={transportForm.gstin} onChange={e => setTransportForm({...transportForm, gstin: e.target.value})} placeholder="GST Number" />
+          <FileUploadField
+            label="Bilty Copy"
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={transportForm.bilty_copy_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "bilty_copy_upload")}
+            onRemove={() => handleFileRemove("bilty_copy_upload")}
+          />
         </div>
       </div>
+      {renderPartyParityFields(transportForm)}
     </div>
   )
 
@@ -3289,6 +6015,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               else if (activeTab === "depots") { refetchDepot(); refetchPendingDepots() }
               else if (activeTab === "brokers") { refetchBroker(); refetchPendingBrokers() }
               else if (activeTab === "salespersons") { refetchSalesperson(); refetchPendingSalespersons() }
+              else if (activeTab === "ledger_groups") { refetchLedgerGroup(); refetchPendingLedgerGroups() }
+              else if (activeTab === "stock_groups") { refetchStockGroup(); refetchPendingStockGroups() }
+              else if (activeTab === "units") { refetchUnit(); refetchPendingUnits() }
+              else if (activeTab === "raw_materials") { refetchRawMaterial(); refetchPendingRawMaterials() }
+              else if (activeTab === "semi_finished_goods") { refetchSemiFinishedGood(); refetchPendingSemiFinishedGoods() }
+              else if (activeTab === "insurance_details") { refetchInsuranceDetail(); refetchPendingInsuranceDetails() }
+              else if (activeTab === "conversion_formulas") { refetchConversionFormula(); refetchPendingConversionFormulas() }
+              else if (activeTab === "price_levels") { refetchPriceLevel(); refetchPendingPriceLevels() }
+              else if (activeTab === "petrol_pumps") { refetchPetrolPump(); refetchPendingPetrolPumps() }
+              else if (activeTab === "cd_rules") { refetchCdRule(); refetchPendingCdRules() }
+        else if (activeTab === "tds_rules") { refetchTdsRule(); refetchPendingTdsRules() }
+        else if (activeTab === "bhada_rates") { refetchBhadaRate(); refetchPendingBhadaRates() }
               else if (activeTab === "sku_details") { refetchSku(); refetchPendingSku() }
               else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
               else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
@@ -3311,9 +6049,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </DialogTrigger>
             <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>{editingItem ? "Edit" : "Add New"} {activeTab === "sku_details" ? "SKU" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab.slice(0, -1)}</DialogTitle>
+                <DialogTitle>{editingItem ? "Edit" : "Add New"} {activeTab === "sku_details" ? "Finished Good" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab === "ledger_groups" ? "Ledger Group" : activeTab === "stock_groups" ? "Stock Group" : activeTab === "units" ? "Unit" : activeTab === "raw_materials" ? "Raw Material" : activeTab === "semi_finished_goods" ? "Semi-Finished Good" : activeTab === "insurance_details" ? "Insurance Detail" : activeTab === "conversion_formulas" ? "Conversion Formula" : activeTab === "price_levels" ? "Price Level" : activeTab === "petrol_pumps" ? "Petrol Pump" : activeTab === "cd_rules" ? "CD Rule" : activeTab === "tds_rules" ? "TDS Rule" : activeTab === "bhada_rates" ? "Bhada Rate" : activeTab.slice(0, -1)}</DialogTitle>
                 <DialogDescription>
-                  Enter the details for the {activeTab === "sku_details" ? "SKU" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab.slice(0, -1)} record.
+                  Enter the details for the {activeTab === "sku_details" ? "Finished Good" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab === "ledger_groups" ? "Ledger Group" : activeTab === "stock_groups" ? "Stock Group" : activeTab === "units" ? "Unit" : activeTab === "raw_materials" ? "Raw Material" : activeTab === "semi_finished_goods" ? "Semi-Finished Good" : activeTab === "insurance_details" ? "Insurance Detail" : activeTab === "conversion_formulas" ? "Conversion Formula" : activeTab === "price_levels" ? "Price Level" : activeTab === "petrol_pumps" ? "Petrol Pump" : activeTab === "cd_rules" ? "CD Rule" : activeTab === "tds_rules" ? "TDS Rule" : activeTab === "bhada_rates" ? "Bhada Rate" : activeTab.slice(0, -1)} record.
                 </DialogDescription>
               </DialogHeader>
               {renderFormForTab(activeTab)}
@@ -4323,6 +7061,1898 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </TabsContent>
         )}
 
+        {visibleTabs.includes("ledger_groups") && (
+        <TabsContent value="ledger_groups">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <BookOpen className="h-5 w-5 text-primary" />
+                    Ledger Groups List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your ledger group categories</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setLedgerGroupSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${ledgerGroupSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setLedgerGroupSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${ledgerGroupSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingLedgerGroups.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${ledgerGroupSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingLedgerGroups.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {ledgerGroupSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingLedgerGroups.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingLedgerGroups.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.group_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.group_name}</p>
+                                  <p className="text-xs text-slate-500">{item.group_code}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('ledger_groups', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'ledger_groups', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">Code</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingLedgerGroups.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.group_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.group_code}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.group_name}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('ledger_groups', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'ledger_groups', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
+                  )}
+                </div></div>
+              ) : (
+              <>
+              {/* Mobile card view */}
+              <div className="md:hidden">
+                {isLedgerGroupLoading && ledgerGroupsList.length === 0 ? (
+                  <div className="p-4 space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="border border-slate-100 rounded-xl p-4 space-y-2 animate-pulse"><div className="h-4 w-32 bg-slate-200 rounded" /><div className="h-3 w-40 bg-slate-200 rounded" /></div>)}</div>
+                ) : ledgerGroupsList.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400">No ledger groups found</div>
+                ) : (
+                  <div className="p-3 space-y-3 overflow-auto" style={{ maxHeight: 600 }}>
+                    {sortedLedgerGroups.map((item: any) => (
+                      <div key={item.group_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-800 truncate">{item.group_name}</p>
+                            <p className="text-xs text-slate-500">{item.group_code}</p>
+                          </div>
+                          {!item.is_system && (
+                            <div className="flex gap-1 shrink-0">
+                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.is_system && <Badge variant="outline" className="border-slate-300 text-slate-600 bg-slate-50">Primary (system)</Badge>}
+                        </div>
+                      </div>
+                    ))}
+                    {isFetchingNextLedgerGroup && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more ledger groups...</span></div>}
+                  </div>
+                )}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:flex flex-col h-[600px]">
+                <div className="flex-1 overflow-auto rounded-b-2xl">
+                  <table className="w-full caption-bottom text-sm">
+                    <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-b">
+                        <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('group_code', ledgerGroupSort, setLedgerGroupSort)}>Code <SortIcon col="group_code" sort={ledgerGroupSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('group_name', ledgerGroupSort, setLedgerGroupSort)}>Group Name <SortIcon col="group_name" sort={ledgerGroupSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', ledgerGroupSort, setLedgerGroupSort)}>Status <SortIcon col="status" sort={ledgerGroupSort} /></TableHead>
+                        <TableHead className="text-right pr-6">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLedgerGroupLoading && ledgerGroupsList.length === 0 ? (
+                        [...Array(8)].map((_, i) => (
+                          <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                            <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                            <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : ledgerGroupsList.length === 0 ? (
+                        <TableRow><TableCell colSpan={4} className="text-center py-20 text-slate-400">No ledger groups found</TableCell></TableRow>
+                      ) : (
+                        <>
+                          {sortedLedgerGroups.map((item: any) => (
+                            <TableRow key={item.group_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6">{item.group_code}</TableCell>
+                              <TableCell className="font-semibold text-slate-900">
+                                {item.group_name}
+                                {item.is_system && <Badge variant="outline" className="ml-2 border-slate-300 text-slate-600 bg-slate-50">Primary</Badge>}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                  {item.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right pr-6">
+                                {!item.is_system && (
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Ledger Group"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Ledger Group"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {/* Infinite Scroll Sentinel */}
+                          <TableRow ref={ledgerGroupEndRef}>
+                            <TableCell colSpan={4} className="p-0 h-12 border-none">
+                              {isFetchingNextLedgerGroup && (
+                                <div className="flex items-center justify-center py-4 text-slate-400 bg-slate-50/20">
+                                  <div className="flex gap-1.5 items-center bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce"></div>
+                                    <span className="text-xs font-medium ml-2 text-slate-500">Loading more ledger groups...</span>
+                                  </div>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </table>
+                </div>
+              </div>
+              </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("stock_groups") && (
+        <TabsContent value="stock_groups">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-primary" />
+                    Stock Groups List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your stock group categories</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setStockGroupSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${stockGroupSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setStockGroupSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${stockGroupSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingStockGroups.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${stockGroupSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingStockGroups.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {stockGroupSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingStockGroups.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingStockGroups.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.group_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.group_name}</p>
+                                  <p className="text-xs text-slate-500">{item.group_code}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('stock_groups', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'stock_groups', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">Code</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingStockGroups.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.group_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.group_code}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.group_name}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('stock_groups', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'stock_groups', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
+                  )}
+                </div></div>
+              ) : (
+              <>
+              {/* Mobile card view */}
+              <div className="md:hidden">
+                {isStockGroupLoading && stockGroupsList.length === 0 ? (
+                  <div className="p-4 space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="border border-slate-100 rounded-xl p-4 space-y-2 animate-pulse"><div className="h-4 w-32 bg-slate-200 rounded" /><div className="h-3 w-40 bg-slate-200 rounded" /></div>)}</div>
+                ) : stockGroupsList.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400">No stock groups found</div>
+                ) : (
+                  <div className="p-3 space-y-3 overflow-auto" style={{ maxHeight: 600 }}>
+                    {sortedStockGroups.map((item: any) => (
+                      <div key={item.group_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-800 truncate">{item.group_name}</p>
+                            <p className="text-xs text-slate-500">{item.group_code}</p>
+                          </div>
+                          {!item.is_system && (
+                            <div className="flex gap-1 shrink-0">
+                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                          {item.is_system && <Badge variant="outline" className="border-slate-300 text-slate-600 bg-slate-50">Primary (system)</Badge>}
+                        </div>
+                      </div>
+                    ))}
+                    {isFetchingNextStockGroup && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more stock groups...</span></div>}
+                  </div>
+                )}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:flex flex-col h-[600px]">
+                <div className="flex-1 overflow-auto rounded-b-2xl">
+                  <table className="w-full caption-bottom text-sm">
+                    <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-b">
+                        <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('group_code', stockGroupSort, setStockGroupSort)}>Code <SortIcon col="group_code" sort={stockGroupSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('group_name', stockGroupSort, setStockGroupSort)}>Group Name <SortIcon col="group_name" sort={stockGroupSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', stockGroupSort, setStockGroupSort)}>Status <SortIcon col="status" sort={stockGroupSort} /></TableHead>
+                        <TableHead className="text-right pr-6">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isStockGroupLoading && stockGroupsList.length === 0 ? (
+                        [...Array(8)].map((_, i) => (
+                          <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                            <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                            <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : stockGroupsList.length === 0 ? (
+                        <TableRow><TableCell colSpan={4} className="text-center py-20 text-slate-400">No stock groups found</TableCell></TableRow>
+                      ) : (
+                        <>
+                          {sortedStockGroups.map((item: any) => (
+                            <TableRow key={item.group_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6">{item.group_code}</TableCell>
+                              <TableCell className="font-semibold text-slate-900">
+                                {item.group_name}
+                                {item.is_system && <Badge variant="outline" className="ml-2 border-slate-300 text-slate-600 bg-slate-50">Primary</Badge>}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                  {item.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right pr-6">
+                                {!item.is_system && (
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Stock Group"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Stock Group"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {/* Infinite Scroll Sentinel */}
+                          <TableRow ref={stockGroupEndRef}>
+                            <TableCell colSpan={4} className="p-0 h-12 border-none">
+                              {isFetchingNextStockGroup && (
+                                <div className="flex items-center justify-center py-4 text-slate-400 bg-slate-50/20">
+                                  <div className="flex gap-1.5 items-center bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce"></div>
+                                    <span className="text-xs font-medium ml-2 text-slate-500">Loading more stock groups...</span>
+                                  </div>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </table>
+                </div>
+              </div>
+              </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("units") && (
+        <TabsContent value="units">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Ruler className="h-5 w-5 text-primary" />
+                    Units List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your units of measurement (UOM)</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setUnitSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${unitSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setUnitSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${unitSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingUnits.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${unitSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingUnits.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {unitSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingUnits.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <>
+                      {/* Mobile card view */}
+                      <div className="md:hidden p-3 space-y-3">
+                        {pendingUnits.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                            <div key={item.unit_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{item.unit_name}</p>
+                                  <p className="text-xs text-slate-500">{item.unit_code}</p>
+                                </div>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50 shrink-0" : "border-emerald-300 text-emerald-700 bg-emerald-50 shrink-0"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted By: </span>{submittedBy || "—"}</div>
+                                <div className="col-span-2"><span className="font-medium text-slate-600">Submitted On: </span>{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-50 flex gap-2 w-full justify-end">
+                                <Button size="sm" onClick={() => openApprovalModal('units', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg text-xs flex-1"><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'units', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg text-xs flex-1"><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <table className="hidden md:table w-full caption-bottom text-sm">
+                        <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                          <TableRow className="hover:bg-transparent border-b">
+                            <TableHead className="pl-6">Code</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Submitted By</TableHead>
+                            <TableHead>Submitted On</TableHead>
+                            <TableHead className="text-right pr-6">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingUnits.map(item => {
+                            const isEdit = item.request_type === 'edit'
+                            const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                            const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                            return (
+                            <TableRow key={item.unit_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6 text-slate-500">{item.unit_code}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                  {isEdit ? "Edit" : "New"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.unit_name}</TableCell>
+                              <TableCell>{submittedBy || "—"}</TableCell>
+                              <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" onClick={() => openApprovalModal('units', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                    <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'units', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                    <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )})}
+                        </TableBody>
+                      </table>
+                    </>
+                  )}
+                </div></div>
+              ) : (
+              <>
+              {/* Mobile card view */}
+              <div className="md:hidden">
+                {isUnitLoading && unitsList.length === 0 ? (
+                  <div className="p-4 space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="border border-slate-100 rounded-xl p-4 space-y-2 animate-pulse"><div className="h-4 w-32 bg-slate-200 rounded" /><div className="h-3 w-40 bg-slate-200 rounded" /></div>)}</div>
+                ) : unitsList.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400">No units found</div>
+                ) : (
+                  <div className="p-3 space-y-3 overflow-auto" style={{ maxHeight: 600 }}>
+                    {sortedUnits.map((item: any) => (
+                      <div key={item.unit_code} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-800 truncate">{item.unit_name}</p>
+                            <p className="text-xs text-slate-500">{item.unit_code}</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit"}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete"}><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>{item.status}</Badge>
+                        </div>
+                      </div>
+                    ))}
+                    {isFetchingNextUnit && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more units...</span></div>}
+                  </div>
+                )}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:flex flex-col h-[600px]">
+                <div className="flex-1 overflow-auto rounded-b-2xl">
+                  <table className="w-full caption-bottom text-sm">
+                    <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-b">
+                        <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('unit_code', unitSort, setUnitSort)}>Code <SortIcon col="unit_code" sort={unitSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('unit_name', unitSort, setUnitSort)}>UOM <SortIcon col="unit_name" sort={unitSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', unitSort, setUnitSort)}>Status <SortIcon col="status" sort={unitSort} /></TableHead>
+                        <TableHead className="text-right pr-6">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isUnitLoading && unitsList.length === 0 ? (
+                        [...Array(8)].map((_, i) => (
+                          <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                            <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                            <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : unitsList.length === 0 ? (
+                        <TableRow><TableCell colSpan={4} className="text-center py-20 text-slate-400">No units found</TableCell></TableRow>
+                      ) : (
+                        <>
+                          {sortedUnits.map((item: any) => (
+                            <TableRow key={item.unit_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                              <TableCell className="font-medium pl-6">{item.unit_code}</TableCell>
+                              <TableCell className="font-semibold text-slate-900">{item.unit_name}</TableCell>
+                              <TableCell>
+                                <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                  {item.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right pr-6">
+                                <div className="flex justify-end gap-2">
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Unit"}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Unit"}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {/* Infinite Scroll Sentinel */}
+                          <TableRow ref={unitEndRef}>
+                            <TableCell colSpan={6} className="p-0 h-12 border-none">
+                              {isFetchingNextUnit && (
+                                <div className="flex items-center justify-center py-4 text-slate-400 bg-slate-50/20">
+                                  <div className="flex gap-1.5 items-center bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]"></div>
+                                    <div className="h-1.5 w-1.5 bg-primary animate-bounce"></div>
+                                    <span className="text-xs font-medium ml-2 text-slate-500">Loading more units...</span>
+                                  </div>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </table>
+                </div>
+              </div>
+              </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("raw_materials") && (
+        <TabsContent value="raw_materials">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <FlaskConical className="h-5 w-5 text-primary" />
+                    Raw Materials List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your raw material database</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setRawMaterialSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${rawMaterialSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setRawMaterialSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${rawMaterialSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingRawMaterials.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${rawMaterialSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingRawMaterials.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {rawMaterialSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingRawMaterials.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingRawMaterials.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.raw_material_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.raw_material_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('raw_materials', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'raw_materials', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('raw_material_code', rawMaterialSort, setRawMaterialSort)}>Code <SortIcon col="raw_material_code" sort={rawMaterialSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', rawMaterialSort, setRawMaterialSort)}>Name <SortIcon col="name" sort={rawMaterialSort} /></TableHead>
+                          <TableHead>Main UOM</TableHead>
+                          <TableHead>Type of Supply</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', rawMaterialSort, setRawMaterialSort)}>Status <SortIcon col="status" sort={rawMaterialSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isRawMaterialLoading && rawMaterialsList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : rawMaterialsList.length === 0 ? (
+                          <TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">No raw materials found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedRawMaterials.map((item: any) => (
+                              <TableRow key={item.raw_material_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.raw_material_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                                <TableCell>{unitOptions.find((u: any) => u.id === item.main_uom_id)?.unit_name || "—"}</TableCell>
+                                <TableCell>{item.type_of_supply || "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Raw Material"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Raw Material"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={rawMaterialEndRef}>
+                              <TableCell colSpan={6} className="p-0 h-12 border-none">
+                                {isFetchingNextRawMaterial && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more raw materials...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("semi_finished_goods") && (
+        <TabsContent value="semi_finished_goods">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Factory className="h-5 w-5 text-primary" />
+                    Semi-Finished Goods List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your semi-finished goods database</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setSemiFinishedGoodSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${semiFinishedGoodSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setSemiFinishedGoodSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${semiFinishedGoodSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingSemiFinishedGoods.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${semiFinishedGoodSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingSemiFinishedGoods.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {semiFinishedGoodSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingSemiFinishedGoods.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingSemiFinishedGoods.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.semi_finished_good_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.semi_finished_good_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('semi_finished_goods', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'semi_finished_goods', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('semi_finished_good_code', semiFinishedGoodSort, setSemiFinishedGoodSort)}>Code <SortIcon col="semi_finished_good_code" sort={semiFinishedGoodSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', semiFinishedGoodSort, setSemiFinishedGoodSort)}>Name <SortIcon col="name" sort={semiFinishedGoodSort} /></TableHead>
+                          <TableHead>Main UOM</TableHead>
+                          <TableHead>Converted Kg</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', semiFinishedGoodSort, setSemiFinishedGoodSort)}>Status <SortIcon col="status" sort={semiFinishedGoodSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isSemiFinishedGoodLoading && semiFinishedGoodsList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : semiFinishedGoodsList.length === 0 ? (
+                          <TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">No semi-finished goods found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedSemiFinishedGoods.map((item: any) => (
+                              <TableRow key={item.semi_finished_good_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.semi_finished_good_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                                <TableCell>{unitOptions.find((u: any) => u.id === item.main_uom_id)?.unit_name || "—"}</TableCell>
+                                <TableCell>{item.converted_kg ?? "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Semi-Finished Good"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Semi-Finished Good"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={semiFinishedGoodEndRef}>
+                              <TableCell colSpan={6} className="p-0 h-12 border-none">
+                                {isFetchingNextSemiFinishedGood && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more semi-finished goods...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("petrol_pumps") && (
+        <TabsContent value="petrol_pumps">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Fuel className="h-5 w-5 text-primary" />
+                    Petrol Pumps List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your petrol pump database</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setPetrolPumpSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${petrolPumpSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setPetrolPumpSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${petrolPumpSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingPetrolPumps.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${petrolPumpSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingPetrolPumps.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {petrolPumpSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingPetrolPumps.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingPetrolPumps.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.petrol_pump_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.petrol_pump_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.petrol_pump_name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('petrol_pumps', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'petrol_pumps', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('petrol_pump_code', petrolPumpSort, setPetrolPumpSort)}>Code <SortIcon col="petrol_pump_code" sort={petrolPumpSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('petrol_pump_name', petrolPumpSort, setPetrolPumpSort)}>Name <SortIcon col="petrol_pump_name" sort={petrolPumpSort} /></TableHead>
+                          <TableHead>Mobile</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', petrolPumpSort, setPetrolPumpSort)}>Status <SortIcon col="status" sort={petrolPumpSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isPetrolPumpLoading && petrolPumpsList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : petrolPumpsList.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-20 text-slate-400">No petrol pumps found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedPetrolPumps.map((item: any) => (
+                              <TableRow key={item.petrol_pump_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.petrol_pump_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.petrol_pump_name}</TableCell>
+                                <TableCell>{item.mobile_no || "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Petrol Pump"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Petrol Pump"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={petrolPumpEndRef}>
+                              <TableCell colSpan={5} className="p-0 h-12 border-none">
+                                {isFetchingNextPetrolPump && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more petrol pumps...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("cd_rules") && (
+        <TabsContent value="cd_rules">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Percent className="h-5 w-5 text-primary" />
+                    Cash Discount Rules
+                  </CardTitle>
+                  <CardDescription className="mt-1">Maintain Cash Discount rules by Stock Category, rate, and payment condition</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setCdRuleSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${cdRuleSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setCdRuleSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${cdRuleSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingCdRules.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${cdRuleSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingCdRules.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {cdRuleSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingCdRules.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Stock Category</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingCdRules.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          const categoryName = (stockCategoryData || []).find((c: any) => String(c.id) === String(item.stock_category_id))?.name
+                          return (
+                          <TableRow key={item.cd_rule_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.cd_rule_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{categoryName || "—"}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('cd_rules', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'cd_rules', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('cd_rule_code', cdRuleSort, setCdRuleSort)}>Code <SortIcon col="cd_rule_code" sort={cdRuleSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('wef_date', cdRuleSort, setCdRuleSort)}>W.E.F. Date <SortIcon col="wef_date" sort={cdRuleSort} /></TableHead>
+                          <TableHead>Stock Category</TableHead>
+                          <TableHead>Discount Rate</TableHead>
+                          <TableHead>Payment Days</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', cdRuleSort, setCdRuleSort)}>Status <SortIcon col="status" sort={cdRuleSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isCdRuleLoading && cdRulesList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-24 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-28 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-12 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : cdRulesList.length === 0 ? (
+                          <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">No CD rules found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedCdRules.map((item: any) => {
+                              const categoryName = (stockCategoryData || []).find((c: any) => String(c.id) === String(item.stock_category_id))?.name
+                              return (
+                              <TableRow key={item.cd_rule_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.cd_rule_code}</TableCell>
+                                <TableCell>{item.wef_date ? new Date(item.wef_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{categoryName || "—"}</TableCell>
+                                <TableCell>{item.discount_rate_per_main_uom != null ? `₹${item.discount_rate_per_main_uom}` : "—"}</TableCell>
+                                <TableCell>{item.payment_condition_days != null ? `${item.payment_condition_days} days` : "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit CD Rule"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete CD Rule"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )})}
+                            <TableRow ref={cdRuleEndRef}>
+                              <TableCell colSpan={7} className="p-0 h-12 border-none">
+                                {isFetchingNextCdRule && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more CD rules...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("tds_rules") && (
+        <TabsContent value="tds_rules">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Landmark className="h-5 w-5 text-primary" />
+                    TDS Rules
+                  </CardTitle>
+                  <CardDescription className="mt-1">Placeholder master — pending client scoping (Section 21 has no specified fields/rules)</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setTdsRuleSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tdsRuleSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setTdsRuleSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${tdsRuleSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingTdsRules.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${tdsRuleSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingTdsRules.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {tdsRuleSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingTdsRules.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingTdsRules.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.tds_rule_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.tds_rule_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('tds_rules', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'tds_rules', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('tds_rule_code', tdsRuleSort, setTdsRuleSort)}>Code <SortIcon col="tds_rule_code" sort={tdsRuleSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', tdsRuleSort, setTdsRuleSort)}>Name <SortIcon col="name" sort={tdsRuleSort} /></TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', tdsRuleSort, setTdsRuleSort)}>Status <SortIcon col="status" sort={tdsRuleSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isTdsRuleLoading && tdsRulesList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-12 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : tdsRulesList.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-20 text-slate-400">No TDS rules found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedTdsRules.map((item: any) => (
+                              <TableRow key={item.tds_rule_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.tds_rule_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                                <TableCell>{item.rate != null && item.rate !== '' ? `${item.rate}%` : "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit TDS Rule"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete TDS Rule"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={tdsRuleEndRef}>
+                              <TableCell colSpan={5} className="p-0 h-12 border-none">
+                                {isFetchingNextTdsRule && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more TDS rules...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("bhada_rates") && (
+        <TabsContent value="bhada_rates">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Route className="h-5 w-5 text-primary" />
+                    Bhada Rates
+                  </CardTitle>
+                  <CardDescription className="mt-1">Placeholder master — pending client scoping (Section 22 has no specified fields/rules)</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setBhadaRateSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${bhadaRateSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setBhadaRateSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${bhadaRateSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingBhadaRates.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${bhadaRateSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingBhadaRates.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {bhadaRateSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingBhadaRates.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingBhadaRates.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.bhada_rate_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.bhada_rate_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('bhada_rates', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'bhada_rates', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('bhada_rate_code', bhadaRateSort, setBhadaRateSort)}>Code <SortIcon col="bhada_rate_code" sort={bhadaRateSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', bhadaRateSort, setBhadaRateSort)}>Name <SortIcon col="name" sort={bhadaRateSort} /></TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', bhadaRateSort, setBhadaRateSort)}>Status <SortIcon col="status" sort={bhadaRateSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isBhadaRateLoading && bhadaRatesList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-12 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : bhadaRatesList.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-20 text-slate-400">No Bhada rates found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedBhadaRates.map((item: any) => (
+                              <TableRow key={item.bhada_rate_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.bhada_rate_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
+                                <TableCell>{item.rate != null && item.rate !== '' ? item.rate : "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Bhada Rate"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Bhada Rate"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={bhadaRateEndRef}>
+                              <TableCell colSpan={5} className="p-0 h-12 border-none">
+                                {isFetchingNextBhadaRate && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more Bhada rates...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("insurance_details") && (
+        <TabsContent value="insurance_details">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Shield className="h-5 w-5 text-primary" />
+                    Insurance Details List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Manage your insurance policies</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setInsuranceDetailSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${insuranceDetailSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setInsuranceDetailSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${insuranceDetailSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingInsuranceDetails.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${insuranceDetailSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingInsuranceDetails.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {insuranceDetailSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingInsuranceDetails.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingInsuranceDetails.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.insurance_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.insurance_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{item.insurance_company_name}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('insurance_details', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'insurance_details', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('insurance_code', insuranceDetailSort, setInsuranceDetailSort)}>Code <SortIcon col="insurance_code" sort={insuranceDetailSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('insurance_company_name', insuranceDetailSort, setInsuranceDetailSort)}>Company <SortIcon col="insurance_company_name" sort={insuranceDetailSort} /></TableHead>
+                          <TableHead>Policy No.</TableHead>
+                          <TableHead>Valid Upto</TableHead>
+                          <TableHead>Sum Insured</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', insuranceDetailSort, setInsuranceDetailSort)}>Status <SortIcon col="status" sort={insuranceDetailSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isInsuranceDetailLoading && insuranceDetailsList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-20 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : insuranceDetailsList.length === 0 ? (
+                          <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">No insurance details found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedInsuranceDetails.map((item: any) => (
+                              <TableRow key={item.insurance_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.insurance_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{item.insurance_company_name}</TableCell>
+                                <TableCell>{item.policy_number || "—"}</TableCell>
+                                <TableCell>{formatDocDate(item.valid_upto)}</TableCell>
+                                <TableCell>{item.sum_insured ? `₹${item.sum_insured}` : "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Insurance Detail"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Insurance Detail"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={insuranceDetailEndRef}>
+                              <TableCell colSpan={7} className="p-0 h-12 border-none">
+                                {isFetchingNextInsuranceDetail && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more insurance details...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("conversion_formulas") && (
+        <TabsContent value="conversion_formulas">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Calculator className="h-5 w-5 text-primary" />
+                    Conversion Formulas List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Define price conversion formulas between Finished Goods</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setConversionFormulaSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${conversionFormulaSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setConversionFormulaSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${conversionFormulaSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingConversionFormulas.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${conversionFormulaSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingConversionFormulas.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {conversionFormulaSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingConversionFormulas.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Base Item</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingConversionFormulas.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          const baseItem = skuOptions.find((s: any) => s.id === item.base_item_id)
+                          return (
+                          <TableRow key={item.conversion_formula_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.conversion_formula_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{baseItem?.sku_name || `#${item.base_item_id}`}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('conversion_formulas', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'conversion_formulas', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('conversion_formula_code', conversionFormulaSort, setConversionFormulaSort)}>Code <SortIcon col="conversion_formula_code" sort={conversionFormulaSort} /></TableHead>
+                          <TableHead>Base Item</TableHead>
+                          <TableHead>Child Item</TableHead>
+                          <TableHead>Steps</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', conversionFormulaSort, setConversionFormulaSort)}>Status <SortIcon col="status" sort={conversionFormulaSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isConversionFormulaLoading && conversionFormulasList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-12 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : conversionFormulasList.length === 0 ? (
+                          <TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">No conversion formulas found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedConversionFormulas.map((item: any) => {
+                              const baseItem = skuOptions.find((s: any) => s.id === item.base_item_id)
+                              const childItem = skuOptions.find((s: any) => s.id === item.child_item_id)
+                              return (
+                              <TableRow key={item.conversion_formula_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.conversion_formula_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{baseItem?.sku_name || `#${item.base_item_id}`}</TableCell>
+                                <TableCell>{childItem?.sku_name || `#${item.child_item_id}`}</TableCell>
+                                <TableCell>{(item.steps || []).length}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Conversion Formula"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Conversion Formula"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )})}
+                            <TableRow ref={conversionFormulaEndRef}>
+                              <TableCell colSpan={6} className="p-0 h-12 border-none">
+                                {isFetchingNextConversionFormula && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more conversion formulas...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        {visibleTabs.includes("price_levels") && (
+        <TabsContent value="price_levels">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <Tag className="h-5 w-5 text-primary" />
+                    Price Levels List
+                  </CardTitle>
+                  <CardDescription className="mt-1">Maintain dated Finished Goods price lists</CardDescription>
+                </div>
+              </div>
+              {isAdminOrSuper && (
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setPriceLevelSubTab('active')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${priceLevelSubTab === 'active' ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Active Records</button>
+                  <button onClick={() => setPriceLevelSubTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${priceLevelSubTab === 'pending' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    Pending Approval {pendingPriceLevels.length > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${priceLevelSubTab === 'pending' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'}`}>{pendingPriceLevels.length}</span>}
+                  </button>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {priceLevelSubTab === 'pending' ? (
+                <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                  {pendingPriceLevels.length === 0 ? <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400"><CheckCircle2 className="h-10 w-10 text-emerald-300" /><p className="text-sm font-medium">No pending approvals</p></div> : (
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6">Code</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Effective Date</TableHead>
+                          <TableHead>Submitted By</TableHead>
+                          <TableHead>Submitted On</TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingPriceLevels.map(item => {
+                          const isEdit = item.request_type === 'edit'
+                          const submittedBy = isEdit ? (item.pending_edit_by_name || item.created_by_name) : item.created_by_name
+                          const submittedOn = isEdit ? item.pending_edit_at : item.created_at
+                          return (
+                          <TableRow key={item.price_level_code} className="hover:bg-amber-50/30 border-b border-slate-50 h-16">
+                            <TableCell className="font-medium pl-6 text-slate-500">{item.price_level_code}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={isEdit ? "border-blue-300 text-blue-700 bg-blue-50" : "border-emerald-300 text-emerald-700 bg-emerald-50"}>
+                                {isEdit ? "Edit" : "New"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">{formatDocDate(item.effective_date)}</TableCell>
+                            <TableCell>{submittedBy || "—"}</TableCell>
+                            <TableCell className="text-slate-500 text-xs">{submittedOn ? new Date(submittedOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
+                            <TableCell className="text-right pr-6">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" onClick={() => openApprovalModal('price_levels', item)} disabled={isReviewing} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white px-3 rounded-lg">
+                                  <Check className="h-3.5 w-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setRejectDialogContext({ tab: 'price_levels', id: item.id })} disabled={isReviewing} className="h-8 border-red-200 text-red-600 hover:bg-red-50 px-3 rounded-lg">
+                                  <X className="h-3.5 w-3.5 mr-1" /> Reject
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )})}
+                      </TableBody>
+                    </table>
+                  )}
+                </div></div>
+              ) : (
+                <div className="flex flex-col h-[600px]">
+                  <div className="flex-1 overflow-auto rounded-b-2xl">
+                    <table className="w-full caption-bottom text-sm">
+                      <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-b">
+                          <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('price_level_code', priceLevelSort, setPriceLevelSort)}>Code <SortIcon col="price_level_code" sort={priceLevelSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('effective_date', priceLevelSort, setPriceLevelSort)}>Effective Date <SortIcon col="effective_date" sort={priceLevelSort} /></TableHead>
+                          <TableHead>Items Priced</TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', priceLevelSort, setPriceLevelSort)}>Status <SortIcon col="status" sort={priceLevelSort} /></TableHead>
+                          <TableHead className="text-right pr-6">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {isPriceLevelLoading && priceLevelsList.length === 0 ? (
+                          [...Array(8)].map((_, i) => (
+                            <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                              <TableCell className="pl-6"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-24 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-4 w-12 bg-slate-200 animate-pulse rounded" /></TableCell>
+                              <TableCell><div className="h-6 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                              <TableCell className="pr-6"><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                            </TableRow>
+                          ))
+                        ) : priceLevelsList.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-20 text-slate-400">No price levels found</TableCell></TableRow>
+                        ) : (
+                          <>
+                            {sortedPriceLevels.map((item: any) => (
+                              <TableRow key={item.price_level_code} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                                <TableCell className="font-medium pl-6">{item.price_level_code}</TableCell>
+                                <TableCell className="font-semibold text-slate-900">{formatDocDate(item.effective_date)}</TableCell>
+                                <TableCell>{(item.items || []).length}</TableCell>
+                                <TableCell>
+                                  <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                                    {item.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right pr-6">
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Price Level"}>
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Price Level"}>
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow ref={priceLevelEndRef}>
+                              <TableCell colSpan={5} className="p-0 h-12 border-none">
+                                {isFetchingNextPriceLevel && <div className="flex items-center justify-center py-4 text-slate-400 text-xs">Loading more price levels...</div>}
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        )}
+                      </TableBody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
         {visibleTabs.includes("sku_details") && (
         <TabsContent value="sku_details">
           <Card className="shadow-xl border-none rounded-2xl bg-white">
@@ -4331,9 +8961,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <div>
                   <CardTitle className="text-xl font-bold flex items-center gap-2">
                     <Package className="h-5 w-5 text-primary" />
-                    SKU Details List
+                    Finished Goods List
                   </CardTitle>
-                  <CardDescription className="mt-1">Manage your SKU database</CardDescription>
+                  <CardDescription className="mt-1">Manage your Finished Goods database</CardDescription>
                 </div>
               </div>
               {isAdminOrSuper && (
@@ -4385,9 +9015,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                       <table className="hidden md:table w-full caption-bottom text-sm">
                         <TableHeader className="sticky top-0 z-20 bg-amber-50 shadow-sm">
                           <TableRow className="hover:bg-transparent border-b">
-                            <TableHead className="pl-6">SKU Code</TableHead>
+                            <TableHead className="pl-6">FG Code</TableHead>
                             <TableHead>Type</TableHead>
-                            <TableHead>SKU Name</TableHead>
+                            <TableHead>Finished Goods Name</TableHead>
                             <TableHead>Main UOM</TableHead>
                             <TableHead>Submitted By</TableHead>
                             <TableHead>Submitted On</TableHead>
@@ -4435,7 +9065,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 {isSkuLoading && skuDetails.length === 0 ? (
                   <div className="p-4 space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="border border-slate-100 rounded-xl p-4 space-y-2 animate-pulse"><div className="h-4 w-32 bg-slate-200 rounded" /><div className="h-3 w-48 bg-slate-200 rounded" /></div>)}</div>
                 ) : skuDetails.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400">No SKUs found</div>
+                  <div className="text-center py-16 text-slate-400">No Finished Goods found</div>
                 ) : (
                   <div className="p-3 space-y-3 overflow-auto" style={{ maxHeight: 600 }}>
                     {sortedSkuDetails.map(item => (
@@ -4462,7 +9092,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         </div>
                       </div>
                     ))}
-                    {isFetchingNextSku && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more SKUs...</span></div>}
+                    {isFetchingNextSku && <div className="flex items-center justify-center py-4 gap-2 text-slate-400 text-xs"><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]" /><div className="h-1.5 w-1.5 bg-primary animate-bounce" /><span className="ml-2">Loading more Finished Goods...</span></div>}
                   </div>
                 )}
               </div>
@@ -4473,7 +9103,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                     <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
                       <TableRow className="hover:bg-transparent border-b">
                         <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('sku_code', skuSort, setSkuSort)}>ID <SortIcon col="sku_code" sort={skuSort} /></TableHead>
-                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('sku_name', skuSort, setSkuSort)}>SKU Name <SortIcon col="sku_name" sort={skuSort} /></TableHead>
+                        <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('sku_name', skuSort, setSkuSort)}>Finished Goods Name <SortIcon col="sku_name" sort={skuSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('main_uom', skuSort, setSkuSort)}>Main UOM <SortIcon col="main_uom" sort={skuSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('alternate_uom', skuSort, setSkuSort)}>Alt. UOM <SortIcon col="alternate_uom" sort={skuSort} /></TableHead>
                         <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('packing_weight', skuSort, setSkuSort)}>Packing Wt <SortIcon col="packing_weight" sort={skuSort} /></TableHead>
@@ -4497,7 +9127,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                           </TableRow>
                         ))
                       ) : skuDetails.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-20 text-slate-400">No SKUs found</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={8} className="text-center py-20 text-slate-400">No Finished Goods found</TableCell></TableRow>
                       ) : (
                         <>
                           {sortedSkuDetails.map(item => (
@@ -4522,10 +9152,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                               </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit SKU"}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Finished Good"}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
-                                  <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete SKU"}>
+                                  <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Finished Good"}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -4541,7 +9171,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                                     <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.3s]"></div>
                                     <div className="h-1.5 w-1.5 bg-primary animate-bounce [animation-delay:-0.15s]"></div>
                                     <div className="h-1.5 w-1.5 bg-primary animate-bounce"></div>
-                                    <span className="text-xs font-medium ml-2 text-slate-500">Loading more SKUs...</span>
+                                    <span className="text-xs font-medium ml-2 text-slate-500">Loading more Finished Goods...</span>
                                   </div>
                                 </div>
                               )}
@@ -5664,6 +10294,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   depots: approvalReviewModal.item.id,
                   brokers: approvalReviewModal.item.id,
                   salespersons: approvalReviewModal.item.id,
+                  ledger_groups: approvalReviewModal.item.id,
+                  stock_groups: approvalReviewModal.item.id,
+                  units: approvalReviewModal.item.id,
+                  raw_materials: approvalReviewModal.item.id,
+                  semi_finished_goods: approvalReviewModal.item.id,
+                  insurance_details: approvalReviewModal.item.id,
+                  conversion_formulas: approvalReviewModal.item.id,
+                  price_levels: approvalReviewModal.item.id,
+                  petrol_pumps: approvalReviewModal.item.id,
+                  cd_rules: approvalReviewModal.item.id,
+                  tds_rules: approvalReviewModal.item.id,
+                  bhada_rates: approvalReviewModal.item.id,
                   sku_details: approvalReviewModal.item.id,
                   vehicle_master: approvalReviewModal.item.id,
                   driver_master: approvalReviewModal.item.id,
@@ -5707,6 +10349,89 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Quick Add Dialog (shared: inline "+" next to Unit/Ledger/SAC Code fields) */}
+      <Dialog open={!!quickAddDialog} onOpenChange={(open) => { if (!open) setQuickAddDialog(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{quickAddDialog?.type === 'unit' ? 'Add Unit' : quickAddDialog?.type === 'ledger' ? 'Add Ledger' : quickAddDialog?.type === 'hsn_code' ? 'Add HSN Code' : 'Add SAC Code'}</DialogTitle>
+            <DialogDescription>
+              {quickAddDialog?.type === 'unit' ? 'Create a new Unit without leaving this form.' : quickAddDialog?.type === 'ledger' ? 'Create a new Ledger without leaving this form.' : quickAddDialog?.type === 'hsn_code' ? 'Create a new HSN Code without leaving this form.' : 'Create a new SAC Code without leaving this form.'}
+            </DialogDescription>
+          </DialogHeader>
+          {quickAddDialog?.type === 'unit' ? (
+            <div className="grid gap-4 py-2 px-1">
+              <div className="space-y-2">
+                <Label htmlFor="qa_unit_name">UOM *</Label>
+                <Input id="qa_unit_name" value={quickAddForm.unit_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, unit_name: e.target.value })} placeholder="e.g. Kilograms" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="qa_unit_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm({ ...quickAddForm, status: checked === true ? 'Active' : 'Inactive' })} />
+                <Label htmlFor="qa_unit_is_active" className="cursor-pointer">Is Active?</Label>
+              </div>
+            </div>
+          ) : quickAddDialog?.type === 'ledger' ? (
+            <div className="grid gap-4 py-2 px-1">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="qa_ledger_code">Ledger Code</Label>
+                  <Input id="qa_ledger_code" value={quickAddForm.ledger_code || ''} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qa_ledger_name">Ledger Name *</Label>
+                  <Input id="qa_ledger_name" value={quickAddForm.ledger_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, ledger_name: e.target.value })} placeholder="e.g. Freight Charges" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qa_ledger_group_id">Ledger Group</Label>
+                <Select value={quickAddForm.ledger_group_id ? String(quickAddForm.ledger_group_id) : ''} onValueChange={val => setQuickAddForm({ ...quickAddForm, ledger_group_id: val })}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select ledger group" /></SelectTrigger>
+                  <SelectContent>
+                    {ledgerGroupOptions.map((g: any) => <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : quickAddDialog?.type === 'hsn_code' ? (
+            <div className="grid gap-4 py-2 px-1">
+              <div className="space-y-2">
+                <Label htmlFor="qa_hsn_code">HSN Code (8 digits) *</Label>
+                <Input id="qa_hsn_code" value={quickAddForm.code || ''} maxLength={8} onChange={e => setQuickAddForm({ ...quickAddForm, code: e.target.value.replace(/\D/g, '') })} placeholder="e.g. 73269099" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qa_hsn_name">Description *</Label>
+                <Input id="qa_hsn_name" value={quickAddForm.name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, name: e.target.value })} placeholder="e.g. Test raw material" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="qa_hsn_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm({ ...quickAddForm, status: checked === true ? 'Active' : 'Inactive' })} />
+                <Label htmlFor="qa_hsn_is_active" className="cursor-pointer">Is Active?</Label>
+              </div>
+            </div>
+          ) : quickAddDialog?.type === 'sac_code' ? (
+            <div className="grid gap-4 py-2 px-1">
+              <div className="space-y-2">
+                <Label htmlFor="qa_sac_code">SAC Code (6 digits) *</Label>
+                <Input id="qa_sac_code" value={quickAddForm.code || ''} maxLength={6} onChange={e => setQuickAddForm({ ...quickAddForm, code: e.target.value.replace(/\D/g, '') })} placeholder="e.g. 996511" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qa_sac_name">Description *</Label>
+                <Input id="qa_sac_name" value={quickAddForm.name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, name: e.target.value })} placeholder="e.g. Construction services" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="qa_sac_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm({ ...quickAddForm, status: checked === true ? 'Active' : 'Inactive' })} />
+                <Label htmlFor="qa_sac_is_active" className="cursor-pointer">Is Active?</Label>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickAddDialog(null)} disabled={isQuickAdding}>Cancel</Button>
+            <Button onClick={submitQuickAdd} disabled={isQuickAdding}>
+              {isQuickAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Footer */}
       <div className="flex items-center justify-center pt-12 border-t border-slate-100 opacity-100">

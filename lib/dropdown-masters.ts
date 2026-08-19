@@ -182,6 +182,15 @@ export const DEFAULT_MASTER_RECORDS: Record<LookupType, any[]> = {
     { id: '6', code: 'KA01', name: 'Bengaluru Central (Koramangala)', rto_name: 'Bengaluru Central', status: 'Active' },
     { id: '7', code: 'DL01', name: 'Delhi North (Mall Road)', rto_name: 'Delhi North', status: 'Active' },
   ],
+  stock_category: [
+    { id: '1', name: 'Bulk Packaging', status: 'Active' },
+    { id: '2', name: 'Retail Packaging', status: 'Active' },
+  ],
+  oil_type: [
+    { id: '1', name: 'Rice Bran Refined Oil', status: 'Active' },
+    { id: '2', name: 'Soya Bean Refined Oil', status: 'Active' },
+    { id: '3', name: 'Palm Olein Refined Oil', status: 'Active' },
+  ],
 };
 
 /**
