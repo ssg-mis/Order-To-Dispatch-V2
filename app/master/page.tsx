@@ -3234,7 +3234,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
 
   const renderCustomerForm = () => (
-    <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
+    <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="customer_id">Customer ID *</Label>
@@ -5742,7 +5742,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   }
 
   const renderDriverForm = () => (
-    <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
+    <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driver ID *</Label>
@@ -5884,7 +5884,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   )
 
   const renderTransportForm = () => (
-    <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
+    <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Transport ID *</Label>
