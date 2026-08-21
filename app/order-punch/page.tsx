@@ -143,6 +143,28 @@ export default function OrderPunchPage() {
     }
   }
 
+  // Godown gates the Customer picker: changing it clears any already-selected
+  // customer that isn't tagged to the newly-selected Godown (re-checked via a
+  // real backend query, not just cleared unconditionally).
+  const handleDepoChange = async (val: string) => {
+    setDepoName(val)
+    if (!customerName) return
+    const selectedDepot = depots.find(d => d.depot_name === val)
+    if (!selectedDepot) { setCustomerName(""); return }
+    const [name, gstin] = customerName.split('|')
+    try {
+      const res = await customerApi.getAll({ search: name, depot_id: selectedDepot.id, limit: 10 })
+      const list = res.success ? (res.data.customers || []) : []
+      const stillValid = list.some((c: any) => c.customer_name === name && (c.gstin || '') === gstin)
+      if (!stillValid) {
+        setCustomerName("")
+        toast({ title: "Customer cleared", description: "The previously selected customer isn't tagged to this Godown.", variant: "destructive" })
+      }
+    } catch {
+      setCustomerName("")
+    }
+  }
+
   // Function to fetch SKUs
   const fetchSkus = async () => {
     try {
@@ -1224,7 +1246,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                 <Label htmlFor="customerName">Customer Name</Label>
                 {customerType === "existing" ? (
                   <AsyncCombobox
-                    placeholder={isLoadingCustomers ? "Loading..." : "Select existing customer"}
+                    placeholder={!depoName ? "Select a Godown first" : (isLoadingCustomers ? "Loading..." : "Select existing customer")}
+                    disabled={!depoName}
                     searchPlaceholder="Search customers..."
                     value={customerName}
                     onValueChange={setCustomerName}
@@ -1237,7 +1260,10 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       }
                     }}
                     fetchOptions={async (search: string, page: number) => {
-                      const res = await customerApi.getAll({ search, page, limit: 20 });
+                      const selectedDepot = depots.find(d => d.depot_name === depoName);
+                      // Godown-gated: only customers tagged to the selected Godown, filtered
+                      // server-side (not by loading every customer and filtering in the browser).
+                      const res = await customerApi.getAll({ search, page, limit: 20, depot_id: selectedDepot?.id });
                       const list = res.data.customers || [];
                       return {
                         options: list.map((c: any) => ({ 
@@ -1351,7 +1377,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     placeholder="Select Depo"
                     searchPlaceholder="Search depots..."
                     value={depoName}
-                    onValueChange={setDepoName}
+                    onValueChange={handleDepoChange}
                     onSelectOption={(opt: any) => {
                       if (opt.original) {
                         setDepots(prev => {

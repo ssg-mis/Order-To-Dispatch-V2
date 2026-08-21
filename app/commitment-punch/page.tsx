@@ -207,42 +207,16 @@ export default function CommitmentPunchPage() {
     }
   }, [isProcessOpen])
 
-  // Auto-select Reliance customer when Add Commitment dialog opens
-  useEffect(() => {
-    if (isAddOpen && !partyName) {
-      const relianceName = "Reliance Consumer Products Limited"
-      setPartyName(relianceName)
-      // Fetch customer details from API to auto-fill contact info
-      customerApi.getAll({ search: "Reliance", limit: 30 }).then((res: any) => {
-        const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
-        const found = items.find((c: any) =>
-          (c.customer_name || "").toLowerCase().includes("reliance consumer products")
-        ) || items.find((c: any) =>
-          (c.customer_name || "").toLowerCase().includes("reliance")
-        )
-        if (found) {
-          setContactPerson(found.contact_person || "")
-          setWhatsappNo(found.contact || "")
-          const parts = [found.address_line_1, found.address_line_2, found.state, found.pincode].filter(Boolean)
-          setCustomerAddress(parts.join(", "))
-          // Cache it too
-          setCustomerList((prev: any[]) => {
-            const exists = prev.find((c: any) => c.id === found.id)
-            return exists ? prev : [...prev, found]
-          })
-        }
-      }).catch(() => { })
-    }
-  }, [isAddOpen])
-
   // ── Customer / Broker / Salesperson fetch callbacks ─────────
+  // Only customers flagged "Is Required for Commitment" = Yes appear here,
+  // filtered server-side - never by matching a name substring. The dialog opens
+  // blank (no auto-selected default customer); the user picks one every time.
   const fetchCustomerOptions = useCallback(async (search: string, page: number) => {
     try {
-      const res = await customerApi.getAll({ search: search || "Reliance", page, limit: 30 })
+      const res = await customerApi.getAll({ search, page, limit: 30, is_required_for_commitment: "Yes" })
       const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
       const seen = new Map<string, boolean>()
       const options = items
-        .filter((c: any) => (c.customer_name || "").toLowerCase().includes("reliance"))
         .map((c: any) => ({ value: c.customer_name, label: c.customer_name, original: c }))
         .filter((o: any) => {
           if (!o.value || seen.has(o.value)) return false
