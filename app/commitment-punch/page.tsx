@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react"
 import type React from "react"
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,7 +31,7 @@ import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi } from "@/lib/api-service"
+import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -67,6 +68,8 @@ type PendingCommitment = {
   remaining_qty: number
   delivery_qty?: number
   po_pending_qty?: number
+  dispatch_from?: string
+  depot_name?: string
 }
 
 type SkuRow = {
@@ -86,6 +89,7 @@ const PAGE_COLUMNS = [
   { id: "commitment_no",  label: "Commitment No." },
   { id: "commitment_date", label: "Date" },
   { id: "party_name",    label: "Customer Name" },
+  { id: "dispatch_from", label: "Dispatch from" },
   { id: "oil_type",      label: "Oil Type" },
   { id: "rate",          label: "Rate" },
   { id: "quantity",      label: "Qty (MT)" },
@@ -144,6 +148,7 @@ export default function CommitmentPunchPage() {
   const [detailsRow, setDetailsRow] = useState<PendingCommitment | null>(null)
   const [detailsData, setDetailsData] = useState<any>(null)
   const [isLoadingDetails, setIsLoadingDetails] = useState(false)
+  const [detailsType, setDetailsType] = useState<"raised" | "delivered" | "pending">("raised")
 
   // ── Add Commitment form state ───────────────────────────────
   const [commitmentDate, setCommitmentDate] = useState(new Date().toISOString().split("T")[0])
@@ -151,11 +156,18 @@ export default function CommitmentPunchPage() {
   const [contactPerson, setContactPerson] = useState("")
   const [whatsappNo, setWhatsappNo] = useState("")
   const [customerAddress, setCustomerAddress] = useState("")
+  const [shipToAddress, setShipToAddress] = useState("")
   const [customerList, setCustomerList] = useState<any[]>([])
   const [orderType, setOrderType] = useState("")
-  const [transportType, setTransportType] = useState("")
+  const [transportType, setTransportType] = useState("self")
   const [brokerName, setBrokerName] = useState("")
   const [salespersonName, setSalespersonName] = useState("")
+  const [orderThrough, setOrderThrough] = useState("Direct")
+  const [depotName, setDepotName] = useState("Banari")
+  const [advancePayment, setAdvancePayment] = useState("No")
+  const [paymentTerms, setPaymentTerms] = useState("7days")
+  const [remarks, setRemarks] = useState("")
+  const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [rows, setRows] = useState<ProductRow[]>([
     { id: "1", oil_type: "Rice Oil", quantity: "", unit: "Metric Ton", rate: "" },
   ])
@@ -179,8 +191,9 @@ export default function CommitmentPunchPage() {
   useEffect(() => { loadPending() }, [loadPending])
 
   // ── Fetch commitment details for popup ─────────────────────────────────────
-  const openDetails = async (row: PendingCommitment, e: React.MouseEvent) => {
+  const openDetails = async (row: PendingCommitment, e: React.MouseEvent, type: "raised" | "delivered" | "pending" = "raised") => {
     e.stopPropagation()
+    setDetailsType(type)
     setDetailsRow(row)
     setDetailsData(null)
     setIsDetailsOpen(true)
@@ -216,8 +229,53 @@ export default function CommitmentPunchPage() {
       const res = await customerApi.getAll({ search, page, limit: 30, is_required_for_commitment: "Yes" })
       const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
       const seen = new Map<string, boolean>()
+
+      const STATE_SHORT_MAP: Record<string, string> = {
+        "Chhattisgarh": "CG",
+        "Maharashtra": "MH",
+        "Madhya Pradesh": "MP",
+        "Uttar Pradesh": "UP",
+        "Delhi": "DL",
+        "Gujarat": "GJ",
+        "Rajasthan": "RJ",
+        "Punjab": "PB",
+        "Haryana": "HR",
+        "West Bengal": "WB",
+        "Bihar": "BR",
+        "Jharkhand": "JH",
+        "Odisha": "OR",
+        "Karnataka": "KA",
+        "Tamil Nadu": "TN",
+        "Andhra Pradesh": "AP",
+        "Telangana": "TS",
+        "Kerala": "KL"
+      }
+
       const options = items
-        .map((c: any) => ({ value: c.customer_name, label: c.customer_name, original: c }))
+        .map((c: any) => {
+          const addr1 = c.address_line_1 || ""
+          const city = addr1 ? addr1.split(",").pop().trim() : ""
+          const stateShort = c.state ? (STATE_SHORT_MAP[c.state] || c.state.substring(0, 2).toUpperCase()) : ""
+          const locationPart = [city, stateShort ? `(${stateShort})` : ""].filter(Boolean).join(" ")
+          
+          const gstinPart = c.gstin ? ` | GST: ${c.gstin}` : ""
+          const contactPart = c.contact ? ` | Mob: ${c.contact}` : ""
+          const contactPersonPart = c.contact_person ? ` | CP: ${c.contact_person}` : ""
+
+          const formattedDropdownLabel = (
+            <div className="text-xs whitespace-normal break-words py-1 w-full text-left font-normal text-slate-700 max-w-[500px]">
+              <span className="font-semibold text-slate-900">{c.customer_name}</span>
+              {`, ${locationPart}${gstinPart}${contactPart}${contactPersonPart}`}
+            </div>
+          )
+
+          return {
+            value: c.customer_name,
+            label: c.customer_name,
+            dropdownLabel: formattedDropdownLabel,
+            original: c
+          }
+        })
         .filter((o: any) => {
           if (!o.value || seen.has(o.value)) return false
           seen.set(o.value, true)
@@ -316,10 +374,17 @@ export default function CommitmentPunchPage() {
     setContactPerson("")
     setWhatsappNo("")
     setCustomerAddress("")
+    setShipToAddress("")
     setBrokerName("")
     setSalespersonName("")
+    setOrderThrough("Direct")
+    setDepotName("Banari")
+    setAdvancePayment("No")
+    setPaymentTerms("7days")
+    setRemarks("")
+    setPdfFile(null)
     setOrderType("")
-    setTransportType("")
+    setTransportType("self")
     setRows([{ id: "1", oil_type: "Rice Oil", quantity: "", unit: "Metric Ton", rate: "" }])
   }
 
@@ -355,17 +420,15 @@ export default function CommitmentPunchPage() {
     e.preventDefault()
     if (!partyName) { toast({ title: "Validation Error", description: "Customer name is required.", variant: "destructive" }); return }
     if (!commitmentDate) { toast({ title: "Validation Error", description: "Commitment date is required.", variant: "destructive" }); return }
-    if (orderType === "broker" && !brokerName) { toast({ title: "Validation Error", description: "Broker name is required.", variant: "destructive" }); return }
-    if (orderType === "salesperson" && !salespersonName) { toast({ title: "Validation Error", description: "Salesperson is required.", variant: "destructive" }); return }
+    if (orderThrough === "Broker" && !brokerName) { toast({ title: "Validation Error", description: "Broker name is required.", variant: "destructive" }); return }
+    if (orderThrough === "Salesperson" && !salespersonName) { toast({ title: "Validation Error", description: "Salesperson is required.", variant: "destructive" }); return }
     if (rows.some(r => !r.oil_type || !r.quantity || !r.rate)) {
       toast({ title: "Validation Error", description: "Fill Oil Type, Quantity and Rate for all rows.", variant: "destructive" }); return
     }
 
     setIsSubmitting(true)
     try {
-      // The backend links a commitment to the customer via a real FK
-      // (customerId), not the name string the combobox tracks - resolve it
-      // the same way pre-approval resolves a SKU name to an id.
+      // 1. Resolve Customer ID
       let customerId = customerList.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
       if (!customerId) {
         const res = await customerApi.getAll({ search: partyName, limit: 5 })
@@ -378,12 +441,61 @@ export default function CommitmentPunchPage() {
         return
       }
 
+      // 2. Resolve Depot ID
+      let depotId: number | null = null
+      if (depotName) {
+        const depotRes = await depotApi.getAll({ search: depotName, all: "true" })
+        const depotItems = depotRes.success ? (depotRes.data.depots || (Array.isArray(depotRes.data) ? depotRes.data : [])) : []
+        depotId = depotItems.find((d: any) => (d.depot_name || "").toLowerCase() === depotName.toLowerCase())?.id ?? null
+      }
+
+      // 3. Resolve Broker ID
+      let brokerId: number | null = null
+      if (orderThrough === "Broker" && brokerName) {
+        const brokerRes = await brokerApi.getAll({ search: brokerName, limit: 30 })
+        const brokerItems = brokerRes.success ? (brokerRes.data.brokers || (Array.isArray(brokerRes.data) ? brokerRes.data : [])) : []
+        brokerId = brokerItems.find((b: any) => {
+          const n = b.salesman_name || b.broker_name || b.name || ""
+          return n.toLowerCase() === brokerName.toLowerCase()
+        })?.id ?? null
+      }
+
+      // 4. Resolve Salesperson ID
+      let salespersonId: number | null = null
+      if (orderThrough === "Salesperson" && salespersonName) {
+        const spRes = await salespersonApi.getAll({ search: salespersonName, limit: 30 })
+        const spItems = spRes.success ? (spRes.data.salespersons || (Array.isArray(spRes.data) ? spRes.data : [])) : []
+        salespersonId = spItems.find((s: any) => {
+          const n = s.salesman_name || s.name || ""
+          return n.toLowerCase() === salespersonName.toLowerCase()
+        })?.id ?? null
+      }
+
+      // 5. Upload PDF file
+      let uploadCopy: string | null = null
+      if (pdfFile) {
+        const uploadRes = await orderApi.uploadFile(pdfFile)
+        if (uploadRes.success) {
+          uploadCopy = uploadRes.data.url
+        }
+      }
+
       const payload = {
         commitmentDate: commitmentDate,
         customerId,
         customerContactPersonName: contactPerson || null,
         whatsappNo: whatsappNo || null,
         address: customerAddress || null,
+        shipToAddress: shipToAddress || null,
+        depotId,
+        advancePaymentToBeTaken: advancePayment === "Yes",
+        paymentTerms,
+        transportType,
+        orderThrough,
+        brokerId,
+        salespersonId,
+        uploadCopy,
+        remarks: remarks || null,
         rows: rows.map(r => ({
           oilType: r.oil_type,
           quantity: parseFloat(r.quantity),
@@ -432,6 +544,8 @@ export default function CommitmentPunchPage() {
       return r
     }))
   }
+
+
 
   const resetProcess = () => {
     setProcessPoNo("")
@@ -640,25 +754,45 @@ export default function CommitmentPunchPage() {
     rate:            "rate",
     quantity:        "qty",
   }
-  const RIGHT_ALIGN_COLS: ColId[] = ["rate", "quantity", "processed_qty", "delivery_qty", "po_pending_qty", "remaining_qty"]
+  const RIGHT_ALIGN_COLS: ColId[] = []
+  const CENTER_ALIGN_COLS: ColId[] = ["oil_type", "dispatch_from"]
+  const COL_WIDTHS: Record<ColId, string> = {
+    commitment_no: "min-w-[140px] w-[140px]",
+    commitment_date: "min-w-[100px] w-[100px]",
+    party_name: "min-w-[240px]",
+    dispatch_from: "min-w-[120px] w-[120px]",
+    oil_type: "min-w-[110px] w-[110px]",
+    rate: "min-w-[115px] w-[115px]",
+    quantity: "min-w-[100px] w-[100px]",
+    processed_qty: "min-w-[120px] w-[120px]",
+    delivery_qty: "min-w-[130px] w-[130px]",
+    po_pending_qty: "min-w-[145px] w-[145px]",
+    remaining_qty: "min-w-[180px] w-[180px]",
+  }
 
   const renderCell = (row: PendingCommitment, colId: ColId) => {
+    const widthClass = COL_WIDTHS[colId] || ""
+    const isCenter = CENTER_ALIGN_COLS.includes(colId)
+    const alignClass = isCenter ? "text-center" : "pl-[30px]"
+
     switch (colId) {
       case "commitment_no":
-        return <TableCell key={colId} className="font-mono font-semibold text-blue-700">{row.commitment_no}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono font-semibold text-blue-700", alignClass, widthClass)}>{row.commitment_no}</TableCell>
       case "commitment_date":
-        return <TableCell key={colId}>{row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}</TableCell>
+        return <TableCell key={colId} className={cn(alignClass, widthClass)}>{row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}</TableCell>
       case "party_name":
-        return <TableCell key={colId} className="font-medium">{row.party_name}</TableCell>
+        return <TableCell key={colId} className={cn("font-medium", alignClass, widthClass)}>{row.party_name}</TableCell>
+      case "dispatch_from":
+        return <TableCell key={colId} className={cn(alignClass, widthClass)}>{row.depot_name || "Banari"}</TableCell>
       case "oil_type":
-        return <TableCell key={colId}><Badge variant="outline" className="text-xs">{row.oil_type || "—"}</Badge></TableCell>
+        return <TableCell key={colId} className={cn(alignClass, widthClass)}><Badge variant="outline" className="text-xs">{row.oil_type || "—"}</Badge></TableCell>
       case "rate":
-        return <TableCell key={colId} className="text-right font-mono">₹{row.rate ?? "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>₹{row.rate ?? "—"}</TableCell>
       case "quantity":
-        return <TableCell key={colId} className="text-right font-mono">{row.quantity ?? "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.quantity ?? "—"}</TableCell>
       case "processed_qty":
         return (
-          <TableCell key={colId} className="text-right font-mono text-blue-600 font-semibold">
+          <TableCell key={colId} className={cn("font-mono text-blue-600 font-semibold", alignClass, widthClass)}>
             {Number(row.processed_qty || 0) > 0 ? (
               <button onClick={(e) => openDetails(row, e)} className="text-blue-600 underline hover:text-blue-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
                 {Number(row.processed_qty || 0).toFixed(4)}
@@ -669,11 +803,31 @@ export default function CommitmentPunchPage() {
           </TableCell>
         )
       case "delivery_qty":
-        return <TableCell key={colId} className="text-right font-mono text-purple-600 font-semibold">{Number(row.delivery_qty || 0).toFixed(4)}</TableCell>
+        return (
+          <TableCell key={colId} className={cn("font-mono text-purple-600 font-semibold", alignClass, widthClass)}>
+            {Number(row.delivery_qty || 0) > 0 ? (
+              <button onClick={(e) => openDetails(row, e, "delivered")} className="text-purple-600 underline hover:text-purple-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
+                {Number(row.delivery_qty || 0).toFixed(4)}
+              </button>
+            ) : (
+              <span className="text-slate-400">0.0000</span>
+            )}
+          </TableCell>
+        )
       case "po_pending_qty":
-        return <TableCell key={colId} className="text-right font-mono text-amber-600 font-semibold">{Number(row.po_pending_qty || 0).toFixed(4)}</TableCell>
+        return (
+          <TableCell key={colId} className={cn("font-mono text-amber-600 font-semibold", alignClass, widthClass)}>
+            {Number(row.po_pending_qty || 0) > 0 ? (
+              <button onClick={(e) => openDetails(row, e, "pending")} className="text-amber-600 underline hover:text-amber-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
+                {Number(row.po_pending_qty || 0).toFixed(4)}
+              </button>
+            ) : (
+              <span className="text-slate-400">0.0000</span>
+            )}
+          </TableCell>
+        )
       case "remaining_qty":
-        return <TableCell key={colId} className="text-right font-mono text-emerald-600 font-bold">{Number(row.remaining_qty ?? row.quantity).toFixed(4)}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono text-emerald-600 font-bold", alignClass, widthClass)}>{Number(row.remaining_qty ?? row.quantity).toFixed(4)}</TableCell>
       default:
         return null
     }
@@ -715,39 +869,35 @@ export default function CommitmentPunchPage() {
               Showing pending commitments ({pendingList.length} record{pendingList.length !== 1 ? "s" : ""})
             </CardDescription>
           </div>
-          {selectedIds.size > 0 && (
-            <Button
-              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 sm:w-auto"
-              onClick={() => setIsProcessOpen(true)}
-            >
-              <ChevronRight className="h-4 w-4" />
-              Process ({selectedIds.size} selected)
-            </Button>
-          )}
         </CardHeader>
         <CardContent className="p-0">
           <div className="hidden overflow-x-auto rounded-b-xl md:block">
             <Table>
               <TableHeader className="bg-slate-50">
                 <TableRow>
-                  <TableHead className="w-[48px] text-center">
-                    <Checkbox
-                      checked={pendingList.length > 0 && selectedIds.size === pendingList.length}
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  </TableHead>
                   <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                     {orderedVisibleCols.map(col => {
                       const sf = COL_SORT_FIELD[col.id]
                       const isRight = RIGHT_ALIGN_COLS.includes(col.id)
+                      const isCenter = CENTER_ALIGN_COLS.includes(col.id)
                       return (
                         <SortableTableHead
                           key={col.id}
                           id={col.id}
-                          className={`whitespace-nowrap${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}${isRight ? " text-right" : ""}`}
+                          className={`whitespace-nowrap ${COL_WIDTHS[col.id] || ""}${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}
                           onClick={sf ? () => handlePendingSort(sf) : undefined}
                         >
-                          {col.label}{sf && <PendingSortIcon field={sf} />}
+                          {isRight ? (
+                            <div className="flex items-center gap-1">
+                              {sf && <PendingSortIcon field={sf} />}
+                              <span>{col.label}</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span>{col.label}</span>
+                              {sf && <PendingSortIcon field={sf} />}
+                            </div>
+                          )}
                         </SortableTableHead>
                       )
                     })}
@@ -758,14 +908,14 @@ export default function CommitmentPunchPage() {
                 {isLoadingPending ? (
                   [...Array(4)].map((_, i) => (
                     <TableRow key={i} className="opacity-40">
-                      {[...Array(orderedVisibleCols.length + 1)].map((__, j) => (
+                      {[...Array(orderedVisibleCols.length)].map((__, j) => (
                         <TableCell key={j}><div className="h-4 w-full bg-slate-200 animate-pulse rounded" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : pendingList.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-16 text-muted-foreground">
+                    <TableCell colSpan={orderedVisibleCols.length} className="text-center py-16 text-muted-foreground">
                       <div className="flex flex-col items-center gap-2">
                         <CheckCircle2 className="h-10 w-10 text-slate-300" />
                         <p className="font-medium">No pending commitments</p>
@@ -777,15 +927,12 @@ export default function CommitmentPunchPage() {
                   sortedPendingList.map(row => (
                     <TableRow
                       key={row.id}
-                      className={`hover:bg-slate-50 cursor-pointer transition-colors ${selectedIds.has(row.id) ? "bg-blue-50 hover:bg-blue-50" : ""}`}
-                      onClick={() => toggleSelect(row.id)}
+                      className="hover:bg-slate-50 cursor-pointer transition-colors"
+                      onClick={() => {
+                        setSelectedIds(new Set([row.id]))
+                        setIsProcessOpen(true)
+                      }}
                     >
-                      <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                        <Checkbox
-                          checked={selectedIds.has(row.id)}
-                          onCheckedChange={() => toggleSelect(row.id)}
-                        />
-                      </TableCell>
                       {orderedVisibleCols.map(col => renderCell(row, col.id))}
                     </TableRow>
                   ))
@@ -818,8 +965,11 @@ export default function CommitmentPunchPage() {
               pendingList.map(row => (
                 <div
                   key={row.id}
-                  className={`rounded-lg border p-4 transition-colors ${selectedIds.has(row.id) ? "border-blue-200 bg-blue-50" : "bg-white"}`}
-                  onClick={() => toggleSelect(row.id)}
+                  className="rounded-lg border p-4 transition-colors bg-white hover:bg-slate-50 cursor-pointer"
+                  onClick={() => {
+                    setSelectedIds(new Set([row.id]))
+                    setIsProcessOpen(true)
+                  }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -827,12 +977,6 @@ export default function CommitmentPunchPage() {
                       <p className="mt-1 text-xs text-slate-500">
                         {row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}
                       </p>
-                    </div>
-                    <div onClick={e => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(row.id)}
-                        onCheckedChange={() => toggleSelect(row.id)}
-                      />
                     </div>
                   </div>
 
@@ -842,6 +986,10 @@ export default function CommitmentPunchPage() {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-md bg-slate-50 p-2">
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Dispatch from</p>
+                      <p className="mt-1 font-semibold">{row.depot_name || "Banari"}</p>
+                    </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Oil Type</p>
                       <Badge variant="outline" className="mt-1 text-[10px]">{row.oil_type || "—"}</Badge>
@@ -858,7 +1006,7 @@ export default function CommitmentPunchPage() {
                       <p className="text-[10px] font-bold uppercase text-slate-400">PO Raised</p>
                       {Number(row.processed_qty || 0) > 0 ? (
                         <button
-                          onClick={(e) => openDetails(row, e)}
+                          onClick={(e) => openDetails(row, e, "raised")}
                           className="mt-1 text-blue-600 underline hover:text-blue-800 font-semibold font-mono bg-transparent border-none p-0"
                         >
                           {Number(row.processed_qty || 0).toFixed(4)}
@@ -869,11 +1017,23 @@ export default function CommitmentPunchPage() {
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Delivery Qty</p>
-                      <p className="mt-1 font-mono font-semibold text-purple-600">{Number(row.delivery_qty || 0).toFixed(4)}</p>
+                      {Number(row.delivery_qty || 0) > 0 ? (
+                        <button onClick={(e) => openDetails(row, e, "delivered")} className="mt-1 text-purple-600 underline hover:text-purple-800 font-semibold font-mono bg-transparent border-none p-0">
+                          {Number(row.delivery_qty || 0).toFixed(4)}
+                        </button>
+                      ) : (
+                        <p className="mt-1 font-mono text-slate-400">0.0000</p>
+                      )}
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">PO Pending</p>
-                      <p className="mt-1 font-mono font-semibold text-amber-600">{Number(row.po_pending_qty || 0).toFixed(4)}</p>
+                      {Number(row.po_pending_qty || 0) > 0 ? (
+                        <button onClick={(e) => openDetails(row, e, "pending")} className="mt-1 text-amber-600 underline hover:text-amber-800 font-semibold font-mono bg-transparent border-none p-0">
+                          {Number(row.po_pending_qty || 0).toFixed(4)}
+                        </button>
+                      ) : (
+                        <p className="mt-1 font-mono text-slate-400">0.0000</p>
+                      )}
                     </div>
                   </div>
                   <div className="mt-3 rounded-md bg-emerald-50 p-2">
@@ -891,7 +1051,7 @@ export default function CommitmentPunchPage() {
           ADD COMMITMENT DIALOG
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isAddOpen} onOpenChange={open => { setIsAddOpen(open); if (!open) resetAddForm() }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[700px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[850px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Add Commitment</DialogTitle>
             <DialogDescription>Enter commitment details. A unique Commitment No. will be auto-generated.</DialogDescription>
@@ -920,7 +1080,9 @@ export default function CommitmentPunchPage() {
                       setContactPerson(c.contact_person || "")
                       setWhatsappNo(c.contact || "")
                       const parts = [c.address_line_1, c.address_line_2, c.state, c.pincode].filter(Boolean)
-                      setCustomerAddress(parts.join(", "))
+                      const fullAddr = parts.join(", ")
+                      setCustomerAddress(fullAddr)
+                      setShipToAddress(fullAddr)
                     }
                   }}
                   placeholder="Select customer"
@@ -935,9 +1097,115 @@ export default function CommitmentPunchPage() {
                 <Label htmlFor="d-whatsapp">WhatsApp No.</Label>
                 <Input id="d-whatsapp" disabled placeholder="Enter WhatsApp number" value={whatsappNo} onChange={e => setWhatsappNo(e.target.value)} />
               </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="d-address">Customer Address</Label>
-                <Input id="d-address" disabled placeholder="Enter full address" value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} />
+              <div className="space-y-2">
+                <Label htmlFor="d-address">Bill to</Label>
+                <Input id="d-address" disabled placeholder="Enter billing address" value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="d-shipTo">Ship to</Label>
+                <Input id="d-shipTo" placeholder="Enter shipping address" value={shipToAddress} onChange={e => setShipToAddress(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Dispatch from <span className="text-red-500">*</span></Label>
+                <AsyncCombobox
+                  fetchOptions={fetchDepoOptions}
+                  value={depotName}
+                  onValueChange={setDepotName}
+                  placeholder="Select Godown"
+                  searchPlaceholder="Search godowns..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="transportType">Transport Type <span className="text-red-500">*</span></Label>
+                <Select value={transportType} onValueChange={setTransportType}>
+                  <SelectTrigger id="transportType">
+                    <SelectValue placeholder="Select transport" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="self">FOR</SelectItem>
+                    <SelectItem value="others">Ex-Depot</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="paymentTerms">Payment Terms</Label>
+                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+                  <SelectTrigger id="paymentTerms">
+                    <SelectValue placeholder="Select terms" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="advance">Advance</SelectItem>
+                    <SelectItem value="7days">7 Days After Delivery</SelectItem>
+                    <SelectItem value="delivery">On Delivery</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Advance Payment to be Taken <span className="text-red-500">*</span></Label>
+                <Select value={advancePayment} onValueChange={setAdvancePayment}>
+                  <SelectTrigger><SelectValue placeholder="Advance Payment?" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="No">No</SelectItem>
+                    <SelectItem value="Yes">Yes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Is this order through <span className="text-red-500">*</span></Label>
+                <Select value={orderThrough} onValueChange={setOrderThrough}>
+                  <SelectTrigger><SelectValue placeholder="Select channel" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Direct">Direct</SelectItem>
+                    <SelectItem value="Broker">Broker</SelectItem>
+                    <SelectItem value="Salesperson">Salesperson</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                {orderThrough === "Broker" && (
+                  <>
+                    <Label>Broker Name <span className="text-red-500">*</span></Label>
+                    <AsyncCombobox
+                      fetchOptions={fetchBrokerOptions}
+                      value={brokerName}
+                      onValueChange={setBrokerName}
+                      placeholder="Select Broker"
+                      searchPlaceholder="Search brokers..."
+                    />
+                  </>
+                )}
+                {orderThrough === "Salesperson" && (
+                  <>
+                    <Label>Salesperson Name <span className="text-red-500">*</span></Label>
+                    <AsyncCombobox
+                      fetchOptions={fetchSalespersonOptions}
+                      value={salespersonName}
+                      onValueChange={setSalespersonName}
+                      placeholder="Select Salesperson"
+                      searchPlaceholder="Search salesperson..."
+                    />
+                  </>
+                )}
+                {orderThrough === "Direct" && null}
+              </div>
+              <div className="space-y-2">
+                <Label>Upload Commitment PDF</Label>
+                <FileUploadField
+                  label=""
+                  accept=".pdf"
+                  fileName={pdfFile?.name || ""}
+                  helperText="Max file size: 20 MB"
+                  buttonText="Select PDF"
+                  onFilesSelected={(files) => {
+                    if (files[0]) {
+                      setPdfFile(files[0])
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="d-remarks">Remarks</Label>
+                <Input id="d-remarks" placeholder="Enter optional remarks" value={remarks} onChange={e => setRemarks(e.target.value)} />
               </div>
             </div>
 
@@ -978,7 +1246,7 @@ export default function CommitmentPunchPage() {
                           <Input type="number" min="0" step="0.0001" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} placeholder="0.0000" className="h-8 text-sm" />
                         </td>
                         <td className="py-1.5 px-2">
-                          <Input type="text" value={row.unit} onChange={e => updateRow(row.id, "unit", e.target.value)} placeholder="e.g. Ltr" className="h-8 text-sm" />
+                          <Input type="text" disabled value={row.unit} placeholder="e.g. Ltr" className="h-8 text-sm" />
                         </td>
                         <td className="py-1.5 px-2">
                           <Input type="number" min="0" step="0.01" value={row.rate} onChange={e => updateRow(row.id, "rate", e.target.value)} placeholder="₹ 0.00" className="h-8 text-sm" />
@@ -1019,7 +1287,7 @@ export default function CommitmentPunchPage() {
                       </div>
                       <div className="space-y-2">
                         <Label>Unit</Label>
-                        <Input type="text" value={row.unit} onChange={e => updateRow(row.id, "unit", e.target.value)} placeholder="e.g. Ltr" />
+                        <Input type="text" disabled value={row.unit} placeholder="e.g. Ltr" />
                       </div>
                       <div className="space-y-2">
                         <Label>Rate (PMT) *</Label>
@@ -1127,8 +1395,8 @@ export default function CommitmentPunchPage() {
                 <Select value={transportType} onValueChange={setTransportType}>
                   <SelectTrigger id="p-transportType"><SelectValue placeholder="Select transport type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="FOR">FOR</SelectItem>
-                    <SelectItem value="EX-Depot">EX-Depot</SelectItem>
+                    <SelectItem value="self">FOR</SelectItem>
+                    <SelectItem value="others">Ex-Depot</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1572,196 +1840,219 @@ export default function CommitmentPunchPage() {
       </Dialog>
 
       {/* ═══════════════════════════════════════════════════════
-          PO RAISED DETAILS POPUP
+          DETAILS POPUP (PO Raised / Delivery / PO Pending)
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>PO Raised Details — {detailsRow?.commitment_no}</DialogTitle>
+            <DialogTitle>
+              {detailsType === "raised" ? "PO Raised Details" : detailsType === "delivered" ? "Delivery Details" : "PO Pending Details"}
+            </DialogTitle>
             <DialogDescription>
-              Commitment: <span className="font-semibold">{detailsRow?.party_name}</span>
-              {" | "}
-              Oil Type: <span className="font-semibold">{detailsRow?.oil_type}</span>
-              {" | "}
-              Total Qty: <span className="font-semibold">{detailsRow?.quantity} {detailsRow?.unit}</span>
+              Breakdown for commitment <span className="font-semibold">{detailsRow?.commitment_no}</span>
             </DialogDescription>
           </DialogHeader>
 
-          {isLoadingDetails ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin mr-2" /> Loading details...
-            </div>
-          ) : detailsData ? (
-            <div className="space-y-4">
-              {/* Summary row */}
-              <div className="grid grid-cols-1 gap-3 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm sm:flex sm:flex-wrap sm:gap-6">
+          <div className="space-y-5 py-1">
+
+            {/* Commitment Info Strip — same style as Process Commitment */}
+            {detailsRow && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 grid grid-cols-1 gap-3 text-sm sm:flex sm:flex-wrap sm:gap-6">
+                <div>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Company Name</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.party_name || "—"}</p>
+                </div>
                 <div>
                   <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Commitment No.</p>
-                  <p className="font-mono font-semibold text-blue-700 mt-0.5">{detailsRow?.commitment_no}</p>
+                  <p className="font-mono font-semibold text-blue-700 mt-0.5">{detailsRow.commitment_no}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total PO Raised (MT)</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{Number(detailsData.total_processed_mt).toFixed(4)} MT</p>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Oil Type</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.oil_type || "—"}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">No. of Times Raised</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{detailsData.raise_count} time{detailsData.raise_count !== 1 ? "s" : ""}</p>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total Qty</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.quantity} {detailsRow.unit}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Commitment Date</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">
-                    {detailsRow?.commitment_date ? new Date(detailsRow.commitment_date).toLocaleDateString("en-IN") : "—"}
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">
+                    {detailsType === "raised" ? "Total PO Raised" : detailsType === "delivered" ? "Total Delivered" : "Total PO Pending"}
+                  </p>
+                  <p className={cn("font-bold mt-0.5", detailsType === "raised" ? "text-blue-700" : detailsType === "delivered" ? "text-purple-700" : "text-amber-700")}>
+                    {isLoadingDetails ? "..." : Number(
+                      detailsType === "raised" ? detailsData?.total_processed_mt :
+                      detailsType === "delivered" ? detailsData?.total_delivered_mt :
+                      detailsData?.total_pending_mt || 0
+                    ).toFixed(4)} MT
                   </p>
                 </div>
               </div>
+            )}
 
-              {/* Details table */}
-              {detailsData.details?.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No PO raised yet for this commitment.</p>
-              ) : (
-                <>
-                  <div className="hidden rounded-lg border overflow-x-auto sm:block">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b">
-                        <tr>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">#</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Raised On</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">DO No.</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs text-nowrap">PO No.</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">PO Date</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">SKU</th>
-                          <th className="py-2 px-3 text-right font-medium text-slate-600 text-xs">Qty (Box)</th>
-                          <th className="py-2 px-3 text-right font-medium text-slate-600 text-xs">Weight (MT)</th>
-                          <th className="py-2 px-3 text-right font-medium text-slate-600 text-xs">Rate</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Category</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Order Type</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Depo</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Payment Terms</th>
-                          <th className="py-2 px-3 text-left font-medium text-slate-600 text-xs">Remarks</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detailsData.details.map((d: any, idx: number) => (
-                          <tr key={d.id} className="border-b last:border-0 hover:bg-slate-50">
-                            <td className="py-2 px-3 text-xs font-bold text-slate-400">{idx + 1}</td>
-                            <td className="py-2 px-3 text-xs">
-                              {d.actual1 ? new Date(d.actual1).toLocaleDateString("en-IN") : "—"}
+            {/* Orders Breakdown Table */}
+            {isLoadingDetails ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <RefreshCw className="h-5 w-5 animate-spin mr-2" /> Loading details...
+              </div>
+            ) : detailsData?.details?.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">No orders found for this commitment.</p>
+            ) : detailsData ? (
+              <div className="space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b pb-1">Order Breakdown</p>
+
+                {/* Desktop Table */}
+                <div className="hidden rounded-lg border overflow-x-auto sm:block">
+                  <table className="w-full text-sm border-collapse">
+                    <thead className="bg-slate-50/80 border-b border-slate-200">
+                      <tr>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-8">#</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">DO No.</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Raised On</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO No.</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO Date</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU</th>
+                        <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty (Box)</th>
+                        <th className={cn("py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider", detailsType === "raised" ? "text-blue-600" : detailsType === "delivered" ? "text-purple-600" : "text-amber-600")}>
+                          {detailsType === "raised" ? "PO Raised (MT)" : detailsType === "delivered" ? "Delivered (MT)" : "PO Pending (MT)"}
+                        </th>
+                        <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Rate</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment Terms</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150 bg-white">
+                      {detailsData.details.map((d: any, idx: number) => {
+                        const mt = detailsType === "raised" ? d.sku_weight_mt : detailsType === "delivered" ? d.delivered_mt : d.pending_mt
+                        const highlightColor = detailsType === "raised" ? "text-blue-700 bg-blue-50/40 border-blue-100" : detailsType === "delivered" ? "text-purple-700 bg-purple-50/40 border-purple-100" : "text-amber-700 bg-amber-50/40 border-amber-100"
+                        return (
+                          <tr key={d.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 px-3 text-xs text-slate-400 font-bold">{idx + 1}</td>
+                            <td className="py-3 px-3">
+                              {d.order_no ? (
+                                <Link
+                                  href={`/approval-of-order?search=${d.order_no}`}
+                                  className="inline-flex font-mono text-xs font-bold text-emerald-800 bg-emerald-50/50 border border-emerald-100 px-2 py-0.5 rounded hover:bg-emerald-100 hover:text-emerald-900 transition-colors"
+                                >
+                                  {d.order_no}
+                                </Link>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
                             </td>
-                            <td className="py-2 px-3 font-mono text-xs font-bold text-emerald-700">{d.order_no || "—"}</td>
-                            <td className="py-2 px-3 font-mono text-xs font-semibold text-blue-700">{d.po_no || "—"}</td>
-                            <td className="py-2 px-3 text-xs">
-                              {d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}
+                            <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</td>
+                            <td className="py-3 px-3">
+                              <span className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded">
+                                {d.po_no || "—"}
+                              </span>
                             </td>
-                            <td className="py-2 px-3 text-xs max-w-[160px] truncate" title={d.sku}>{d.sku || "—"}</td>
-                            <td className="py-2 px-3 text-right font-mono text-xs">{d.sku_quantity ?? "—"}</td>
-                            <td className="py-2 px-3 text-right font-mono text-xs font-semibold text-emerald-700">
-                              {d.sku_weight_mt ? Number(d.sku_weight_mt).toFixed(4) : "—"}
+                            <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
+                            <td className="py-3 px-3 text-xs text-slate-800 font-medium leading-relaxed">{d.sku || "—"}</td>
+                            <td className="py-3 px-3 font-mono text-xs text-slate-800 text-right font-medium">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
+                            <td className="py-3 px-3 text-right">
+                              <span className={cn("inline-flex font-mono text-xs font-bold px-2 py-0.5 rounded border", highlightColor)}>
+                                {mt != null ? Number(mt).toFixed(4) : "—"}
+                              </span>
                             </td>
-                            <td className="py-2 px-3 text-right font-mono text-xs">
-                              {d.sku_rate ? `₹${d.sku_rate}` : "—"}
-                            </td>
-                            <td className="py-2 px-3 text-xs">
-                              <Badge variant="outline" className={cn(
-                                "text-[10px] px-1.5 py-0 h-4 uppercase font-bold border",
-                                d.order_category === "Stock Transfer" ? "border-purple-200 bg-purple-50 text-purple-700" : "border-blue-200 bg-blue-50 text-blue-700"
-                              )}>
-                                {d.order_category || "Sales"}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-3 text-xs">{d.order_type || "—"}</td>
-                            <td className="py-2 px-3 text-xs">{d.depo_name || "—"}</td>
-                            <td className="py-2 px-3 text-xs">{d.payment_terms || "—"}</td>
-                            <td className="py-2 px-3 text-xs max-w-[140px] truncate" title={d.remarks}>{d.remarks || "—"}</td>
+                            <td className="py-3 px-3 font-mono text-xs text-slate-800 text-right font-semibold">{d.sku_rate ? `₹${Number(d.sku_rate).toLocaleString("en-IN")}` : "—"}</td>
+                            <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.payment_terms || "—"}</td>
+                            <td className="py-3 px-3 text-xs text-slate-500 font-normal italic max-w-[160px] truncate" title={d.remarks}>{d.remarks || "—"}</td>
                           </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-slate-50 border-t">
-                        <tr>
-                          <td colSpan={7} className="py-2 px-3 text-xs font-semibold text-slate-600 text-right">Total Weight:</td>
-                          <td className="py-2 px-3 text-right font-mono text-xs font-bold text-emerald-700">
-                            {Number(detailsData.total_processed_mt).toFixed(4)} MT
-                          </td>
-                          <td colSpan={5} />
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                  <div className="space-y-3 sm:hidden">
-                  {detailsData.details.map((d: any, idx: number) => (
-                    <div key={d.id} className="rounded-lg border p-3 space-y-3 bg-white">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">DO No.</p>
-                          <p className="font-mono text-sm font-bold text-emerald-700 break-words">{d.order_no || "—"}</p>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot className="bg-slate-50 border-t border-slate-200">
+                      <tr>
+                        <td colSpan={7} className="py-3 px-3 text-xs font-semibold text-slate-600 text-right">
+                          Total {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}:
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span className={cn("inline-flex font-mono text-xs font-bold px-2.5 py-1 rounded border",
+                            detailsType === "raised" ? "text-blue-700 bg-blue-50 border-blue-200" :
+                            detailsType === "delivered" ? "text-purple-700 bg-purple-50 border-purple-200" :
+                            "text-amber-700 bg-amber-50 border-amber-200"
+                          )}>
+                            {Number(detailsType === "raised" ? detailsData.total_processed_mt : detailsType === "delivered" ? detailsData.total_delivered_mt : detailsData.total_pending_mt || 0).toFixed(4)} MT
+                          </span>
+                        </td>
+                        <td colSpan={3} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* Mobile Cards */}
+                <div className="space-y-3 sm:hidden">
+                  {detailsData.details.map((d: any, idx: number) => {
+                    const mt = detailsType === "raised" ? d.sku_weight_mt : detailsType === "delivered" ? d.delivered_mt : d.pending_mt
+                    const mtLabel = detailsType === "raised" ? "PO Raised (MT)" : detailsType === "delivered" ? "Delivered (MT)" : "PO Pending (MT)"
+                    const mtColor = detailsType === "raised" ? "text-blue-700" : detailsType === "delivered" ? "text-purple-700" : "text-amber-700"
+                    return (
+                      <div key={d.id} className="rounded-lg border px-4 py-3 bg-white grid grid-cols-1 gap-3 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">DO No.</p>
+                            {d.order_no ? (
+                              <Link
+                                href={`/approval-of-order?search=${d.order_no}`}
+                                className="inline-flex font-mono text-sm font-bold text-emerald-800 bg-emerald-50/50 border border-emerald-100 px-1.5 py-0.5 rounded hover:bg-emerald-100 hover:text-emerald-900 transition-colors mt-0.5"
+                              >
+                                {d.order_no}
+                              </Link>
+                            ) : (
+                              <p className="font-mono text-sm text-slate-400 mt-0.5">—</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className={cn("text-xs font-medium uppercase tracking-wider", detailsType === "raised" ? "text-blue-500" : detailsType === "delivered" ? "text-purple-500" : "text-amber-500")}>{mtLabel}</p>
+                            <p className={cn("font-mono font-bold mt-0.5", mtColor)}>{mt != null ? Number(mt).toFixed(4) : "—"}</p>
+                          </div>
                         </div>
-                        <Badge variant="outline" className={cn(
-                          "text-[10px] px-1.5 py-0 uppercase font-bold border shrink-0",
-                          d.order_category === "Stock Transfer" ? "border-purple-200 bg-purple-50 text-purple-700" : "border-blue-200 bg-blue-50 text-blue-700"
-                        )}>
-                          {d.order_category || "Sales"}
-                        </Badge>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">PO No.</p>
+                            <p className="font-mono font-semibold text-blue-700 mt-0.5 break-words">{d.po_no || "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">PO Date</p>
+                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Raised On</p>
+                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Qty (Box)</p>
+                            <p className="font-mono font-semibold text-slate-800 mt-0.5">{d.sku_quantity ?? "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Rate</p>
+                            <p className="font-mono font-semibold text-slate-800 mt-0.5">{d.sku_rate ? `₹${d.sku_rate}` : "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Payment Terms</p>
+                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.payment_terms || "—"}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">SKU</p>
+                          <p className="text-sm font-semibold text-slate-800 mt-0.5 break-words">{d.sku || "—"}</p>
+                        </div>
+                        {d.remarks && (
+                          <div>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Remarks</p>
+                            <p className="text-sm text-slate-700 mt-0.5">{d.remarks}</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Raised On</p>
-                          <p>{d.actual1 ? new Date(d.actual1).toLocaleDateString("en-IN") : "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">PO No.</p>
-                          <p className="font-mono font-semibold text-blue-700 break-words">{d.po_no || "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">PO Date</p>
-                          <p>{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Weight (MT)</p>
-                          <p className="font-mono font-semibold text-emerald-700">{d.sku_weight_mt ? Number(d.sku_weight_mt).toFixed(4) : "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Qty (Box)</p>
-                          <p className="font-mono">{d.sku_quantity ?? "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Rate</p>
-                          <p className="font-mono">{d.sku_rate ? `₹${d.sku_rate}` : "—"}</p>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400">SKU</p>
-                        <p className="text-xs font-medium break-words">{d.sku || "—"}</p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Order Type</p>
-                          <p>{d.order_type || "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Depo</p>
-                          <p>{d.depo_name || "—"}</p>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400">Payment Terms</p>
-                        <p className="text-xs">{d.payment_terms || "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase text-slate-400">Remarks</p>
-                        <p className="text-xs break-words">{d.remarks || "—"}</p>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="rounded-lg border bg-slate-50 p-3 text-right">
-                    <p className="text-xs font-semibold text-slate-600">Total Weight</p>
-                    <p className="font-mono text-sm font-bold text-emerald-700">{Number(detailsData.total_processed_mt).toFixed(4)} MT</p>
-                  </div>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <p className="text-center text-muted-foreground py-8">No data available.</p>
-          )}
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-center text-muted-foreground py-8">No data available.</p>
+            )}
+
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDetailsOpen(false)} className="w-full sm:w-auto">Close</Button>
