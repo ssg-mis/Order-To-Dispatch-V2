@@ -3236,7 +3236,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderCustomerForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="customer_id">Customer ID *</Label>
           <Input id="customer_id" value={customerForm.customer_id} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -3246,7 +3246,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="customer_name" value={customerForm.customer_name} onChange={e => setCustomerForm({...customerForm, customer_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={customerForm.status} onValueChange={val => setCustomerForm({...customerForm, status: val})}>
@@ -3261,7 +3261,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="email" type="email" value={customerForm.email} onChange={e => setCustomerForm({...customerForm, email: e.target.value})} placeholder="email@example.com" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="contact_person">Contact Person</Label>
           <Input id="contact_person" value={customerForm.contact_person} onChange={e => setCustomerForm({...customerForm, contact_person: e.target.value})} placeholder="Enter name" />
@@ -3275,7 +3275,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <Label htmlFor="address_line_1">Address Line 1</Label>
         <Input id="address_line_1" value={customerForm.address_line_1} onChange={e => setCustomerForm({...customerForm, address_line_1: e.target.value})} placeholder="Street address" />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="state">State</Label>
           <Combobox
@@ -3321,12 +3321,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeAddressRow(index)}>Remove</Button>
               </div>
               <Input value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
                 <Input value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
                 <Input value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Combobox
                   options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
                   value={addr.state_id ? String(addr.state_id) : ""}
@@ -3342,7 +3342,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   {" · "}Short Name: <span className="font-medium text-slate-600">{rowState.short_name || '—'}</span>
                 </p>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Input
                     value={addr.pincode || ''}
@@ -3358,7 +3358,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           )
         })}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pan">PAN</Label>
           <Input
@@ -3384,7 +3384,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           {customerFormErrors.gstin && <p className="text-xs text-red-500 mt-1">{customerFormErrors.gstin}</p>}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="gst_registered">GST Registration Status</Label>
           <Combobox
@@ -3415,7 +3415,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         )}
       </div>
       {customerForm.gst_registered === 'Registered' && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="gst_registration_wef">GST W.E.F. Date</Label>
             <Input
@@ -3432,7 +3432,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       )}
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">MSME Details</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="msme_registration_no">MSME Registration No</Label>
             <Input
@@ -3453,7 +3453,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="msme_registration_wef">MSME W.E.F. Date</Label>
             <Input
@@ -3471,7 +3471,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">FSSAI Details</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="fssai_no">FSSAI No</Label>
             <Input
@@ -3492,7 +3492,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="fssai_valid_upto">FSSAI Valid Upto Date</Label>
             <Input
@@ -3510,7 +3510,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">Document Uploads</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FileUploadField
             label="Aadhaar Card"
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -3559,7 +3559,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="border-t pt-4 mt-2 grid grid-cols-2 gap-4">
+      <div className="border-t pt-4 mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Belongs to Which Godown</Label>
           <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2">
@@ -3688,7 +3688,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderDepotForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="depot_id">Depot ID *</Label>
           <Input id="depot_id" value={depotForm.depot_id} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -3698,7 +3698,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="depot_name" value={depotForm.depot_name} onChange={e => setDepotForm({...depotForm, depot_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={depotForm.status} onValueChange={val => setDepotForm({...depotForm, status: val})}>
@@ -3780,7 +3780,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">Document Uploads</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FileUploadField
             label="Agreement Paper"
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -3832,7 +3832,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     const setForm = setPartyForm
     return (
     <>
-      <div className="border-t pt-4 mt-2 grid grid-cols-2 gap-4">
+      <div className="border-t pt-4 mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>State</Label>
           <Combobox
@@ -3858,7 +3858,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           {partyFormErrors.pan && <p className="text-xs text-red-500 mt-1">{partyFormErrors.pan}</p>}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>GSTIN</Label>
           <Input
@@ -3885,7 +3885,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
       {form.gst_registered === 'Registered' && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>GST Registration Type</Label>
             <Combobox
@@ -3904,7 +3904,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       )}
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">MSME Details</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>MSME Registration No</Label>
             <Input value={form.msme_registration_no || ''} onChange={e => setForm({ msme_registration_no: e.target.value })} placeholder="Enter MSME registration no" />
@@ -3927,7 +3927,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </div>
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">FSSAI Details</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>FSSAI No</Label>
             <Input value={form.fssai_no || ''} onChange={e => setForm({ fssai_no: e.target.value })} placeholder="Enter FSSAI no" />
@@ -3950,7 +3950,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </div>
       <div className="border-t pt-4 mt-2 space-y-4">
         <Label className="text-slate-600">Document Uploads</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FileUploadField
             label="Aadhaar Card"
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -4004,7 +4004,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderBrokerForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="broker_id">Broker ID *</Label>
           <Input id="broker_id" value={brokerForm.broker_id} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4014,7 +4014,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="salesman_name" value={brokerForm.salesman_name} onChange={e => setBrokerForm({...brokerForm, salesman_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={brokerForm.status} onValueChange={val => setBrokerForm({...brokerForm, status: val})}>
@@ -4029,7 +4029,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="mobile_no" value={brokerForm.mobile_no} onChange={e => setBrokerForm({...brokerForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="email_id">Email ID</Label>
           <Input id="email_id" value={brokerForm.email_id} onChange={e => setBrokerForm({...brokerForm, email_id: e.target.value})} placeholder="email@example.com" />
@@ -4050,7 +4050,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderSalespersonForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="broker_id">Salesperson ID *</Label>
           <Input id="broker_id" value={salespersonForm.broker_id} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4060,7 +4060,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="salesman_name" value={salespersonForm.salesman_name} onChange={e => setSalespersonForm({...salespersonForm, salesman_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={salespersonForm.status} onValueChange={val => setSalespersonForm({...salespersonForm, status: val})}>
@@ -4075,7 +4075,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="mobile_no" value={salespersonForm.mobile_no} onChange={e => setSalespersonForm({...salespersonForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="email_id">Email ID</Label>
             <Input id="email_id" value={salespersonForm.email_id} onChange={e => setSalespersonForm({...salespersonForm, email_id: e.target.value})} placeholder="email@example.com" />
@@ -4085,7 +4085,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Input id="employee_id" value={salespersonForm.employee_id || ''} onChange={e => setSalespersonForm({...salespersonForm, employee_id: e.target.value})} placeholder="Enter employee ID" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="ledger_group_id">Ledger Group</Label>
             <Select value={salespersonForm.ledger_group_id ? String(salespersonForm.ledger_group_id) : ''} onValueChange={val => setSalespersonForm({...salespersonForm, ledger_group_id: val})}>
@@ -4102,7 +4102,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderLedgerGroupForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="group_code">Group Code *</Label>
           <Input id="group_code" value={ledgerGroupForm.group_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4126,7 +4126,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderStockGroupForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="group_code">Group Code *</Label>
           <Input id="group_code" value={stockGroupForm.group_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4167,7 +4167,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderRawMaterialForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="raw_material_code">Raw Material Code *</Label>
           <Input id="raw_material_code" value={rawMaterialForm.raw_material_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4177,7 +4177,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="name" value={rawMaterialForm.name} onChange={e => setRawMaterialForm({...rawMaterialForm, name: e.target.value})} placeholder="Enter raw material name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="main_uom_id">UOM</Label>
           <div className="flex items-center gap-2">
@@ -4272,7 +4272,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Plus className="h-4 w-4 mr-1" /> Add Additional UOM
         </Button>
       )}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="type_of_supply">Type of Supply</Label>
           <Select value={rawMaterialForm.type_of_supply || ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, type_of_supply: val})}>
@@ -4284,7 +4284,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="gst_rate_id">GST Rate</Label>
           <Select value={rawMaterialForm.gst_rate_id ? String(rawMaterialForm.gst_rate_id) : ''} onValueChange={val => setRawMaterialForm({...rawMaterialForm, gst_rate_id: val})}>
@@ -4326,7 +4326,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="default_accounting_ledger_id">Default Accounting Ledger</Label>
           <div className="flex items-center gap-2">
@@ -4373,7 +4373,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderSemiFinishedGoodForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="semi_finished_good_code">SFG Code *</Label>
           <Input id="semi_finished_good_code" value={semiFinishedGoodForm.semi_finished_good_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4383,7 +4383,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="sfg_name" value={semiFinishedGoodForm.name} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, name: e.target.value})} placeholder="e.g. HK RBO 700 MLT PP (1x12)" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="sfg_main_uom_id">UOM</Label>
           <div className="flex items-center gap-2">
@@ -4410,7 +4410,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </div>
       <div className="rounded-lg border border-slate-200 p-4 space-y-4">
         <p className="font-semibold text-sm text-slate-800">Weight Conversion (review Section 13)</p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="oil_filling_per_unit">Oil Filling per Unit</Label>
             <Input id="oil_filling_per_unit" type="number" value={semiFinishedGoodForm.oil_filling_per_unit} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, oil_filling_per_unit: e.target.value})} placeholder="0.00" />
@@ -4425,7 +4425,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="converted_kg">Converted Kg</Label>
             <Input id="converted_kg" type="number" value={semiFinishedGoodForm.converted_kg} onChange={e => setSfgFieldRecomputeWeightDiff({ converted_kg: e.target.value })} placeholder="0.00" />
@@ -4435,7 +4435,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Input id="packing_weight_per_main_unit" type="number" value={semiFinishedGoodForm.packing_weight_per_main_unit} onChange={e => setSfgFieldRecomputeWeightDiff({ packing_weight_per_main_unit: e.target.value })} placeholder="0.00" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2 min-w-0">
             <Label htmlFor="packing_weight_unit_id">Packing Weight Unit</Label>
             <Select value={semiFinishedGoodForm.packing_weight_unit_id ? String(semiFinishedGoodForm.packing_weight_unit_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, packing_weight_unit_id: val})}>
@@ -4450,7 +4450,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Input id="weight_difference" value={semiFinishedGoodForm.weight_difference} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="standard_weight">Standard Weight</Label>
             <Input id="standard_weight" type="number" value={semiFinishedGoodForm.standard_weight} onChange={e => setSemiFinishedGoodForm({...semiFinishedGoodForm, standard_weight: e.target.value})} placeholder="0.00" />
@@ -4466,7 +4466,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="sfg_type_of_supply">Type of Supply</Label>
           <Select value={semiFinishedGoodForm.type_of_supply || ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, type_of_supply: val})}>
@@ -4478,7 +4478,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="sfg_gst_rate_id">GST Rate</Label>
           <Select value={semiFinishedGoodForm.gst_rate_id ? String(semiFinishedGoodForm.gst_rate_id) : ''} onValueChange={val => setSemiFinishedGoodForm({...semiFinishedGoodForm, gst_rate_id: val})}>
@@ -4515,7 +4515,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="sfg_default_accounting_ledger_id">Default Accounting Ledger</Label>
           <div className="flex items-center gap-2">
@@ -4549,7 +4549,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderPetrolPumpForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="petrol_pump_code">Petrol Pump Code *</Label>
           <Input id="petrol_pump_code" value={petrolPumpForm.petrol_pump_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4559,7 +4559,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="petrol_pump_name" value={petrolPumpForm.petrol_pump_name} onChange={e => setPetrolPumpForm({...petrolPumpForm, petrol_pump_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pp_status">Status</Label>
           <Select value={petrolPumpForm.status} onValueChange={val => setPetrolPumpForm({...petrolPumpForm, status: val})}>
@@ -4574,7 +4574,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="pp_mobile_no" value={petrolPumpForm.mobile_no} onChange={e => setPetrolPumpForm({...petrolPumpForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pp_email_id">Email ID</Label>
           <Input id="pp_email_id" value={petrolPumpForm.email_id} onChange={e => setPetrolPumpForm({...petrolPumpForm, email_id: e.target.value})} placeholder="email@example.com" />
@@ -4595,7 +4595,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderCdRuleForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="cd_rule_code">CD Rule Code *</Label>
           <Input id="cd_rule_code" value={cdRuleForm.cd_rule_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4605,7 +4605,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="cd_wef_date" type="date" value={cdRuleForm.wef_date?.split('T')[0] || ''} onChange={e => setCdRuleForm({...cdRuleForm, wef_date: e.target.value})} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="cd_stock_category_id">Stock Category *</Label>
           <Select value={cdRuleForm.stock_category_id ? String(cdRuleForm.stock_category_id) : ''} onValueChange={val => setCdRuleForm({...cdRuleForm, stock_category_id: val})}>
@@ -4625,7 +4625,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="cd_discount_rate_per_main_uom">Discount Rate (per Main UOM) *</Label>
           <Input id="cd_discount_rate_per_main_uom" type="number" step="0.01" value={cdRuleForm.discount_rate_per_main_uom} onChange={e => setCdRuleForm({...cdRuleForm, discount_rate_per_main_uom: e.target.value})} placeholder="0.00" />
@@ -4645,7 +4645,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const renderTdsRuleForm = () => (
     <div className="grid gap-4 py-4 px-1">
       <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified TDS rules/sections yet. Only Name, Rate and Status exist until that's scoped.</p>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="tds_rule_code">TDS Rule Code *</Label>
           <Input id="tds_rule_code" value={tdsRuleForm.tds_rule_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4655,7 +4655,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="tds_name" value={tdsRuleForm.name} onChange={e => setTdsRuleForm({...tdsRuleForm, name: e.target.value})} placeholder="e.g. 194Q Purchase TDS" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="tds_rate">Rate (%)</Label>
           <Input id="tds_rate" type="number" step="0.01" value={tdsRuleForm.rate} onChange={e => setTdsRuleForm({...tdsRuleForm, rate: e.target.value})} placeholder="0.00" />
@@ -4678,7 +4678,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const renderBhadaRateForm = () => (
     <div className="grid gap-4 py-4 px-1">
       <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified Bhada/freight rate rules yet. Only Name, Rate and Status exist until that's scoped.</p>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="bhada_rate_code">Bhada Rate Code *</Label>
           <Input id="bhada_rate_code" value={bhadaRateForm.bhada_rate_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4688,7 +4688,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="bhada_name" value={bhadaRateForm.name} onChange={e => setBhadaRateForm({...bhadaRateForm, name: e.target.value})} placeholder="e.g. Local Route Rate" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="bhada_rate">Rate</Label>
           <Input id="bhada_rate" type="number" step="0.01" value={bhadaRateForm.rate} onChange={e => setBhadaRateForm({...bhadaRateForm, rate: e.target.value})} placeholder="0.00" />
@@ -4708,7 +4708,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderInsuranceDetailForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="insurance_code">Insurance Code *</Label>
           <Input id="insurance_code" value={insuranceDetailForm.insurance_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4718,7 +4718,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="insurance_company_name" value={insuranceDetailForm.insurance_company_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, insurance_company_name: e.target.value})} placeholder="Enter company name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="short_name">Short Name</Label>
           <Input id="short_name" value={insuranceDetailForm.short_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, short_name: e.target.value})} placeholder="e.g. ICICI" />
@@ -4728,7 +4728,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="policy_number" value={insuranceDetailForm.policy_number} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, policy_number: e.target.value})} placeholder="Enter policy number" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="valid_from">Valid From</Label>
           <Input id="valid_from" type="date" value={insuranceDetailForm.valid_from?.split('T')[0] || ''} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, valid_from: e.target.value})} />
@@ -4738,7 +4738,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="insurance_valid_upto" type="date" value={insuranceDetailForm.valid_upto?.split('T')[0] || ''} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, valid_upto: e.target.value})} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="type_of_policy">Type of Policy</Label>
           <Select value={insuranceDetailForm.type_of_policy || ''} onValueChange={val => setInsuranceDetailForm({...insuranceDetailForm, type_of_policy: val})}>
@@ -4754,7 +4754,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="sum_insured" type="number" value={insuranceDetailForm.sum_insured} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, sum_insured: e.target.value})} placeholder="0.00" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="owner_type">Owner of Policy</Label>
           <Select value={insuranceDetailForm.owner_type || 'Company'} onValueChange={val => setInsuranceDetailForm({...insuranceDetailForm, owner_type: val})}>
@@ -4807,7 +4807,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderConversionFormulaForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="conversion_formula_code">Formula Code *</Label>
           <Input id="conversion_formula_code" value={conversionFormulaForm.conversion_formula_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4822,7 +4822,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="base_item_id">Base / Parent Item</Label>
           <Select value={conversionFormulaForm.base_item_id ? String(conversionFormulaForm.base_item_id) : ''} onValueChange={val => setConversionFormulaForm({...conversionFormulaForm, base_item_id: val})}>
@@ -4857,7 +4857,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         )}
         <div className="bg-slate-50/60 rounded-lg p-4 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2 min-w-0">
               <Label>Operation</Label>
               <Select value={newFormulaStep.operation} onValueChange={val => setNewFormulaStep({...newFormulaStep, operation: val})}>
@@ -4915,7 +4915,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderPriceLevelForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="price_level_code">Price Level Code *</Label>
           <Input id="price_level_code" value={priceLevelForm.price_level_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4987,7 +4987,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderSkuDetailsForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_code">Finished Goods Code *</Label>
           <Input id="sku_code" value={skuDetailsForm.sku_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
@@ -4997,7 +4997,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="sku_name" value={skuDetailsForm.sku_name} onChange={e => setSkuDetailsForm({...skuDetailsForm, sku_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={skuDetailsForm.status} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, status: val})}>
@@ -5018,7 +5018,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="main_uom">Main UOM</Label>
           <Input id="main_uom" value={skuDetailsForm.main_uom} onChange={e => setSkuDetailsForm({...skuDetailsForm, main_uom: e.target.value})} placeholder="e.g. Box" />
@@ -5028,7 +5028,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="alternate_uom" value={skuDetailsForm.alternate_uom} onChange={e => setSkuDetailsForm({...skuDetailsForm, alternate_uom: e.target.value})} placeholder="e.g. Pcs" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="main_uom_id">Main UOM (Reference Data)</Label>
           <Select value={skuDetailsForm.main_uom_id ? String(skuDetailsForm.main_uom_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, main_uom_id: val})}>
@@ -5049,7 +5049,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
       <p className="text-xs text-slate-400 -mt-2">The Reference Data pickers above are additive - the free-text Main/Alternate UOM fields keep working unchanged.</p>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="nos_per_main_uom">Nos per Main UOM</Label>
           <Input id="nos_per_main_uom" type="number" value={skuDetailsForm.nos_per_main_uom} onChange={e => setSkuDetailsForm({...skuDetailsForm, nos_per_main_uom: e.target.value})} placeholder="0" />
@@ -5061,7 +5061,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </div>
 
       <Separator />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="semi_finished_good_id">Semi-Finished Good (link)</Label>
           <p className="text-xs text-slate-400 mb-1">When linked (nos per main UOM &gt; 1), the weight fields below auto-fill from this SFG on save.</p>
@@ -5083,7 +5083,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="oil_filling_per_unit">Oil Filling per Unit</Label>
           <Input id="oil_filling_per_unit" type="number" value={skuDetailsForm.oil_filling_per_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, oil_filling_per_unit: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
@@ -5093,7 +5093,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="filling_units" value={skuDetailsForm.filling_units} onChange={e => setSkuDetailsForm({...skuDetailsForm, filling_units: e.target.value})} placeholder="e.g. Ltr" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="converted_kg">Converted Kg</Label>
           <Input id="converted_kg" type="number" value={skuDetailsForm.converted_kg} onChange={e => setSkuDetailsForm({...skuDetailsForm, converted_kg: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
@@ -5103,7 +5103,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="packing_weight_per_main_unit" type="number" value={skuDetailsForm.packing_weight_per_main_unit} onChange={e => setSkuDetailsForm({...skuDetailsForm, packing_weight_per_main_unit: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="weight_difference">Weight Difference</Label>
           <Input id="weight_difference" type="number" value={skuDetailsForm.weight_difference} onChange={e => setSkuDetailsForm({...skuDetailsForm, weight_difference: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
@@ -5113,7 +5113,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="sku_weight" type="number" value={skuDetailsForm.sku_weight} onChange={e => setSkuDetailsForm({...skuDetailsForm, sku_weight: e.target.value})} placeholder="0.00" readOnly={!!skuDetailsForm.semi_finished_good_id} className={skuDetailsForm.semi_finished_good_id ? "bg-slate-100" : ""} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="packing_weight">Packing Weight</Label>
           <Input id="packing_weight" type="number" value={skuDetailsForm.packing_weight} onChange={e => setSkuDetailsForm({...skuDetailsForm, packing_weight: e.target.value})} placeholder="0.00" />
@@ -5126,7 +5126,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <p className="text-xs text-slate-400 -mt-2">Packing Weight and Gross Weight always stay manual entry - not derived from the linked Semi-Finished Good.</p>
 
       <Separator />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="stock_category_id">Stock Category</Label>
           <Select value={skuDetailsForm.stock_category_id ? String(skuDetailsForm.stock_category_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, stock_category_id: val})}>
@@ -5147,7 +5147,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="gst_rate_id">GST Rate</Label>
           <Select value={skuDetailsForm.gst_rate_id ? String(skuDetailsForm.gst_rate_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, gst_rate_id: val})}>
@@ -5179,7 +5179,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label htmlFor="uqc_id">UQC – Unit Quantity Code</Label>
           <Select value={skuDetailsForm.uqc_id ? String(skuDetailsForm.uqc_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, uqc_id: val})}>
@@ -5234,7 +5234,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderSkuSellingPriceForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="packing_material">Packing Material *</Label>
           <Input id="packing_material" value={skuSellingPriceForm.packing_material} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, packing_material: e.target.value})} placeholder="Enter material name" />
@@ -5244,7 +5244,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="sku_unit" value={skuSellingPriceForm.sku_unit} readOnly className="bg-slate-100" placeholder="e.g. Ltr" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_weight_sp">SKU Weight</Label>
           <Input id="sku_weight_sp" type="number" value={skuSellingPriceForm.sku_weight} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, sku_weight: e.target.value})} placeholder="0.00" />
@@ -5254,7 +5254,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="conversion_formula" type="number" value={skuSellingPriceForm.conversion_formula} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, conversion_formula: e.target.value})} placeholder="0.00" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_weight_in_gm">SKU Weight (gm)</Label>
           <Input id="sku_weight_in_gm" type="number" value={skuSellingPriceForm.sku_weight_in_gm} onChange={e => {
@@ -5304,7 +5304,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           }} placeholder="0.00" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="net_oil_in_gm">Net Oil (gm)</Label>
           <Input id="net_oil_in_gm" type="number" value={skuSellingPriceForm.net_oil_in_gm} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
@@ -5331,13 +5331,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           }} placeholder="0.00" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="landing_cost">Landing Cost</Label>
           <Input id="landing_cost" type="number" value={skuSellingPriceForm.landing_cost} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="var">Var</Label>
           <Input id="var" value={skuSellingPriceForm.var} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, var: e.target.value})} placeholder="e.g. 1" />
@@ -5347,7 +5347,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="margin" value={skuSellingPriceForm.margin} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, margin: e.target.value})} placeholder="e.g. 10%" />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="space-y-2">
           <Label htmlFor="landing_cost">Landing Cost</Label>
           <Input id="landing_cost" type="number" value={skuSellingPriceForm.landing_cost} readOnly className="bg-slate-100" placeholder="Auto" />
@@ -5367,7 +5367,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const renderVehicleForm = () => {
     return (
       <div className="grid gap-4 py-4 px-1">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Vehicle ID *</Label>
             <Input value={vehicleForm.vehicle_master_id} readOnly className="bg-slate-100" />
@@ -5383,7 +5383,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             {vehicleFormErrors.registration_no && <p className="text-xs text-red-500 mt-1">{vehicleFormErrors.registration_no}</p>}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Vehicle Type <span className="text-red-500">*</span></Label>
             <Input
@@ -5407,7 +5407,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             {vehicleFormErrors.transporter && <p className="text-xs text-red-500 mt-1">{vehicleFormErrors.transporter}</p>}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Status</Label>
             <Select value={vehicleForm.status} onValueChange={val => setVehicleForm({...vehicleForm, status: val})}>
@@ -5429,7 +5429,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>RTO</Label>
             <Input value={vehicleForm.rto || ''} onChange={e => setVehicleForm({...vehicleForm, rto: e.target.value})} placeholder="RTO" />
@@ -5448,7 +5448,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
 
         <Separator className="my-2" />
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>GVW (KGS)</Label>
             <Input type="number" value={vehicleForm.gvw} onChange={e => {
@@ -5496,7 +5496,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </Select>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {roadTaxType === 'expiry' ? (
               <>
                 <div className="space-y-2">
@@ -5612,7 +5612,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           {/* State Permit (document compulsory) */}
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-600">State Permit <span className="text-red-500">*</span></p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>State Permit Expiry Date</Label>
                 <Input
@@ -5645,7 +5645,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           {/* National Permit (optional) */}
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-600">National Permit</p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>National Permit Expiry Date</Label>
                 <Input
@@ -5673,7 +5673,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
         <Separator className="my-2" />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2 min-w-0">
             <Label>RTO Code</Label>
             <Select value={vehicleForm.rto_id ? String(vehicleForm.rto_id) : ''} onValueChange={val => setVehicleForm({...vehicleForm, rto_id: val})}>
@@ -5712,7 +5712,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
         <div className="rounded-lg border border-slate-200 p-4 space-y-4">
           <p className="font-semibold text-sm text-slate-800">GPS Tracking</p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>GPS Company</Label>
               <Input value={vehicleForm.gps_company || ''} onChange={e => setVehicleForm({...vehicleForm, gps_company: e.target.value})} placeholder="e.g. Trackwell" />
@@ -5726,7 +5726,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Label>GPS API / Tracking Link</Label>
             <Input value={vehicleForm.gps_api_tracking_link || ''} onChange={e => setVehicleForm({...vehicleForm, gps_api_tracking_link: e.target.value})} placeholder="https://..." />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>GPS Valid Upto</Label>
               <Input type="date" value={vehicleForm.gps_valid_upto?.split('T')[0] || ''} onChange={e => setVehicleForm({...vehicleForm, gps_valid_upto: e.target.value})} />
@@ -5750,7 +5750,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderDriverForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driver ID *</Label>
           <Input value={driverForm.driver_master_id} readOnly className="bg-slate-100" />
@@ -5766,7 +5766,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driver Name *</Label>
           <Input value={driverForm.driver_name} onChange={e => setDriverForm({...driverForm, driver_name: e.target.value})} placeholder="Full Name" />
@@ -5777,7 +5777,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Email ID</Label>
           <Input type="email" value={driverForm.email_id} onChange={e => setDriverForm({...driverForm, email_id: e.target.value})} placeholder="email@example.com" />
@@ -5790,7 +5790,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <Separator className="my-2" />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driving Licence No *</Label>
           <Input value={driverForm.driving_licence_no} onChange={e => setDriverForm({...driverForm, driving_licence_no: e.target.value})} placeholder="DL Number" />
@@ -5801,7 +5801,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>DL Valid Upto</Label>
           <Input type="date" value={driverForm.valid_upto?.split('T')[0] || ''} onChange={e => setDriverForm({...driverForm, valid_upto: e.target.value})} />
@@ -5812,7 +5812,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Trans Valid Upto</Label>
           <Input type="date" value={driverForm.trans_valid_upto?.split('T')[0] || ''} onChange={e => setDriverForm({...driverForm, trans_valid_upto: e.target.value})} />
@@ -5823,7 +5823,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label>RTO Code</Label>
           <Select value={driverForm.rto_id ? String(driverForm.rto_id) : ''} onValueChange={val => setDriverForm({...driverForm, rto_id: val ? parseInt(val, 10) : null})}>
@@ -5847,7 +5847,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <Separator className="my-2" />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Aadhaar No</Label>
           <Input value={driverForm.aadhaar_no} onChange={e => setDriverForm({...driverForm, aadhaar_no: e.target.value})} placeholder="12-digit number" />
@@ -5868,7 +5868,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <Input value={driverForm.address_line1} onChange={e => setDriverForm({...driverForm, address_line1: e.target.value})} placeholder="Full address" />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>State</Label>
           <Combobox
@@ -5892,7 +5892,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const renderTransportForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Transport ID *</Label>
           <Input value={transportForm.transport_master_id} readOnly className="bg-slate-100" />
@@ -5915,7 +5915,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Contact Person *</Label>
           <Input value={transportForm.contact_person} onChange={e => setTransportForm({...transportForm, contact_person: e.target.value})} placeholder="Full Name" />
@@ -5926,7 +5926,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Email ID</Label>
           <Input type="email" value={transportForm.email_id} onChange={e => setTransportForm({...transportForm, email_id: e.target.value})} placeholder="email@example.com" />
@@ -5937,7 +5937,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Pincode</Label>
           <Input value={transportForm.pincode} onChange={e => setTransportForm({...transportForm, pincode: e.target.value})} placeholder="6-digit PIN" />
@@ -5953,7 +5953,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2 min-w-0">
           <Label>Linked Customer</Label>
           <p className="text-xs text-slate-400 mb-1">If this transporter is also a customer, link them so they don't need a separate ledger.</p>
@@ -6054,7 +6054,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <span className="hidden md:inline">Add {activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="w-[95vw] max-h-[90vh] overflow-y-auto" style={{ maxWidth: '1250px' }}>
               <DialogHeader>
                 <DialogTitle>{editingItem ? "Edit" : "Add New"} {activeTab === "sku_details" ? "Finished Good" : activeTab === "sku_selling_price" ? "SKU Selling Price" : activeTab === "salespersons" ? "Salesperson" : activeTab === "vehicle_master" ? "Vehicle" : activeTab === "driver_master" ? "Driver" : activeTab === "transport_master" ? "Transporter" : activeTab === "ledger_groups" ? "Ledger Group" : activeTab === "stock_groups" ? "Stock Group" : activeTab === "units" ? "Unit" : activeTab === "raw_materials" ? "Raw Material" : activeTab === "semi_finished_goods" ? "Semi-Finished Good" : activeTab === "insurance_details" ? "Insurance Detail" : activeTab === "conversion_formulas" ? "Conversion Formula" : activeTab === "price_levels" ? "Price Level" : activeTab === "petrol_pumps" ? "Petrol Pump" : activeTab === "cd_rules" ? "CD Rule" : activeTab === "tds_rules" ? "TDS Rule" : activeTab === "bhada_rates" ? "Bhada Rate" : activeTab.slice(0, -1)}</DialogTitle>
                 <DialogDescription>
@@ -10271,7 +10271,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       {/* Approve with Review Dialog (shared for all tabs) */}
       <Dialog open={!!approvalReviewModal} onOpenChange={(open) => { if (!open) { setApprovalReviewModal(null); setApprovalEditData({}); resetForms() } }}>
-        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto" style={{ maxWidth: '750px' }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Check className="h-5 w-5 text-emerald-600" />
@@ -10379,7 +10379,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </div>
           ) : quickAddDialog?.type === 'ledger' ? (
             <div className="grid gap-4 py-2 px-1">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="qa_ledger_code">Ledger Code</Label>
                   <Input id="qa_ledger_code" value={quickAddForm.ledger_code || ''} readOnly className="bg-slate-100" placeholder="Auto-generated" />
