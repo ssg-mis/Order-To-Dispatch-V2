@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Combobox } from "@/components/ui/combobox"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -1717,6 +1719,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     status: 'Active',
   })
 
+  const [insuranceCustomerSearch, setInsuranceCustomerSearch] = useState("");
+  const [showCustomerSearch, setShowCustomerSearch] = useState(false);
   const [insuranceDetailForm, setInsuranceDetailForm] = useState<any>({
     insurance_code: '',
     status: 'Active',
@@ -4815,31 +4819,106 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
       </div>
       {insuranceDetailForm.owner_type === 'Customer' && (
-        <div className="space-y-2">
-          <Label>Linked Customers</Label>
-          <p className="text-xs text-slate-400">Select the customer(s) that own this policy (multi-select).</p>
-          <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 p-2 max-h-40 overflow-y-auto">
-            {customers.map((c: any) => {
-              const checked = (insuranceDetailForm.customer_ids || []).includes(c.id)
-              return (
-                <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={(val) => {
-                      const current = insuranceDetailForm.customer_ids || []
-                      setInsuranceDetailForm({
-                        ...insuranceDetailForm,
-                        customer_ids: val ? [...current, c.id] : current.filter((id: number) => id !== c.id),
-                      })
-                    }}
-                  />
-                  {c.customer_name}
-                </label>
-              )
-            })}
+          <div className="space-y-2 flex flex-col">
+            <Label>Linked Customers</Label>
+            <p className="text-xs text-slate-400 mb-1">Search and tick the checkboxes of the customers who own this policy.</p>
+            {!showCustomerSearch ? (
+              <Button 
+                type="button" 
+                variant="outline" 
+                className="w-full justify-start text-slate-500 bg-transparent font-normal h-10 hover:bg-slate-50"
+                onClick={() => setShowCustomerSearch(true)}
+              >
+                <Search className="mr-2 h-4 w-4" />
+                Select customers
+              </Button>
+            ) : (
+              <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col bg-white shadow-sm mt-1">
+                <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input 
+                      placeholder="Search..." 
+                      value={insuranceCustomerSearch} 
+                      onChange={(e) => setInsuranceCustomerSearch(e.target.value)} 
+                      className="pl-9 h-9 bg-white"
+                      autoFocus
+                    />
+                  </div>
+                  <Button 
+                    type="button" 
+                    variant="ghost" 
+                    size="sm" 
+                    className="ml-2 text-slate-500 hover:text-slate-700"
+                    onClick={() => setShowCustomerSearch(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
+                <div className="max-h-52 overflow-y-auto p-1.5">
+                  {customers.filter((c: any) => c.customer_name.toLowerCase().includes(insuranceCustomerSearch.toLowerCase())).length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-6">No customer found matching your search.</p>
+                  ) : (
+                    <div className="flex flex-col gap-0.5">
+                      {customers
+                        .filter((c: any) => c.customer_name.toLowerCase().includes(insuranceCustomerSearch.toLowerCase()))
+                        .map((c: any) => {
+                          const checked = (insuranceDetailForm.customer_ids || []).includes(c.id)
+                          return (
+                            <label 
+                              key={c.id} 
+                              className={`flex items-center gap-3 p-2.5 rounded-md cursor-pointer transition-colors ${checked ? 'bg-primary/5 border border-primary/20' : 'hover:bg-slate-50 border border-transparent'}`}
+                            >
+                              <Checkbox 
+                                checked={checked} 
+                                onCheckedChange={() => {
+                                  const current = insuranceDetailForm.customer_ids || []
+                                  setInsuranceDetailForm({
+                                    ...insuranceDetailForm,
+                                    customer_ids: !checked ? [...current, c.id] : current.filter((id: number) => id !== c.id),
+                                  })
+                                }}
+                              />
+                              <span className={`text-sm ${checked ? 'text-primary font-medium' : 'text-slate-700'}`}>
+                                {c.customer_name}
+                              </span>
+                            </label>
+                          )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {(insuranceDetailForm.customer_ids || []).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {customers
+                  .filter((c: any) => (insuranceDetailForm.customer_ids || []).includes(c.id))
+                  .map((c: any) => (
+                    <Badge key={c.id} variant="secondary" className="text-xs font-normal flex items-center">
+                      {c.customer_name}
+                      <button
+                        type="button"
+                        className="ml-1.5 rounded-full hover:bg-slate-200 p-0.5"
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setInsuranceDetailForm({
+                            ...insuranceDetailForm,
+                            customer_ids: (insuranceDetailForm.customer_ids || []).filter((id: number) => id !== c.id),
+                          });
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))
+                }
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
     </div>
   )
 
