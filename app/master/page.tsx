@@ -3302,6 +3302,62 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
         </div>
       </div>
+
+
+      <div className="border-t pt-4 mt-2 space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-slate-600">Additional Addresses</Label>
+          <Button type="button" variant="outline" size="sm" onClick={addAddressRow}>+ Add Address</Button>
+        </div>
+        {(!customerForm.addresses || customerForm.addresses.length === 0) && (
+          <p className="text-xs text-slate-400">No additional addresses added. The address fields above remain the customer's primary address.</p>
+        )}
+        {(customerForm.addresses || []).map((addr, index) => {
+          const rowState = activeStates.find((s: any) => String(s.id) === String(addr.state_id))
+          return (
+            <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 relative">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Address {index + 1}</span>
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeAddressRow(index)}>Remove</Button>
+              </div>
+              <Input value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
+              <div className="grid grid-cols-3 gap-3">
+                <Input value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
+                <Input value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
+                <Input value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Combobox
+                  options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
+                  value={addr.state_id ? String(addr.state_id) : ""}
+                  onValueChange={val => handleAddressStateChange(index, val)}
+                  placeholder="State" searchPlaceholder="Search state..."
+                />
+                <Input value={addr.district || ''} onChange={e => updateAddressRow(index, { district: e.target.value })} placeholder="District" />
+                <Input value={addr.sub_district || ''} onChange={e => updateAddressRow(index, { sub_district: e.target.value })} placeholder="Sub-District" />
+              </div>
+              {rowState && (
+                <p className="text-[11px] text-slate-400">
+                  State Code: <span className="font-medium text-slate-600">{rowState.gst_state_code}</span>
+                  {" · "}Short Name: <span className="font-medium text-slate-600">{rowState.short_name || '—'}</span>
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Input
+                    value={addr.pincode || ''}
+                    onChange={e => updateAddressRow(index, { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
+                    onBlur={e => handleAddressPincodeBlur(index, e.target.value)}
+                    placeholder="PIN Code (6 digits)"
+                    className={addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                  />
+                  {addressErrors[index] && <p className="text-xs text-red-500 mt-1">{addressErrors[index]}</p>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pan">PAN</Label>
@@ -3537,61 +3593,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             </SelectContent>
           </Select>
         </div>
-      </div>
-
-      <div className="border-t pt-4 mt-2 space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-slate-600">Additional Addresses</Label>
-          <Button type="button" variant="outline" size="sm" onClick={addAddressRow}>+ Add Address</Button>
-        </div>
-        {(!customerForm.addresses || customerForm.addresses.length === 0) && (
-          <p className="text-xs text-slate-400">No additional addresses added. The address fields above remain the customer's primary address.</p>
-        )}
-        {(customerForm.addresses || []).map((addr, index) => {
-          const rowState = activeStates.find((s: any) => String(s.id) === String(addr.state_id))
-          return (
-            <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 relative">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">Address {index + 1}</span>
-                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeAddressRow(index)}>Remove</Button>
-              </div>
-              <Input value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
-              <div className="grid grid-cols-3 gap-3">
-                <Input value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
-                <Input value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
-                <Input value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <Combobox
-                  options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
-                  value={addr.state_id ? String(addr.state_id) : ""}
-                  onValueChange={val => handleAddressStateChange(index, val)}
-                  placeholder="State" searchPlaceholder="Search state..."
-                />
-                <Input value={addr.district || ''} onChange={e => updateAddressRow(index, { district: e.target.value })} placeholder="District" />
-                <Input value={addr.sub_district || ''} onChange={e => updateAddressRow(index, { sub_district: e.target.value })} placeholder="Sub-District" />
-              </div>
-              {rowState && (
-                <p className="text-[11px] text-slate-400">
-                  State Code: <span className="font-medium text-slate-600">{rowState.gst_state_code}</span>
-                  {" · "}Short Name: <span className="font-medium text-slate-600">{rowState.short_name || '—'}</span>
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Input
-                    value={addr.pincode || ''}
-                    onChange={e => updateAddressRow(index, { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
-                    onBlur={e => handleAddressPincodeBlur(index, e.target.value)}
-                    placeholder="PIN Code (6 digits)"
-                    className={addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
-                  />
-                  {addressErrors[index] && <p className="text-xs text-red-500 mt-1">{addressErrors[index]}</p>}
-                </div>
-              </div>
-            </div>
-          )
-        })}
       </div>
 
       <div className="border-t pt-4 mt-2 space-y-3">
