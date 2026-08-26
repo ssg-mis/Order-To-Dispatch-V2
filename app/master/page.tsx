@@ -4112,14 +4112,26 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="group_name" value={ledgerGroupForm.group_name} onChange={e => setLedgerGroupForm({...ledgerGroupForm, group_name: e.target.value})} placeholder="Enter ledger group name" />
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="status">Status</Label>
-        <Select value={ledgerGroupForm.status} onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, status: val})}>
-          <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Under (Parent Group)</Label>
+          <Combobox
+            options={(ledgerGroupOptionsData || []).map((g: any) => ({ value: String(g.id), label: g.group_name }))}
+            value={ledgerGroupForm.parent_id ? String(ledgerGroupForm.parent_id) : ""}
+            onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, parent_id: val ? parseInt(val, 10) : null})}
+            placeholder="Select parent group"
+            searchPlaceholder="Search groups..."
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="status">Status</Label>
+          <Select value={ledgerGroupForm.status} onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   )
@@ -4136,14 +4148,26 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Input id="group_name" value={stockGroupForm.group_name} onChange={e => setStockGroupForm({...stockGroupForm, group_name: e.target.value})} placeholder="Enter stock group name" />
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="status">Status</Label>
-        <Select value={stockGroupForm.status} onValueChange={val => setStockGroupForm({...stockGroupForm, status: val})}>
-          <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Under (Parent Group)</Label>
+          <Combobox
+            options={(stockGroupOptionsData || []).map((g: any) => ({ value: String(g.id), label: g.group_name }))}
+            value={stockGroupForm.parent_id ? String(stockGroupForm.parent_id) : ""}
+            onValueChange={val => setStockGroupForm({...stockGroupForm, parent_id: val ? parseInt(val, 10) : null})}
+            placeholder="Select parent group"
+            searchPlaceholder="Search groups..."
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="status">Status</Label>
+          <Select value={stockGroupForm.status} onValueChange={val => setStockGroupForm({...stockGroupForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   )
