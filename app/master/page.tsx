@@ -2832,9 +2832,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'vehicle_master': return renderVehicleForm()
       case 'driver_master': return renderDriverForm()
       case 'transport_master': return renderTransportForm()
-      case 'states': return renderStateForm()
-      case 'districts': return renderDistrictForm()
-      case 'sub_districts': return renderSubDistrictForm()
+      case 'states': return null
+      case 'districts': return null
+      case 'sub_districts': return null
       default: return null
     }
   }
@@ -10442,3 +10442,4 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     </div>
   )
 }
+
