@@ -4118,11 +4118,25 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Combobox
             options={(ledgerGroupOptionsData || []).map((g: any) => ({ value: String(g.id), label: g.group_name }))}
             value={ledgerGroupForm.parent_id ? String(ledgerGroupForm.parent_id) : ""}
-            onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, parent_id: val ? parseInt(val, 10) : null})}
+            onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, parent_id: val ? parseInt(val, 10) : null, nature_of_group: ""})}
             placeholder="Select parent group"
             searchPlaceholder="Search groups..."
           />
         </div>
+        
+        {/* TALLY LOGIC: Show Nature of Group ONLY if Under is Primary */}
+        {ledgerGroupForm.parent_id === ledgerGroupOptionsData?.find((g: any) => g.group_name === 'Primary')?.id && (
+          <div className="space-y-2">
+            <Label>Nature of Group</Label>
+            <Select value={ledgerGroupForm.nature_of_group} onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, nature_of_group: val})}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select Nature" /></SelectTrigger>
+              <SelectContent>
+                {['Assets', 'Liabilities', 'Income', 'Expenses'].map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={ledgerGroupForm.status} onValueChange={val => setLedgerGroupForm({...ledgerGroupForm, status: val})}>
