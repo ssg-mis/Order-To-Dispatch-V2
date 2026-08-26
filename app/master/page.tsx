@@ -349,11 +349,12 @@ const blankCustomerAddress = (): CustomerAddress => ({
 interface CustomerBankAccount {
   id?: number
   bank_name_id?: number | null
+  account_holder_name?: string
   account_number?: string
   ifsc_code?: string
 }
 const blankCustomerBankAccount = (): CustomerBankAccount => ({
-  bank_name_id: null, account_number: "", ifsc_code: "",
+  bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "",
 })
 
 // Customer-Master field parity block (Phases 10/11/12/21) - the same blank
@@ -3607,30 +3608,35 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               <span className="text-xs font-semibold text-slate-500">Bank Account {index + 1}</span>
               <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeBankAccountRow(index)}>Remove</Button>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <Combobox
-                options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
-                value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
-                onValueChange={val => updateBankAccountRow(index, { bank_name_id: val ? parseInt(val, 10) : null })}
-                placeholder="Bank Name"
-                searchPlaceholder="Search bank..."
-              />
-              <Input
-                value={bank.account_number || ''}
-                onChange={e => updateBankAccountRow(index, { account_number: e.target.value })}
-                placeholder="Account Number"
-              />
-              <div>
-                <Input
-                  value={bank.ifsc_code || ''}
-                  onChange={e => updateBankAccountRow(index, { ifsc_code: e.target.value.toUpperCase() })}
-                  onBlur={e => handleBankAccountIfscBlur(index, e.target.value)}
-                  placeholder="IFSC Code"
-                  className={bankAccountErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Combobox
+                  options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                  value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
+                  onValueChange={val => updateBankAccountRow(index, { bank_name_id: val ? parseInt(val, 10) : null })}
+                  placeholder="Bank Name"
+                  searchPlaceholder="Search bank..."
                 />
-                {bankAccountErrors[index] && <p className="text-xs text-red-500 mt-1">{bankAccountErrors[index]}</p>}
+                <Input
+                  value={bank.account_holder_name || ''}
+                  onChange={e => updateBankAccountRow(index, { account_holder_name: e.target.value })}
+                  placeholder="Account Holder Name"
+                />
+                <Input
+                  value={bank.account_number || ''}
+                  onChange={e => updateBankAccountRow(index, { account_number: e.target.value })}
+                  placeholder="Account Number"
+                />
+                <div>
+                  <Input
+                    value={bank.ifsc_code || ''}
+                    onChange={e => updateBankAccountRow(index, { ifsc_code: e.target.value.toUpperCase() })}
+                    onBlur={e => handleBankAccountIfscBlur(index, e.target.value)}
+                    placeholder="IFSC Code"
+                    className={bankAccountErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                  />
+                  {bankAccountErrors[index] && <p className="text-xs text-red-500 mt-1">{bankAccountErrors[index]}</p>}
+                </div>
               </div>
-            </div>
           </div>
         ))}
       </div>
@@ -10442,4 +10448,5 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     </div>
   )
 }
+
 
