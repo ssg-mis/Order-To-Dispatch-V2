@@ -1922,7 +1922,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     tag_name: "",
     semi_finished_good_id: "",
     oil_tag_id: "",
-      oil_tag_id: "",
         oil_type_id: "",
     stock_category_id: "",
     main_uom_id: "",

@@ -1911,6 +1911,7 @@ export const oilTagApi = {
     return request(`/oil-tags${queryString}`);
   },
   getById: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`),
+    getPending: async (): Promise<ApiResponse> => request(`/oil-tags/pending`),
   create: async (data: any): Promise<ApiResponse> => request('/oil-tags', { method: 'POST', body: JSON.stringify(data) }),
   update: async (id: number | string, data: any): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'DELETE' }),
