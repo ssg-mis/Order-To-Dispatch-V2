@@ -529,6 +529,7 @@ export default function MasterPage() {
     setCdRuleSubTab('active')
     setTdsRuleSubTab('active'); setBhadaRateSubTab('active')
     setSelectedVehicleType('all')
+    setSearchTerm("")
     return () => { setMasterTabContext(null) }
   }, [activeTab])
 
@@ -642,6 +643,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     },
   })
   const ledgerGroupOptions: any[] = ledgerGroupOptionsData || []
+
+  // Lightweight, unpaginated Customers list for the selector on Insurance Details form
+  const { data: customerOptionsData } = useQuery({
+    queryKey: ['customer-options'],
+    queryFn: async () => {
+      const res = await customerApi.getAll({ all: 'true' })
+      return res.success ? (res.data?.customers || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const customerOptions = useMemo(() => customerOptionsData || [], [customerOptionsData])
+
 
   // Lightweight, unpaginated Units / Ledgers lists for the pickers on the
   // Raw Materials form (Phase 16) - independent of those tabs' own
@@ -4831,21 +4844,21 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="insurance_code">Insurance Code *</Label>
-          <Input id="insurance_code" value={insuranceDetailForm.insurance_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+          <Input id="insurance_code" value={insuranceDetailForm.insurance_code || ""} readOnly className="bg-slate-100" placeholder="Auto-generated" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="insurance_company_name">Insurance Company Name *</Label>
-          <Input id="insurance_company_name" value={insuranceDetailForm.insurance_company_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, insurance_company_name: e.target.value})} placeholder="Enter company name" />
+          <Input id="insurance_company_name" value={insuranceDetailForm.insurance_company_name || ""} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, insurance_company_name: e.target.value})} placeholder="Enter company name" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="short_name">Short Name</Label>
-          <Input id="short_name" value={insuranceDetailForm.short_name} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, short_name: e.target.value})} placeholder="e.g. ICICI" />
+          <Input id="short_name" value={insuranceDetailForm.short_name || ""} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, short_name: e.target.value})} placeholder="e.g. ICICI" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="policy_number">Policy Number</Label>
-          <Input id="policy_number" value={insuranceDetailForm.policy_number} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, policy_number: e.target.value})} placeholder="Enter policy number" />
+          <Input id="policy_number" value={insuranceDetailForm.policy_number || ""} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, policy_number: e.target.value})} placeholder="Enter policy number" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4871,7 +4884,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label htmlFor="sum_insured">Sum Insured (₹)</Label>
-          <Input id="sum_insured" type="number" value={insuranceDetailForm.sum_insured} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, sum_insured: e.target.value})} placeholder="0.00" />
+          <Input id="sum_insured" type="number" value={insuranceDetailForm.sum_insured ?? ""} onChange={e => setInsuranceDetailForm({...insuranceDetailForm, sum_insured: e.target.value})} placeholder="0.00" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4934,11 +4947,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   </Button>
                 </div>
                 <div className="max-h-52 overflow-y-auto p-1.5">
-                  {customers.filter((c: any) => c.customer_name.toLowerCase().includes(insuranceCustomerSearch.toLowerCase())).length === 0 ? (
+                  {customerOptions.filter((c: any) => c.customer_name.toLowerCase().includes(insuranceCustomerSearch.toLowerCase())).length === 0 ? (
                     <p className="text-sm text-slate-400 text-center py-6">No customer found matching your search.</p>
                   ) : (
                     <div className="flex flex-col gap-0.5">
-                      {customers
+                      {customerOptions
                         .filter((c: any) => c.customer_name.toLowerCase().includes(insuranceCustomerSearch.toLowerCase()))
                         .map((c: any) => {
                           const checked = (insuranceDetailForm.customer_ids || []).includes(c.id)
@@ -4971,7 +4984,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             
             {(insuranceDetailForm.customer_ids || []).length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {customers
+                {customerOptions
                   .filter((c: any) => (insuranceDetailForm.customer_ids || []).includes(c.id))
                   .map((c: any) => (
                     <Badge key={c.id} variant="secondary" className="text-xs font-normal flex items-center">
