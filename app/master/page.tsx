@@ -6275,7 +6275,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <SelectTrigger className="w-full sm:w-72 h-12 rounded-xl bg-white shadow-sm border-slate-200 px-4 font-medium data-[state=open]:ring-2 data-[state=open]:ring-primary/20">
               <SelectValue placeholder="Select master" />
             </SelectTrigger>
-            <SelectContent className="rounded-xl">
+            <SelectContent className="rounded-xl max-h-[300px]">
               {visibleTabs.map((tab) => {
                 const meta = TAB_META[tab]
                 if (!meta) return null
