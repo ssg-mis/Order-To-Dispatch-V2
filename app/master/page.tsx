@@ -4686,15 +4686,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   // conversation to extend.
   const renderTdsRuleForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified TDS rules/sections yet. Only Name, Rate and Status exist until that's scoped.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="tds_rule_code">TDS Rule Code *</Label>
           <Input id="tds_rule_code" value={tdsRuleForm.tds_rule_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="tds_name">Name *</Label>
-          <Input id="tds_name" value={tdsRuleForm.name} onChange={e => setTdsRuleForm({...tdsRuleForm, name: e.target.value})} placeholder="e.g. 194Q Purchase TDS" />
+          <Label htmlFor="tds_name">Nature of Transaction *</Label>
+          <Input id="tds_name" value={tdsRuleForm.name} onChange={e => setTdsRuleForm({...tdsRuleForm, name: e.target.value})} placeholder="Enter nature of transaction..." />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4719,7 +4718,6 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   // Phase 23 - see that render function's comment.
   const renderBhadaRateForm = () => (
     <div className="grid gap-4 py-4 px-1">
-      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Placeholder master — the client hasn't specified Bhada/freight rate rules yet. Only Name, Rate and Status exist until that's scoped.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="bhada_rate_code">Bhada Rate Code *</Label>
@@ -8460,7 +8458,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                       <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
                         <TableRow className="hover:bg-transparent border-b">
                           <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('tds_rule_code', tdsRuleSort, setTdsRuleSort)}>Code <SortIcon col="tds_rule_code" sort={tdsRuleSort} /></TableHead>
-                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', tdsRuleSort, setTdsRuleSort)}>Name <SortIcon col="name" sort={tdsRuleSort} /></TableHead>
+                          <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', tdsRuleSort, setTdsRuleSort)}>Nature of Transaction <SortIcon col="name" sort={tdsRuleSort} /></TableHead>
                           <TableHead>Rate</TableHead>
                           <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', tdsRuleSort, setTdsRuleSort)}>Status <SortIcon col="status" sort={tdsRuleSort} /></TableHead>
                           <TableHead className="text-right pr-6">Actions</TableHead>
