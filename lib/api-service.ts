@@ -1904,6 +1904,19 @@ export const cdRuleApi = {
 /**
  * TDS Master API (Phase 23) - bare-minimum placeholder, see db-v2/schema/tds_rules.ts.
  */
+
+export const oilTagApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/oil-tags${queryString}`);
+  },
+  getById: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`),
+  create: async (data: any): Promise<ApiResponse> => request('/oil-tags', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: number | string, data: any): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'DELETE' }),
+      review: async (id: number | string, data: any): Promise<ApiResponse> => request(`/oil-tags/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
+};
+
 export const tdsRuleApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';

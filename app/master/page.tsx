@@ -20,12 +20,12 @@ import { Combobox } from "@/components/ui/combobox"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
-import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi } from "@/lib/api-service"
+import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, oilTagApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
 import { useAuth } from "@/hooks/use-auth"
-import {   UserPlus, UserMinus, Search, RefreshCw, FileText, Download, Filter, ArrowUpDown, ArrowUp, ArrowDown, Package, Warehouse, Briefcase, Plus, Loader2, Save, Trash2, Edit2, AlertCircle, CheckCircle2, MoreVertical, X, Settings, Calendar, Clock, MapPin, Phone, Mail, User, Users, Info, Check, Eye, Trash, LayoutGrid, ChevronRight, ChevronDown, List, Upload, EyeOff, Layout, Truck, Pencil, UserCircle, Factory, BookOpen, Layers, Ruler, Landmark, FlaskConical, Shield, Calculator, Tag, Fuel, Percent, Route,
+import {   Droplet, UserPlus, UserMinus, Search, RefreshCw, FileText, Download, Filter, ArrowUpDown, ArrowUp, ArrowDown, Package, Warehouse, Briefcase, Plus, Loader2, Save, Trash2, Edit2, AlertCircle, CheckCircle2, MoreVertical, X, Settings, Calendar, Clock, MapPin, Phone, Mail, User, Users, Info, Check, Eye, Trash, LayoutGrid, ChevronRight, ChevronDown, List, Upload, EyeOff, Layout, Truck, Pencil, UserCircle, Factory, BookOpen, Layers, Ruler, Landmark, FlaskConical, Shield, Calculator, Tag, Fuel, Percent, Route,
 } from 'lucide-react'
 import { PageHeader } from "@/components/page-header"
 import {
@@ -215,7 +215,8 @@ interface SkuDetail {
   tag_name: string
   // Phase 18 (Finished Goods Master) + Phase 3 fold-in (SKU GST extension).
   semi_finished_good_id?: number | string | null
-  oil_type_id?: number | string | null
+  oil_tag_id?: number | string | null
+    oil_type_id?: number | string | null
   stock_category_id?: number | string | null
   main_uom_id?: number | string | null
   alternate_uom_id?: number | string | null
@@ -374,7 +375,7 @@ const ALL_MASTER_TABS = [
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master",
   "ledger_groups", "stock_groups", "units", "raw_materials", "semi_finished_goods",
   "insurance_details", "conversion_formulas", "price_levels", "petrol_pumps", "cd_rules",
-  "tds_rules", "bhada_rates",
+  "tds_rules", "oil_tags", "bhada_rates",
   "reference_data"
 ]
 
@@ -394,6 +395,7 @@ const TAB_META: Record<string, { label: string; icon: ComponentType<{ className?
   petrol_pumps: { label: "Petrol Pumps", icon: Fuel, desc: "Manage your petrol pump records and details" },
   cd_rules: { label: "Cash Discount", icon: Percent, desc: "Maintain Cash Discount rules by Stock Category" },
   tds_rules: { label: "TDS", icon: Landmark, desc: "TDS rate placeholder — minimum fields only, pending client scoping" },
+    oil_tags: { label: "Oil Tags", icon: Droplet, desc: "Manage dynamic oil types and tags" },
   bhada_rates: { label: "Bhada Rate", icon: Route, desc: "Freight/Bhada rate placeholder — minimum fields only, pending client scoping" },
   sku_details: { label: "Finished Goods", icon: Package, desc: "Manage your Finished Goods list and product details" },
   sku_selling_price: { label: "Pricing", icon: Package, desc: "Manage SKU selling prices and rates" },
@@ -1451,6 +1453,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [petrolPumpSort, setPetrolPumpSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'petrol_pump_code', dir: 'asc' })
   const [cdRuleSort, setCdRuleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'cd_rule_code', dir: 'asc' })
   const [tdsRuleSort, setTdsRuleSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'tds_rule_code', dir: 'asc' })
+    const [oilTagSort, setOilTagSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
   const [bhadaRateSort, setBhadaRateSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'bhada_rate_code', dir: 'asc' })
 
 
@@ -1769,7 +1772,42 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     status: 'Active',
   })
 
-  const [tdsRuleForm, setTdsRuleForm] = useState<any>({
+  
+    const { data: oilTagsData, isLoading: isOilTagsLoading, refetch: refetchOilTag } = useQuery({
+      queryKey: ["oil_tags", searchTerm],
+      queryFn: async () => {
+        const res = await oilTagApi.getAll({ page: 1, limit: 1000, search: searchTerm })
+        return res.success ? (res.data.items || []) : []
+      },
+      enabled: activeTab === 'oil_tags',
+    })
+    const oilTagsList = useMemo(() => oilTagsData || [], [oilTagsData])
+
+    const { data: pendingOilTagsData, refetch: refetchPendingOilTags } = useQuery({
+      queryKey: ["oil_tags_pending"],
+      queryFn: async () => {
+        const res = await oilTagApi.getPending()
+        return res.success ? (res.data.items || []) : []
+      },
+      enabled: activeTab === 'oil_tags',
+    })
+    const pendingOilTags = useMemo(() => pendingOilTagsData || [], [pendingOilTagsData])
+
+    const sortedOilTags = useMemo(() => {
+      let sortable = [...oilTagsList]
+      if (oilTagSort.col) {
+        sortable.sort((a, b) => {
+          if (a[oilTagSort.col] < b[oilTagSort.col]) return oilTagSort.dir === 'asc' ? -1 : 1
+          if (a[oilTagSort.col] > b[oilTagSort.col]) return oilTagSort.dir === 'asc' ? 1 : -1
+          return 0
+        })
+      }
+      return sortable
+    }, [oilTagsList, oilTagSort])
+
+    const [oilTagForm, setOilTagForm] = useState<any>({ name: "", status: "Active" })
+
+    const [tdsRuleForm, setTdsRuleForm] = useState<any>({
     tds_rule_code: '',
     name: '',
     rate: '',
@@ -1883,7 +1921,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     gross_weight: "",
     tag_name: "",
     semi_finished_good_id: "",
-    oil_type_id: "",
+    oil_tag_id: "",
+      oil_tag_id: "",
+        oil_type_id: "",
     stock_category_id: "",
     main_uom_id: "",
     alternate_uom_id: "",
@@ -2003,7 +2043,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     setRawMaterialForm({ raw_material_code: "", name: "", main_uom_id: "", stock_group_id: "", additional_uoms: [], type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, status: "Active" })
     setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
     setShowAdditionalUomSection(false)
-    setSemiFinishedGoodForm({ semi_finished_good_code: "", name: "", main_uom_id: "", stock_group_id: "", type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, oil_filling_per_unit: "", filling_unit_id: "", converted_kg: "", packing_weight_per_main_unit: "", packing_weight_unit_id: "", weight_difference: "", standard_weight: "", standard_weight_unit_id: "", status: "Active" })
+    setSemiFinishedGoodForm({ semi_finished_good_code: "", name: "", main_uom_id: "", stock_group_id: "", type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, oil_tag_id: "", oil_filling_per_unit: "", filling_unit_id: "", converted_kg: "", packing_weight_per_main_unit: "", packing_weight_unit_id: "", weight_difference: "", standard_weight: "", standard_weight_unit_id: "", status: "Active" })
     setInsuranceDetailForm({ insurance_code: "", status: "Active", insurance_company_name: "", short_name: "", policy_number: "", valid_from: "", valid_upto: "", type_of_policy: "", sum_insured: "", owner_type: "Company", customer_ids: [] })
     setConversionFormulaForm({ conversion_formula_code: "", base_item_id: "", child_item_id: "", status: "Active", steps: [] })
     setNewFormulaStep({ operation: 'subtract', operand_type: 'literal', operand_value: '' })
@@ -2012,6 +2052,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     setPetrolPumpForm({ petrol_pump_code: "", petrol_pump_name: "", email_id: "", mobile_no: "", ledger_group_id: "", status: "Active", ...blankPartyParityFields() })
     setCdRuleForm({ cd_rule_code: "", wef_date: "", stock_category_id: "", discount_rate_per_main_uom: "", payment_condition_days: "", status: "Active" })
     setTdsRuleForm({ tds_rule_code: "", name: "", rate: "", status: "Active" })
+      setOilTagForm({ name: "", status: "Active" })
     setBhadaRateForm({ bhada_rate_code: "", name: "", rate: "", status: "Active" })
     setSkuDetailsForm({
       status: "Active",
@@ -2261,13 +2302,23 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         } else {
           res = await cdRuleApi.create(cdRuleForm)
         }
-      } else if (activeTab === "tds_rules") {
+      } 
+      else if (activeTab === "tds_rules") {
         if (editingItem) {
           res = await tdsRuleApi.update(editingItem.id, tdsRuleForm)
         } else {
           res = await tdsRuleApi.create(tdsRuleForm)
         }
-      } else if (activeTab === "bhada_rates") {
+      }
+
+      else if (activeTab === "oil_tags") {
+        if (editingItem) {
+          res = await oilTagApi.update(editingItem.id, oilTagForm)
+        } else {
+          res = await oilTagApi.create(oilTagForm)
+        }
+      }
+ else if (activeTab === "bhada_rates") {
         if (editingItem) {
           res = await bhadaRateApi.update(editingItem.id, bhadaRateForm)
         } else {
@@ -2378,6 +2429,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "petrol_pumps") { refetchPetrolPump(); refetchPendingPetrolPumps() }
         else if (activeTab === "cd_rules") { refetchCdRule(); refetchPendingCdRules() }
         else if (activeTab === "tds_rules") { refetchTdsRule(); refetchPendingTdsRules() }
+              else if (activeTab === "oil_tags") { refetchOilTag(); refetchPendingOilTags() }
         else if (activeTab === "bhada_rates") { refetchBhadaRate(); refetchPendingBhadaRates() }
         else if (activeTab === "sku_details") { refetchSku(); refetchPendingSku() }
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
@@ -2429,7 +2481,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         res = await petrolPumpApi.delete(deletingItem.id)
       } else if (activeTab === "cd_rules") {
         res = await cdRuleApi.delete(deletingItem.id)
-      } else if (activeTab === "tds_rules") {
+      } else if (activeTab === "oil_tags") {
+          res = await oilTagApi.delete(deletingItem.id)
+        } else if (activeTab === "tds_rules") {
         res = await tdsRuleApi.delete(deletingItem.id)
       } else if (activeTab === "bhada_rates") {
         res = await bhadaRateApi.delete(deletingItem.id)
@@ -2464,6 +2518,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "petrol_pumps") refetchPetrolPump()
         else if (activeTab === "cd_rules") refetchCdRule()
         else if (activeTab === "tds_rules") refetchTdsRule()
+        else if (activeTab === "oil_tags") refetchOilTag()
         else if (activeTab === "bhada_rates") refetchBhadaRate()
         else if (activeTab === "sku_details") refetchSku()
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
@@ -2512,7 +2567,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       else if (tab === 'price_levels') res = await priceLevelApi.review(id, payload)
       else if (tab === 'petrol_pumps') res = await petrolPumpApi.review(id, payload)
       else if (tab === 'cd_rules') res = await cdRuleApi.review(id, payload)
-      else if (tab === 'tds_rules') res = await tdsRuleApi.review(id, payload)
+      else if (tab === 'oil_tags') res = await oilTagApi.review(id, payload)
+        else if (tab === 'tds_rules') res = await tdsRuleApi.review(id, payload)
       else if (tab === 'bhada_rates') res = await bhadaRateApi.review(id, payload)
       else if (tab === 'sku_details') res = await skuDetailsApi.review(id, payload)
       else if (tab === 'vehicle_master') res = await vehicleMasterApi.review(id, payload)
@@ -2686,6 +2742,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setPetrolPumpForm({ ...data })
     } else if (tab === "cd_rules") {
       setCdRuleForm({ ...data })
+    } else if (tab === "oil_tags") {
+      setOilTagForm({ ...data })
     } else if (tab === "tds_rules") {
       setTdsRuleForm({ ...data })
     } else if (tab === "bhada_rates") {
@@ -2784,7 +2842,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'price_levels': return priceLevelForm
       case 'petrol_pumps': return petrolPumpForm
       case 'cd_rules': return cdRuleForm
-      case 'tds_rules': return tdsRuleForm
+      case 'oil_tags': return oilTagForm
+        case 'tds_rules': return tdsRuleForm
       case 'bhada_rates': return bhadaRateForm
       case 'sku_details': return skuDetailsForm
       case 'vehicle_master': {
@@ -2832,6 +2891,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'petrol_pumps': return renderPetrolPumpForm()
       case 'cd_rules': return renderCdRuleForm()
       case 'tds_rules': return renderTdsRuleForm()
+      case 'oil_tags': return renderOilTagForm()
       case 'bhada_rates': return renderBhadaRateForm()
       case 'sku_details': return renderSkuDetailsForm()
       case 'vehicle_master': return renderVehicleForm()
@@ -4684,6 +4744,27 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   // decision (the source review gives zero fields/rules for this master) -
   // no calculation logic, just a name+rate picklist for a future scoping
   // conversation to extend.
+  
+  const renderOilTagForm = () => (
+    <div className="grid gap-4 py-4 px-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="ot_name">Oil Tag Name *</Label>
+          <Input id="ot_name" value={oilTagForm.name} onChange={e => setOilTagForm({...oilTagForm, name: e.target.value})} placeholder="e.g. Rice Bran Refined Oil" />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ot_status">Status</Label>
+          <Select value={oilTagForm.status} onValueChange={val => setOilTagForm({...oilTagForm, status: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  )
+
   const renderTdsRuleForm = () => (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -5189,11 +5270,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           />
         </div>
         <div className="space-y-2 min-w-0">
-          <Label htmlFor="oil_type_id">Oil Type</Label>
-          <Select value={skuDetailsForm.oil_type_id ? String(skuDetailsForm.oil_type_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, oil_type_id: val})}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Select oil type" /></SelectTrigger>
+          <Label htmlFor="oil_tag_id">Oil Tag</Label>
+          <Select value={skuDetailsForm.oil_tag_id ? String(skuDetailsForm.oil_tag_id) : ''} onValueChange={val => setSkuDetailsForm({...skuDetailsForm, oil_tag_id: val})}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select oil tag" /></SelectTrigger>
             <SelectContent>
-              {activeOilTypes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+              {oilTagsList.filter((t: any) => t.status === "Active").map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -8513,6 +8594,72 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
+
+        
+        {visibleTabs.includes("oil_tags") && (
+        <TabsContent value="oil_tags">
+          <Card className="shadow-xl border-none rounded-2xl bg-white">
+            <CardHeader className="bg-slate-50/50 border-b p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <Droplet className="h-6 w-6 text-primary" />
+                    Oil Tags
+                  </CardTitle>
+                  <CardDescription className="text-slate-500 mt-1 text-base">Manage dynamic oil types and tags</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="flex flex-col h-[600px]"><div className="flex-1 overflow-auto rounded-b-2xl">
+                <table className="w-full caption-bottom text-sm">
+                  <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                    <TableRow className="hover:bg-transparent border-b">
+                      <TableHead className="pl-6 cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name', oilTagSort, setOilTagSort)}>Tag Name <SortIcon col="name" sort={oilTagSort} /></TableHead>
+                      <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort('status', oilTagSort, setOilTagSort)}>Status <SortIcon col="status" sort={oilTagSort} /></TableHead>
+                      <TableHead className="text-right pr-6">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isOilTagsLoading && oilTagsList.length === 0 ? (
+                      [...Array(5)].map((_, i) => (
+                        <TableRow key={i} className="opacity-40 border-b border-slate-50 h-16">
+                          <TableCell className="pl-6"><div className="h-4 w-32 bg-slate-200 animate-pulse rounded" /></TableCell>
+                          <TableCell><div className="h-6 w-16 bg-slate-200 animate-pulse rounded" /></TableCell>
+                          <TableCell><div className="h-8 w-16 bg-slate-100 animate-pulse rounded ml-auto" /></TableCell>
+                        </TableRow>
+                      ))
+                    ) : oilTagsList.length === 0 ? (
+                      <TableRow><TableCell colSpan={3} className="text-center py-20 text-slate-400">No oil tags found</TableCell></TableRow>
+                    ) : (
+                      sortedOilTags.map((item: any) => (
+                        <TableRow key={item.id} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
+                          <TableCell className="font-semibold text-slate-900 pl-6">{item.name}</TableCell>
+                          <TableCell>
+                            <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
+                              {item.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right pr-6">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(item)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" disabled={!canEditActiveTab} title={!canEditActiveTab ? "View Only" : "Edit Tag"}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => { setDeletingItem(item); setIsDeleteDialogOpen(true); }} className="h-8 w-8 text-destructive hover:bg-red-50" disabled={!canEditExisting} title={!canEditExisting ? "Admin Only" : "Delete Tag"}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </table>
+              </div></div>
             </CardContent>
           </Card>
         </TabsContent>
