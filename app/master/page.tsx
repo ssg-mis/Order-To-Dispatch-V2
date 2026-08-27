@@ -1597,12 +1597,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     }
   }
 
-  // Read-only GST history for the customer currently open in the Add/Edit dialog
+  // Read-only edit history for the customer currently open in the Add/Edit dialog
   // (only meaningful for an existing customer, i.e. editingItem is set).
-  const { data: customerGstHistoryData } = useQuery({
-    queryKey: ["customer-gst-history", editingItem?.id],
+  const { data: customerEditHistoryData } = useQuery({
+    queryKey: ["customer-edit-history", editingItem?.id],
     queryFn: async () => {
-      const res = await customerApi.getGstHistory(editingItem.id)
+      const res = await customerApi.getGstHistory(editingItem.id) // Endpoint repurposed on backend to return general edit history
       return res.success ? (res.data || []) : []
     },
     enabled: activeTab === 'customers' && (isDialogOpen || !!approvalReviewModal) && !!editingItem?.id,
@@ -3315,11 +3315,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="customer_id">Customer ID *</Label>
-          <Input id="customer_id" value={customerForm.customer_id} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+          <Input id="customer_id" value={customerForm.customer_id || ""} readOnly className="bg-slate-100" placeholder="Auto-generated" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="customer_name">Customer Name *</Label>
-          <Input id="customer_name" value={customerForm.customer_name} onChange={e => setCustomerForm({...customerForm, customer_name: e.target.value})} placeholder="Enter name" />
+          <Input id="customer_name" value={customerForm.customer_name || ""} onChange={e => setCustomerForm({...customerForm, customer_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3334,22 +3334,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" value={customerForm.email} onChange={e => setCustomerForm({...customerForm, email: e.target.value})} placeholder="email@example.com" />
+          <Input id="email" type="email" value={customerForm.email || ""} onChange={e => setCustomerForm({...customerForm, email: e.target.value})} placeholder="email@example.com" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="contact_person">Contact Person</Label>
-          <Input id="contact_person" value={customerForm.contact_person} onChange={e => setCustomerForm({...customerForm, contact_person: e.target.value})} placeholder="Enter name" />
+          <Input id="contact_person" value={customerForm.contact_person || ""} onChange={e => setCustomerForm({...customerForm, contact_person: e.target.value})} placeholder="Enter name" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="contact">Contact Number</Label>
-          <Input id="contact" value={customerForm.contact} onChange={e => setCustomerForm({...customerForm, contact: e.target.value})} placeholder="Enter number" />
+          <Input id="contact" value={customerForm.contact || ""} onChange={e => setCustomerForm({...customerForm, contact: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="address_line_1">Address Line 1</Label>
-        <Input id="address_line_1" value={customerForm.address_line_1} onChange={e => setCustomerForm({...customerForm, address_line_1: e.target.value})} placeholder="Street address" />
+        <Input id="address_line_1" value={customerForm.address_line_1 || ""} onChange={e => setCustomerForm({...customerForm, address_line_1: e.target.value})} placeholder="Street address" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -3369,7 +3369,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Label htmlFor="pincode">Pincode</Label>
           <Input
             id="pincode"
-            value={customerForm.pincode}
+            value={customerForm.pincode || ""}
             onChange={e => setCustomerForm({...customerForm, pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6)})}
             onBlur={handlePincodeBlur}
             placeholder="6-digit PIN code"
@@ -3439,7 +3439,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Label htmlFor="pan">PAN</Label>
           <Input
             id="pan"
-            value={customerForm.pan}
+            value={customerForm.pan || ""}
             onChange={e => setCustomerForm({...customerForm, pan: e.target.value})}
             onBlur={handlePanBlur}
             placeholder="ABCDE1234F"
@@ -3451,7 +3451,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Label htmlFor="gstin">GSTIN</Label>
           <Input
             id="gstin"
-            value={customerForm.gstin}
+            value={customerForm.gstin || ""}
             onChange={e => setCustomerForm({...customerForm, gstin: e.target.value})}
             onBlur={handleGstinBlur}
             placeholder="22ABCDE1234F1Z5"
@@ -3730,27 +3730,31 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       {editingItem?.id && (
         <div className="space-y-2 border-t pt-4 mt-2">
-          <Label className="text-slate-600">GST History</Label>
-          {!customerGstHistoryData || customerGstHistoryData.length === 0 ? (
-            <p className="text-xs text-slate-400">No GST history recorded yet.</p>
+          <Label className="text-slate-600">Customer Edit History</Label>
+          {!customerEditHistoryData || customerEditHistoryData.length === 0 ? (
+            <p className="text-xs text-slate-400">No edit history recorded yet.</p>
           ) : (
             <div className="rounded-md border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="text-left p-2 font-medium text-slate-600">W.E.F. Date</th>
-                    <th className="text-left p-2 font-medium text-slate-600">Status</th>
-                    <th className="text-left p-2 font-medium text-slate-600">Type</th>
-                    <th className="text-left p-2 font-medium text-slate-600">GSTIN</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Date & Time</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Field Name</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Old Value</th>
+                    <th className="text-left p-2 font-medium text-slate-600">New Value</th>
+                    <th className="text-left p-2 font-medium text-slate-600">Edited By</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {customerGstHistoryData.map((h: any) => (
+                  {customerEditHistoryData.map((h: any) => (
                     <tr key={h.id} className="border-t">
-                      <td className="p-2">{formatDocDate(h.wefDate)}</td>
-                      <td className="p-2">{h.isGstRegistered || '—'}</td>
-                      <td className="p-2">{h.gstRegistrationType || '—'}</td>
-                      <td className="p-2">{h.gstin || '—'}</td>
+                      <td className="p-2 whitespace-nowrap">
+                        {new Date(h.createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                      </td>
+                      <td className="p-2 font-medium text-slate-700">{h.fieldName}</td>
+                      <td className="p-2 text-slate-500 max-w-[200px] break-all">{h.oldValue || '—'}</td>
+                      <td className="p-2 text-slate-900 max-w-[200px] break-all">{h.newValue || '—'}</td>
+                      <td className="p-2 text-slate-600">{h.changedByName || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
