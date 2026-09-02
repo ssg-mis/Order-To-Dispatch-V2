@@ -39,6 +39,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { ReferenceDataTab } from "@/components/reference-data-tab"
+import { MasterEditHistoryTable } from "@/components/master-edit-history-table"
+
 
 // --- Types ---
 
@@ -1949,18 +1951,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [skuSellingPriceForm, setSkuSellingPrice] = useState<Partial<SkuSellingPrice>>({
     id: 0,
     packing_material: "",
-    sku_weight: 0,
+    sku_weight: "",
     sku_unit: "",
-    conversion_formula: 0,
-    sku_weight_in_gm: 0,
-    packing_material_weight_in_gm: 0,
-    net_oil_in_gm: 0,
-    packing_cost: 0,
+    conversion_formula: "",
+    sku_weight_in_gm: "",
+    packing_material_weight_in_gm: "",
+    net_oil_in_gm: "",
+    packing_cost: "",
     var: "",
-    landing_cost: 0,
-    selling_cost: 0,
+    landing_cost: "",
+    selling_cost: "",
     margin: "",
-    actual_margin: 0
+    actual_margin: ""
   })
 
   // --- Data Fetching ---
@@ -1968,8 +1970,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const fetchVarCalc = useCallback(async () => {
     try {
       const varRes = await varCalcApi.getLatest()
-      if (varRes.success) setLatestVarCalc(varRes.data)
-    } catch (e) { console.error("Var calc fetch failed") }
+      if (varRes?.success && varRes?.data) {
+        setLatestVarCalc(varRes.data)
+      }
+    } catch (e) {
+      console.warn("Var calc fetch notice:", e)
+    }
   }, [])
 
   useEffect(() => {
@@ -2164,6 +2170,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       ledger_group_id: "",
       bilty_copy_upload: "",
       linked_customer_id: "",
+    })
+    setSkuSellingPrice({
+      id: 0,
+      packing_material: "",
+      sku_weight: "",
+      sku_unit: "",
+      conversion_formula: "",
+      sku_weight_in_gm: "",
+      packing_material_weight_in_gm: "",
+      net_oil_in_gm: "",
+      packing_cost: "",
+      var: "",
+      landing_cost: "",
+      selling_cost: "",
+      margin: "",
+      actual_margin: ""
     })
     setEditingItem(null)
     setOpeningStockByDepot({})
@@ -2382,6 +2404,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         if (Object.keys(vErrors).length > 0) {
           setVehicleFormErrors(vErrors)
           setIsSubmitting(false)
+
+          const errList = Object.values(vErrors).filter(Boolean)
+          toast({
+            title: "Validation Error",
+            description: `Please fill in required fields: ${errList.join(", ")}`,
+            variant: "destructive",
+          })
+
+          setTimeout(() => {
+            const firstErrorElem = document.querySelector('.border-red-500, .text-red-500')
+            if (firstErrorElem) {
+              firstErrorElem.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              if (firstErrorElem instanceof HTMLInputElement || firstErrorElem instanceof HTMLButtonElement) {
+                firstErrorElem.focus()
+              }
+            }
+          }, 100)
+
           return
         }
         setVehicleFormErrors({})
@@ -2409,12 +2449,56 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await vehicleMasterApi.create(payload)
         }
       } else if (activeTab === "driver_master") {
+        const dErrors: string[] = []
+        if (!driverForm.driver_name?.trim()) dErrors.push('Driver Name is required')
+        if (!driverForm.mobile_no?.trim()) dErrors.push('Mobile Number is required')
+        if (!driverForm.driving_licence_no?.trim()) dErrors.push('Driving Licence Number is required')
+
+        if (dErrors.length > 0) {
+          setIsSubmitting(false)
+          toast({
+            title: "Validation Error",
+            description: `Please fill in required fields: ${dErrors.join(", ")}`,
+            variant: "destructive",
+          })
+          setTimeout(() => {
+            const firstErrorElem = document.querySelector('.border-red-500, .text-red-500') || document.querySelector('input[placeholder="Full Name"], input[placeholder="10-digit number"], input[placeholder="DL Number"]')
+            if (firstErrorElem) {
+              firstErrorElem.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              if (firstErrorElem instanceof HTMLInputElement) firstErrorElem.focus()
+            }
+          }, 100)
+          return
+        }
+
         if (editingItem) {
           res = await driverMasterApi.update(editingItem.id, driverForm)
         } else {
           res = await driverMasterApi.create(driverForm)
         }
       } else if (activeTab === "transport_master") {
+        const tErrors: string[] = []
+        if (!transportForm.transporter_name?.trim()) tErrors.push('Transporter Name is required')
+        if (!transportForm.contact_person?.trim()) tErrors.push('Contact Person is required')
+        if (!transportForm.contact_number?.trim()) tErrors.push('Contact Number is required')
+
+        if (tErrors.length > 0) {
+          setIsSubmitting(false)
+          toast({
+            title: "Validation Error",
+            description: `Please fill in required fields: ${tErrors.join(", ")}`,
+            variant: "destructive",
+          })
+          setTimeout(() => {
+            const firstErrorElem = document.querySelector('.border-red-500, .text-red-500') || document.querySelector('input[placeholder="Company Name"], input[placeholder="Full Name"], input[placeholder="Mobile/Phone"]')
+            if (firstErrorElem) {
+              firstErrorElem.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              if (firstErrorElem instanceof HTMLInputElement) firstErrorElem.focus()
+            }
+          }, 100)
+          return
+        }
+
         if (editingItem) {
           res = await transportMasterApi.update(editingItem.id, transportForm)
         } else {
@@ -2425,6 +2509,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         toast({ title: "Success", description: res.message || (editingItem ? "Updated successfully" : "Created successfully") })
         setIsDialogOpen(false)
         resetForms()
+        queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
         // Refetch appropriate query (also refresh pending list so admin sees new/edited record immediately)
         if (activeTab === "customers") { refetchCustomer(); refetchPendingCustomers() }
         else if (activeTab === "depots") { refetchDepot(); refetchPendingDepots() }
@@ -2447,6 +2532,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (activeTab === "sku_selling_price") refetchSkuSellingPrice()
         else if (activeTab === "vehicle_master") { refetchVehicle(); refetchPendingVehicles() }
         else if (activeTab === "driver_master") { refetchDriver(); refetchPendingDrivers() }
+        else if (activeTab === "transport_master") { refetchTransport(); refetchPendingTransport() }
       }
     } catch (error: any) {
       toast({
@@ -2608,6 +2694,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         else if (tab === 'vehicle_master') { refetchPendingVehicles(); refetchVehicle() }
         else if (tab === 'driver_master') { refetchPendingDrivers(); refetchDriver() }
         else if (tab === 'transport_master') { refetchPendingTransport(); refetchTransport() }
+        queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
       }
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to review record", variant: "destructive" })
@@ -2705,18 +2792,18 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       setSkuSellingPrice({
         id: 0,
         packing_material: "",
-        sku_weight: 0,
+        sku_weight: "",
         sku_unit: "",
-        conversion_formula: 0,
-        sku_weight_in_gm: 0,
-        packing_material_weight_in_gm: 0,
-        net_oil_in_gm: 0,
-        packing_cost: 0,
+        conversion_formula: "",
+        sku_weight_in_gm: "",
+        packing_material_weight_in_gm: "",
+        net_oil_in_gm: "",
+        packing_cost: "",
         var: "",
-        landing_cost: 0,
-        selling_cost: 0,
+        landing_cost: "",
+        selling_cost: "",
         margin: "",
-        actual_margin: 0
+        actual_margin: ""
       })
     } else if (activeTab === "transport_master") {
       nextId = await fetchNextId('transport')
@@ -2906,6 +2993,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       case 'oil_tags': return renderOilTagForm()
       case 'bhada_rates': return renderBhadaRateForm()
       case 'sku_details': return renderSkuDetailsForm()
+      case 'sku_selling_price': return renderSkuSellingPriceForm()
       case 'vehicle_master': return renderVehicleForm()
       case 'driver_master': return renderDriverForm()
       case 'transport_master': return renderTransportForm()
@@ -3929,7 +4017,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label>PAN</Label>
           <Input
-            value={form.pan || ''}
+            value={form.pan ?? ""}
             onChange={e => setForm({ pan: e.target.value })}
             onBlur={handlePartyPanBlur}
             placeholder="ABCDE1234F"
@@ -3942,7 +4030,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="space-y-2">
           <Label>GSTIN</Label>
           <Input
-            value={form.gstin || ''}
+            value={form.gstin ?? ""}
             onChange={e => setForm({ gstin: e.target.value })}
             onBlur={handlePartyGstinBlur}
             placeholder="22ABCDE1234F1Z5"
@@ -3954,7 +4042,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <Label>GST Registration Status</Label>
           <Combobox
             options={activeGstRegStatuses.map((r: any) => ({ value: r.name, label: r.name }))}
-            value={form.gst_registered || ""}
+            value={form.gst_registered ?? ""}
             onValueChange={val => setForm({
               gst_registered: val,
               ...(val !== 'Registered' ? { gst_registration_type: '', gst_registration_wef: '' } : {})
@@ -3970,7 +4058,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <Label>GST Registration Type</Label>
             <Combobox
               options={activeGstRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-              value={form.gst_registration_type || ""}
+              value={form.gst_registration_type ?? ""}
               onValueChange={val => setForm({ gst_registration_type: val })}
               placeholder="Select type"
               searchPlaceholder="Search..."
@@ -3978,7 +4066,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </div>
           <div className="space-y-2">
             <Label>GST W.E.F. Date</Label>
-            <Input type="date" value={form.gst_registration_wef?.split('T')[0] || ''} onChange={e => setForm({ gst_registration_wef: e.target.value })} />
+            <Input type="date" value={form.gst_registration_wef?.split('T')[0] ?? ""} onChange={e => setForm({ gst_registration_wef: e.target.value })} />
           </div>
         </div>
       )}
@@ -3987,13 +4075,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>MSME Registration No</Label>
-            <Input value={form.msme_registration_no || ''} onChange={e => setForm({ msme_registration_no: e.target.value })} placeholder="Enter MSME registration no" />
+            <Input value={form.msme_registration_no ?? ""} onChange={e => setForm({ msme_registration_no: e.target.value })} placeholder="Enter MSME registration no" />
           </div>
           <div className="space-y-2">
             <Label>MSME Registration Type</Label>
             <Combobox
               options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-              value={form.msme_registration_type || ""}
+              value={form.msme_registration_type ?? ""}
               onValueChange={val => setForm({ msme_registration_type: val })}
               placeholder="Select type"
               searchPlaceholder="Search..."
@@ -4002,7 +4090,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label>MSME W.E.F. Date</Label>
-          <Input type="date" value={form.msme_registration_wef?.split('T')[0] || ''} onChange={e => setForm({ msme_registration_wef: e.target.value })} />
+          <Input type="date" value={form.msme_registration_wef?.split('T')[0] ?? ""} onChange={e => setForm({ msme_registration_wef: e.target.value })} />
         </div>
       </div>
       <div className="border-t pt-4 mt-2 space-y-4">
@@ -4010,13 +4098,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>FSSAI No</Label>
-            <Input value={form.fssai_no || ''} onChange={e => setForm({ fssai_no: e.target.value })} placeholder="Enter FSSAI no" />
+            <Input value={form.fssai_no ?? ""} onChange={e => setForm({ fssai_no: e.target.value })} placeholder="Enter FSSAI no" />
           </div>
           <div className="space-y-2">
             <Label>FSSAI Licence Type</Label>
             <Combobox
               options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-              value={form.fssai_licence_type || ""}
+              value={form.fssai_licence_type ?? ""}
               onValueChange={val => setForm({ fssai_licence_type: val })}
               placeholder="Select licence type"
               searchPlaceholder="Search..."
@@ -4025,7 +4113,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label>FSSAI Valid Upto Date</Label>
-          <Input type="date" value={form.fssai_valid_upto?.split('T')[0] || ''} onChange={e => setForm({ fssai_valid_upto: e.target.value })} />
+          <Input type="date" value={form.fssai_valid_upto?.split('T')[0] ?? ""} onChange={e => setForm({ fssai_valid_upto: e.target.value })} />
         </div>
       </div>
       <div className="border-t pt-4 mt-2 space-y-4">
@@ -4670,17 +4758,17 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="petrol_pump_code">Petrol Pump Code *</Label>
-          <Input id="petrol_pump_code" value={petrolPumpForm.petrol_pump_code} readOnly className="bg-slate-100" placeholder="Auto-generated" />
+          <Input id="petrol_pump_code" value={petrolPumpForm.petrol_pump_code ?? ""} readOnly className="bg-slate-100" placeholder="Auto-generated" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="petrol_pump_name">Name *</Label>
-          <Input id="petrol_pump_name" value={petrolPumpForm.petrol_pump_name} onChange={e => setPetrolPumpForm({...petrolPumpForm, petrol_pump_name: e.target.value})} placeholder="Enter name" />
+          <Input id="petrol_pump_name" value={petrolPumpForm.petrol_pump_name ?? ""} onChange={e => setPetrolPumpForm({...petrolPumpForm, petrol_pump_name: e.target.value})} placeholder="Enter name" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pp_status">Status</Label>
-          <Select value={petrolPumpForm.status} onValueChange={val => setPetrolPumpForm({...petrolPumpForm, status: val})}>
+          <Select value={petrolPumpForm.status || 'Active'} onValueChange={val => setPetrolPumpForm({...petrolPumpForm, status: val})}>
             <SelectTrigger className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
@@ -4689,13 +4777,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label htmlFor="pp_mobile_no">Mobile Number</Label>
-          <Input id="pp_mobile_no" value={petrolPumpForm.mobile_no} onChange={e => setPetrolPumpForm({...petrolPumpForm, mobile_no: e.target.value})} placeholder="Enter number" />
+          <Input id="pp_mobile_no" value={petrolPumpForm.mobile_no ?? ""} onChange={e => setPetrolPumpForm({...petrolPumpForm, mobile_no: e.target.value})} placeholder="Enter number" />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="pp_email_id">Email ID</Label>
-          <Input id="pp_email_id" value={petrolPumpForm.email_id} onChange={e => setPetrolPumpForm({...petrolPumpForm, email_id: e.target.value})} placeholder="email@example.com" />
+          <Input id="pp_email_id" value={petrolPumpForm.email_id ?? ""} onChange={e => setPetrolPumpForm({...petrolPumpForm, email_id: e.target.value})} placeholder="email@example.com" />
         </div>
         <div className="space-y-2 min-w-0">
           <Label htmlFor="pp_ledger_group_id">Ledger Group</Label>
@@ -5444,133 +5532,225 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     </div>
   )
 
+  const recalculateSkuSellingPrice = (updatedForm: Partial<SkuSellingPrice>) => {
+    const skuWtGm = parseFloat(updatedForm.sku_weight_in_gm?.toString() || "0") || 0;
+    const pmWtGm = parseFloat(updatedForm.packing_material_weight_in_gm?.toString() || "0") || 0;
+    const pCost = parseFloat(updatedForm.packing_cost?.toString() || "0") || 0;
+
+    const netOil = (skuWtGm || pmWtGm) ? (skuWtGm - pmWtGm) : 0;
+    
+    let landingCost = 0;
+    if (latestVarCalc?.gt) {
+      const gt = parseFloat(latestVarCalc.gt) || 0;
+      landingCost = ((gt / 1000) * netOil) + pCost;
+    } else {
+      landingCost = parseFloat(updatedForm.landing_cost?.toString() || "0") || 0;
+    }
+
+    let marginVal = 0;
+    if (updatedForm.margin) {
+      marginVal = parseFloat(updatedForm.margin.toString().replace('%', '')) || 0;
+    }
+
+    let sellingCost = 0;
+    let actualMargin = 0;
+    if (landingCost > 0 && marginVal > 0) {
+      sellingCost = landingCost * (1 + marginVal / 100);
+      actualMargin = sellingCost - landingCost;
+    }
+
+    return {
+      ...updatedForm,
+      net_oil_in_gm: netOil !== 0 ? netOil.toFixed(2) : (updatedForm.net_oil_in_gm ?? ""),
+      landing_cost: landingCost > 0 ? landingCost.toFixed(2) : (updatedForm.landing_cost ?? ""),
+      selling_cost: sellingCost > 0 ? sellingCost.toFixed(2) : (updatedForm.selling_cost ?? ""),
+      actual_margin: actualMargin > 0 ? actualMargin.toFixed(2) : (updatedForm.actual_margin ?? ""),
+    };
+  };
+
   const renderSkuSellingPriceForm = () => (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="packing_material">Packing Material *</Label>
-          <Input id="packing_material" value={skuSellingPriceForm.packing_material} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, packing_material: e.target.value})} placeholder="Enter material name" />
+          <Input 
+            id="packing_material" 
+            value={skuSellingPriceForm.packing_material ?? ""} 
+            onChange={e => {
+              const val = e.target.value;
+              const matchedSku = skuDetails.find((s: any) => s.sku_name?.toLowerCase() === val.toLowerCase());
+              if (matchedSku) {
+                const updated = recalculateSkuSellingPrice({
+                  ...skuSellingPriceForm,
+                  packing_material: val,
+                  sku_unit: matchedSku.main_uom || matchedSku.units || skuSellingPriceForm.sku_unit,
+                  sku_weight: matchedSku.sku_weight || skuSellingPriceForm.sku_weight,
+                  conversion_formula: matchedSku.nos_per_main_uom || skuSellingPriceForm.conversion_formula,
+                  sku_weight_in_gm: matchedSku.converted_kg ? (parseFloat(matchedSku.converted_kg) * 1000) : (matchedSku.oil_filling_per_unit || skuSellingPriceForm.sku_weight_in_gm),
+                  packing_material_weight_in_gm: matchedSku.packing_weight_per_main_unit || matchedSku.packing_weight || skuSellingPriceForm.packing_material_weight_in_gm
+                });
+                setSkuSellingPrice(updated);
+              } else {
+                setSkuSellingPrice({ ...skuSellingPriceForm, packing_material: val });
+              }
+            }} 
+            placeholder="Enter or select material name" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="sku_unit">SKU Unit</Label>
-          <Input id="sku_unit" value={skuSellingPriceForm.sku_unit} readOnly className="bg-slate-100" placeholder="e.g. Ltr" />
+          <Input 
+            id="sku_unit" 
+            value={skuSellingPriceForm.sku_unit ?? ""} 
+            onChange={e => setSkuSellingPrice({ ...skuSellingPriceForm, sku_unit: e.target.value })} 
+            placeholder="e.g. Ltr" 
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_weight_sp">SKU Weight</Label>
-          <Input id="sku_weight_sp" type="number" value={skuSellingPriceForm.sku_weight} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, sku_weight: e.target.value})} placeholder="0.00" />
+          <Input 
+            id="sku_weight_sp" 
+            type="number" 
+            value={skuSellingPriceForm.sku_weight ?? ""} 
+            onChange={e => setSkuSellingPrice({ ...skuSellingPriceForm, sku_weight: e.target.value })} 
+            placeholder="0.00" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="conversion_formula">Conversion Formula</Label>
-          <Input id="conversion_formula" type="number" value={skuSellingPriceForm.conversion_formula} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, conversion_formula: e.target.value})} placeholder="0.00" />
+          <Input 
+            id="conversion_formula" 
+            type="number" 
+            value={skuSellingPriceForm.conversion_formula ?? ""} 
+            onChange={e => setSkuSellingPrice({ ...skuSellingPriceForm, conversion_formula: e.target.value })} 
+            placeholder="0.00" 
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="sku_weight_in_gm">SKU Weight (gm)</Label>
-          <Input id="sku_weight_in_gm" type="number" value={skuSellingPriceForm.sku_weight_in_gm} onChange={e => {
-            const rawVal = e.target.value;
-            const val = parseFloat(rawVal) || 0;
-            const pmWeight = parseFloat(skuSellingPriceForm.packing_material_weight_in_gm?.toString() || "0");
-            const netOilInGm = val - pmWeight;
-            
-            // Recalculate landing cost: (GT / 1000) * netOilInGm + packingCost
-            let newLandingCost = skuSellingPriceForm.landing_cost || 0;
-            if (latestVarCalc?.gt) {
-              const gt = parseFloat(latestVarCalc.gt) || 0;
-              const pCost = parseFloat(skuSellingPriceForm.packing_cost?.toString() || "0");
-              newLandingCost = ((gt / 1000) * netOilInGm + pCost).toFixed(2);
-            }
-
-            setSkuSellingPrice({
-              ...skuSellingPriceForm, 
-              sku_weight_in_gm: rawVal,
-              net_oil_in_gm: netOilInGm.toFixed(2),
-              landing_cost: newLandingCost
-            });
-          }} placeholder="0.00" />
+          <Input 
+            id="sku_weight_in_gm" 
+            type="number" 
+            value={skuSellingPriceForm.sku_weight_in_gm ?? ""} 
+            onChange={e => {
+              const updated = recalculateSkuSellingPrice({
+                ...skuSellingPriceForm,
+                sku_weight_in_gm: e.target.value
+              });
+              setSkuSellingPrice(updated);
+            }} 
+            placeholder="0.00" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="packing_material_weight_in_gm">Packing Mat. Wt (gm)</Label>
-          <Input id="packing_material_weight_in_gm" type="number" value={skuSellingPriceForm.packing_material_weight_in_gm} onChange={e => {
-            const rawVal = e.target.value;
-            const val = parseFloat(rawVal) || 0;
-            const skuWt = parseFloat(skuSellingPriceForm.sku_weight_in_gm?.toString() || "0");
-            const netOilInGm = skuWt - val;
-
-            // Recalculate landing cost: (GT / 1000) * netOilInGm + packingCost
-            let newLandingCost = skuSellingPriceForm.landing_cost || 0;
-            if (latestVarCalc?.gt) {
-              const gt = parseFloat(latestVarCalc.gt) || 0;
-              const pCost = parseFloat(skuSellingPriceForm.packing_cost?.toString() || "0");
-              newLandingCost = ((gt / 1000) * netOilInGm + pCost).toFixed(2);
-            }
-
-            setSkuSellingPrice({
-              ...skuSellingPriceForm, 
-              packing_material_weight_in_gm: rawVal,
-              net_oil_in_gm: netOilInGm.toFixed(2),
-              landing_cost: newLandingCost
-            });
-          }} placeholder="0.00" />
+          <Input 
+            id="packing_material_weight_in_gm" 
+            type="number" 
+            value={skuSellingPriceForm.packing_material_weight_in_gm ?? ""} 
+            onChange={e => {
+              const updated = recalculateSkuSellingPrice({
+                ...skuSellingPriceForm,
+                packing_material_weight_in_gm: e.target.value
+              });
+              setSkuSellingPrice(updated);
+            }} 
+            placeholder="0.00" 
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="net_oil_in_gm">Net Oil (gm)</Label>
-          <Input id="net_oil_in_gm" type="number" value={skuSellingPriceForm.net_oil_in_gm} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
+          <Input 
+            id="net_oil_in_gm" 
+            type="number" 
+            value={skuSellingPriceForm.net_oil_in_gm ?? ""} 
+            readOnly 
+            className="bg-slate-100 font-semibold" 
+            placeholder="Auto-calculated" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="packing_cost">Packing Cost</Label>
-          <Input id="packing_cost" type="number" value={skuSellingPriceForm.packing_cost} onChange={e => {
-            const rawVal = e.target.value;
-            const val = parseFloat(rawVal) || 0;
-            
-            // Recalculate landing cost when packing cost changes as well
-            let newLandingCost = skuSellingPriceForm.landing_cost || 0;
-            if (latestVarCalc?.gt) {
-              const gt = parseFloat(latestVarCalc.gt) || 0;
-              const netOilInGm = parseFloat(skuSellingPriceForm.net_oil_in_gm?.toString() || "0");
-              newLandingCost = ((gt / 1000) * netOilInGm + val).toFixed(2);
-            }
-
-            setSkuSellingPrice({
-              ...skuSellingPriceForm, 
-              packing_cost: rawVal,
-              landing_cost: newLandingCost
-            });
-          }} placeholder="0.00" />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="landing_cost">Landing Cost</Label>
-          <Input id="landing_cost" type="number" value={skuSellingPriceForm.landing_cost} readOnly className="bg-slate-100" placeholder="Auto-calculated" />
+          <Input 
+            id="packing_cost" 
+            type="number" 
+            value={skuSellingPriceForm.packing_cost ?? ""} 
+            onChange={e => {
+              const updated = recalculateSkuSellingPrice({
+                ...skuSellingPriceForm,
+                packing_cost: e.target.value
+              });
+              setSkuSellingPrice(updated);
+            }} 
+            placeholder="0.00" 
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="var">Var</Label>
-          <Input id="var" value={skuSellingPriceForm.var} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, var: e.target.value})} placeholder="e.g. 1" />
+          <Input 
+            id="var" 
+            value={skuSellingPriceForm.var ?? ""} 
+            onChange={e => setSkuSellingPrice({ ...skuSellingPriceForm, var: e.target.value })} 
+            placeholder="e.g. 1" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="margin">Margin</Label>
-          <Input id="margin" value={skuSellingPriceForm.margin} onChange={e => setSkuSellingPrice({...skuSellingPriceForm, margin: e.target.value})} placeholder="e.g. 10%" />
+          <Input 
+            id="margin" 
+            value={skuSellingPriceForm.margin ?? ""} 
+            onChange={e => {
+              const updated = recalculateSkuSellingPrice({
+                ...skuSellingPriceForm,
+                margin: e.target.value
+              });
+              setSkuSellingPrice(updated);
+            }} 
+            placeholder="e.g. 10%" 
+          />
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t pt-3">
         <div className="space-y-2">
-          <Label htmlFor="landing_cost">Landing Cost</Label>
-          <Input id="landing_cost" type="number" value={skuSellingPriceForm.landing_cost} readOnly className="bg-slate-100" placeholder="Auto" />
+          <Label htmlFor="landing_cost_display">Landing Cost</Label>
+          <Input 
+            id="landing_cost_display" 
+            type="number" 
+            value={skuSellingPriceForm.landing_cost ?? ""} 
+            readOnly 
+            className="bg-slate-100 font-semibold text-slate-700" 
+            placeholder="Auto" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="actual_margin">Actual Margin</Label>
-          <Input id="actual_margin" type="number" value={skuSellingPriceForm.actual_margin} readOnly className="bg-slate-100" placeholder="Auto" />
+          <Input 
+            id="actual_margin" 
+            type="number" 
+            value={skuSellingPriceForm.actual_margin ?? ""} 
+            readOnly 
+            className="bg-slate-100 font-semibold text-emerald-700" 
+            placeholder="Auto" 
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="selling_cost">Selling Cost</Label>
-          <Input id="selling_cost" type="number" value={skuSellingPriceForm.selling_cost} readOnly className="bg-slate-100" placeholder="Auto" />
+          <Input 
+            id="selling_cost" 
+            type="number" 
+            value={skuSellingPriceForm.selling_cost ?? ""} 
+            onChange={e => setSkuSellingPrice({ ...skuSellingPriceForm, selling_cost: e.target.value })} 
+            className="font-bold text-blue-700" 
+            placeholder="Auto / Custom" 
+          />
         </div>
       </div>
     </div>
@@ -5965,7 +6145,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driver ID *</Label>
-          <Input value={driverForm.driver_master_id} readOnly className="bg-slate-100" />
+          <Input value={driverForm.driver_master_id ?? ""} readOnly className="bg-slate-100" />
         </div>
         <div className="space-y-2">
           <Label>Status</Label>
@@ -5981,22 +6161,22 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driver Name *</Label>
-          <Input value={driverForm.driver_name} onChange={e => setDriverForm({...driverForm, driver_name: e.target.value})} placeholder="Full Name" />
+          <Input value={driverForm.driver_name ?? ""} onChange={e => setDriverForm({...driverForm, driver_name: e.target.value})} placeholder="Full Name" />
         </div>
         <div className="space-y-2">
           <Label>Mobile No *</Label>
-          <Input value={driverForm.mobile_no} onChange={e => setDriverForm({...driverForm, mobile_no: e.target.value})} placeholder="10-digit number" />
+          <Input value={driverForm.mobile_no ?? ""} onChange={e => setDriverForm({...driverForm, mobile_no: e.target.value})} placeholder="10-digit number" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Email ID</Label>
-          <Input type="email" value={driverForm.email_id} onChange={e => setDriverForm({...driverForm, email_id: e.target.value})} placeholder="email@example.com" />
+          <Input type="email" value={driverForm.email_id ?? ""} onChange={e => setDriverForm({...driverForm, email_id: e.target.value})} placeholder="email@example.com" />
         </div>
         <div className="space-y-2">
           <Label>PAN No</Label>
-          <Input value={driverForm.pan_no} onChange={e => setDriverForm({...driverForm, pan_no: e.target.value})} placeholder="Permanent Account Number" />
+          <Input value={driverForm.pan_no ?? ""} onChange={e => setDriverForm({...driverForm, pan_no: e.target.value})} placeholder="Permanent Account Number" />
         </div>
       </div>
 
@@ -6005,11 +6185,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Driving Licence No *</Label>
-          <Input value={driverForm.driving_licence_no} onChange={e => setDriverForm({...driverForm, driving_licence_no: e.target.value})} placeholder="DL Number" />
+          <Input value={driverForm.driving_licence_no ?? ""} onChange={e => setDriverForm({...driverForm, driving_licence_no: e.target.value})} placeholder="DL Number" />
         </div>
         <div className="space-y-2">
           <Label>DL Type</Label>
-          <Input value={driverForm.driving_licence_type} onChange={e => setDriverForm({...driverForm, driving_licence_type: e.target.value})} placeholder="e.g. LMV/HMV" />
+          <Input value={driverForm.driving_licence_type ?? ""} onChange={e => setDriverForm({...driverForm, driving_licence_type: e.target.value})} placeholder="e.g. LMV/HMV" />
         </div>
       </div>
 
@@ -6020,7 +6200,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label>RTO</Label>
-          <Input value={driverForm.rto} onChange={e => setDriverForm({...driverForm, rto: e.target.value})} placeholder="RTO" />
+          <Input value={driverForm.rto ?? ""} onChange={e => setDriverForm({...driverForm, rto: e.target.value})} placeholder="RTO" />
         </div>
       </div>
 
@@ -6062,7 +6242,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Aadhaar No</Label>
-          <Input value={driverForm.aadhaar_no} onChange={e => setDriverForm({...driverForm, aadhaar_no: e.target.value})} placeholder="12-digit number" />
+          <Input value={driverForm.aadhaar_no ?? ""} onChange={e => setDriverForm({...driverForm, aadhaar_no: e.target.value})} placeholder="12-digit number" />
         </div>
         <FileUploadField
           label="Aadhaar Upload"
@@ -6077,7 +6257,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <div className="space-y-2">
         <Label>Address</Label>
-        <Input value={driverForm.address_line1} onChange={e => setDriverForm({...driverForm, address_line1: e.target.value})} placeholder="Full address" />
+        <Input value={driverForm.address_line1 ?? ""} onChange={e => setDriverForm({...driverForm, address_line1: e.target.value})} placeholder="Full address" />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -6096,7 +6276,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         </div>
         <div className="space-y-2">
           <Label>Pincode</Label>
-          <Input value={driverForm.pincode} onChange={e => setDriverForm({...driverForm, pincode: e.target.value})} placeholder="Pincode" />
+          <Input value={driverForm.pincode ?? ""} onChange={e => setDriverForm({...driverForm, pincode: e.target.value})} placeholder="Pincode" />
         </div>
       </div>
     </div>
@@ -6107,7 +6287,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Transport ID *</Label>
-          <Input value={transportForm.transport_master_id} readOnly className="bg-slate-100" />
+          <Input value={transportForm.transport_master_id ?? ""} readOnly className="bg-slate-100" />
         </div>
         <div className="space-y-2">
           <Label>Status</Label>
@@ -6123,36 +6303,36 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       <div className="grid grid-cols-1 gap-4">
         <div className="space-y-2">
           <Label>Transporter Name *</Label>
-          <Input value={transportForm.transporter_name} onChange={e => setTransportForm({...transportForm, transporter_name: e.target.value})} placeholder="Company Name" />
+          <Input value={transportForm.transporter_name ?? ""} onChange={e => setTransportForm({...transportForm, transporter_name: e.target.value})} placeholder="Company Name" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Contact Person *</Label>
-          <Input value={transportForm.contact_person} onChange={e => setTransportForm({...transportForm, contact_person: e.target.value})} placeholder="Full Name" />
+          <Input value={transportForm.contact_person ?? ""} onChange={e => setTransportForm({...transportForm, contact_person: e.target.value})} placeholder="Full Name" />
         </div>
         <div className="space-y-2">
           <Label>Contact Number *</Label>
-          <Input value={transportForm.contact_number} onChange={e => setTransportForm({...transportForm, contact_number: e.target.value})} placeholder="Mobile/Phone" />
+          <Input value={transportForm.contact_number ?? ""} onChange={e => setTransportForm({...transportForm, contact_number: e.target.value})} placeholder="Mobile/Phone" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Email ID</Label>
-          <Input type="email" value={transportForm.email_id} onChange={e => setTransportForm({...transportForm, email_id: e.target.value})} placeholder="email@example.com" />
+          <Input type="email" value={transportForm.email_id ?? ""} onChange={e => setTransportForm({...transportForm, email_id: e.target.value})} placeholder="email@example.com" />
         </div>
         <div className="space-y-2">
           <Label>Address</Label>
-          <Input value={transportForm.address_line1} onChange={e => setTransportForm({...transportForm, address_line1: e.target.value})} placeholder="Office address" />
+          <Input value={transportForm.address_line1 ?? ""} onChange={e => setTransportForm({...transportForm, address_line1: e.target.value})} placeholder="Office address" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Pincode</Label>
-          <Input value={transportForm.pincode} onChange={e => setTransportForm({...transportForm, pincode: e.target.value})} placeholder="6-digit PIN" />
+          <Input value={transportForm.pincode ?? ""} onChange={e => setTransportForm({...transportForm, pincode: e.target.value})} placeholder="6-digit PIN" />
         </div>
         <div className="space-y-2">
           <Label>Ledger Group</Label>
@@ -6274,6 +6454,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 </DialogDescription>
               </DialogHeader>
               {renderFormForTab(activeTab)}
+              {editingItem?.id && activeTab !== "customers" && (
+                <div className="space-y-2 border-t pt-4 mt-2">
+                  <Label className="text-slate-600 font-semibold flex items-center gap-1.5 text-xs">
+                    <Clock className="h-3.5 w-3.5 text-slate-500" />
+                    {(TAB_META[activeTab]?.label || activeTab.replace('_', ' '))} History Table
+                  </Label>
+                  <MasterEditHistoryTable masterType={activeTab} recordId={editingItem.id} />
+                </div>
+              )}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                 <Button onClick={handleCreateOrUpdate} disabled={isSubmitting}>
@@ -10564,6 +10753,15 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             <div className="grid gap-3 py-2">
               {renderProposedChanges()}
               {renderFormForTab(approvalReviewModal.tab)}
+              {approvalReviewModal.item?.id && approvalReviewModal.tab !== "customers" && (
+                <div className="space-y-2 border-t pt-4 mt-2">
+                  <Label className="text-slate-600 font-semibold flex items-center gap-1.5 text-xs">
+                    <Clock className="h-3.5 w-3.5 text-slate-500" />
+                    {(TAB_META[approvalReviewModal.tab]?.label || approvalReviewModal.tab.replace('_', ' '))} History Table
+                  </Label>
+                  <MasterEditHistoryTable masterType={approvalReviewModal.tab} recordId={approvalReviewModal.item.id} />
+                </div>
+              )}
             </div>
           )}
 
