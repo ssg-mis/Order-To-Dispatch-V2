@@ -18,7 +18,7 @@ import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi } from "@/lib/api-service"
+import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { format } from "date-fns"
 import { cn, fuzzyMatch } from "@/lib/utils"
@@ -73,6 +73,22 @@ type PreApprovalProduct = {
   ratePerLtr: string
 }
 
+const forwardEvaluateSteps = (baseRate: number, steps: any[]): number => {
+  let result = baseRate;
+  if (!steps || steps.length === 0) return result;
+  
+  for (const step of steps) {
+    const operand = parseFloat(step.operand_value) || 0;
+    switch (step.operation) {
+      case 'add': result += operand; break;
+      case 'subtract': result -= operand; break;
+      case 'multiply': result *= operand; break;
+      case 'divide': if (operand !== 0) result /= operand; break;
+    }
+  }
+  return result;
+};
+
 export default function OrderPunchPage() {
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isLoading: isAuthLoading } = useAuth()
@@ -98,6 +114,24 @@ export default function OrderPunchPage() {
   // New state for Salespersons
   const [salespersons, setSalespersons] = useState<any[]>([])
   const [isLoadingSalespersons, setIsLoadingSalespersons] = useState(false)
+
+  // New state for Conversion Formulas
+  const [conversionFormulas, setConversionFormulas] = useState<any[]>([])
+  const [isLoadingFormulas, setIsLoadingFormulas] = useState(false)
+
+  const fetchFormulas = async () => {
+    try {
+      setIsLoadingFormulas(true)
+      const response = await conversionFormulaApi.getAll({ all: "true" })
+      if (response.success) {
+        setConversionFormulas(response.data.conversion_formulas || response.data || [])
+      }
+    } catch (error) {
+      console.error("Failed to fetch formulas:", error)
+    } finally {
+      setIsLoadingFormulas(false)
+    }
+  }
 
   // Function to fetch customers - declared before useEffect
   const fetchCustomers = async () => {
@@ -296,6 +330,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     fetchSkus()
     fetchBrokers()
     fetchSalespersons()
+    fetchFormulas()
   }, [])
 
   useEffect(() => {
@@ -407,6 +442,64 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     }
   }, [customerName, customerType, customers])
 
+  // Pre-Approval Rate Auto-fill Effect
+  useEffect(() => {
+    if (orderType !== "pre-approval" || conversionFormulas.length === 0) return;
+
+    let changed = false;
+    const newProducts = products.map(p => {
+      if (!p.productName) return p;
+
+      const productNameLower = p.productName.toLowerCase();
+      let oilTypeVal = "";
+      if (productNameLower.includes("palm") || productNameLower.includes("p.o.") || productNameLower.includes(" po ")) oilTypeVal = "Palm Oil";
+      else if (productNameLower.includes("rice") || productNameLower.includes("r.o.") || productNameLower.includes(" ro ") || productNameLower.includes("rbo")) oilTypeVal = "Rice Oil";
+      else if (productNameLower.includes("soya") || productNameLower.includes("s.o.") || productNameLower.includes(" so ") || productNameLower.includes("sbo")) oilTypeVal = "Soya Oil";
+
+      if (!oilTypeVal) return p;
+
+      const matchedRate = preApprovalProducts.find(pap => pap.oilType.toLowerCase() === oilTypeVal.toLowerCase());
+      if (!matchedRate) return p;
+
+      const baseRate15kg = parseFloat(matchedRate.ratePer15Kg) || 0;
+      const baseRateLtr = parseFloat(matchedRate.ratePerLtr) || 0;
+
+      const formula = conversionFormulas.find(f => f.child_item_id === p.skuId || f.child_sku_name === p.productName);
+      let newRate = p.rate;
+
+      if (formula) {
+        const baseName = (formula.base_sku_name || '').toUpperCase();
+        const isLtrBase = baseName.includes('1 LTR') || baseName.includes('1LTR');
+        const baseRate = isLtrBase ? baseRateLtr : baseRate15kg;
+
+        newRate = baseRate.toString();
+        if (formula.steps && formula.steps.length > 0) {
+           newRate = forwardEvaluateSteps(baseRate, formula.steps).toString();
+        }
+      } else {
+        // Fallback for base items that don't have a conversion formula
+        const nameUpper = p.productName.toUpperCase();
+        if (nameUpper.includes("15 KG") || nameUpper.includes("15KG")) {
+           newRate = baseRate15kg.toString();
+        } else if (nameUpper.includes("1 LTR") || nameUpper.includes("1LTR") || nameUpper.includes("1 LITER")) {
+           newRate = baseRateLtr.toString();
+        } else {
+           return p;
+        }
+      }
+
+      if (p.rate !== newRate) {
+        changed = true;
+        return { ...p, rate: newRate };
+      }
+      return p;
+    });
+
+    if (changed) {
+      setProducts(newProducts);
+    }
+  }, [products, preApprovalProducts, orderType, conversionFormulas]);
+
   // Track which fields are auto-filled from the database
   const selectedCustomerRecord = customerType === "existing" && customerName 
     ? (() => {
@@ -416,7 +509,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     : null;
 
   const isContactPersonAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact_person);
-  const isWhatsappNoAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact);
+  const isWhatsappNoAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact && /^\d{10}$/.test(selectedCustomerRecord.contact));
   const isAddressAutoFilled = !!(selectedCustomerRecord && (
     selectedCustomerRecord.address_line_1 || 
     selectedCustomerRecord.address_line_2 || 
@@ -1613,9 +1706,11 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                             <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Order Qty <span className="text-red-500">*</span></Label>
                             <Input
                               type="number"
+                              name={`qty-${Math.random().toString(36).substring(7)}`}
                               value={product.orderQty}
                               onChange={(e) => updateProduct(product.id, "orderQty", e.target.value)}
                               placeholder="0"
+                              autoComplete="new-password"
                               className="bg-background h-10 border-slate-200 focus:border-blue-400 focus:ring-blue-400"
                             />
                           </div>
@@ -1625,9 +1720,11 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                             <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider truncate">Rate {orderCategory !== "Stock Transfer" && <span className="text-red-500">*</span>} {orderCategory === "Stock Transfer" && <span className="text-[10px] lowercase">(Optional)</span>}</Label>
                             <Input
                               type="number"
+                              name={`rate-${Math.random().toString(36).substring(7)}`}
                               value={product.rate}
                               onChange={(e) => updateProduct(product.id, "rate", e.target.value)}
                               placeholder="0.00"
+                              autoComplete="new-password"
                               className="bg-background h-11 min-w-[120px] border-slate-200 focus:border-blue-400 focus:ring-blue-400 font-semibold text-blue-600 text-base px-3"
                             />
                           </div>

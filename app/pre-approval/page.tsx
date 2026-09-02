@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { Settings2, Loader2, ChevronDown, ChevronUp, Plus, Check, Search, Package, Calculator, Save, Calendar, ChevronLeft, ChevronRight, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { saveWorkflowHistory } from "@/lib/storage-utils"
-import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, customerApi, depotApi } from "@/lib/api-service"
+import { skuApi, preApprovalApi, skuSellingPriceApi, varCalcApi, orderApi, customerApi, depotApi, conversionFormulaApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
@@ -76,6 +76,22 @@ function BillingAddressField({ depoName }: { depoName: string }) {
     </div>
   )
 }
+
+const forwardEvaluateSteps = (baseRate: number, steps: any[]): number => {
+  let result = baseRate;
+  if (!steps || steps.length === 0) return result;
+  
+  for (const step of steps) {
+    const operand = parseFloat(step.operand_value) || 0;
+    switch (step.operation) {
+      case 'add': result += operand; break;
+      case 'subtract': result -= operand; break;
+      case 'multiply': result *= operand; break;
+      case 'divide': if (operand !== 0) result /= operand; break;
+    }
+  }
+  return result;
+};
 
 export default function PreApprovalPage() {
   const queryClient = useQueryClient()
@@ -365,82 +381,33 @@ export default function PreApprovalPage() {
   }, [])
 
   // Calculate SKU prices based on formulas
-  const calculateSkuPrices = (baseRatePer15Kg: number, baseRatePer1Ltr: number, formulas: any[]) => {
-    return formulas.map((item) => {
-      let calculatedRate = 0
-      const formula = item.formula?.trim() || ""
+  const calculateSkuPrices = (baseRatePer15Kg: number, baseRatePer1Ltr: number, formulasResponse: any) => {
+    // API directly returns array in some cases or nested in data/conversion_formulas
+    const formulas = Array.isArray(formulasResponse) 
+      ? formulasResponse 
+      : (formulasResponse?.conversion_formulas || []);
 
+    return formulas.map((item: any) => {
+      let calculatedRate = 0;
+      
       try {
-        if (!formula || formula === "") {
-          // No formula, use stored rate
-          calculatedRate = parseFloat(item.rate) || 0
-        } else if (formula.toUpperCase() === "A") {
-          // Direct 15 KG rate
-          calculatedRate = baseRatePer15Kg
-        } else if (formula.toUpperCase() === "B") {
-          // Direct 1 LTR rate
-          calculatedRate = baseRatePer1Ltr
+        const baseName = (item.base_sku_name || '').toUpperCase();
+        const isLtrBase = baseName.includes('1 LTR') || baseName.includes('1LTR');
+        const baseRate = isLtrBase ? baseRatePer1Ltr : baseRatePer15Kg;
+
+        if (!item.steps || item.steps.length === 0) {
+           calculatedRate = baseRate;
         } else {
-          // Replace A and B with actual values
-          let evalFormula = formula
-            .replace(/A/gi, baseRatePer15Kg.toString())
-            .replace(/B/gi, baseRatePer1Ltr.toString())
-
-          // Safe math evaluator (Shunting-yard algorithm)
-          const evaluateExpression = (expr: string): number => {
-            let s = expr.replace(/\s+/g, '');
-            if (!/^[0-9+\-*/().]+$/.test(s)) return 0;
-
-            const precedence: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2 };
-            const applyOp = (op: string, b: number, a: number) => {
-              if (op === '+') return a + b;
-              if (op === '-') return a - b;
-              if (op === '*') return a * b;
-              if (op === '/') return a / b;
-              return 0;
-            };
-
-            const values: number[] = [];
-            const ops: string[] = [];
-
-            for (let i = 0; i < s.length; i++) {
-              if (s[i] === '(') {
-                ops.push(s[i]);
-              } else if ((s[i] >= '0' && s[i] <= '9') || s[i] === '.') {
-                let val = '';
-                while (i < s.length && ((s[i] >= '0' && s[i] <= '9') || s[i] === '.')) {
-                  val += s[i++];
-                }
-                values.push(parseFloat(val));
-                i--;
-              } else if (s[i] === ')') {
-                while (ops.length > 0 && ops[ops.length - 1] !== '(') {
-                  values.push(applyOp(ops.pop()!, values.pop()!, values.pop()!));
-                }
-                ops.pop();
-              } else if (['+', '-', '*', '/'].includes(s[i])) {
-                while (ops.length > 0 && precedence[ops[ops.length - 1]] >= precedence[s[i]]) {
-                  values.push(applyOp(ops.pop()!, values.pop()!, values.pop()!));
-                }
-                ops.push(s[i]);
-              }
-            }
-            while (ops.length > 0) {
-              values.push(applyOp(ops.pop()!, values.pop()!, values.pop()!));
-            }
-            return values[0] || 0;
-          };
-
-          calculatedRate = evaluateExpression(evalFormula)
+           calculatedRate = forwardEvaluateSteps(baseRate, item.steps);
         }
       } catch (error) {
-        console.error(`Error calculating rate for ${item.sku}:`, error)
-        calculatedRate = 0
+        console.error(`Error calculating rate for ${item.child_sku_name}:`, error)
+        calculatedRate = 0;
       }
 
       return {
-        sku: item.sku,
-        formula: item.formula || "—",
+        sku: item.child_sku_name || item.child_item_id, // Fallback to ID if name is missing
+        formula: "Computed via Steps",
         calculatedRate: calculatedRate.toString()
       }
     })
@@ -452,7 +419,7 @@ export default function PreApprovalPage() {
     setCatalogContext(specificOrderContext || null)
 
     try {
-      const response = await skuApi.getAllSkuRates()
+      const response = await conversionFormulaApi.getAll({ all: "true" })
 
       if (response.success) {
         setSkuRates(response.data)
@@ -2078,6 +2045,7 @@ export default function PreApprovalPage() {
                                               <TableRow
                                                 key={rowKey}
                                                 className={cn(
+                                                  "align-top",
                                                   isSelected ? "bg-blue-50/40" : "",
                                                   hasError ? "bg-red-50" : ""
                                                 )}
@@ -2219,7 +2187,7 @@ export default function PreApprovalPage() {
                                                     />
                                                   </div>
                                                 </TableCell>
-                                                <TableCell className="p-2">
+                                                <TableCell className="p-2 align-top">
                                                   <Input
                                                     type="number"
                                                     placeholder="Qty"
@@ -2231,20 +2199,20 @@ export default function PreApprovalPage() {
                                                     onChange={(e) => handleApprovalQtyChange(e.target.value, rowKey, product, orderDetails, baseDo)}
                                                     disabled={!isSelected}
                                                   />
-                                                  {hasError && <p className="text-[9px] text-red-600 font-black mt-1 uppercase tracking-tighter text-center">{hasError}</p>}
+                                                  {hasError && <p className="text-[9px] text-red-600 font-black mt-1 uppercase tracking-tighter text-center leading-tight">{hasError}</p>}
                                                   {!hasError && qtyInfoNotices[rowKey] && (
                                                     <p className="text-[9px] text-blue-600 font-bold mt-1 tracking-tight text-center leading-tight">
                                                       ℹ️ {qtyInfoNotices[rowKey]}
                                                     </p>
                                                   )}
                                                 </TableCell>
-                                                <TableCell className="p-2 min-w-[140px]">
+                                                <TableCell className="p-2 min-w-[140px] align-top">
                                                   <div className="relative">
                                                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400 text-xs font-black">₹</span>
                                                     <Input
                                                       type="number"
                                                       className={cn(
-                                                        "h-9 text-[10px] bg-white border-slate-200 font-medium",
+                                                        "h-9 text-[10px] bg-white border-slate-200 font-medium pl-6",
                                                         rateValidationErrors[rowKey] ? "border-red-400 focus-visible:ring-red-400" : ""
                                                       )}
                                                       value={productRates[rowKey]?.rate || ""}
@@ -2295,16 +2263,15 @@ export default function PreApprovalPage() {
                                                         const productOilType = product.oilType || product.productName || "";
                                                         const doDate = orderDetails.soDate || "";
                                                         const dynamicCost = computeDynamicLandingCost(productRates[rowKey]?.skuName, productOilType, doDate);
-                                                        const enteredRate = parseFloat(e.target.value);
-                                                        if (dynamicCost && !dynamicCost.noVarCalc && dynamicCost.landingCost > 0 && !isNaN(enteredRate)) {
+                                                        
+                                                        if (dynamicCost && !dynamicCost.noVarCalc && dynamicCost.landingCost > 0 && e.target.value !== "") {
+                                                          const enteredRate = parseFloat(e.target.value) || 0;
                                                           const minAllowed = dynamicCost.landingCost;
-                                                          const maxAllowed = minAllowed * (1 + (dynamicCost.margin || 0) / 100);
+                                                          const marginPercent = dynamicCost.margin;
+                                                          const maxAllowed = minAllowed * (1 + marginPercent / 100);
 
-                                                          let clampedValue = enteredRate;
-                                                          if (enteredRate < minAllowed) clampedValue = minAllowed;
-                                                          else if (enteredRate > maxAllowed) clampedValue = maxAllowed;
-
-                                                          if (clampedValue !== enteredRate) {
+                                                          if (enteredRate < minAllowed || enteredRate > maxAllowed) {
+                                                            const clampedValue = Math.max(minAllowed, Math.min(enteredRate, maxAllowed));
                                                             setProductRates({
                                                               ...productRates,
                                                               [rowKey]: {
@@ -2329,55 +2296,49 @@ export default function PreApprovalPage() {
                                                         return dc && !dc.noVarCalc && dc.landingCost > 0 ? dc.landingCost * (1 + (dc.margin || 0) / 100) : undefined;
                                                       })()}
                                                     />
-                                                    {rateValidationErrors[rowKey] && (
-                                                      <p className="text-[9px] text-red-600 font-black mt-1 uppercase tracking-tighter text-center">
-                                                        {rateValidationErrors[rowKey]}
-                                                      </p>
-                                                    )}
-                                                    {/* Show dynamic landing cost info based on oil type + DO date */}
-                                                    {(() => {
-                                                      const productOilType = product.oilType || product.productName || "";
-                                                      const doDate = orderDetails.soDate || "";
-                                                      const dynamicCost = computeDynamicLandingCost(productRates[rowKey]?.skuName, productOilType, doDate);
-
-                                                      if (!dynamicCost) return null;
-
-                                                      if (dynamicCost.noVarCalc) {
-                                                        return (
-                                                          <div className="mt-1.5 bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold p-1 rounded-sm text-center leading-tight shadow-sm">
-                                                            🚫 No variable parameter found for {normalizeOilType(productOilType)}
+                                                  </div>
+                                                  {rateValidationErrors[rowKey] && (
+                                                    <p className="text-[9px] text-red-600 font-black mt-1 uppercase tracking-tighter text-center leading-tight">
+                                                      {rateValidationErrors[rowKey]}
+                                                    </p>
+                                                  )}
+                                                  {(() => {
+                                                    const productOilType = product.oilType || product.productName || "";
+                                                    const doDate = orderDetails.soDate || "";
+                                                    const dynamicCost = computeDynamicLandingCost(productRates[rowKey]?.skuName, productOilType, doDate);
+                                                    if (!dynamicCost) return null;
+                                                    if (dynamicCost.noVarCalc) {
+                                                      return (
+                                                        <div className="mt-1.5 bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold p-1 rounded-sm text-center leading-tight shadow-sm">
+                                                          🚫 No variable parameter found for {normalizeOilType(productOilType)}
+                                                          <br />on {doDate ? formatDate(doDate) : "selected date"}
+                                                        </div>
+                                                      );
+                                                    }
+                                                    const maxRate = dynamicCost.landingCost * (1 + (dynamicCost.margin || 0) / 100);
+                                                    let warningElement = null;
+                                                    if (dynamicCost.varCalcDate && doDate) {
+                                                      const doDateObj = new Date(doDate);
+                                                      const vcDateObj = new Date(dynamicCost.varCalcDate);
+                                                      const diffMs = doDateObj.getTime() - vcDateObj.getTime();
+                                                      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                                      if (diffDays > 0) {
+                                                        warningElement = (
+                                                          <div className="mt-1.5 bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-bold p-1 rounded-sm text-center leading-tight shadow-sm">
+                                                            ⚠️ Using var param from {diffDays} {diffDays === 1 ? 'day' : 'days'} before DO date
                                                           </div>
                                                         );
                                                       }
-
-                                                      const maxRate = dynamicCost.landingCost * (1 + (dynamicCost.margin || 0) / 100);
-
-                                                      // Check how old the matched var_calc is relative to DO date
-                                                      let warningElement = null;
-                                                      if (dynamicCost.varCalcDate && doDate) {
-                                                        const doDateObj = new Date(doDate);
-                                                        const vcDateObj = new Date(dynamicCost.varCalcDate);
-                                                        const diffMs = doDateObj.getTime() - vcDateObj.getTime();
-                                                        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                                                        if (diffDays > 0) {
-                                                          warningElement = (
-                                                            <div className="mt-1.5 bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-bold p-1 rounded-sm text-center leading-tight shadow-sm">
-                                                              ⚠️ Using var param from {diffDays} {diffDays === 1 ? 'day' : 'days'} before DO date
-                                                            </div>
-                                                          );
-                                                        }
-                                                      }
-
-                                                      return (
-                                                        <>
-                                                          <p className="text-[8px] text-slate-400 mt-1 text-center font-bold">
-                                                            Range: ₹{dynamicCost.landingCost} - ₹{maxRate}
-                                                          </p>
-                                                          {warningElement}
-                                                        </>
-                                                      );
-                                                    })()}
-                                                  </div>
+                                                    }
+                                                    return (
+                                                      <>
+                                                        <p className="text-[8px] text-slate-400 mt-1 text-center font-bold">
+                                                          Range: ₹{dynamicCost.landingCost} - ₹{maxRate.toFixed(2)}
+                                                        </p>
+                                                        {warningElement}
+                                                      </>
+                                                    );
+                                                  })()}
                                                 </TableCell>
                                                 <TableCell className="p-2">
                                                   <Input

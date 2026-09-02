@@ -2155,4 +2155,8 @@ export default {
   driverMaster: driverMasterApi,
 };
 
-
+export const masterHistoryApi = {
+  getHistory: async (masterType: string, recordId: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/${masterType}/${recordId}`);
+  },
+};
