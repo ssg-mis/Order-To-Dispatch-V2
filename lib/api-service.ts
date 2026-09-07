@@ -1126,6 +1126,35 @@ export const customerApi = {
   getGstHistory: async (id: number): Promise<ApiResponse> => {
     return request(`/customers/${id}/gst-history`);
   },
+
+  getMailingHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/mailing-history`);
+  },
+
+  getStructuredGstHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/structured-gst-history`);
+  },
+
+  getMsmeHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/msme-history`);
+  },
+
+  getFssaiHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/fssai-history`);
+  },
+
+  getEffectiveDetails: async (id: number | string, date?: string): Promise<ApiResponse> => {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+    return request(`/customers/${id}/effective-details${qs}`);
+  },
+
+  addSectionHistory: async (id: number | string, sectionOrData: string | Record<string, any>, data?: any): Promise<ApiResponse> => {
+    const payload = typeof sectionOrData === 'string' ? { section: sectionOrData, ...data } : sectionOrData;
+    return request(`/customers/${id}/section-history`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 /**
@@ -2158,5 +2187,11 @@ export default {
 export const masterHistoryApi = {
   getHistory: async (masterType: string, recordId: number | string): Promise<ApiResponse> => {
     return request(`/master-history/${masterType}/${recordId}`);
+  },
+  deleteHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/${id}`, { method: 'DELETE' });
+  },
+  deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/section/${section}/${id}`, { method: 'DELETE' });
   },
 };
