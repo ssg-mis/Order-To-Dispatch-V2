@@ -52,11 +52,15 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
     }))
   }
 
-  // Deduplicate items created within the same minute with identical fieldName, oldValue, and newValue
+  // Deduplicate items created within the same minute with identical fieldName, oldValue, and newValue,
+  // and drop no-op entries where the value didn't actually change (e.g. an effective-dated version
+  // save logs a full section snapshot, not just the fields that were touched - this audit view should
+  // only ever read as a list of real edits).
   const uniqueHistoryData = useMemo(() => {
     if (!historyData || historyData.length === 0) return []
     const seen = new Set<string>()
     return historyData.filter((item: HistoryItem) => {
+      if (String(item.oldValue ?? '').trim() === String(item.newValue ?? '').trim()) return false
       const timeKey = item.createdAt ? new Date(item.createdAt).toISOString().slice(0, 16) : ''
       const key = `${item.fieldName}_${item.oldValue || ''}_${item.newValue || ''}_${timeKey}`
       if (seen.has(key)) return false
@@ -116,7 +120,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
     )
   }
 
-  if (!historyData || historyData.length === 0) {
+  if (groupedData.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center bg-slate-50/50 space-y-2">
         <div className="mx-auto w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
