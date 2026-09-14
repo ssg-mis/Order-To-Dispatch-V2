@@ -28,6 +28,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { customerApi, masterHistoryApi, depotApi, lookupApi, orderApi, ledgerGroupApi } from "@/lib/api-service"
 import { FileUploadField } from "@/components/file-upload-field"
@@ -61,6 +68,10 @@ export function CustomerEffectiveDatesModalView({
   const [newVersionForm, setNewVersionForm] = useState<Record<string, any>>({
     wefDate: new Date().toISOString().split("T")[0],
   })
+  // Tracks the version currently loaded via "Edit" (its row ids + original
+  // W.E.F date) so that saving under a CHANGED date can delete the original
+  // rows instead of leaving a stale duplicate version behind at the old date.
+  const [editingVersion, setEditingVersion] = useState<{ ids: (number | string)[]; wefDate: string } | null>(null)
   const wefDateInputRef = useRef<HTMLInputElement>(null)
 
   const GODOWN_NAMES = ["Banari", "Ambikapur", "Dallirajhara", "Raigarh", "Rajnandgaon"]
@@ -182,17 +193,45 @@ export function CustomerEffectiveDatesModalView({
 
   const rawItems = historyData || []
 
-  // Sort items descending by WEF date, tie-breaking by createdAt timestamp & ID
+  // Sort items descending by WEF date, tie-breaking by createdAt timestamp & ID, then deduplicate by date (1 per date)
   const items = useMemo(() => {
-    return [...rawItems].sort((a: any, b: any) => {
-      const dateA = new Date(a.wefDate || a.wef_date || a.createdAt).getTime()
-      const dateB = new Date(b.wefDate || b.wef_date || b.createdAt).getTime()
+    const sorted = [...rawItems].sort((a: any, b: any) => {
+      const dateA = new Date(a.wefDate || a.wef_date || a.createdAt || 0).getTime()
+      const dateB = new Date(b.wefDate || b.wef_date || b.createdAt || 0).getTime()
       if (dateB !== dateA) return dateB - dateA
       const createA = new Date(a.createdAt || 0).getTime()
       const createB = new Date(b.createdAt || 0).getTime()
       if (createB !== createA) return createB - createA
       return Number(b.id || 0) - Number(a.id || 0)
     })
+
+    const dateMap = new Map<string, any>()
+    for (const item of sorted) {
+      const rawDateStr = item.wefDate || item.wef_date || item.createdAt
+      let key = "unknown"
+      if (rawDateStr) {
+        try {
+          const parsed = new Date(rawDateStr)
+          key = !isNaN(parsed.getTime()) ? parsed.toISOString().split("T")[0] : String(rawDateStr).slice(0, 10)
+        } catch {
+          key = String(rawDateStr).slice(0, 10)
+        }
+      }
+
+      if (!dateMap.has(key)) {
+        dateMap.set(key, {
+          ...item,
+          wefDate: key,
+          allIds: item.id && !String(item.id).startsWith("baseline") ? [item.id] : [],
+        })
+      } else {
+        const existing = dateMap.get(key)
+        if (item.id && !String(item.id).startsWith("baseline") && !existing.allIds.includes(item.id)) {
+          existing.allIds.push(item.id)
+        }
+      }
+    }
+    return Array.from(dateMap.values())
   }, [rawItems])
 
   // Determine which record is strictly ACTIVE today (WEF date <= Today, most recent)
@@ -225,6 +264,47 @@ export function CustomerEffectiveDatesModalView({
     return found || items[0] || {}
   }, [items])
 
+  const parseBankAccountsFromRow = (r: any) => {
+    if (!r) return [{ bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }]
+    if (Array.isArray(r.bank_accounts) && r.bank_accounts.length > 0) return r.bank_accounts
+    if (Array.isArray(r.bankAccounts) && r.bankAccounts.length > 0) return r.bankAccounts
+    if (r.newValue && typeof r.newValue === 'string') {
+      const itemsStr = r.newValue.split(/;|\n/)
+      const parsed = itemsStr.map((itemStr: string) => {
+        const trimStr = itemStr.trim()
+        if (!trimStr || trimStr.includes('bank account(s)') || trimStr === 'None' || trimStr === 'Updated Bank Accounts') return null
+        const ifscMatch = trimStr.match(/\(([^)]+)\)/)
+        const ifsc = ifscMatch ? ifscMatch[1].trim() : ""
+        const rest = trimStr.replace(/\([^)]+\)/, "").trim()
+        const parts = rest.split('-').map(s => s.trim())
+        let bank_name_id = null
+        let bank_name = ""
+        let account_holder_name = ""
+        let account_number = ""
+        if (parts.length >= 3) {
+          account_holder_name = parts[0]
+          bank_name = parts[1]
+          account_number = parts[2]
+        } else if (parts.length === 2) {
+          bank_name = parts[0]
+          account_number = parts[1]
+        } else {
+          account_number = rest
+        }
+        if (bank_name && activeBankNames.length > 0) {
+          const found = activeBankNames.find((b: any) => b.name?.toLowerCase() === bank_name.toLowerCase())
+          if (found) bank_name_id = found.id
+        }
+        return { bank_name_id, bank_name, account_holder_name, account_number, ifsc_code: ifsc }
+      }).filter(Boolean)
+      if (parsed.length > 0) return parsed
+    }
+    if (Array.isArray(customerForm?.bank_accounts) && customerForm.bank_accounts.length > 0) {
+      return customerForm.bank_accounts
+    }
+    return [{ bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }]
+  }
+
   useEffect(() => {
     const latest = activeRecord
     if (activeSection === "basic") {
@@ -234,6 +314,7 @@ export function CustomerEffectiveDatesModalView({
         email: latest.email || customerForm?.email || "",
         contact_person: latest.contact_person || latest.contactPerson || customerForm?.contact_person || "",
         contact: latest.contact || customerForm?.contact || "",
+        status: latest.status || customerForm?.status || "Active",
       })
     } else if (activeSection === "mailing") {
       setNewVersionForm({
@@ -278,13 +359,7 @@ export function CustomerEffectiveDatesModalView({
         is_required_for_commitment: customerForm?.is_required_for_commitment || "No",
       })
     } else if (activeSection === "bank") {
-      const activeBanks = (Array.isArray(latest.bank_accounts) && latest.bank_accounts.length > 0)
-        ? latest.bank_accounts
-        : (Array.isArray(latest.bankAccounts) && latest.bankAccounts.length > 0)
-        ? latest.bankAccounts
-        : (Array.isArray(customerForm?.bank_accounts) && customerForm.bank_accounts.length > 0)
-        ? customerForm.bank_accounts
-        : [{ bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }]
+      const activeBanks = parseBankAccountsFromRow(latest)
       setNewVersionForm({
         wefDate: new Date().toISOString().split("T")[0],
         bank_accounts: JSON.parse(JSON.stringify(activeBanks)),
@@ -323,10 +398,12 @@ export function CustomerEffectiveDatesModalView({
       }
     }, 150)
     return () => clearTimeout(timer)
-  }, [activeSection, activeRecord, customerForm, godownDepots, customerName, targetFieldName])
+  }, [activeSection, activeRecordId, customerId, targetFieldName])
 
   const handleToggleAdd = () => {
     if (!isAdding) {
+      // Opening a fresh blank form (not via Edit) - clear any stale edit-tracking state.
+      setEditingVersion(null)
       const latest = activeRecord
       if (activeSection === "basic") {
         setNewVersionForm({
@@ -335,6 +412,7 @@ export function CustomerEffectiveDatesModalView({
           email: latest.email || customerForm?.email || "",
           contact_person: latest.contact_person || latest.contactPerson || customerForm?.contact_person || "",
           contact: latest.contact || customerForm?.contact || "",
+          status: latest.status || customerForm?.status || "Active",
         })
       } else if (activeSection === "mailing") {
         setNewVersionForm({
@@ -514,6 +592,18 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
         title: "Version Added Successfully",
         description: `New ${activeSection.toUpperCase()} version logged with W.E.F. date ${newVersionForm.wefDate}`,
       })
+
+      // If this save was editing an existing version (via "Edit") and its
+      // W.E.F date was changed, the fields were just re-logged under the NEW
+      // date above - delete the original rows at the OLD date so the version
+      // "moves" instead of leaving a stale duplicate behind at the old date.
+      if (editingVersion && editingVersion.wefDate !== newVersionForm.wefDate && editingVersion.ids.length > 0) {
+        for (const oldId of editingVersion.ids) {
+          await masterHistoryApi.deleteSectionHistory(activeSection, oldId)
+        }
+      }
+      setEditingVersion(null)
+
       setIsAdding(false)
       setNewVersionForm({ wefDate: new Date().toISOString().split("T")[0] })
       await queryClient.invalidateQueries({ queryKey: ["customer-sectional-history", activeSection, customerId] })
@@ -849,6 +939,21 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                         setNewVersionForm({ ...newVersionForm, contact: val })
                       }}
                     />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-slate-700">Status</Label>
+                    <Select
+                      value={newVersionForm.status || "Active"}
+                      onValueChange={(val: string) => setNewVersionForm({ ...newVersionForm, status: val })}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Select Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem value="Inactive">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </>
               )}
@@ -1272,7 +1377,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                 variant="outline"
                 size="sm"
                 className="h-7 text-xs bg-white"
-                onClick={() => setIsAdding(false)}
+                onClick={() => { setIsAdding(false); setEditingVersion(null) }}
               >
                 Cancel
               </Button>
@@ -1318,6 +1423,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     <th className="py-2.5 px-3 border-r border-slate-300">Email</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Contact Person</th>
                     <th className="py-2.5 px-3 border-r border-slate-300 font-mono">Contact Number</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Status</th>
                   </>
                 )}
 
@@ -1425,11 +1531,11 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                 const handleDeleteRow = async () => {
                   if (!confirm("Are you sure you want to delete this history version?")) return
                   try {
-                    if (row.id && typeof row.id === "number") {
-                      await masterHistoryApi.deleteSectionHistory(activeSection, row.id)
-                    } else if (row.id && typeof row.id === "string" && !row.id.startsWith("baseline")) {
-                      await masterHistoryApi.deleteHistory(row.id)
-                    } else {
+                    const idsToDelete = (row.allIds && row.allIds.length > 0)
+                      ? row.allIds
+                      : (row.id && !String(row.id).startsWith("baseline") ? [row.id] : [])
+
+                    if (idsToDelete.length === 0) {
                       toast({
                         title: "Notice",
                         description: "Initial baseline versions cannot be deleted directly.",
@@ -1438,14 +1544,30 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       return
                     }
 
+                    for (const singleId of idsToDelete) {
+                      await masterHistoryApi.deleteSectionHistory(activeSection, singleId)
+                    }
+
                     toast({
                       title: "Success",
                       description: "History version deleted successfully.",
                     })
-                    queryClient.invalidateQueries({ queryKey: ["customer-sectional-history"] })
-                    queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
-                    queryClient.invalidateQueries({ queryKey: ["master-customers"] })
-                    refetch()
+
+                    await queryClient.invalidateQueries({ queryKey: ["customer-sectional-history"] })
+                    await queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
+                    await queryClient.invalidateQueries({ queryKey: ["master-customers"] })
+
+                    // Refetch latest customer data from server to keep parent Customer Edit Form in sync
+                    if (customerId) {
+                      const updatedCust = await customerApi.getById(customerId)
+                      if (updatedCust?.success && updatedCust.data) {
+                        if (typeof (window as any).setCustomerFormGlobal === 'function') {
+                          (window as any).setCustomerFormGlobal(updatedCust.data)
+                        }
+                      }
+                    }
+
+                    await refetch()
                   } catch (err: any) {
                     toast({
                       title: "Error",
@@ -1456,10 +1578,12 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                 }
 
                 const handleEditRow = () => {
-                  setNewVersionForm({
-                    ...row,
-                    wefDate: itemDateStr,
-                  })
+                  let formState: Record<string, any> = { ...row, wefDate: itemDateStr }
+                  if (activeSection === "bank") {
+                    formState.bank_accounts = parseBankAccountsFromRow(row)
+                  }
+                  setNewVersionForm(formState)
+                  setEditingVersion({ ids: row.allIds || [], wefDate: itemDateStr })
                   setIsAdding(true)
                   toast({
                     title: "Editing Version",
@@ -1491,6 +1615,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       let emailVal = row.email || ""
                       let contactPersonVal = row.contact_person || row.contactPerson || ""
                       let contactNumVal = row.contact || ""
+                      let statusVal = row.status || "Active"
 
                       if (row.newValue && typeof row.newValue === 'string' && row.newValue.includes('Name:')) {
                         const parts = row.newValue.split(' | ')
@@ -1499,6 +1624,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                           else if (p.startsWith('Email: ')) emailVal = p.replace('Email: ', '')
                           else if (p.startsWith('Contact Person: ')) contactPersonVal = p.replace('Contact Person: ', '')
                           else if (p.startsWith('Contact: ')) contactNumVal = p.replace('Contact: ', '')
+                          else if (p.startsWith('Status: ')) statusVal = p.replace('Status: ', '')
                         })
                       } else if (!custName && row.newValue && typeof row.newValue === 'string' && row.newValue !== 'Updated Customer Details') {
                         custName = row.newValue
@@ -1517,6 +1643,18 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                           </td>
                           <td className="py-2 px-3 border-r border-slate-200 font-mono font-medium text-emerald-800">
                             {contactNumVal || "—"}
+                          </td>
+                          <td className="py-2 px-3 border-r border-slate-200">
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-2 py-0.5 font-bold ${
+                                statusVal === "Inactive"
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }`}
+                            >
+                              {statusVal}
+                            </Badge>
                           </td>
                         </>
                       )

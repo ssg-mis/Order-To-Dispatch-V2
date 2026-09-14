@@ -310,7 +310,7 @@ function CustomerEffectiveDatesContent() {
               <div className="flex items-center justify-between border-b border-emerald-200 pb-2.5">
                 <span className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
                   <Calendar className="h-4 w-4 text-emerald-600" />
-                  Log New {activeSection === 'basic' ? 'CUSTOMER DETAILS' : activeSection.toUpperCase()} Version (Applicable From Date)
+                  Log New {String(activeSection).toUpperCase()} Version (Applicable From Date)
                 </span>
               </div>
 

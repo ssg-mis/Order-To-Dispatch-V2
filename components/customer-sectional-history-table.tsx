@@ -60,7 +60,20 @@ export function CustomerSectionalHistoryTable({ section, customerId, title, onOp
   })
 
   if (!customerId) return null
-  const count = (historyData || []).length
+  const uniqueVersionDates = new Set(
+    (historyData || []).map((h: any) => {
+      const rawDateStr = h.applicableFrom || h.wef_date || h.wefDate || h.effective_from || h.createdAt
+      if (!rawDateStr) return "unknown"
+      if (typeof rawDateStr === "string" && /^\d{4}-\d{2}-\d{2}/.test(rawDateStr)) {
+        return rawDateStr.slice(0, 10)
+      }
+      const d = new Date(rawDateStr)
+      return !isNaN(d.getTime())
+        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+        : String(rawDateStr).slice(0, 10)
+    })
+  )
+  const count = uniqueVersionDates.size
 
   return (
     <Button
