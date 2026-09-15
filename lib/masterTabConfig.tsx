@@ -79,7 +79,7 @@ export const TAB_META: Record<string, { label: string; icon: ComponentType<{ cla
   oil_tags: { label: "Oil Tags", icon: Droplet, desc: "Manage dynamic oil types and tags" },
   bhada_rates: { label: "Bhada Rate", icon: Route, desc: "Freight/Bhada rate placeholder — minimum fields only, pending client scoping" },
   sku_details: { label: "Finished Goods", icon: Package, desc: "Manage your Finished Goods list and product details" },
-  sku_selling_price: { label: "Pricing", icon: Package, desc: "Manage SKU selling prices and rates" },
+  sku_selling_price: { label: "SKU Pricing", icon: Package, desc: "Manage SKU selling prices and rates" },
   vehicle_master: { label: "Vehicles", icon: Truck, desc: "Manage your vehicle database and documents" },
   driver_master: { label: "Drivers", icon: User, desc: "Manage your driver records and documents" },
   transport_master: { label: "Transporters", icon: Truck, desc: "Manage your transporter records and details" },

@@ -2795,25 +2795,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const drivers = useMemo(() => driverData?.pages.flatMap(p => p?.drivers || []) || [], [driverData])
 
   // Infinite Scroll Observers
-  useEffect(() => { if (customerInView && hasNextCustomer) fetchNextCustomer() }, [customerInView, hasNextCustomer, fetchNextCustomer])
-  useEffect(() => { if (depotInView && hasNextDepot) fetchNextDepot() }, [depotInView, hasNextDepot, fetchNextDepot])
-  useEffect(() => { if (brokerInView && hasNextBroker) fetchNextBroker() }, [brokerInView, hasNextBroker, fetchNextBroker])
-  useEffect(() => { if (salespersonInView && hasNextSalesperson) fetchNextSalesperson() }, [salespersonInView, hasNextSalesperson, fetchNextSalesperson])
-  useEffect(() => { if (ledgerGroupInView && hasNextLedgerGroup) fetchNextLedgerGroup() }, [ledgerGroupInView, hasNextLedgerGroup, fetchNextLedgerGroup])
-  useEffect(() => { if (stockGroupInView && hasNextStockGroup) fetchNextStockGroup() }, [stockGroupInView, hasNextStockGroup, fetchNextStockGroup])
-  useEffect(() => { if (unitInView && hasNextUnit) fetchNextUnit() }, [unitInView, hasNextUnit, fetchNextUnit])
-  useEffect(() => { if (rawMaterialInView && hasNextRawMaterial) fetchNextRawMaterial() }, [rawMaterialInView, hasNextRawMaterial, fetchNextRawMaterial])
-  useEffect(() => { if (semiFinishedGoodInView && hasNextSemiFinishedGood) fetchNextSemiFinishedGood() }, [semiFinishedGoodInView, hasNextSemiFinishedGood, fetchNextSemiFinishedGood])
-  useEffect(() => { if (insuranceDetailInView && hasNextInsuranceDetail) fetchNextInsuranceDetail() }, [insuranceDetailInView, hasNextInsuranceDetail, fetchNextInsuranceDetail])
-  useEffect(() => { if (conversionFormulaInView && hasNextConversionFormula) fetchNextConversionFormula() }, [conversionFormulaInView, hasNextConversionFormula, fetchNextConversionFormula])
-  useEffect(() => { if (priceLevelInView && hasNextPriceLevel) fetchNextPriceLevel() }, [priceLevelInView, hasNextPriceLevel, fetchNextPriceLevel])
-  useEffect(() => { if (petrolPumpInView && hasNextPetrolPump) fetchNextPetrolPump() }, [petrolPumpInView, hasNextPetrolPump, fetchNextPetrolPump])
-  useEffect(() => { if (cdRuleInView && hasNextCdRule) fetchNextCdRule() }, [cdRuleInView, hasNextCdRule, fetchNextCdRule])
-  useEffect(() => { if (tdsRuleInView && hasNextTdsRule) fetchNextTdsRule() }, [tdsRuleInView, hasNextTdsRule, fetchNextTdsRule])
-  useEffect(() => { if (bhadaRateInView && hasNextBhadaRate) fetchNextBhadaRate() }, [bhadaRateInView, hasNextBhadaRate, fetchNextBhadaRate])
-  useEffect(() => { if (skuInView && hasNextSku) fetchNextSku() }, [skuInView, hasNextSku, fetchNextSku])
-  useEffect(() => { if (skuSellingPriceInView && hasNextSkuSellingPrice) fetchNextSkuSellingPrice() }, [skuSellingPriceInView, hasNextSkuSellingPrice, fetchNextSkuSellingPrice])
-  useEffect(() => { if (driverInView && hasNextDriver) fetchNextDriver() }, [driverInView, hasNextDriver, fetchNextDriver])
+  useEffect(() => { if (customerInView && hasNextCustomer && !isFetchingNextCustomer) fetchNextCustomer() }, [customerInView, hasNextCustomer, isFetchingNextCustomer, fetchNextCustomer])
+  useEffect(() => { if (depotInView && hasNextDepot && !isFetchingNextDepot) fetchNextDepot() }, [depotInView, hasNextDepot, isFetchingNextDepot, fetchNextDepot])
+  useEffect(() => { if (brokerInView && hasNextBroker && !isFetchingNextBroker) fetchNextBroker() }, [brokerInView, hasNextBroker, isFetchingNextBroker, fetchNextBroker])
+  useEffect(() => { if (salespersonInView && hasNextSalesperson && !isFetchingNextSalesperson) fetchNextSalesperson() }, [salespersonInView, hasNextSalesperson, isFetchingNextSalesperson, fetchNextSalesperson])
+  useEffect(() => { if (ledgerGroupInView && hasNextLedgerGroup && !isFetchingNextLedgerGroup) fetchNextLedgerGroup() }, [ledgerGroupInView, hasNextLedgerGroup, isFetchingNextLedgerGroup, fetchNextLedgerGroup])
+  useEffect(() => { if (stockGroupInView && hasNextStockGroup && !isFetchingNextStockGroup) fetchNextStockGroup() }, [stockGroupInView, hasNextStockGroup, isFetchingNextStockGroup, fetchNextStockGroup])
+  useEffect(() => { if (unitInView && hasNextUnit && !isFetchingNextUnit) fetchNextUnit() }, [unitInView, hasNextUnit, isFetchingNextUnit, fetchNextUnit])
+  useEffect(() => { if (rawMaterialInView && hasNextRawMaterial && !isFetchingNextRawMaterial) fetchNextRawMaterial() }, [rawMaterialInView, hasNextRawMaterial, isFetchingNextRawMaterial, fetchNextRawMaterial])
+  useEffect(() => { if (semiFinishedGoodInView && hasNextSemiFinishedGood && !isFetchingNextSemiFinishedGood) fetchNextSemiFinishedGood() }, [semiFinishedGoodInView, hasNextSemiFinishedGood, isFetchingNextSemiFinishedGood, fetchNextSemiFinishedGood])
+  useEffect(() => { if (insuranceDetailInView && hasNextInsuranceDetail && !isFetchingNextInsuranceDetail) fetchNextInsuranceDetail() }, [insuranceDetailInView, hasNextInsuranceDetail, isFetchingNextInsuranceDetail, fetchNextInsuranceDetail])
+  useEffect(() => { if (conversionFormulaInView && hasNextConversionFormula && !isFetchingNextConversionFormula) fetchNextConversionFormula() }, [conversionFormulaInView, hasNextConversionFormula, isFetchingNextConversionFormula, fetchNextConversionFormula])
+  useEffect(() => { if (priceLevelInView && hasNextPriceLevel && !isFetchingNextPriceLevel) fetchNextPriceLevel() }, [priceLevelInView, hasNextPriceLevel, isFetchingNextPriceLevel, fetchNextPriceLevel])
+  useEffect(() => { if (petrolPumpInView && hasNextPetrolPump && !isFetchingNextPetrolPump) fetchNextPetrolPump() }, [petrolPumpInView, hasNextPetrolPump, isFetchingNextPetrolPump, fetchNextPetrolPump])
+  useEffect(() => { if (cdRuleInView && hasNextCdRule && !isFetchingNextCdRule) fetchNextCdRule() }, [cdRuleInView, hasNextCdRule, isFetchingNextCdRule, fetchNextCdRule])
+  useEffect(() => { if (tdsRuleInView && hasNextTdsRule && !isFetchingNextTdsRule) fetchNextTdsRule() }, [tdsRuleInView, hasNextTdsRule, isFetchingNextTdsRule, fetchNextTdsRule])
+  useEffect(() => { if (bhadaRateInView && hasNextBhadaRate && !isFetchingNextBhadaRate) fetchNextBhadaRate() }, [bhadaRateInView, hasNextBhadaRate, isFetchingNextBhadaRate, fetchNextBhadaRate])
+  useEffect(() => { if (skuInView && hasNextSku && !isFetchingNextSku) fetchNextSku() }, [skuInView, hasNextSku, isFetchingNextSku, fetchNextSku])
+  useEffect(() => { if (skuSellingPriceInView && hasNextSkuSellingPrice && !isFetchingNextSkuSellingPrice) fetchNextSkuSellingPrice() }, [skuSellingPriceInView, hasNextSkuSellingPrice, isFetchingNextSkuSellingPrice, fetchNextSkuSellingPrice])
 
   // 7. Vehicle Data (Infinite Query)
   const {
@@ -2849,6 +2848,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   useEffect(() => {
     if (driverInView && hasNextDriver && !isFetchingNextDriver) fetchNextDriver()
   }, [driverInView, hasNextDriver, isFetchingNextDriver, fetchNextDriver])
+
+  useEffect(() => {
+    if (transportInView && hasNextTransport && !isFetchingNextTransport) fetchNextTransport()
+  }, [transportInView, hasNextTransport, isFetchingNextTransport, fetchNextTransport])
 
   const isLoading = isCustomerLoading || isDepotLoading || isBrokerLoading || isSalespersonLoading || isSkuLoading || isSkuSellingPriceLoading || isVehicleLoading || isDriverLoading || isTransportLoading || isLedgerGroupLoading || isStockGroupLoading || isUnitLoading || isRawMaterialLoading || isSemiFinishedGoodLoading || isInsuranceDetailLoading || isConversionFormulaLoading || isPriceLevelLoading || isPetrolPumpLoading || isCdRuleLoading || isTdsRuleLoading || isBhadaRateLoading
 
@@ -5551,9 +5554,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             if (!open) resetForms()
           }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all" disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab.replace('_', ' ')}`}>
+              <Button size="sm" className="h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all" disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.replace('_', ' ')}`}>
                 <Plus className="h-4 w-4 md:mr-2" />
-                <span className="hidden md:inline">Add {activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
+                <span className="hidden md:inline">Add {activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
               </Button>
             </DialogTrigger>
             <DialogContent className={`w-[95vw] ${isUnitCompactForm ? 'min-h-[440px]' : 'min-h-[580px]'} max-h-[90vh] overflow-y-auto`} style={{ maxWidth: isUnitCompactForm ? '820px' : '1250px' }}>
