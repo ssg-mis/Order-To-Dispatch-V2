@@ -270,8 +270,8 @@ export function CdRuleBulkImportModal({
           </div>
         </DialogHeader>
 
-        {/* Modal Body */}
-        <div className="px-6 py-4 flex-1 space-y-3.5 overflow-y-auto max-h-[calc(90vh-130px)]">
+        {/* Modal Body (scrollable content only — footer buttons are fixed below) */}
+        <div className="px-6 py-4 flex-1 min-h-0 overflow-y-auto space-y-3.5">
           {/* STEP 1: FORMAT GUIDE */}
           {step === 1 && (
             <div className="space-y-3.5">
@@ -361,28 +361,6 @@ export function CdRuleBulkImportModal({
                   </div>
                 </div>
               </div>
-
-              {/* Action Bar */}
-              <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadTemplate}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
-                >
-                  <Download className="h-3.5 w-3.5 text-slate-500" />
-                  Download Sample CSV
-                </Button>
-
-                <Button
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Upload File
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
             </div>
           )}
 
@@ -448,29 +426,6 @@ export function CdRuleBulkImportModal({
                   </div>
                 )}
               </div>
-
-              {/* Action Bar */}
-              <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(1)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={!file || parsedRows.length === 0}
-                  onClick={() => setStep(3)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Preview & Validate ({parsedRows.length} rows)
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
             </div>
           )}
 
@@ -532,38 +487,6 @@ export function CdRuleBulkImportModal({
                   </tbody>
                 </table>
               </div>
-
-              {/* Action Bar */}
-              <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={validCount === 0 || isSubmitting}
-                  onClick={handlePerformImport}
-                  className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Importing...
-                    </>
-                  ) : (
-                    <>
-                      Import {validCount} Records
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </>
-                  )}
-                </Button>
-              </div>
             </div>
           )}
 
@@ -580,16 +503,101 @@ export function CdRuleBulkImportModal({
                   Imported {importResponse?.importedCount || validCount} cash discount rules into master database.
                 </p>
               </div>
+            </div>
+          )}
+        </div>
 
-              <div className="pt-4 border-t border-slate-100 flex justify-center">
-                <Button
-                  size="sm"
-                  onClick={handleClose}
-                  className="h-9 px-6 rounded-xl font-bold bg-slate-900 hover:bg-slate-800 text-white text-xs"
-                >
-                  Done & Close
-                </Button>
-              </div>
+        {/* Fixed Footer Action Bar — stays visible while the body above scrolls */}
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-white shrink-0">
+          {step === 1 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadTemplate}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-500" />
+                Download Sample CSV
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Upload File
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(1)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={!file || parsedRows.length === 0}
+                onClick={() => setStep(3)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Preview & Validate ({parsedRows.length} rows)
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={validCount === 0 || isSubmitting}
+                onClick={handlePerformImport}
+                className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    Import {validCount} Records
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="flex justify-center">
+              <Button
+                size="sm"
+                onClick={handleClose}
+                className="h-9 px-6 rounded-xl font-bold bg-slate-900 hover:bg-slate-800 text-white text-xs"
+              >
+                Done & Close
+              </Button>
             </div>
           )}
         </div>

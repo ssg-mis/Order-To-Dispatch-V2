@@ -303,8 +303,8 @@ export function DepotBulkImportModal({
           </div>
         </DialogHeader>
 
-        {/* Modal Body */}
-        <div className="px-6 py-4 flex-1 overflow-y-auto max-h-[calc(90vh-130px)] space-y-3.5">
+        {/* Modal Body (scrollable content only — footer buttons are fixed below) */}
+        <div className="px-6 py-4 flex-1 min-h-0 overflow-y-auto space-y-3.5">
           {/* STEP 1: FORMAT GUIDE */}
           {step === 1 && (
             <div className="space-y-3.5">
@@ -375,28 +375,6 @@ export function DepotBulkImportModal({
                     <div className="text-slate-400 text-xs italic shrink-0">Optional details</div>
                   </div>
                 </div>
-              </div>
-
-              {/* Step 1 Footer Action Bar */}
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadTemplate}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
-                >
-                  <Download className="h-3.5 w-3.5 text-slate-500" />
-                  Download Sample CSV
-                </Button>
-
-                <Button
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Upload File
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
               </div>
             </div>
           )}
@@ -485,28 +463,6 @@ export function DepotBulkImportModal({
                   <li>Depot Code (DPT101, etc.) will be automatically generated</li>
                 </ul>
               </div>
-
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(1)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back to Guide
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={!file || parsedRows.length === 0}
-                  onClick={() => setStep(3)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Validate Data
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
             </div>
           )}
 
@@ -590,37 +546,6 @@ export function DepotBulkImportModal({
                   </tbody>
                 </table>
               </div>
-
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Re-upload
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={validCount === 0 || isSubmitting}
-                  onClick={handlePerformImport}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20 disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Importing...
-                    </>
-                  ) : (
-                    <>
-                      Import {validCount} Records
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </>
-                  )}
-                </Button>
-              </div>
             </div>
           )}
 
@@ -667,16 +592,101 @@ export function DepotBulkImportModal({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
 
-              <div className="pt-1">
-                <Button
-                  size="sm"
-                  onClick={handleClose}
-                  className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs shadow-sm shadow-primary/20"
-                >
-                  Close & Refresh Depot List
-                </Button>
-              </div>
+        {/* Fixed Footer Action Bar — stays visible while the body above scrolls */}
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-white shrink-0">
+          {step === 1 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadTemplate}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-500" />
+                Download Sample CSV
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Upload File
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(1)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to Guide
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={!file || parsedRows.length === 0}
+                onClick={() => setStep(3)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Validate Data
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Re-upload
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={validCount === 0 || isSubmitting}
+                onClick={handlePerformImport}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20 disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    Import {validCount} Records
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {step === 4 && importResponse && (
+            <div className="flex justify-center">
+              <Button
+                size="sm"
+                onClick={handleClose}
+                className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs shadow-sm shadow-primary/20"
+              >
+                Close & Refresh Depot List
+              </Button>
             </div>
           )}
         </div>

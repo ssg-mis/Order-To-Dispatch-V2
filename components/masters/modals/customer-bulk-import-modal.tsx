@@ -115,6 +115,83 @@ export function CustomerBulkImportModal({
     document.body.removeChild(link)
   }
 
+  // Escape a value for safe CSV embedding (wraps in quotes, doubles internal quotes)
+  const csvEscape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`
+
+  // Export only the rows that failed validation, in the same column order as the
+  // import template, plus a Row # and Errors column — so users can fix the flagged
+  // fields and re-upload the same file for import.
+  const handleExportErrors = () => {
+    const errorRows = validationResults.filter((v) => !v.isValid)
+    if (errorRows.length === 0) return
+
+    const headers = [
+      "Row #",
+      "Customer Name",
+      "State",
+      "PAN",
+      "GSTIN",
+      "GST Registration Type",
+      "GST W.E.F. Date",
+      "Contact Person",
+      "Contact Number",
+      "Email",
+      "Address Line 1",
+      "Address Line 2",
+      "Pincode",
+      "MSME Reg No",
+      "MSME Reg Type",
+      "MSME W.E.F. Date",
+      "FSSAI No",
+      "FSSAI Licence Type",
+      "FSSAI Valid Upto",
+      "Ledger Group",
+      "Is Required For Commitment",
+      "Status",
+      "Errors",
+    ]
+
+    const lines = errorRows.map(({ row, errors }) =>
+      [
+        row.index,
+        row.customer_name,
+        row.state,
+        row.pan,
+        row.gstin,
+        row.gst_registration_type,
+        row.gst_registration_wef,
+        row.contact_person,
+        row.contact,
+        row.email,
+        row.address_line_1,
+        row.address_line_2,
+        row.pincode,
+        row.msme_registration_no,
+        row.msme_registration_type,
+        row.msme_registration_wef,
+        row.fssai_no,
+        row.fssai_licence_type,
+        row.fssai_valid_upto,
+        row.ledger_group_name,
+        row.is_required_for_commitment,
+        row.status,
+        errors.join("; "),
+      ]
+        .map(csvEscape)
+        .join(",")
+    )
+
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      encodeURIComponent(`${headers.map(csvEscape).join(",")}\n${lines.join("\n")}\n`)
+    const link = document.createElement("a")
+    link.setAttribute("href", csvContent)
+    link.setAttribute("download", "Customer_Import_Errors.csv")
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
   // Map header row + raw data rows into ParsedRow[]
   const mapRowsToParsedRows = (headers: string[], dataRows: string[][]): ParsedRow[] => {
     const normalizedHeaders = headers.map((h) => (h || "").trim().replace(/^["']|["']$/g, "").toLowerCase())
@@ -423,8 +500,8 @@ export function CustomerBulkImportModal({
           </div>
         </DialogHeader>
 
-        {/* Modal Body */}
-        <div className="px-6 py-4 flex-1 overflow-y-auto max-h-[calc(90vh-130px)] space-y-3.5">
+        {/* Modal Body (scrollable content only — footer buttons are fixed below) */}
+        <div className="px-6 py-4 flex-1 min-h-0 overflow-y-auto space-y-3.5">
           {/* STEP 1: FORMAT GUIDE */}
           {step === 1 && (
             <div className="space-y-3.5">
@@ -539,27 +616,6 @@ export function CustomerBulkImportModal({
                 </div>
               </div>
 
-              {/* Step 1 Footer Action Bar */}
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadTemplate}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
-                >
-                  <Download className="h-3.5 w-3.5 text-slate-500" />
-                  Download Sample CSV
-                </Button>
-
-                <Button
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Upload File
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
             </div>
           )}
 
@@ -648,27 +704,6 @@ export function CustomerBulkImportModal({
                 </ul>
               </div>
 
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(1)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back to Guide
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={!file || parsedRows.length === 0}
-                  onClick={() => setStep(3)}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
-                >
-                  Next: Validate Data
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
             </div>
           )}
 
@@ -703,9 +738,21 @@ export function CustomerBulkImportModal({
                       <AlertCircle className="h-4 w-4 shrink-0" />
                       <span>{errorCount} row(s) failed validation</span>
                     </span>
-                    <Badge variant="outline" className="bg-white text-amber-800 border-amber-300 font-bold text-[10px]">
-                      {validCount} will be imported
-                    </Badge>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleExportErrors}
+                        className="h-6.5 px-2.5 rounded-lg border-red-300 bg-white text-red-700 hover:bg-red-100 font-bold text-[10px] gap-1"
+                      >
+                        <Download className="h-3 w-3" />
+                        Export Errors as CSV
+                      </Button>
+                      <Badge variant="outline" className="bg-white text-amber-800 border-amber-300 font-bold text-[10px]">
+                        {validCount} will be imported
+                      </Badge>
+                    </div>
                   </div>
                   <ul className="list-disc list-inside space-y-0.5 text-[11px] text-red-700 bg-white/70 p-2 rounded-lg border border-red-100 font-medium max-h-24 overflow-y-auto">
                     {validationResults.filter(v => !v.isValid).map((v, idx) => (
@@ -762,36 +809,6 @@ export function CustomerBulkImportModal({
                 </table>
               </div>
 
-              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setStep(2)}
-                  className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Re-upload
-                </Button>
-
-                <Button
-                  size="sm"
-                  disabled={validCount === 0 || isSubmitting}
-                  onClick={handlePerformImport}
-                  className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20 disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Importing...
-                    </>
-                  ) : (
-                    <>
-                      Import {validCount} Records
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </>
-                  )}
-                </Button>
-              </div>
             </div>
           )}
 
@@ -838,16 +855,101 @@ export function CustomerBulkImportModal({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
 
-              <div className="pt-1">
-                <Button
-                  size="sm"
-                  onClick={handleClose}
-                  className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs shadow-sm shadow-primary/20"
-                >
-                  Close & Refresh Customer List
-                </Button>
-              </div>
+        {/* Fixed Footer Action Bar — stays visible while the body above scrolls */}
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-white shrink-0">
+          {step === 1 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadTemplate}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-2"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-500" />
+                Download Sample CSV
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Upload File
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(1)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to Guide
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={!file || parsedRows.length === 0}
+                onClick={() => setStep(3)}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20"
+              >
+                Next: Validate Data
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStep(2)}
+                className="h-8.5 px-3.5 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs gap-1.5"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Re-upload
+              </Button>
+
+              <Button
+                size="sm"
+                disabled={validCount === 0 || isSubmitting}
+                onClick={handlePerformImport}
+                className="h-8.5 px-4.5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs gap-2 shadow-sm shadow-primary/20 disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    Import {validCount} Records
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {step === 4 && importResponse && (
+            <div className="flex justify-center">
+              <Button
+                size="sm"
+                onClick={handleClose}
+                className="h-8.5 px-5 rounded-xl font-bold bg-primary hover:bg-primary/90 text-white text-xs shadow-sm shadow-primary/20"
+              >
+                Close & Refresh Customer List
+              </Button>
             </div>
           )}
         </div>
