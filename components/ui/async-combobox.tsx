@@ -23,7 +23,7 @@ import {
 export interface AsyncComboboxOption {
   value: string
   label: string
-  dropdownLabel?: string
+  dropdownLabel?: React.ReactNode
   original?: any
 }
 

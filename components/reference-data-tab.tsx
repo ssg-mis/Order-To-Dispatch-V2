@@ -42,16 +42,22 @@ import {
   ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
-  AlertTriangle
+  AlertTriangle,
+  Upload,
+  Download,
+  Loader2
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { stateApi, districtApi, subDistrictApi, lookupApi, type LookupType } from "@/lib/api-service"
+import { stateApi, districtApi, subDistrictApi, lookupApi, oilTagApi, type LookupType } from "@/lib/api-service"
 import { DEFAULT_MASTER_RECORDS, formatDropdownLabel } from "@/lib/dropdown-masters"
 
 export interface ReferenceDataTabProps {
   activeStates?: Array<{ id: number | string; state_name: string; status?: string; gst_state_code?: string; short_name?: string }>
   isMasterTabReadOnly?: boolean
+  onImportOilTags?: () => void
+  onExportOilTags?: () => void
+  isExportingOilTags?: boolean
 }
 
 // 22 Standard Master Categories
@@ -117,7 +123,13 @@ const CATEGORY_GROUPS: CategoryGroup[] = [
   },
 ]
 
-export function ReferenceDataTab({ activeStates = [], isMasterTabReadOnly = false }: ReferenceDataTabProps) {
+export function ReferenceDataTab({
+  activeStates = [],
+  isMasterTabReadOnly = false,
+  onImportOilTags,
+  onExportOilTags,
+  isExportingOilTags = false,
+}: ReferenceDataTabProps) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -869,14 +881,46 @@ export function ReferenceDataTab({ activeStates = [], isMasterTabReadOnly = fals
                 </div>
               </div>
 
-              <Button
-                onClick={handleOpenAddDialog}
-                disabled={isMasterTabReadOnly}
-                className="bg-primary text-white hover:bg-primary/90 shadow-sm font-medium text-xs h-9 px-4 rounded-xl flex items-center gap-1.5"
-              >
-                <Plus className="h-4 w-4" />
-                Add New {selectedCategoryMeta.label}
-              </Button>
+              <div className="flex items-center gap-2">
+                {selectedCategory === "oil_type" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100/80 text-emerald-800 shadow-2xs px-3 rounded-xl font-bold flex items-center gap-1.5 transition-all text-xs"
+                      disabled={isMasterTabReadOnly}
+                      onClick={onImportOilTags}
+                      title={isMasterTabReadOnly ? "View Only Access" : "Import Oil Tags via CSV/Excel"}
+                    >
+                      <Upload className="w-3.5 h-3.5 mr-1" />
+                      Import CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 text-blue-800 shadow-2xs px-3 rounded-xl font-bold flex items-center gap-1.5 transition-all text-xs"
+                      disabled={isExportingOilTags}
+                      onClick={onExportOilTags}
+                      title="Export Oil Tags to CSV"
+                    >
+                      {isExportingOilTags ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5 mr-1" />
+                      )}
+                      Export CSV
+                    </Button>
+                  </>
+                )}
+                <Button
+                  onClick={handleOpenAddDialog}
+                  disabled={isMasterTabReadOnly}
+                  className="bg-primary text-white hover:bg-primary/90 shadow-sm font-medium text-xs h-9 px-4 rounded-xl flex items-center gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add New {selectedCategoryMeta.label}
+                </Button>
+              </div>
             </div>
 
             {/* Filter Toolbar */}

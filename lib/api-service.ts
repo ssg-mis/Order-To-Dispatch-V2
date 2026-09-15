@@ -171,9 +171,6 @@ async function request<T = any>(
  * Order Dispatch API
  */
 export const orderApi = {
-  /**
-   * Create new order
-   */
   create: async (orderData: CreateOrderRequest): Promise<ApiResponse<CreateOrderResponse>> => {
     return request(API_ENDPOINTS.orders.create, {
       method: 'POST',
@@ -181,9 +178,6 @@ export const orderApi = {
     });
   },
 
-  /**
-   * Upload file to S3
-   */
   uploadFile: async (file: File): Promise<ApiResponse<{ url: string }>> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -194,9 +188,6 @@ export const orderApi = {
     });
   },
 
-  /**
-   * Get all orders with pagination
-   */
   getAll: async (params?: {
     page?: number;
     limit?: number;
@@ -211,16 +202,10 @@ export const orderApi = {
     return request(API_ENDPOINTS.orders.getAll + queryString);
   },
 
-  /**
-   * Get order by order number
-   */
   getByOrderNumber: async (orderNo: string): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.getByOrderNumber(orderNo));
   },
 
-  /**
-   * Update order
-   */
   update: async (id: number, updateData: Partial<CreateOrderRequest>): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.update(id), {
       method: 'PUT',
@@ -228,27 +213,17 @@ export const orderApi = {
     });
   },
 
-  /**
-   * Delete order
-   */
   delete: async (id: number): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.delete(id), {
       method: 'DELETE',
     });
   },
 
-  /**
-   * Get all suffixes for a given order prefix
-   */
   getSuffixes: async (prefix: string): Promise<ApiResponse<string[]>> => {
     return request(API_ENDPOINTS.orders.getSuffixes(prefix));
   },
 };
 
-/**
- * Order Lookup API — cross-stage DO lookup, resolves which workflow stage
- * a DO number is currently sitting at.
- */
 export const orderLookupApi = {
   lookup: async (search: string): Promise<ApiResponse<{
     orderNo: string;
@@ -263,13 +238,7 @@ export const orderLookupApi = {
   },
 };
 
-/**
- * Pre-Approval API
- */
 export const preApprovalApi = {
-  /**
-   * Get pending pre-approvals
-   */
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -285,9 +254,6 @@ export const preApprovalApi = {
     return adaptList(await request(`/pre-approval/pending${queryString}`), 'orders', flattenOrderItemStage);
   },
 
-  /**
-   * Get pre-approval history
-   */
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -303,9 +269,6 @@ export const preApprovalApi = {
     return adaptList(await request(`/pre-approval/history${queryString}`), 'orders', flattenOrderItemStage);
   },
 
-  /**
-   * Submit pre-approval
-   */
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
     return request(`/pre-approval/submit/${id}`, {
       method: 'POST',
@@ -313,11 +276,6 @@ export const preApprovalApi = {
     });
   },
 
-  /**
-   * Deduct qty from an existing pending pre-approval order_item without advancing it.
-   * Used when a new SKU consumes budget from existing orders.
-   * qty = 0 → backend closes the pre_approvals gate (audit-only row).
-   */
   deductBudget: async (id: number, data: { orderQuantity: number }): Promise<ApiResponse> => {
     return request(`/pre-approval/deduct-budget/${id}`, {
       method: 'PATCH',
@@ -325,16 +283,12 @@ export const preApprovalApi = {
     });
   },
 
-  /**
-   * Atomically submit approvals + cascade deductions in one DB transaction.
-   * Prevents totals from going out of sync if deductions fail after approvals succeed.
-   */
   submitBatch: async (payload: {
-    approvals: Array<{ id: number;[key: string]: any }>;
+    approvals: Array<{ id: number; [key: string]: any }>;
     cascadeBudgets?: Array<{ base_do: string; oil_type: string; qty: number }>;
     deductions?: Array<{ id: number; orderQuantity: number }>;
     skipIds?: number[];
-    newItems?: Array<{ orderId: number; skuId: number;[key: string]: any }>;
+    newItems?: Array<{ orderId: number; skuId: number; [key: string]: any }>;
   }): Promise<ApiResponse> => {
     return request(`/pre-approval/submit-batch`, {
       method: 'POST',
@@ -343,13 +297,7 @@ export const preApprovalApi = {
   },
 };
 
-/**
- * Order Approval API (Stage 3)
- */
 export const approvalApi = {
-  /**
-   * Get pending approvals
-   */
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -366,9 +314,6 @@ export const approvalApi = {
     return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenOrderItemStage);
   },
 
-  /**
-   * Get approval history
-   */
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -385,23 +330,14 @@ export const approvalApi = {
     return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenOrderItemStage);
   },
 
-  /**
-   * Get dynamic filter options for Approval stage
-   */
   getFilters: async (): Promise<ApiResponse> => {
     return request('/approval/filters');
   },
 
-  /**
-   * Get approval by ID
-   */
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/approval/${id}`);
   },
 
-  /**
-   * Submit approval
-   */
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
     return request(`/approval/submit/${id}`, {
       method: 'POST',
@@ -410,13 +346,7 @@ export const approvalApi = {
   },
 };
 
-/**
- * Dispatch Planning API (Stage 4)
- */
 export const dispatchPlanningApi = {
-  /**
-   * Get pending dispatch planning
-   */
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -430,9 +360,6 @@ export const dispatchPlanningApi = {
     return adaptList(await request(`/dispatch-planning/pending${buildQuery(params)}`), 'dispatches', flattenOrderItemStage);
   },
 
-  /**
-   * Get dispatch planning history
-   */
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -446,9 +373,6 @@ export const dispatchPlanningApi = {
     return adaptList(await request(`/dispatch-planning/history${buildQuery(params)}`), 'dispatches', flattenOrderItemStage);
   },
 
-  /**
-   * Submit dispatch planning
-   */
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
     return request(`/dispatch-planning/submit/${id}`, {
       method: 'POST',
@@ -456,9 +380,6 @@ export const dispatchPlanningApi = {
     });
   },
 
-  /**
-   * Revert dispatch planning to pre-approval
-   */
   revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
     return request(`/dispatch-planning/revert/${id}`, {
       method: 'POST',
@@ -466,9 +387,6 @@ export const dispatchPlanningApi = {
     });
   },
 
-  /**
-   * Cancel an order from Dispatch Planning — Super Admin only
-   */
   cancel: async (id: number, userId: number | null, remarks: string): Promise<ApiResponse> => {
     return request(`/dispatch-planning/cancel/${id}`, {
       method: 'POST',
@@ -476,9 +394,6 @@ export const dispatchPlanningApi = {
     });
   },
 
-  /**
-   * Update transfer details for an order
-   */
   updateTransferDetails: async (id: number, data: any): Promise<ApiResponse> => {
     return request(`/dispatch-planning/update-transfer/${id}`, {
       method: 'POST',
@@ -486,9 +401,6 @@ export const dispatchPlanningApi = {
     });
   },
 
-  /**
-   * Pre-close quantity for an order
-   */
   preclose: async (id: number, data: { precloseQty: number, userId: number | null, action: string, precloseRemarks: string }): Promise<ApiResponse> => {
     return request(`/dispatch-planning/preclose/${id}`, {
       method: 'POST',
@@ -497,13 +409,7 @@ export const dispatchPlanningApi = {
   },
 };
 
-/**
- * Actual Dispatch API (Stage 5)
- */
 export const actualDispatchApi = {
-  /**
-   * Get pending actual dispatches
-   */
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -517,9 +423,6 @@ export const actualDispatchApi = {
     return adaptList(await request(`/actual-dispatch/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
   },
 
-  /**
-   * Get actual dispatch history
-   */
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -533,9 +436,6 @@ export const actualDispatchApi = {
     return adaptList(await request(`/actual-dispatch/history${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
   },
 
-  /**
-   * Submit actual dispatch. id = dispatch id (v2 route /submit/:id).
-   */
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
     return request(`/actual-dispatch/submit/${id}`, {
       method: 'POST',
@@ -543,9 +443,6 @@ export const actualDispatchApi = {
     });
   },
 
-  /**
-   * Revert actual dispatch (back to Pre-Approval). id = dispatch id.
-   */
   revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
     return request(`/actual-dispatch/revert/${id}`, {
       method: 'POST',
@@ -553,9 +450,6 @@ export const actualDispatchApi = {
     });
   },
 
-  /**
-   * Revert actual dispatch back to Dispatch Planning only (one stage back). id = dispatch id.
-   */
   revertToDispatchPlanning: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
     return request(`/actual-dispatch/revert-to-planning/${id}`, {
       method: 'POST',
@@ -563,17 +457,10 @@ export const actualDispatchApi = {
     });
   },
 
-  /**
-   * Get unique filter options for Actual Dispatch
-   */
   getFilters: async (): Promise<ApiResponse> => {
     return request('/actual-dispatch/filters');
   },
 
-  /**
-   * Cancel Stock Transfer SKUs left unselected in an Actual Dispatch submission.
-   * dispatchIds = dispatch ids (v2 body: { dispatchIds: number[] }).
-   */
   cancelUnselected: async (dispatchIds: number[]): Promise<ApiResponse> => {
     return request('/actual-dispatch/cancel-unselected', {
       method: 'POST',
@@ -582,9 +469,6 @@ export const actualDispatchApi = {
   },
 };
 
-/**
- * Gate In API
- */
 export const gateInApi = {
   getPending: (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
     return request(`/gate-in/pending${buildQuery(params)}`);
@@ -609,11 +493,6 @@ export const gateInApi = {
     request(`/gate-in/check?order_key=${encodeURIComponent(orderKey)}`),
 };
 
-/**
- * Draft API – Save as Draft for Actual Dispatch stage
- * Drafts are shared per order (orderKey) so any user can view/continue one;
- * username is only recorded as "last saved by" metadata on save.
- */
 export const draftApi = {
   save: (username: string, orderKey: string, data: any): Promise<ApiResponse> =>
     request('/drafts', {
@@ -630,13 +509,7 @@ export const draftApi = {
     }),
 };
 
-/**
- * Security Guard Approval API (Stage 8)
- */
 export const securityGuardApprovalApi = {
-  /**
-   * Get pending security guard approvals
-   */
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -664,9 +537,6 @@ export const securityGuardApprovalApi = {
     return adaptList(await request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url), 'approvals', flattenSecurityStage);
   },
 
-  /**
-   * Get security guard approval history
-   */
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -698,23 +568,14 @@ export const securityGuardApprovalApi = {
     return adaptList(await request(url.endsWith('&') || url.endsWith('?') ? url.slice(0, -1) : url), 'approvals', flattenSecurityStage);
   },
 
-  /**
-   * Get security guard filter options
-   */
   getFilters: async (): Promise<ApiResponse> => {
     return request('/security-approval/filters');
   },
 
-  /**
-   * Get security guard approval by ID
-   */
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/security-approval/${id}`);
   },
 
-  /**
-   * Submit security guard approval
-   */
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
     return request(`/security-approval/submit/${id}`, {
       method: "POST",
@@ -723,9 +584,6 @@ export const securityGuardApprovalApi = {
   },
 };
 
-/**
- * Make Invoice API (Stage 9)
- */
 export const makeInvoiceApi = {
   getPending: async (params?: {
     page?: number;
@@ -767,9 +625,6 @@ export const makeInvoiceApi = {
   },
 };
 
-/**
- * Check Invoice API (Stage 10)
- */
 export const checkInvoiceApi = {
   getPending: async (params?: {
     page?: number;
@@ -807,9 +662,6 @@ export const checkInvoiceApi = {
   },
 };
 
-/**
- * Gate Out API (Stage 11)
- */
 export const gateOutApi = {
   getPending: async (params?: {
     page?: number;
@@ -847,9 +699,6 @@ export const gateOutApi = {
   },
 };
 
-/**
- * Confirm Material Receipt API (Stage 12)
- */
 export const confirmMaterialReceiptApi = {
   getPending: async (params?: {
     page?: number;
@@ -889,9 +738,6 @@ export const confirmMaterialReceiptApi = {
   },
 };
 
-/**
- * Damage Adjustment API (Stage 13)
- */
 export const damageAdjustmentApi = {
   getPending: async (params?: {
     page?: number;
@@ -929,13 +775,7 @@ export const damageAdjustmentApi = {
   },
 };
 
-/**
- * User Management API
- */
 export const userApi = {
-  /**
-   * Get all users
-   */
   getAll: async (params?: {
     page?: number;
     limit?: number;
@@ -949,9 +789,6 @@ export const userApi = {
     return request(`/users${queryString}`);
   },
 
-  /**
-   * Get user by ID
-   */
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/users/${id}`);
   },
@@ -963,9 +800,6 @@ export const userApi = {
     });
   },
 
-  /**
-   * Update user
-   */
   update: async (id: number, userData: any): Promise<ApiResponse> => {
     return request(`/users/${id}`, {
       method: 'PUT',
@@ -973,9 +807,6 @@ export const userApi = {
     });
   },
 
-  /**
-   * Delete user
-   */
   delete: async (id: number): Promise<ApiResponse> => {
     return request(`/users/${id}`, {
       method: 'DELETE',
@@ -993,32 +824,20 @@ export const userApi = {
     });
   },
 
-  /**
-   * Logout user
-   */
   logout: async (): Promise<ApiResponse> => {
     return request('/users/logout', {
       method: 'POST',
     });
   },
 
-  /**
-   * Get page access options
-   */
   getPageAccessOptions: async (): Promise<ApiResponse> => {
     return request('/users/page-access-options');
   },
 
-  /**
-   * Get CSV export format presets for a user
-   */
   getCsvFormats: async (id: number): Promise<ApiResponse> => {
     return request(`/users/${id}/csv-formats`);
   },
 
-  /**
-   * Save CSV export format presets for a user
-   */
   saveCsvFormats: async (id: number, formats: Record<string, string[]>): Promise<ApiResponse> => {
     return request(`/users/${id}/csv-formats`, {
       method: 'PUT',
@@ -1026,18 +845,10 @@ export const userApi = {
     });
   },
 
-  /**
-   * Get this user's per-stage column preferences
-   * (visibility + order), keyed by stage.
-   */
   getColumnPrefs: async (id: number): Promise<ApiResponse> => {
     return request(`/users/${id}/column-prefs`);
   },
 
-  /**
-   * Deep-merge-save one stage's column preferences. Send only the slice you
-   * changed ({ visible } or { order }); the other is preserved server-side.
-   */
   saveColumnPrefs: async (
     id: number,
     stageKey: string,
@@ -1052,13 +863,7 @@ export const userApi = {
   },
 };
 
-/**
- * Customer API
- */
 export const customerApi = {
-  /**
-   * Get all customers
-   */
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
@@ -1066,23 +871,14 @@ export const customerApi = {
     return request(`/customers${queryString}`);
   },
 
-  /**
-   * Get customer by ID
-   */
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/customers/${id}`);
   },
 
-  /**
-   * Get customer by name
-   */
   getByName: async (name: string): Promise<ApiResponse> => {
     return request(`/customers/name/${encodeURIComponent(name)}`);
   },
 
-  /**
-   * Create new customer
-   */
   create: async (data: any): Promise<ApiResponse> => {
     return request('/customers', {
       method: 'POST',
@@ -1090,9 +886,6 @@ export const customerApi = {
     });
   },
 
-  /**
-   * Update customer
-   */
   update: async (id: number, data: any): Promise<ApiResponse> => {
     return request(`/customers/${id}`, {
       method: 'PUT',
@@ -1100,9 +893,6 @@ export const customerApi = {
     });
   },
 
-  /**
-   * Delete customer
-   */
   delete: async (id: number): Promise<ApiResponse> => {
     return request(`/customers/${id}`, {
       method: 'DELETE',
@@ -1120,21 +910,48 @@ export const customerApi = {
     });
   },
 
-  /**
-   * Get a customer's effective-dated GST registration history (read-only)
-   */
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/customers/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
+
   getGstHistory: async (id: number): Promise<ApiResponse> => {
     return request(`/customers/${id}/gst-history`);
   },
+
+  getMailingHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/mailing-history`);
+  },
+
+  getStructuredGstHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/structured-gst-history`);
+  },
+
+  getMsmeHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/msme-history`);
+  },
+
+  getFssaiHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/customers/${id}/fssai-history`);
+  },
+
+  getEffectiveDetails: async (id: number | string, date?: string): Promise<ApiResponse> => {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+    return request(`/customers/${id}/effective-details${qs}`);
+  },
+
+  addSectionHistory: async (id: number | string, sectionOrData: string | Record<string, any>, data?: any): Promise<ApiResponse> => {
+    const payload = typeof sectionOrData === 'string' ? { section: sectionOrData, ...data } : sectionOrData;
+    return request(`/customers/${id}/section-history`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
-/**
- * SKU API
- */
 export const skuApi = {
-  /**
-   * Get all SKUs
-   */
   getAll: async (params?: {
     all?: string;
     page?: number;
@@ -1147,35 +964,20 @@ export const skuApi = {
     return request(`/skus${queryString}`);
   },
 
-  /**
-   * Get SKU by ID
-   */
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/skus/${id}`);
   },
 
-  /**
-   * Get SKU rate by name
-   */
   getRateByName: async (skuName: string): Promise<any> => {
     return request(`/skus/rate/${encodeURIComponent(skuName)}`);
   },
 
-  /**
-   * Get all SKU rates with formulas
-   */
   getAllSkuRates: async (): Promise<ApiResponse> => {
     return request('/skus/rates/all');
   },
 };
 
-/**
- * Depot API
- */
 export const depotApi = {
-  /**
-   * Get all depots
-   */
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
@@ -1183,23 +985,14 @@ export const depotApi = {
     return request(`/depots${queryString}`);
   },
 
-  /**
-   * Get depot by ID
-   */
   getById: async (id: string): Promise<ApiResponse> => {
     return request(`/depots/${id}`);
   },
 
-  /**
-   * Get depot by name
-   */
   getByName: async (name: string): Promise<ApiResponse> => {
     return request(`/depots/name/${encodeURIComponent(name)}`);
   },
 
-  /**
-   * Create new depot
-   */
   create: async (data: any): Promise<ApiResponse> => {
     return request('/depots', {
       method: 'POST',
@@ -1207,9 +1000,6 @@ export const depotApi = {
     });
   },
 
-  /**
-   * Update depot (id = real serial PK, not the legacy depot_id text code)
-   */
   update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/depots/${id}`, {
       method: 'PUT',
@@ -1217,19 +1007,19 @@ export const depotApi = {
     });
   },
 
-  /**
-   * Delete depot (id = real serial PK)
-   */
   delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/depots/${id}`, { method: 'DELETE' });
   },
   getPending: async (): Promise<ApiResponse> => request('/depots/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/depots/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/depots/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * State API (new reference master - customer master overhaul plan Phase 1)
- */
 export const stateApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1243,10 +1033,6 @@ export const stateApi = {
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/states/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
-/**
- * District API (new reference master - customer master overhaul plan Phase 1).
- * getAll accepts { state_id } to narrow the cascading dropdown to one state.
- */
 export const districtApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1260,10 +1046,6 @@ export const districtApi = {
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/districts/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
-/**
- * Sub-District API (new reference master - customer master overhaul plan Phase 1).
- * getAll accepts { district_id } to narrow the cascading dropdown to one district.
- */
 export const subDistrictApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1277,32 +1059,6 @@ export const subDistrictApi = {
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/sub-districts/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
-/**
- * Shared reference-data lookup API.
- * Covers all 22 reference data lookup types:
- * - is_gst_registered
- * - gst_registration_type
- * - city
- * - post
- * - thana
- * - sub_district
- * - district
- * - state
- * - msme_registration_type
- * - fssai_licence_type
- * - bank_name
- * - transaction_type
- * - uqc
- * - gst_rate
- * - hsn_code
- * - sac_code
- * - type_of_supply
- * - vehicle_type
- * - fuel_type
- * - rto_code
- * - stock_category
- * - oil_type
- */
 export type LookupType =
   | 'is_gst_registered'
   | 'gst_registration_type'
@@ -1373,7 +1129,6 @@ export const lookupApi = {
   },
 };
 
-
 export const processStageApi = {
   getAll: async (): Promise<ApiResponse> => {
     return request('/process-stages');
@@ -1398,13 +1153,7 @@ export const processStageApi = {
   },
 };
 
-/**
- * Broker API
- */
 export const brokerApi = {
-  /**
-   * Get all brokers
-   */
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
@@ -1412,23 +1161,14 @@ export const brokerApi = {
     return request(`/brokers${queryString}`);
   },
 
-  /**
-   * Get broker by ID
-   */
   getById: async (id: string): Promise<ApiResponse> => {
     return request(`/brokers/${id}`);
   },
 
-  /**
-   * Get broker by salesman name
-   */
   getByName: async (name: string): Promise<ApiResponse> => {
     return request(`/brokers/name/${encodeURIComponent(name)}`);
   },
 
-  /**
-   * Create new broker
-   */
   create: async (data: any): Promise<ApiResponse> => {
     return request('/brokers', {
       method: 'POST',
@@ -1436,9 +1176,6 @@ export const brokerApi = {
     });
   },
 
-  /**
-   * Update broker (id = real serial PK, not the legacy broker_id text code)
-   */
   update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/brokers/${id}`, {
       method: 'PUT',
@@ -1446,19 +1183,19 @@ export const brokerApi = {
     });
   },
 
-  /**
-   * Delete broker (id = real serial PK)
-   */
   delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/brokers/${id}`, { method: 'DELETE' });
   },
   getPending: async (): Promise<ApiResponse> => request('/brokers/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/brokers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/brokers/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * SKU Details API
- */
 export const skuDetailsApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -1490,15 +1227,15 @@ export const skuDetailsApi = {
   },
   getPending: async (): Promise<ApiResponse> => request('/sku-details/pending'),
   review: async (id: number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/sku-details/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/sku-details/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * SKU Selling Price API
- */
 export const skuSellingPriceApi = {
-  /**
-   * Get all SKU selling prices (landing cost + margin)
-   */
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
@@ -1506,9 +1243,6 @@ export const skuSellingPriceApi = {
     return request(`/skus/sku-selling-price${queryString}`);
   },
 
-  /**
-   * Update SKU selling price
-   */
   update: async (id: number, data: any): Promise<ApiResponse> => {
     return request(`/skus/sku-selling-price/${id}`, {
       method: 'PUT',
@@ -1516,9 +1250,6 @@ export const skuSellingPriceApi = {
     });
   },
 
-  /**
-   * Create SKU selling price
-   */
   create: async (data: any): Promise<ApiResponse> => {
     return request('/skus/sku-selling-price', {
       method: 'POST',
@@ -1526,29 +1257,26 @@ export const skuSellingPriceApi = {
     });
   },
 
-  /**
-   * Delete SKU selling price
-   */
   delete: async (id: number): Promise<ApiResponse> => {
     return request(`/skus/sku-selling-price/${id}`, {
       method: 'DELETE',
     });
   },
+
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/skus/sku-selling-price/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * Common API
- */
 export const commonApi = {
   getNextId: async (type: 'customer' | 'depot' | 'broker' | 'sku' | 'salesperson' | 'vehicle' | 'driver' | 'transport' | 'state' | 'district' | 'sub_district' | 'ledger_group' | 'stock_group' | 'unit' | 'ledger' | 'raw_material' | 'semi_finished_good' | 'insurance_detail' | 'conversion_formula' | 'price_level' | 'petrol_pump' | 'cd_rule' | 'tds_rule' | 'bhada_rate'): Promise<ApiResponse<{ nextId: string; type: string; prefix: string }>> => {
     return request(`/common/next-id?type=${type}`);
   },
 };
 
-
-/**
- * Vehicle Master API
- */
 export const vehicleMasterApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -1578,13 +1306,16 @@ export const vehicleMasterApi = {
   delete: async (id: string | number): Promise<ApiResponse> => {
     return request(`/vehicle-master/${id}`, { method: 'DELETE' });
   },
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/vehicle-master/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
   getPending: async (): Promise<ApiResponse> => request('/vehicle-master/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/vehicle-master/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
-/**
- * Driver Master API
- */
 export const driverMasterApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -1616,11 +1347,14 @@ export const driverMasterApi = {
   },
   getPending: async (): Promise<ApiResponse> => request('/driver-master/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/driver-master/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/driver-master/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * Transport Master API
- */
 export const transportMasterApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -1652,23 +1386,14 @@ export const transportMasterApi = {
   },
   getPending: async (): Promise<ApiResponse> => request('/transport-master/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/transport-master/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/transport-master/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-
-/**
- * Variable Calculation API (Input Parameters)
- */
 export const varCalcApi = {
-  /**
-   * Get latest calculation variables
-   */
   getLatest: async (): Promise<ApiResponse> => {
     return request('/common/var-calc/latest');
   },
 
-  /**
-   * Save calculation variables
-   */
   save: async (data: any): Promise<ApiResponse> => {
     return request('/common/var-calc', {
       method: 'POST',
@@ -1676,9 +1401,6 @@ export const varCalcApi = {
     });
   },
 
-  /**
-   * Get all calculation variables (history)
-   */
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
@@ -1687,9 +1409,6 @@ export const varCalcApi = {
   },
 };
 
-/**
- * Salesperson API
- */
 export const salespersonApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -1709,7 +1428,6 @@ export const salespersonApi = {
     });
   },
 
-  // id = real serial PK, not the legacy broker_id text code
   update: async (id: string | number, data: any): Promise<ApiResponse> => {
     return request(`/salespersons/${id}`, {
       method: 'PUT',
@@ -1722,11 +1440,14 @@ export const salespersonApi = {
   },
   getPending: async (): Promise<ApiResponse> => request('/salespersons/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/salespersons/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/salespersons/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * Ledger Group API (Phase 8)
- */
 export const ledgerGroupApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1738,11 +1459,9 @@ export const ledgerGroupApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/ledger-groups/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/ledger-groups/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledger-groups/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/ledger-groups/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Stock Group API (Phase 8)
- */
 export const stockGroupApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1754,11 +1473,9 @@ export const stockGroupApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/stock-groups/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/stock-groups/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/stock-groups/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/stock-groups/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Units Master API (Phase 15)
- */
 export const unitApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1770,11 +1487,9 @@ export const unitApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/units/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/units/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/units/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/units/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Ledger API (Phase 16 follow-up — accounting-heads picklist)
- */
 export const ledgerApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1788,9 +1503,6 @@ export const ledgerApi = {
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledgers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
-/**
- * Raw Materials Master API (Phase 16)
- */
 export const rawMaterialApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1802,11 +1514,10 @@ export const rawMaterialApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/raw-materials/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/raw-materials/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/raw-materials/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/raw-materials/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
+  addSectionHistory: async (id: string | number, section: string, data: any, wefDate?: string): Promise<ApiResponse> => request(`/raw-materials/${id}/section-history`, { method: 'POST', body: JSON.stringify({ section, data, wefDate }) }),
 };
 
-/**
- * Semi-Finished Goods Master API (Phase 17)
- */
 export const semiFinishedGoodApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1818,11 +1529,9 @@ export const semiFinishedGoodApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/semi-finished-goods/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/semi-finished-goods/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/semi-finished-goods/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/semi-finished-goods/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Insurance Details Master API (Phase 19)
- */
 export const insuranceDetailApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1834,11 +1543,9 @@ export const insuranceDetailApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/insurance-details/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/insurance-details/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/insurance-details/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/insurance-details/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Finished Goods Price Conversion Formula Master API (Phase 20a)
- */
 export const conversionFormulaApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1851,11 +1558,9 @@ export const conversionFormulaApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/conversion-formulas/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/conversion-formulas/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/conversion-formulas/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/conversion-formulas/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Price Levels Master API (Phase 20b)
- */
 export const priceLevelApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1867,11 +1572,9 @@ export const priceLevelApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/price-levels/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/price-levels/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/price-levels/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/price-levels/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Petrol Pump Master API (Phase 21)
- */
 export const petrolPumpApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1883,11 +1586,9 @@ export const petrolPumpApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/petrol-pumps/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/petrol-pumps/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/petrol-pumps/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/petrol-pumps/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Cash Discount (CD) Master API (Phase 22)
- */
 export const cdRuleApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1899,11 +1600,25 @@ export const cdRuleApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/cd-rules/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/cd-rules/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/cd-rules/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/cd-rules/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * TDS Master API (Phase 23) - bare-minimum placeholder, see db-v2/schema/tds_rules.ts.
- */
+
+export const oilTagApi = {
+  getAll: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return request(`/oil-tags${queryString}`);
+  },
+  getById: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`),
+  getPending: async (): Promise<ApiResponse> => request(`/oil-tags/pending`),
+  create: async (data: any): Promise<ApiResponse> => request('/oil-tags', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id: number | string, data: any): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id: number | string): Promise<ApiResponse> => request(`/oil-tags/${id}`, { method: 'DELETE' }),
+  review: async (id: number | string, data: any): Promise<ApiResponse> => request(`/oil-tags/${id}/action`, { method: 'POST', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/oil-tags/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
+};
+
+
 export const tdsRuleApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1915,11 +1630,10 @@ export const tdsRuleApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/tds-rules/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/tds-rules/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/tds-rules/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/tds-rules/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
 };
 
-/**
- * Bhada Rate Master API (Phase 24) - bare-minimum placeholder, see db-v2/schema/bhada_rates.ts.
- */
+
 export const bhadaRateApi = {
   getAll: async (params?: any): Promise<ApiResponse> => {
     const queryString = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -1931,14 +1645,14 @@ export const bhadaRateApi = {
   delete: async (id: string | number): Promise<ApiResponse> => request(`/bhada-rates/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/bhada-rates/pending'),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/bhada-rates/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => {
+    return request('/bhada-rates/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+  },
 };
 
-/**
- * Tag API
- */
-/**
- * Dashboard API
- */
 export const dashboardApi = {
   getStats: async (): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.dashboard.stats);
@@ -1970,7 +1684,6 @@ export const ownerDashboardApi = {
     return request(`${API_ENDPOINTS.ownerDashboard.userDetail}/${userId}${queryString}`);
   },
   getCustomerOrders: async (customerId: string, params?: Record<string, any>): Promise<ApiResponse> => {
-    // customerId is the customers FK ('' = the unmapped "—" group), never a name.
     const qs = new URLSearchParams({ customerId: customerId ?? '', ...Object.fromEntries(Object.entries(params || {}).filter(([,v]) => v)) }).toString();
     return request(`${API_ENDPOINTS.ownerDashboard.customerOrders}?${qs}`);
   },
@@ -1987,9 +1700,6 @@ export const ownerDashboardApi = {
   },
 };
 
-/**
- * Reports API
- */
 export const reportsApi = {
   getReport: async (params?: any): Promise<ApiResponse> => {
     const queryString = params
@@ -2041,9 +1751,6 @@ export const reportsApi = {
   },
 };
 
-// ============================================================
-// COMMITMENT PUNCH API
-// ============================================================
 export const commitmentPunchApi = {
   create: async (data: any): Promise<ApiResponse> =>
     request('/commitment-punch', {
@@ -2075,9 +1782,6 @@ export const commitmentPunchApi = {
     request(`/commitment-punch/${id}/details`),
 };
 
-/**
- * Inventory API
- */
 export const inventoryApi = {
   getData: async (): Promise<ApiResponse> => {
     return request('/inventory/data');
@@ -2090,16 +1794,12 @@ export const inventoryApi = {
     });
   },
 
-
   getDetail: async (depot_name: string, product_name: string, type: string): Promise<ApiResponse> => {
     const params = new URLSearchParams({ depot_name, product_name, type });
     return request(`/inventory/detail?${params}`);
   },
 };
 
-/**
- * Production API
- */
 export const productionApi = {
   getByDate: async (date: string): Promise<ApiResponse> => {
     return request(`/production?date=${date}`);
@@ -2112,6 +1812,24 @@ export const productionApi = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+};
+
+export const masterHistoryApi = {
+  getHistory: async (masterType: string, recordId: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/${masterType}/${recordId}`);
+  },
+  logHistory: async (data: { masterType: string; recordId: number | string; fieldName: string; oldValue?: string; newValue?: string; applicableFrom?: string }): Promise<ApiResponse> => {
+    return request(`/master-history/log`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  deleteHistory: async (id: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/${id}`, { method: 'DELETE' });
+  },
+  deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
+    return request(`/master-history/section/${section}/${id}`, { method: 'DELETE' });
   },
 };
 
@@ -2139,6 +1857,5 @@ export default {
   commitmentPunch: commitmentPunchApi,
   vehicleMaster: vehicleMasterApi,
   driverMaster: driverMasterApi,
+  masterHistory: masterHistoryApi,
 };
-
-
