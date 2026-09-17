@@ -805,7 +805,7 @@ export default function CommitmentPunchPage() {
       case "delivery_qty":
         return (
           <TableCell key={colId} className={cn("font-mono text-purple-600 font-semibold", alignClass, widthClass)}>
-            {Number(row.processed_qty || 0) > 0 ? (
+            {Number(row.delivery_qty || 0) > 0 ? (
               <button onClick={(e) => openDetails(row, e, "delivered")} className="text-purple-600 underline hover:text-purple-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
                 {Number(row.delivery_qty || 0).toFixed(4)}
               </button>
@@ -1017,7 +1017,7 @@ export default function CommitmentPunchPage() {
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Delivered Qty</p>
-                      {Number(row.processed_qty || 0) > 0 ? (
+                      {Number(row.delivery_qty || 0) > 0 ? (
                         <button onClick={(e) => openDetails(row, e, "delivered")} className="mt-1 text-purple-600 underline hover:text-purple-800 font-semibold font-mono bg-transparent border-none p-0">
                           {Number(row.delivery_qty || 0).toFixed(4)}
                         </button>
