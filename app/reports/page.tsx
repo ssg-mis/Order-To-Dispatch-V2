@@ -38,7 +38,7 @@ import { FileText, FileDown, Users, FileSpreadsheet, CalendarDays, Boxes } from 
 import { useToast } from "@/hooks/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5002/api/v1"
+const API = process.env.NEXT_PUBLIC_API_URL || "/api/v1"
 
 const OIL_TYPES = ["All", "Soya", "Rice", "Palm", "Other"]
 

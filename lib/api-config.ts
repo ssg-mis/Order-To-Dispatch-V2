@@ -3,7 +3,8 @@
  */
 
 export const API_CONFIG = {
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api/v1',
+  // Always use relative '/api/v1' on client-side so Next.js rewrites proxy requests to backend
+  baseURL: typeof window !== 'undefined' ? '/api/v1' : (process.env.NEXT_PUBLIC_API_URL || '/api/v1'),
   timeout: 30000, // 30 seconds
 };
 
