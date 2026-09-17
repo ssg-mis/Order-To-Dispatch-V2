@@ -94,7 +94,7 @@ const PAGE_COLUMNS = [
   { id: "rate",          label: "Rate" },
   { id: "quantity",      label: "Qty (MT)" },
   { id: "processed_qty", label: "PO Raised (MT)" },
-  { id: "delivery_qty",  label: "Delivery Qty (MT)" },
+  { id: "delivery_qty",  label: "Delivered Qty (MT)" },
   { id: "po_pending_qty", label: "PO Pending Qty (MT)" },
   { id: "remaining_qty", label: "Commitment Pending (MT)" },
 ] as const
@@ -794,7 +794,7 @@ export default function CommitmentPunchPage() {
         return (
           <TableCell key={colId} className={cn("font-mono text-blue-600 font-semibold", alignClass, widthClass)}>
             {Number(row.processed_qty || 0) > 0 ? (
-              <button onClick={(e) => openDetails(row, e)} className="text-blue-600 underline hover:text-blue-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
+              <button onClick={(e) => openDetails(row, e, "raised")} className="text-blue-600 underline hover:text-blue-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
                 {Number(row.processed_qty || 0).toFixed(4)}
               </button>
             ) : (
@@ -1016,7 +1016,7 @@ export default function CommitmentPunchPage() {
                       )}
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-bold uppercase text-slate-400">Delivery Qty</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Delivered Qty</p>
                       {Number(row.delivery_qty || 0) > 0 ? (
                         <button onClick={(e) => openDetails(row, e, "delivered")} className="mt-1 text-purple-600 underline hover:text-purple-800 font-semibold font-mono bg-transparent border-none p-0">
                           {Number(row.delivery_qty || 0).toFixed(4)}
@@ -1904,26 +1904,90 @@ export default function CommitmentPunchPage() {
                 <div className="hidden rounded-lg border overflow-x-auto sm:block">
                   <table className="w-full text-sm border-collapse">
                     <thead className="bg-slate-50/80 border-b border-slate-200">
-                      <tr>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-8">#</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">DO No.</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Raised On</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO No.</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO Date</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU</th>
-                        <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty (Box)</th>
-                        <th className={cn("py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider", detailsType === "raised" ? "text-blue-600" : detailsType === "delivered" ? "text-purple-600" : "text-amber-600")}>
-                          {detailsType === "raised" ? "PO Raised (MT)" : detailsType === "delivered" ? "Delivered (MT)" : "PO Pending (MT)"}
-                        </th>
-                        <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Rate</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment Terms</th>
-                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Remarks</th>
-                      </tr>
+                      {detailsType === "delivered" ? (
+                        <tr>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-8">#</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-purple-700 uppercase tracking-wider">Invoice No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Invoice Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">DO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">DO Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Manual Sauda No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-blue-700 uppercase tracking-wider">PO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer Name</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Item Name</th>
+                          <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty (Box)</th>
+                          <th className="py-3 px-3 text-right text-xs font-semibold text-purple-600 uppercase tracking-wider">Qty (MT)</th>
+                          <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Invoice Amount</th>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-8">#</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">DO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Raised On</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">PO Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU</th>
+                          <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty (Box)</th>
+                          <th className={cn("py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider", detailsType === "raised" ? "text-blue-600" : "text-amber-600")}>
+                            {detailsType === "raised" ? "PO Raised (MT)" : "PO Pending (MT)"}
+                          </th>
+                          <th className="py-3 px-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Rate</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment Terms</th>
+                          <th className="py-3 px-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Remarks</th>
+                        </tr>
+                      )}
                     </thead>
                     <tbody className="divide-y divide-slate-150 bg-white">
                       {detailsData.details.map((d: any, idx: number) => {
-                        const mt = detailsType === "raised" ? d.sku_weight_mt : detailsType === "delivered" ? d.delivered_mt : d.pending_mt
-                        const highlightColor = detailsType === "raised" ? "text-blue-700 bg-blue-50/40 border-blue-100" : detailsType === "delivered" ? "text-purple-700 bg-purple-50/40 border-purple-100" : "text-amber-700 bg-amber-50/40 border-amber-100"
+                        if (detailsType === "delivered") {
+                          return (
+                            <tr key={d.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-3 px-3 text-xs text-slate-400 font-bold">{idx + 1}</td>
+                              <td className="py-3 px-3">
+                                {d.invoice_copy ? (
+                                  <a href={d.invoice_copy} target="_blank" rel="noopener noreferrer" className="inline-flex font-mono text-xs font-bold text-purple-700 bg-purple-50/50 border border-purple-100 px-2 py-0.5 rounded hover:underline">
+                                    {d.invoice_no || "View Invoice"}
+                                  </a>
+                                ) : (
+                                  <span className="font-mono text-xs font-semibold text-purple-800">{d.invoice_no || "—"}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="py-3 px-3">
+                                {d.order_no ? (
+                                  <Link href={`/approval-of-order?search=${d.order_no}`} className="inline-flex font-mono text-xs font-bold text-emerald-800 bg-emerald-50/50 border border-emerald-100 px-2 py-0.5 rounded hover:bg-emerald-100 transition-colors">
+                                    {d.order_no}
+                                  </Link>
+                                ) : <span className="text-slate-400">—</span>}
+                              </td>
+                              <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.do_date ? new Date(d.do_date).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="py-3 px-3 text-xs font-mono text-slate-700">{d.manual_sauda_no || "—"}</td>
+                              <td className="py-3 px-3">
+                                {d.po_upload_copy ? (
+                                  <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded hover:underline">
+                                    {d.po_no || "View PO"}
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded">{d.po_no || "—"}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="py-3 px-3 text-xs text-slate-800 font-medium">{d.customer_name || detailsData.commitment?.customer?.customer_name || "—"}</td>
+                              <td className="py-3 px-3 text-xs text-slate-800 font-medium">{d.sku || "—"}</td>
+                              <td className="py-3 px-3 font-mono text-xs text-slate-800 text-right font-medium">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
+                              <td className="py-3 px-3 text-right">
+                                <span className="inline-flex font-mono text-xs font-bold text-purple-700 bg-purple-50/40 border border-purple-100 px-2 py-0.5 rounded">
+                                  {d.delivered_mt != null ? Number(d.delivered_mt).toFixed(4) : "—"}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-xs text-slate-800 text-right font-semibold">{d.invoice_amount ? `₹${Number(d.invoice_amount).toLocaleString("en-IN")}` : "—"}</td>
+                            </tr>
+                          )
+                        }
+
+                        const mt = detailsType === "raised" ? d.sku_weight_mt : d.pending_mt
+                        const highlightColor = detailsType === "raised" ? "text-blue-700 bg-blue-50/40 border-blue-100" : "text-amber-700 bg-amber-50/40 border-amber-100"
                         return (
                           <tr key={d.id} className="hover:bg-slate-50/50 transition-colors">
                             <td className="py-3 px-3 text-xs text-slate-400 font-bold">{idx + 1}</td>
@@ -1941,9 +2005,15 @@ export default function CommitmentPunchPage() {
                             </td>
                             <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</td>
                             <td className="py-3 px-3">
-                              <span className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded">
-                                {d.po_no || "—"}
-                              </span>
+                              {d.po_upload_copy ? (
+                                <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded hover:underline">
+                                  {d.po_no || "View PO"}
+                                </a>
+                              ) : (
+                                <span className="inline-flex font-mono text-xs font-semibold text-blue-700 bg-blue-50/50 border border-blue-100 px-2 py-0.5 rounded">
+                                  {d.po_no || "—"}
+                                </span>
+                              )}
                             </td>
                             <td className="py-3 px-3 text-xs text-slate-600 font-medium">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
                             <td className="py-3 px-3 text-xs text-slate-800 font-medium leading-relaxed">{d.sku || "—"}</td>
@@ -1962,7 +2032,7 @@ export default function CommitmentPunchPage() {
                     </tbody>
                     <tfoot className="bg-slate-50 border-t border-slate-200">
                       <tr>
-                        <td colSpan={7} className="py-3 px-3 text-xs font-semibold text-slate-600 text-right">
+                        <td colSpan={detailsType === "delivered" ? 11 : 7} className="py-3 px-3 text-xs font-semibold text-slate-600 text-right">
                           Total {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}:
                         </td>
                         <td className="py-3 px-3 text-right">
@@ -1974,7 +2044,7 @@ export default function CommitmentPunchPage() {
                             {Number(detailsType === "raised" ? detailsData.total_processed_mt : detailsType === "delivered" ? detailsData.total_delivered_mt : detailsData.total_pending_mt || 0).toFixed(4)} MT
                           </span>
                         </td>
-                        <td colSpan={3} />
+                        <td colSpan={detailsType === "delivered" ? 1 : 3} />
                       </tr>
                     </tfoot>
                   </table>
@@ -1987,62 +2057,94 @@ export default function CommitmentPunchPage() {
                     const mtLabel = detailsType === "raised" ? "PO Raised (MT)" : detailsType === "delivered" ? "Delivered (MT)" : "PO Pending (MT)"
                     const mtColor = detailsType === "raised" ? "text-blue-700" : detailsType === "delivered" ? "text-purple-700" : "text-amber-700"
                     return (
-                      <div key={d.id} className="rounded-lg border px-4 py-3 bg-white grid grid-cols-1 gap-3 text-sm">
-                        <div className="flex items-start justify-between gap-3">
+                      <div key={d.id} className="rounded-lg border px-4 py-3 bg-white grid grid-cols-1 gap-3 text-sm shadow-sm">
+                        <div className="flex items-start justify-between gap-3 border-b pb-2">
                           <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">DO No.</p>
-                            {d.order_no ? (
-                              <Link
-                                href={`/approval-of-order?search=${d.order_no}`}
-                                className="inline-flex font-mono text-sm font-bold text-emerald-800 bg-emerald-50/50 border border-emerald-100 px-1.5 py-0.5 rounded hover:bg-emerald-100 hover:text-emerald-900 transition-colors mt-0.5"
-                              >
-                                {d.order_no}
-                              </Link>
+                            {detailsType === "delivered" ? (
+                              <>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600">Invoice No.</p>
+                                {d.invoice_copy ? (
+                                  <a href={d.invoice_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-sm font-bold text-purple-800 underline">
+                                    {d.invoice_no || "View Invoice"}
+                                  </a>
+                                ) : (
+                                  <p className="font-mono text-sm font-bold text-purple-900">{d.invoice_no || "—"}</p>
+                                )}
+                              </>
                             ) : (
-                              <p className="font-mono text-sm text-slate-400 mt-0.5">—</p>
+                              <>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">DO No.</p>
+                                {d.order_no ? (
+                                  <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-sm font-bold text-emerald-800">
+                                    {d.order_no}
+                                  </Link>
+                                ) : (
+                                  <p className="font-mono text-sm text-slate-400">—</p>
+                                )}
+                              </>
                             )}
                           </div>
                           <div className="text-right">
-                            <p className={cn("text-xs font-medium uppercase tracking-wider", detailsType === "raised" ? "text-blue-500" : detailsType === "delivered" ? "text-purple-500" : "text-amber-500")}>{mtLabel}</p>
-                            <p className={cn("font-mono font-bold mt-0.5", mtColor)}>{mt != null ? Number(mt).toFixed(4) : "—"}</p>
+                            <p className={cn("text-[10px] font-bold uppercase tracking-wider", detailsType === "raised" ? "text-blue-500" : detailsType === "delivered" ? "text-purple-500" : "text-amber-500")}>{mtLabel}</p>
+                            <p className={cn("font-mono font-bold text-sm", mtColor)}>{mt != null ? Number(mt).toFixed(4) : "—"}</p>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {detailsType === "delivered" && (
+                            <>
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-slate-400">Invoice Date</p>
+                                <p className="font-semibold text-slate-800">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-IN") : "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-slate-400">DO No.</p>
+                                <p className="font-mono font-bold text-emerald-800">{d.order_no || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-slate-400">DO Date</p>
+                                <p className="font-semibold text-slate-800">{d.do_date ? new Date(d.do_date).toLocaleDateString("en-IN") : "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-slate-400">Manual Sauda No.</p>
+                                <p className="font-mono font-semibold text-slate-700">{d.manual_sauda_no || "—"}</p>
+                              </div>
+                            </>
+                          )}
                           <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">PO No.</p>
-                            <p className="font-mono font-semibold text-blue-700 mt-0.5 break-words">{d.po_no || "—"}</p>
+                            <p className="text-[10px] font-bold uppercase text-slate-400">PO No.</p>
+                            {d.po_upload_copy ? (
+                              <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono font-semibold text-blue-700 underline">
+                                {d.po_no || "View PO"}
+                              </a>
+                            ) : (
+                              <p className="font-mono font-semibold text-blue-700">{d.po_no || "—"}</p>
+                            )}
                           </div>
                           <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">PO Date</p>
-                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</p>
+                            <p className="text-[10px] font-bold uppercase text-slate-400">PO Date</p>
+                            <p className="font-semibold text-slate-800">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</p>
                           </div>
                           <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Raised On</p>
-                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</p>
+                            <p className="text-[10px] font-bold uppercase text-slate-400">Qty (Box)</p>
+                            <p className="font-mono font-semibold text-slate-800">{d.sku_quantity ?? "—"}</p>
                           </div>
-                          <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Qty (Box)</p>
-                            <p className="font-mono font-semibold text-slate-800 mt-0.5">{d.sku_quantity ?? "—"}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Rate</p>
-                            <p className="font-mono font-semibold text-slate-800 mt-0.5">{d.sku_rate ? `₹${d.sku_rate}` : "—"}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Payment Terms</p>
-                            <p className="text-sm font-semibold text-slate-800 mt-0.5">{d.payment_terms || "—"}</p>
-                          </div>
+                          {detailsType === "delivered" && (
+                            <div>
+                              <p className="text-[10px] font-bold uppercase text-slate-400">Invoice Amount</p>
+                              <p className="font-mono font-bold text-slate-800">{d.invoice_amount ? `₹${d.invoice_amount}` : "—"}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-[10px] font-bold uppercase text-slate-400">Customer Name</p>
+                          <p className="text-xs font-semibold text-slate-800 break-words">{d.customer_name || detailsData.commitment?.customer?.customer_name || "—"}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">SKU</p>
-                          <p className="text-sm font-semibold text-slate-800 mt-0.5 break-words">{d.sku || "—"}</p>
+                          <p className="text-[10px] font-bold uppercase text-slate-400">Item Name</p>
+                          <p className="text-xs font-semibold text-slate-800 break-words">{d.sku || "—"}</p>
                         </div>
-                        {d.remarks && (
-                          <div>
-                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Remarks</p>
-                            <p className="text-sm text-slate-700 mt-0.5">{d.remarks}</p>
-                          </div>
-                        )}
                       </div>
                     )
                   })}
