@@ -1758,19 +1758,23 @@ export const commitmentPunchApi = {
       body: JSON.stringify(data),
     }),
 
-  getAll: async (params?: { page?: number; limit?: number; party_name?: string; search?: string }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/commitment-punch${queryString}`);
-  },
+  // Uses buildQuery so undefined values are never serialised to the string "undefined"
+  getAll: async (params?: { page?: number; limit?: number; party_name?: string; search?: string }): Promise<ApiResponse> =>
+    request(`/commitment-punch${buildQuery(params)}`),
 
-  getPending: async (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/commitment-punch/pending${queryString}`);
-  },
+  getPending: async (params?: { page?: number; limit?: number; search?: string; commitment_date?: string; po_date?: string; do_date?: string }): Promise<ApiResponse> =>
+    request(`/commitment-punch/pending${buildQuery(params)}`),
+
+  /** Fetch a single commitment with joined names — used as pre-fill source for the Process dialog. */
+  getById: async (id: number): Promise<ApiResponse> =>
+    request(`/commitment-punch/${id}`),
+
+  /** Update planned values on a commitment (Payment Terms, Transport, Depot, etc.). */
+  updateCommitment: async (id: number, data: any): Promise<ApiResponse> =>
+    request(`/commitment-punch/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 
   processCommitment: async (id: number, data: any): Promise<ApiResponse> =>
     request(`/commitment-punch/${id}/process`, {
