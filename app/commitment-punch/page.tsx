@@ -27,11 +27,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon, ArrowUpDown, ArrowUp, ArrowDown, Search, Info, Calendar as CalendarIconLucide, X, Pencil, ClipboardList, AlertTriangle, Filter } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi } from "@/lib/api-service"
+import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -63,6 +63,13 @@ type PendingCommitment = {
   rate: number
   order_type: string
   transport_type: string
+  payment_terms?: string
+  order_through?: string
+  advance_payment_to_be_taken?: boolean
+  broker_id?: number
+  broker_name?: string
+  salesperson_id?: number
+  salesperson_name?: string
   planned1: string
   processed_qty: number
   remaining_qty: number
@@ -80,21 +87,36 @@ type SkuRow = {
   mt?: number
 }
 
+type LedgerRow = {
+  id: string
+  ledgerName: string
+  amount: string
+}
+
+const LEDGER_OPTIONS = [
+  "Transportation Charges",
+  "Freight Charges",
+  "Insurance Charges",
+  "Handling Charges",
+  "Loading & Unloading Charges",
+  "Other Charges",
+]
+
 // ─── Constants ────────────────────────────────────────────────
 
 const OIL_TYPES = ["Palm Oil", "Soya Oil", "Rice Oil"]
 const TRANSPORT_TYPES = ["Self", "Party", "Company", "Ex-Depot"]
 
 const PAGE_COLUMNS = [
-  { id: "commitment_no",  label: "Commitment No." },
+  { id: "commitment_no", label: "Commitment No." },
   { id: "commitment_date", label: "Date" },
-  { id: "party_name",    label: "Customer Name" },
+  { id: "party_name", label: "Customer Name" },
   { id: "dispatch_from", label: "Dispatch from" },
-  { id: "oil_type",      label: "Oil Type" },
-  { id: "rate",          label: "Rate" },
-  { id: "quantity",      label: "Qty (MT)" },
+  { id: "oil_type", label: "Oil Type" },
+  { id: "rate", label: "Rate" },
+  { id: "quantity", label: "Qty (MT)" },
   { id: "processed_qty", label: "PO Raised (MT)" },
-  { id: "delivery_qty",  label: "Delivered Qty (MT)" },
+  { id: "delivery_qty", label: "Delivered Qty (MT)" },
   { id: "po_pending_qty", label: "PO Pending Qty (MT)" },
   { id: "remaining_qty", label: "Commitment Pending (MT)" },
 ] as const
@@ -112,6 +134,10 @@ export default function CommitmentPunchPage() {
   const [pendingList, setPendingList] = useState<PendingCommitment[]>([])
   const [isLoadingPending, setIsLoadingPending] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [searchQuery, setSearchQuery] = useState("")
+  const [commitmentDateFilter, setCommitmentDateFilter] = useState("")
+  const [poDateFilter, setPoDateFilter] = useState("")
+  const [doDateFilter, setDoDateFilter] = useState("")
 
   // ── Add Commitment dialog ───────────────────────────────────
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -122,11 +148,15 @@ export default function CommitmentPunchPage() {
   const [processPoDate, setProcessPoDate] = useState("")
   const [processDeliveryPurpose, setProcessDeliveryPurpose] = useState("week-on-week")
   const [processDepoName, setProcessDepoName] = useState("Banari")
+  const [processCustomerName, setProcessCustomerName] = useState("")
   const [processAdvancePaymentTaken, setProcessAdvancePaymentTaken] = useState("NO")
   const [processAdvancePayment, setProcessAdvancePayment] = useState("")
   const [processPaymentTerms, setProcessPaymentTerms] = useState("7days")
   const [processOrderTypeThrough, setProcessOrderTypeThrough] = useState("")
   const [processOrderType, setProcessOrderType] = useState("regular")
+  // ⚠️ FIX: Dedicated transport type state for the Process dialog.
+  // Previously shared with the Add form's transportType, causing cross-contamination.
+  const [processTransportType, setProcessTransportType] = useState("self")
   const [processStartDate, setProcessStartDate] = useState("")
   const [processEndDate, setProcessEndDate] = useState("")
   const [processActualDeliveryDate, setProcessActualDeliveryDate] = useState("")
@@ -137,12 +167,31 @@ export default function CommitmentPunchPage() {
   const [processOrderCategory, setProcessOrderCategory] = useState("Sales")
   const [isFuturePeriodDatePickerOpen, setIsFuturePeriodDatePickerOpen] = useState(false)
   const [isActualDeliveryPickerOpen, setIsActualDeliveryPickerOpen] = useState(false)
+  // Stores the full commitment row (with planned names) that the Process dialog is acting on.
+  const [processSelectedCommitment, setProcessSelectedCommitment] = useState<PendingCommitment | null>(null)
   const [skuRows, setSkuRows] = useState<SkuRow[]>([
     { id: "1", sku: "", qty: "", rate: "" },
   ])
+  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([])
+  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
+  const [gstRatePercent, setGstRatePercent] = useState<string>("5")
   const [isProcessing, setIsProcessing] = useState(false)
   const [skuRegistry, setSkuRegistry] = useState<Record<string, any>>({})
 
+  // ── Ledger row helpers ──────────────────────────────────────
+  const addLedgerRow = () =>
+    setLedgerRows(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), ledgerName: "", amount: "" }])
+
+  const removeLedgerRow = (id: string) =>
+    setLedgerRows(prev => prev.filter(r => r.id !== id))
+
+  const updateLedgerRow = (id: string, field: keyof LedgerRow, value: string) =>
+    setLedgerRows(prev => prev.map(r => (r.id === id ? { ...r, [field]: value } : r)))
+
+  // ── Edit Commitment mode ────────────────────────────────────
+  // When isEditMode = true, handleAddSubmit calls updateCommitment instead of createCommitment.
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editCommitmentId, setEditCommitmentId] = useState<number | null>(null)
   // ── PO Raised Details popup ────────────────────────────────────────
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
   const [detailsRow, setDetailsRow] = useState<PendingCommitment | null>(null)
@@ -177,7 +226,12 @@ export default function CommitmentPunchPage() {
   const loadPending = useCallback(async () => {
     setIsLoadingPending(true)
     try {
-      const res = await commitmentPunchApi.getPending()
+      const res = await commitmentPunchApi.getPending({
+        search: searchQuery || undefined,
+        commitment_date: commitmentDateFilter || undefined,
+        po_date: poDateFilter || undefined,
+        do_date: doDateFilter || undefined,
+      })
       if (res.success) {
         setPendingList(res.data?.commitments || [])
       }
@@ -186,7 +240,7 @@ export default function CommitmentPunchPage() {
     } finally {
       setIsLoadingPending(false)
     }
-  }, [toast])
+  }, [searchQuery, commitmentDateFilter, poDateFilter, doDateFilter, toast])
 
   useEffect(() => { loadPending() }, [loadPending])
 
@@ -257,10 +311,12 @@ export default function CommitmentPunchPage() {
           const city = addr1 ? addr1.split(",").pop().trim() : ""
           const stateShort = c.state ? (STATE_SHORT_MAP[c.state] || c.state.substring(0, 2).toUpperCase()) : ""
           const locationPart = [city, stateShort ? `(${stateShort})` : ""].filter(Boolean).join(" ")
-          
+
           const gstinPart = c.gstin ? ` | GST: ${c.gstin}` : ""
           const contactPart = c.contact ? ` | Mob: ${c.contact}` : ""
           const contactPersonPart = c.contact_person ? ` | CP: ${c.contact_person}` : ""
+
+          const fullSearchLabel = [c.customer_name, locationPart, c.gstin, c.contact, c.contact_person].filter(Boolean).join(" ")
 
           const formattedDropdownLabel = (
             <div className="text-xs whitespace-normal break-words py-1 w-full text-left font-normal text-slate-700 max-w-[500px]">
@@ -271,7 +327,7 @@ export default function CommitmentPunchPage() {
 
           return {
             value: c.customer_name,
-            label: c.customer_name,
+            label: fullSearchLabel,
             dropdownLabel: formattedDropdownLabel,
             original: c
           }
@@ -288,6 +344,24 @@ export default function CommitmentPunchPage() {
       })
       return { options, hasMore: false }
     } catch { return { options: [], hasMore: false } }
+  }, [])
+
+  // Fetch live Ledgers from Master DB (`ledgers` table)
+  const fetchLedgerOptions = useCallback(async (search: string, page: number) => {
+    try {
+      const res = await ledgerApi.getAll({ search, page, limit: 50 })
+      const items = res.success ? (res.data.ledgers || (Array.isArray(res.data) ? res.data : [])) : []
+      const options = items
+        .map((l: any) => {
+          const n = l.ledger_name || l.ledgerName || l.name || ""
+          return { value: n, label: n, original: l }
+        })
+        .filter((o: any) => o.value)
+
+      return { options, hasMore: false }
+    } catch {
+      return { options: [], hasMore: false }
+    }
   }, [])
 
 
@@ -324,17 +398,34 @@ export default function CommitmentPunchPage() {
     } catch { return { options: [], hasMore: false } }
   }, [])
 
-  // Fetch SKU options — only show SKUs with tag = "Yes"
+  // Fetch SKU options — only show SKUs with tag = "Yes" and matching commitment's oil_type if present
   const fetchSkuOptions = useCallback(async (search: string, _page: number) => {
     try {
       const res = await skuApi.getAll({ search: search || "", limit: 100 })
       const items = res.success
         ? (res.data.skuDetails || res.data.skus || res.data.sku_details || (Array.isArray(res.data) ? res.data : []))
         : []
-      // Only show SKUs with tag_name = "Yes"
-      const goodLifeItems = items.filter((s: any) =>
+      // Filter SKUs with tag_name = "Yes"
+      let goodLifeItems = items.filter((s: any) =>
         (s.tag_name || "").toLowerCase() === "yes"
       )
+
+      // Filter by commitment's oil_type if processing a commitment
+      if (processSelectedCommitment?.oil_type) {
+        const oilTypeLower = processSelectedCommitment.oil_type.toLowerCase()
+        let keywords: string[] = []
+        if (oilTypeLower.includes("rice")) keywords = ["rice", "r.o.", " ro ", "rbo"]
+        else if (oilTypeLower.includes("palm")) keywords = ["palm", "p.o.", " po "]
+        else if (oilTypeLower.includes("soya")) keywords = ["soya", "s.o.", " so ", "sbo"]
+
+        if (keywords.length > 0) {
+          goodLifeItems = goodLifeItems.filter((s: any) => {
+            const nameLower = (s.sku_name || s.name || "").toLowerCase()
+            return keywords.some(kw => nameLower.includes(kw))
+          })
+        }
+      }
+
       const seen = new Set<string>()
       const newlyFetched: Record<string, any> = {}
       const options = goodLifeItems
@@ -348,7 +439,7 @@ export default function CommitmentPunchPage() {
       setSkuRegistry(prev => ({ ...prev, ...newlyFetched }))
       return { options, hasMore: false }
     } catch { return { options: [], hasMore: false } }
-  }, [])
+  }, [processSelectedCommitment])
 
   // ── Checkbox selection ──────────────────────────────────────
   const toggleSelect = (id: number) => {
@@ -386,6 +477,49 @@ export default function CommitmentPunchPage() {
     setOrderType("")
     setTransportType("self")
     setRows([{ id: "1", oil_type: "Rice Oil", quantity: "", unit: "Metric Ton", rate: "" }])
+    // Reset edit mode
+    setIsEditMode(false)
+    setEditCommitmentId(null)
+  }
+
+  // Opens the Add/Edit dialog pre-filled with an existing commitment's planned values.
+  const openEditCommitment = async (row: PendingCommitment, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsEditMode(true)
+    setEditCommitmentId(row.id)
+    // Pre-fill from the list row data (depot_name, payment_terms, etc. are already joined)
+    setCommitmentDate(row.commitment_date ? new Date(row.commitment_date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0])
+    setPartyName(row.party_name || "")
+    setOrderThrough(row.order_through || "Direct")
+    setDepotName(row.depot_name || "Banari")
+    setPaymentTerms(row.payment_terms || "7days")
+    setTransportType(row.transport_type || "self")
+    setAdvancePayment(row.advance_payment_to_be_taken ? "Yes" : "No")
+    // Broker / Salesperson
+    if (row.order_through === "Broker" && row.broker_name) {
+      setBrokerName(row.broker_name)
+    } else {
+      setBrokerName("")
+    }
+    if (row.order_through === "Salesperson" && row.salesperson_name) {
+      setSalespersonName(row.salesperson_name)
+    } else {
+      setSalespersonName("")
+    }
+    // Fetch full details for contact person / address fields that aren’t in the list row
+    try {
+      const res = await commitmentPunchApi.getById(row.id)
+      if (res.success && res.data) {
+        const d = res.data
+        setContactPerson(d.customer_contact_person_name || "")
+        setWhatsappNo(d.whatsapp_no || "")
+        setCustomerAddress(d.address || "")
+        setShipToAddress(d.ship_to_address || "")
+        setRemarks(d.remarks || "")
+      }
+    } catch { /* non-critical: form still opens with list data */ }
+    // Keep rows as-is (oil details aren’t editable in update)
+    setIsAddOpen(true)
   }
 
   const addRow = () =>
@@ -422,23 +556,27 @@ export default function CommitmentPunchPage() {
     if (!commitmentDate) { toast({ title: "Validation Error", description: "Commitment date is required.", variant: "destructive" }); return }
     if (orderThrough === "Broker" && !brokerName) { toast({ title: "Validation Error", description: "Broker name is required.", variant: "destructive" }); return }
     if (orderThrough === "Salesperson" && !salespersonName) { toast({ title: "Validation Error", description: "Salesperson is required.", variant: "destructive" }); return }
-    if (rows.some(r => !r.oil_type || !r.quantity || !r.rate)) {
+    // Oil row validation only applies when creating — edits don't change oil details
+    if (!isEditMode && rows.some(r => !r.oil_type || !r.quantity || !r.rate)) {
       toast({ title: "Validation Error", description: "Fill Oil Type, Quantity and Rate for all rows.", variant: "destructive" }); return
     }
 
     setIsSubmitting(true)
     try {
-      // 1. Resolve Customer ID
-      let customerId = customerList.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
-      if (!customerId) {
-        const res = await customerApi.getAll({ search: partyName, limit: 5 })
-        const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
-        customerId = items.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
-      }
-      if (!customerId) {
-        toast({ title: "Unknown Customer", description: `Could not match "${partyName}" to a known customer. Please pick one from the list.`, variant: "destructive" })
-        setIsSubmitting(false)
-        return
+      // 1. Resolve Customer ID (only needed for create)
+      let customerId: number | null = null
+      if (!isEditMode) {
+        customerId = customerList.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
+        if (!customerId) {
+          const res = await customerApi.getAll({ search: partyName, limit: 5 })
+          const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
+          customerId = items.find((c: any) => (c.customer_name || "").toLowerCase() === partyName.toLowerCase())?.id
+        }
+        if (!customerId) {
+          toast({ title: "Unknown Customer", description: `Could not match "${partyName}" to a known customer. Please pick one from the list.`, variant: "destructive" })
+          setIsSubmitting(false)
+          return
+        }
       }
 
       // 2. Resolve Depot ID
@@ -480,37 +618,67 @@ export default function CommitmentPunchPage() {
         }
       }
 
-      const payload = {
-        commitmentDate: commitmentDate,
-        customerId,
-        customerContactPersonName: contactPerson || null,
-        whatsappNo: whatsappNo || null,
-        address: customerAddress || null,
-        shipToAddress: shipToAddress || null,
-        depotId,
-        advancePaymentToBeTaken: advancePayment === "Yes",
-        paymentTerms,
-        transportType,
-        orderThrough,
-        brokerId,
-        salespersonId,
-        uploadCopy,
-        remarks: remarks || null,
-        rows: rows.map(r => ({
-          oilType: r.oil_type,
-          quantity: parseFloat(r.quantity),
-          unit: r.unit || null,
-          rate: parseFloat(r.rate),
-        })),
-      }
-      const res = await commitmentPunchApi.create(payload)
-      if (res.success) {
-        toast({ title: "✅ Commitment Created!", description: `Commitment No: ${res.data?.commitment_no}` })
-        resetAddForm()
-        setIsAddOpen(false)
-        loadPending()
+      if (isEditMode && editCommitmentId != null) {
+        // ── UPDATE MODE ─────────────────────────────────────────
+        const updatePayload = {
+          commitmentDate,
+          customerContactPersonName: contactPerson || null,
+          whatsappNo: whatsappNo || null,
+          address: customerAddress || null,
+          shipToAddress: shipToAddress || null,
+          depotId,
+          advancePaymentToBeTaken: advancePayment === "Yes",
+          paymentTerms,
+          transportType,
+          orderThrough,
+          brokerId,
+          salespersonId,
+          uploadCopy: uploadCopy || undefined,
+          remarks: remarks || null,
+        }
+        const res = await commitmentPunchApi.updateCommitment(editCommitmentId, updatePayload)
+        if (res.success) {
+          toast({ title: "✅ Commitment Updated!", description: "Planned values have been saved." })
+          resetAddForm()
+          setIsAddOpen(false)
+          loadPending()
+        } else {
+          throw new Error(res.message || "Failed to update commitment")
+        }
       } else {
-        throw new Error(res.message || "Failed to create commitment")
+        // ── CREATE MODE ─────────────────────────────────────────
+        const payload = {
+          commitmentDate,
+          customerId,
+          customerContactPersonName: contactPerson || null,
+          whatsappNo: whatsappNo || null,
+          address: customerAddress || null,
+          shipToAddress: shipToAddress || null,
+          depotId,
+          advancePaymentToBeTaken: advancePayment === "Yes",
+          paymentTerms,
+          transportType,
+          orderThrough,
+          brokerId,
+          salespersonId,
+          uploadCopy,
+          remarks: remarks || null,
+          rows: rows.map(r => ({
+            oilType: r.oil_type,
+            quantity: parseFloat(r.quantity),
+            unit: r.unit || null,
+            rate: parseFloat(r.rate),
+          })),
+        }
+        const res = await commitmentPunchApi.create(payload)
+        if (res.success) {
+          toast({ title: "✅ Commitment Created!", description: `Commitment No: ${res.data?.commitment_no}` })
+          resetAddForm()
+          setIsAddOpen(false)
+          loadPending()
+        } else {
+          throw new Error(res.message || "Failed to create commitment")
+        }
       }
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Could not save commitment.", variant: "destructive" })
@@ -524,7 +692,12 @@ export default function CommitmentPunchPage() {
     setSkuRows(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), sku: "", qty: "", rate: "" }])
 
   const removeSkuRow = (id: string) => {
-    if (skuRows.length > 1) setSkuRows(prev => prev.filter(r => r.id !== id))
+    if (skuRows.length > 1) {
+      setSkuRows(prev => prev.filter(r => r.id !== id))
+    } else {
+      // If it's the only row, clear its values back to initial empty state
+      setSkuRows([{ id: "1", sku: "", qty: "", rate: "", mt: 0 }])
+    }
   }
 
   const updateSkuRow = (id: string, field: keyof SkuRow, value: string) => {
@@ -547,16 +720,54 @@ export default function CommitmentPunchPage() {
 
 
 
+  const openProcessForCommitment = (row: PendingCommitment) => {
+    setSelectedIds(new Set([row.id]))
+    // Store the full commitment row so the Process dialog can show the Planned Values panel
+    setProcessSelectedCommitment(row)
+
+    // Pre-fill fields from commitment planned data (if specified on commitment)
+    if (row.party_name) setProcessCustomerName(row.party_name)
+    else setProcessCustomerName("")
+
+    if (row.depot_name) setProcessDepoName(row.depot_name)
+    else setProcessDepoName("Banari")
+
+    if (row.payment_terms) setProcessPaymentTerms(row.payment_terms)
+    else setProcessPaymentTerms("7days")
+
+    if (row.transport_type) setProcessTransportType(row.transport_type)
+    else setProcessTransportType("self")
+
+    setProcessAdvancePaymentTaken(row.advance_payment_to_be_taken ? "YES" : "NO")
+
+    if (row.order_through) {
+      const throughMap: Record<string, string> = { Direct: "direct", Broker: "broker", Salesperson: "salesperson" }
+      const throughVal = throughMap[row.order_through] || row.order_through.toLowerCase()
+      setProcessOrderTypeThrough(throughVal)
+      setBrokerName(throughVal === "broker" && row.broker_name ? row.broker_name : "")
+      setSalespersonName(throughVal === "salesperson" && row.salesperson_name ? row.salesperson_name : "")
+    } else {
+      setProcessOrderTypeThrough("")
+      setBrokerName("")
+      setSalespersonName("")
+    }
+
+    setIsProcessOpen(true)
+  }
+
   const resetProcess = () => {
     setProcessPoNo("")
     setProcessPoDate("")
     setProcessDeliveryPurpose("week-on-week")
     setProcessDepoName("Banari")
+    setProcessCustomerName("")
     setProcessAdvancePaymentTaken("NO")
     setProcessAdvancePayment("")
     setProcessPaymentTerms("7days")
     setProcessOrderTypeThrough("")
     setProcessOrderType("regular")
+    setProcessTransportType("self")
+    setProcessSelectedCommitment(null)
     setProcessStartDate("")
     setProcessEndDate("")
     setProcessActualDeliveryDate("")
@@ -568,6 +779,7 @@ export default function CommitmentPunchPage() {
     setIsFuturePeriodDatePickerOpen(false)
     setProcessOrderCategory("Sales")
     setSkuRows([{ id: "1", sku: "", qty: "", rate: "", mt: 0 }])
+    setLedgerRows([])
   }
 
   // ── Submit Process ──────────────────────────────────────────
@@ -616,6 +828,32 @@ export default function CommitmentPunchPage() {
       // combobox that actually drives their visibility in this dialog) - NOT
       // the unrelated top-level `orderType` state, which has no control bound
       // to it in this dialog and can never be "broker"/"salesperson" here.
+      // Resolve Customer ID if overridden in Process Dialog
+      let overrideCustomerId: number | null = null
+      let overrideContactPerson: string | null = null
+      let overrideWhatsappNo: string | null = null
+      let overrideAddress: string | null = null
+
+      if (processCustomerName) {
+        const foundCustomer = customerList.find((c: any) => (c.customer_name || "").toLowerCase() === processCustomerName.toLowerCase())
+        if (foundCustomer) {
+          overrideCustomerId = foundCustomer.id
+          overrideContactPerson = foundCustomer.contact_person || null
+          overrideWhatsappNo = foundCustomer.contact || null
+          overrideAddress = [foundCustomer.address_line_1, foundCustomer.address_line_2, foundCustomer.state, foundCustomer.pincode].filter(Boolean).join(", ") || null
+        } else {
+          const res = await customerApi.getAll({ search: processCustomerName, limit: 5, is_required_for_commitment: "Yes" })
+          const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
+          const matched = items.find((c: any) => (c.customer_name || "").toLowerCase() === processCustomerName.toLowerCase())
+          if (matched) {
+            overrideCustomerId = matched.id
+            overrideContactPerson = matched.contact_person || null
+            overrideWhatsappNo = matched.contact || null
+            overrideAddress = [matched.address_line_1, matched.address_line_2, matched.state, matched.pincode].filter(Boolean).join(", ") || null
+          }
+        }
+      }
+
       const depotRes = await depotApi.getAll({ search: processDepoName, all: "true" })
       const depotItems = depotRes.success ? (depotRes.data.depots || (Array.isArray(depotRes.data) ? depotRes.data : [])) : []
       const depotId = depotItems.find((d: any) => (d.depot_name || "").toLowerCase() === processDepoName.toLowerCase())?.id ?? null
@@ -644,13 +882,17 @@ export default function CommitmentPunchPage() {
             continue
           }
           const payload = {
+            customerId: overrideCustomerId,
+            customerContactPersonName: overrideContactPerson,
+            whatsappNo: overrideWhatsappNo,
+            customerAddress: overrideAddress,
             poNo: processPoNo,
             poDate: processPoDate,
             skuId,
             skuQuantity: parseFloat(skuRow.qty),
             skuRate: parseFloat(skuRow.rate),
             orderType: processOrderType || null,
-            typeOfTransporting: transportType || null,
+            typeOfTransporting: processTransportType || null,
             brokerId,
             salespersonId,
             deliveryPurpose: processDeliveryPurpose,
@@ -720,17 +962,126 @@ export default function CommitmentPunchPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
-  // Sorts pendingList by any field key
+  // ── Top Filter States ─────────────────────────────────────────
+  const [selectedOilFilter, setSelectedOilFilter] = useState<string>("ALL")
+  const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>("ALL")
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<"ALL" | "PENDING" | "COMPLETED">("ALL")
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+
+  const handleColumnFilterChange = (colId: string, val: string) => {
+    setColumnFilters(prev => ({ ...prev, [colId]: val }))
+  }
+
+  // Extract unique oil types and customers dynamically from loaded pendingList
+  const uniqueOilTypes = useMemo(() => {
+    const set = new Set<string>()
+    pendingList.forEach(r => { if (r.oil_type) set.add(r.oil_type) })
+    return Array.from(set).sort()
+  }, [pendingList])
+
+  const uniqueCustomers = useMemo(() => {
+    const set = new Set<string>()
+    pendingList.forEach(r => { if (r.party_name) set.add(r.party_name) })
+    return Array.from(set).sort()
+  }, [pendingList])
+
+  // Count active filters for badge and clear button
+  const activeFiltersCount = useMemo(() => {
+    let count = 0
+    if (selectedOilFilter && selectedOilFilter !== "ALL") count++
+    if (selectedCustomerFilter && selectedCustomerFilter !== "ALL") count++
+    if (selectedStatusFilter !== "ALL") count++
+    if (commitmentDateFilter) count++
+    if (poDateFilter) count++
+    if (doDateFilter) count++
+    if (searchQuery) count++
+    count += Object.values(columnFilters).filter(v => v && v.trim()).length
+    return count
+  }, [selectedOilFilter, selectedCustomerFilter, selectedStatusFilter, commitmentDateFilter, poDateFilter, doDateFilter, searchQuery, columnFilters])
+
+  const clearAllFilters = () => {
+    setSelectedOilFilter("ALL")
+    setSelectedCustomerFilter("ALL")
+    setSelectedStatusFilter("ALL")
+    setCommitmentDateFilter("")
+    setPoDateFilter("")
+    setDoDateFilter("")
+    setSearchQuery("")
+    setColumnFilters({})
+  }
+
+  // Filter pendingList by top filter buttons & per-column search inputs
+  const filteredPendingList = useMemo(() => {
+    if (!pendingList || pendingList.length === 0) return []
+    return pendingList.filter((row: any) => {
+      // 1. Top Oil Type Filter
+      if (selectedOilFilter && selectedOilFilter !== "ALL") {
+        if (String(row.oil_type || "").toLowerCase() !== selectedOilFilter.toLowerCase()) {
+          return false
+        }
+      }
+      // 2. Top Customer Filter
+      if (selectedCustomerFilter && selectedCustomerFilter !== "ALL") {
+        if (String(row.party_name || "").toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
+          return false
+        }
+      }
+      // 3. Top Status Filter
+      if (selectedStatusFilter === "PENDING") {
+        if (Number(row.po_pending_qty || 0) <= 0) return false
+      } else if (selectedStatusFilter === "COMPLETED") {
+        if (Number(row.po_pending_qty || 0) > 0) return false
+      }
+      // 4. Per-column filters
+      return Object.entries(columnFilters).every(([colId, filterVal]) => {
+        if (!filterVal || !filterVal.trim()) return true
+        const search = filterVal.toLowerCase().trim()
+        let cellVal = ""
+        switch (colId) {
+          case "commitment_no": cellVal = String(row.commitment_no ?? ""); break
+          case "commitment_date": cellVal = row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : ""; break
+          case "party_name": cellVal = String(row.party_name ?? ""); break
+          case "dispatch_from": cellVal = String(row.depot_name || "Banari"); break
+          case "oil_type": cellVal = String(row.oil_type ?? ""); break
+          case "rate": cellVal = String(row.rate ?? ""); break
+          case "quantity": cellVal = String(row.quantity ?? ""); break
+          case "processed_qty": cellVal = String(row.processed_qty ?? ""); break
+          case "delivery_qty": cellVal = String(row.delivery_qty ?? ""); break
+          case "po_pending_qty": cellVal = String(row.po_pending_qty ?? ""); break
+          case "remaining_qty": cellVal = String(row.remaining_qty ?? row.quantity ?? ""); break
+          default: cellVal = String(row[colId] ?? "")
+        }
+        return cellVal.toLowerCase().includes(search)
+      })
+    })
+  }, [pendingList, columnFilters, selectedOilFilter, selectedCustomerFilter, selectedStatusFilter])
+
+  // Sorts filteredPendingList by selected sort field
   const sortedPendingList = useMemo(() => {
-    if (!pendingSortField || !pendingList || pendingList.length === 0) return pendingList
-    return [...pendingList].sort((a: any, b: any) => {
+    if (!pendingSortField || !filteredPendingList || filteredPendingList.length === 0) return filteredPendingList
+    return [...filteredPendingList].sort((a: any, b: any) => {
       const aVal = String(a[pendingSortField] ?? "").toLowerCase()
       const bVal = String(b[pendingSortField] ?? "").toLowerCase()
       if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0
     })
-  }, [pendingList, pendingSortField, pendingSortDir])
+  }, [filteredPendingList, pendingSortField, pendingSortDir])
+
+  // Compute per-column totals for MT metrics
+  const columnTotals = useMemo(() => {
+    return sortedPendingList.reduce(
+      (acc, r) => {
+        acc.quantity += Number(r.quantity || 0)
+        acc.processed_qty += Number(r.processed_qty || 0)
+        acc.delivery_qty += Number(r.delivery_qty || 0)
+        acc.po_pending_qty += Number(r.po_pending_qty || 0)
+        acc.remaining_qty += Number(r.remaining_qty ?? r.quantity ?? 0)
+        return acc
+      },
+      { quantity: 0, processed_qty: 0, delivery_qty: 0, po_pending_qty: 0, remaining_qty: 0 }
+    )
+  }, [sortedPendingList])
 
   const [visibleColumns] = usePersistedColumns("commitment-punch", PAGE_COLUMNS.map(c => c.id))
   const [columnOrder, setColumnOrder] = useColumnOrder("commitment-punch", PAGE_COLUMNS.map(c => c.id))
@@ -747,12 +1098,12 @@ export default function CommitmentPunchPage() {
 
   // Sort-field mapping: column id → pending sort key
   const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    commitment_no:   "commitment_no",
+    commitment_no: "commitment_no",
     commitment_date: "date",
-    party_name:      "customer_name",
-    oil_type:        "oil_type",
-    rate:            "rate",
-    quantity:        "qty",
+    party_name: "customer_name",
+    oil_type: "oil_type",
+    rate: "rate",
+    quantity: "qty",
   }
   const RIGHT_ALIGN_COLS: ColId[] = []
   const CENTER_ALIGN_COLS: ColId[] = ["oil_type", "dispatch_from"]
@@ -861,61 +1212,381 @@ export default function CommitmentPunchPage() {
       </div>
 
       {/* ── Pending Commitments Table ── */}
-      <Card>
-        <CardHeader className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle>Commitment Name</CardTitle>
-            <CardDescription>
-              Showing pending commitments ({pendingList.length} record{pendingList.length !== 1 ? "s" : ""})
-            </CardDescription>
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <CardHeader className="p-4 sm:p-5 space-y-3 bg-white border-b border-slate-200/80">
+          {/* Row 1: Title, Subtitle, and Global Search */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
+                  Commitments List
+                </CardTitle>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                  {sortedPendingList.length} of {pendingList.length}
+                </span>
+              </div>
+              <CardDescription className="text-xs text-slate-500 mt-0.5">
+                Showing active customer commitments ready for processing
+              </CardDescription>
+            </div>
+
+            {/* Quick Search */}
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input
+                placeholder="Search PO, Customer, Oil..."
+                className="pl-9 pr-8 text-xs h-8.5 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border-slate-200 rounded-lg transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Row 2: Crisp, Organized Filter Toolbar (Zero collision, clear grouping) */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
+            {/* Filter Buttons Group */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Status Segmented Control */}
+              <div className="flex items-center bg-white p-0.5 rounded-md border border-slate-200 shadow-2xs">
+                {(["ALL", "PENDING", "COMPLETED"] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setSelectedStatusFilter(st)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-pointer",
+                      selectedStatusFilter === st
+                        ? "bg-blue-600 text-white shadow-xs font-bold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    )}
+                  >
+                    {st === "ALL" ? "All" : st === "PENDING" ? "PO Pending" : "Fully Raised"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+
+              {/* Oil Type Filter */}
+              <Select value={selectedOilFilter} onValueChange={setSelectedOilFilter}>
+                <SelectTrigger className="h-8 text-xs min-w-[115px] bg-white border-slate-200 shadow-2xs">
+                  <SelectValue placeholder="All Oils" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Oils</SelectItem>
+                  {uniqueOilTypes.map(oil => (
+                    <SelectItem key={oil} value={oil}>{oil}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Customer Filter */}
+              <Select value={selectedCustomerFilter} onValueChange={setSelectedCustomerFilter}>
+                <SelectTrigger className="h-8 text-xs min-w-[130px] max-w-[180px] bg-white border-slate-200 shadow-2xs truncate">
+                  <SelectValue placeholder="All Customers" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64">
+                  <SelectItem value="ALL">All Customers</SelectItem>
+                  {uniqueCustomers.map(cust => (
+                    <SelectItem key={cust} value={cust} className="text-xs truncate">{cust}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Date Filter Popover (Replaces 3 colliding raw date inputs) */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "h-8 text-xs gap-1.5 bg-white border-slate-200 shadow-2xs cursor-pointer",
+                      (commitmentDateFilter || poDateFilter || doDateFilter) && "border-blue-500 bg-blue-50/60 text-blue-700 font-semibold"
+                    )}
+                  >
+                    <CalendarIconLucide className="h-3.5 w-3.5 text-slate-500" />
+                    <span>
+                      {commitmentDateFilter
+                        ? `Comm: ${commitmentDateFilter}`
+                        : poDateFilter
+                        ? `PO: ${poDateFilter}`
+                        : doDateFilter
+                        ? `DO: ${doDateFilter}`
+                        : "Filter Date"}
+                    </span>
+                    {(commitmentDateFilter || poDateFilter || doDateFilter) && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-600 ml-0.5" />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-3 text-xs space-y-3" align="start">
+                  <div className="flex items-center justify-between border-b pb-1.5">
+                    <span className="font-bold text-slate-800">Filter by Date</span>
+                    {(commitmentDateFilter || poDateFilter || doDateFilter) && (
+                      <button
+                        onClick={() => { setCommitmentDateFilter(""); setPoDateFilter(""); setDoDateFilter("") }}
+                        className="text-[10px] text-red-600 hover:underline font-semibold cursor-pointer"
+                      >
+                        Clear Date
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2.5">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-600">Commitment Date</label>
+                      <Input
+                        type="date"
+                        className="h-7 text-xs bg-slate-50 border-slate-200"
+                        value={commitmentDateFilter}
+                        onChange={(e) => setCommitmentDateFilter(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-600">PO Date (Raised)</label>
+                      <Input
+                        type="date"
+                        className="h-7 text-xs bg-slate-50 border-slate-200"
+                        value={poDateFilter}
+                        onChange={(e) => setPoDateFilter(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-600">DO Date (Dispatched)</label>
+                      <Input
+                        type="date"
+                        className="h-7 text-xs bg-slate-50 border-slate-200"
+                        value={doDateFilter}
+                        onChange={(e) => setDoDateFilter(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+
+              {/* Column Filter Popover (Clean, simple, no complexity) */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "h-8 text-xs gap-1.5 bg-white border-slate-200 shadow-2xs cursor-pointer",
+                      Object.values(columnFilters).some(v => !!v?.trim())
+                        ? "border-blue-500 bg-blue-50/60 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-50"
+                    )}
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    <span>Filter Column</span>
+                    {Object.values(columnFilters).filter(v => !!v?.trim()).length > 0 && (
+                      <span className="ml-0.5 px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-bold">
+                        {Object.values(columnFilters).filter(v => !!v?.trim()).length}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-3 text-xs space-y-3" align="start">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                      <Filter className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Filter by Column</span>
+                    </div>
+                    {Object.values(columnFilters).some(v => !!v?.trim()) && (
+                      <button
+                        onClick={() => setColumnFilters({})}
+                        className="text-[11px] text-red-600 hover:underline font-semibold cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {[
+                      { id: "commitment_no", label: "Commitment No." },
+                      { id: "rate", label: "Rate (₹)" },
+                      { id: "quantity", label: "Quantity (MT)" },
+                      { id: "dispatch_from", label: "Dispatch Depot" },
+                      { id: "processed_qty", label: "PO Raised (MT)" },
+                      { id: "delivery_qty", label: "Delivery Qty (MT)" },
+                      { id: "po_pending_qty", label: "PO Pending Qty (MT)" },
+                      { id: "remaining_qty", label: "Remaining Qty (MT)" },
+                    ].map(col => (
+                      <div key={col.id} className="space-y-1 bg-white p-2 rounded border border-slate-150 shadow-2xs">
+                        <div className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                          <span>{col.label}</span>
+                          {columnFilters[col.id] && (
+                            <button
+                              onClick={() => handleColumnFilterChange(col.id, "")}
+                              className="text-[10px] text-red-600 hover:underline cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <Input
+                          type="text"
+                          placeholder={`Filter ${col.label}...`}
+                          value={columnFilters[col.id] || ""}
+                          onChange={(e) => handleColumnFilterChange(col.id, e.target.value)}
+                          className="h-7 text-xs bg-slate-50 focus:bg-white border-slate-200"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* Right side: Count & Reset Action */}
+            <div className="flex items-center gap-2 ml-auto sm:ml-0">
+              <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
+                Showing <strong className="text-slate-800">{sortedPendingList.length}</strong> of {pendingList.length}
+              </span>
+
+              {activeFiltersCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2 rounded transition-colors gap-1 cursor-pointer"
+                  onClick={clearAllFilters}
+                >
+                  <X className="h-3 w-3" />
+                  Reset ({activeFiltersCount})
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Row 3: Active Filter Chips (Clean, removable, visible only when active) */}
+          {activeFiltersCount > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="text-[11px] font-semibold text-slate-400 mr-1">Active:</span>
+
+              {selectedStatusFilter !== "ALL" && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  Status: {selectedStatusFilter === "PENDING" ? "PO Pending" : "Fully Raised"}
+                  <button onClick={() => setSelectedStatusFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {selectedOilFilter !== "ALL" && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  Oil: {selectedOilFilter}
+                  <button onClick={() => setSelectedOilFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {selectedCustomerFilter !== "ALL" && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  Customer: {selectedCustomerFilter}
+                  <button onClick={() => setSelectedCustomerFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {commitmentDateFilter && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  Comm Date: {commitmentDateFilter}
+                  <button onClick={() => setCommitmentDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {poDateFilter && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  PO Date: {poDateFilter}
+                  <button onClick={() => setPoDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {doDateFilter && (
+                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+                  DO Date: {doDateFilter}
+                  <button onClick={() => setDoDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </Badge>
+              )}
+
+              {Object.entries(columnFilters).map(([colId, val]) => {
+                if (!val || !val.trim()) return null
+                const col = PAGE_COLUMNS.find(c => c.id === colId)
+                return (
+                  <Badge key={colId} variant="secondary" className="gap-1 text-[10px] font-medium bg-slate-100 text-slate-700 border-slate-200 pl-2 pr-1 py-0.5">
+                    {col?.label || colId}: {val}
+                    <button onClick={() => handleColumnFilterChange(colId, "")} className="hover:text-slate-900 cursor-pointer p-0.5 rounded-full hover:bg-slate-200">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </Badge>
+                )
+              })}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <div className="hidden overflow-x-auto rounded-b-xl md:block">
             <Table>
-              <TableHeader className="bg-slate-50">
+              <TableHeader className="bg-slate-50 border-b">
                 <TableRow>
                   <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                     {orderedVisibleCols.map(col => {
                       const sf = COL_SORT_FIELD[col.id]
                       const isRight = RIGHT_ALIGN_COLS.includes(col.id)
                       const isCenter = CENTER_ALIGN_COLS.includes(col.id)
+
                       return (
                         <SortableTableHead
                           key={col.id}
                           id={col.id}
-                          className={`whitespace-nowrap ${COL_WIDTHS[col.id] || ""}${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}
-                          onClick={sf ? () => handlePendingSort(sf) : undefined}
+                          className={`whitespace-nowrap ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}
                         >
-                          {isRight ? (
-                            <div className="flex items-center gap-1">
-                              {sf && <PendingSortIcon field={sf} />}
-                              <span>{col.label}</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <span>{col.label}</span>
-                              {sf && <PendingSortIcon field={sf} />}
-                            </div>
-                          )}
+                          <div
+                            className={cn(
+                              "flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 transition-colors w-full",
+                              isCenter ? "justify-center" : isRight ? "justify-end" : "justify-start"
+                            )}
+                            onClick={sf ? () => handlePendingSort(sf) : undefined}
+                          >
+                            <span>{col.label}</span>
+                            {sf && <PendingSortIcon field={sf} />}
+                          </div>
                         </SortableTableHead>
                       )
                     })}
                   </ColumnDragProvider>
+                  <TableHead className="w-10 px-2"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoadingPending ? (
                   [...Array(4)].map((_, i) => (
                     <TableRow key={i} className="opacity-40">
-                      {[...Array(orderedVisibleCols.length)].map((__, j) => (
+                      {[...Array(orderedVisibleCols.length + 1)].map((__, j) => (
                         <TableCell key={j}><div className="h-4 w-full bg-slate-200 animate-pulse rounded" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : pendingList.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={orderedVisibleCols.length} className="text-center py-16 text-muted-foreground">
+                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-16 text-muted-foreground">
                       <div className="flex flex-col items-center gap-2">
                         <CheckCircle2 className="h-10 w-10 text-slate-300" />
                         <p className="font-medium">No pending commitments</p>
@@ -923,21 +1594,94 @@ export default function CommitmentPunchPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                ) : sortedPendingList.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                      <p className="font-medium text-slate-500">No matching records found for column filters</p>
+                      <button
+                        onClick={() => setColumnFilters({})}
+                        className="text-xs text-blue-600 hover:underline mt-1 font-semibold"
+                      >
+                        Clear Column Filters
+                      </button>
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   sortedPendingList.map(row => (
                     <TableRow
                       key={row.id}
                       className="hover:bg-slate-50 cursor-pointer transition-colors"
-                      onClick={() => {
-                        setSelectedIds(new Set([row.id]))
-                        setIsProcessOpen(true)
-                      }}
+                      onClick={() => openProcessForCommitment(row)}
                     >
                       {orderedVisibleCols.map(col => renderCell(row, col.id))}
+                      <TableCell className="px-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+                          title="Edit planned values"
+                          onClick={(e) => openEditCommitment(row, e)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
+              {/* ── Per-Column Totals Footer ── */}
+              {sortedPendingList.length > 0 && (
+                <tfoot className="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-xs text-slate-800">
+                  <TableRow className="hover:bg-slate-100/90">
+                    {orderedVisibleCols.map(col => {
+                      const isCenter = CENTER_ALIGN_COLS.includes(col.id)
+                      const alignClass = isCenter ? "text-center" : "pl-[30px]"
+
+                      switch (col.id) {
+                        case "commitment_no":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-black text-slate-900 uppercase tracking-wider text-[11px]", alignClass)}>
+                              Total ({sortedPendingList.length})
+                            </TableCell>
+                          )
+                        case "quantity":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-slate-900", alignClass)}>
+                              {columnTotals.quantity.toFixed(4)} MT
+                            </TableCell>
+                          )
+                        case "processed_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>
+                              {columnTotals.processed_qty.toFixed(4)} MT
+                            </TableCell>
+                          )
+                        case "delivery_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-purple-700", alignClass)}>
+                              {columnTotals.delivery_qty.toFixed(4)} MT
+                            </TableCell>
+                          )
+                        case "po_pending_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-amber-700", alignClass)}>
+                              {columnTotals.po_pending_qty.toFixed(4)} MT
+                            </TableCell>
+                          )
+                        case "remaining_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-emerald-700", alignClass)}>
+                              {columnTotals.remaining_qty.toFixed(4)} MT
+                            </TableCell>
+                          )
+                        default:
+                          return <TableCell key={`total-${col.id}`} className={cn("text-slate-400 font-normal", alignClass)}></TableCell>
+                      }
+                    })}
+                    <TableCell className="px-2"></TableCell>
+                  </TableRow>
+                </tfoot>
+              )}
             </Table>
           </div>
 
@@ -966,10 +1710,7 @@ export default function CommitmentPunchPage() {
                 <div
                   key={row.id}
                   className="rounded-lg border p-4 transition-colors bg-white hover:bg-slate-50 cursor-pointer"
-                  onClick={() => {
-                    setSelectedIds(new Set([row.id]))
-                    setIsProcessOpen(true)
-                  }}
+                  onClick={() => openProcessForCommitment(row)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -978,6 +1719,15 @@ export default function CommitmentPunchPage() {
                         {row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}
                       </p>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+                      title="Edit planned values"
+                      onClick={(e) => openEditCommitment(row, e)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
                   </div>
 
                   <div className="mt-3 space-y-1.5">
@@ -1051,10 +1801,22 @@ export default function CommitmentPunchPage() {
           ADD COMMITMENT DIALOG
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isAddOpen} onOpenChange={open => { setIsAddOpen(open); if (!open) resetAddForm() }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[850px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[95vw] min-h-[580px] max-h-[90vh] overflow-y-auto p-4 sm:p-6" style={{ maxWidth: '1250px' }}>
           <DialogHeader>
-            <DialogTitle>Add Commitment</DialogTitle>
-            <DialogDescription>Enter commitment details. A unique Commitment No. will be auto-generated.</DialogDescription>
+            <DialogTitle>
+              {isEditMode ? (
+                <span className="flex items-center gap-2">
+                  <Pencil className="h-4 w-4 text-amber-600" />
+                  Edit Commitment
+                </span>
+              ) : "Add Commitment"}
+            </DialogTitle>
+            <DialogDescription>
+              {isEditMode
+                ? "Update planned values for this commitment. Oil type and quantity cannot be changed after creation."
+                : "Enter commitment details. A unique Commitment No. will be auto-generated."
+              }
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleAddSubmit} className="space-y-5" suppressHydrationWarning>
@@ -1123,7 +1885,7 @@ export default function CommitmentPunchPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="self">FOR</SelectItem>
-                    <SelectItem value="others">Ex-Depot</SelectItem>
+                    <SelectItem value="others">Ex</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1303,7 +2065,7 @@ export default function CommitmentPunchPage() {
               <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)} disabled={isSubmitting} className="w-full sm:w-auto">Cancel</Button>
               <Button type="submit" disabled={isSubmitting} className="w-full gap-2 bg-blue-600 hover:bg-blue-700 min-w-[140px] sm:w-auto">
                 <Save className="h-4 w-4" />
-                {isSubmitting ? "Saving..." : "Save Commitment"}
+                {isSubmitting ? (isEditMode ? "Saving..." : "Saving...") : (isEditMode ? "Save Changes" : "Save Commitment")}
               </Button>
             </DialogFooter>
           </form>
@@ -1314,15 +2076,41 @@ export default function CommitmentPunchPage() {
           PROCESS DIALOG
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isProcessOpen} onOpenChange={open => { setIsProcessOpen(open); if (!open) resetProcess() }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[900px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[95vw] min-h-[580px] max-h-[90vh] overflow-y-auto p-4 sm:p-6" style={{ maxWidth: '1250px' }}>
           <DialogHeader>
-            <DialogTitle>Process Commitment</DialogTitle>
+            <DialogTitle>
+              Process Commitment
+              {processSelectedCommitment && (
+                <span className="ml-2 font-mono text-sm font-normal text-slate-500">
+                  {processSelectedCommitment.commitment_no} — {processSelectedCommitment.party_name}
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription>
               Processing {selectedIds.size} commitment{selectedIds.size !== 1 ? "s" : ""}. Fill PO details and SKU allocation.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 py-1">
+          {/* —— Planned Values Panel —— */}
+          {processSelectedCommitment && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs">
+              <p className="flex items-center gap-1.5 font-bold text-amber-800 mb-2">
+                <ClipboardList className="h-3.5 w-3.5" />
+                Commitment Planned Values — for reference
+              </p>
+              <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-amber-900">
+                <span><span className="font-semibold">Order Through:</span> {processSelectedCommitment.order_through || '—'}</span>
+                <span><span className="font-semibold">Payment Terms:</span> {processSelectedCommitment.payment_terms || '—'}</span>
+                <span><span className="font-semibold">Transport:</span> {processSelectedCommitment.transport_type === 'others' ? 'Ex-Depot' : processSelectedCommitment.transport_type === 'self' ? 'FOR' : (processSelectedCommitment.transport_type || '—')}</span>
+                <span><span className="font-semibold">Depot:</span> {processSelectedCommitment.depot_name || '—'}</span>
+                {processSelectedCommitment.broker_name && <span><span className="font-semibold">Broker:</span> {processSelectedCommitment.broker_name}</span>}
+                {processSelectedCommitment.salesperson_name && <span><span className="font-semibold">Salesperson:</span> {processSelectedCommitment.salesperson_name}</span>}
+                <span><span className="font-semibold">Advance:</span> {processSelectedCommitment.advance_payment_to_be_taken ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-7 py-2">
 
             {/* ── Selected Commitment Info ── */}
             {Array.from(selectedIds).map(id => {
@@ -1332,28 +2120,28 @@ export default function CommitmentPunchPage() {
               const isOverLimit = totalReqMt > (c.remaining_qty ?? c.quantity) + 0.0001
 
               return (
-                <div key={id} className={`rounded-lg border transition-all px-4 py-3 grid grid-cols-1 gap-3 text-sm sm:flex sm:flex-wrap sm:gap-6 ${isOverLimit ? "border-red-200 bg-red-50" : "border-blue-100 bg-blue-50/60"}`}>
+                <div key={id} className={`rounded-lg border transition-all px-5 py-4 grid grid-cols-1 gap-3 text-sm sm:flex sm:flex-wrap sm:gap-10 ${isOverLimit ? "border-red-200 bg-red-50" : "border-blue-100 bg-blue-50/60"}`}>
                   <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Company Name</p>
-                    <p className="font-semibold text-slate-800 mt-0.5">{c.party_name || "—"}</p>
+                    <p className="font-semibold text-slate-800 mt-1.5">{c.party_name || "—"}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Oil Type</p>
-                    <p className="font-semibold text-slate-800 mt-0.5">{c.oil_type || "—"}</p>
+                    <p className="font-semibold text-slate-800 mt-1.5">{c.oil_type || "—"}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total Qty</p>
-                    <p className="font-semibold text-slate-800 mt-0.5">{c.quantity ?? "—"} {c.unit || ""}</p>
+                    <p className="font-semibold text-slate-800 mt-1.5">{c.quantity ?? "—"} {c.unit || ""}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Remaining Balance</p>
-                    <p className={`font-semibold mt-0.5 ${isOverLimit ? "text-red-600" : "text-emerald-700"}`}>
+                    <p className={`font-semibold mt-1.5 ${isOverLimit ? "text-red-600" : "text-emerald-700"}`}>
                       {Number(c.remaining_qty ?? c.quantity).toFixed(4)} MT
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Requested Total</p>
-                    <p className={`font-bold mt-0.5 ${isOverLimit ? "text-red-700" : "text-blue-700"}`}>
+                    <p className={`font-bold mt-1.5 ${isOverLimit ? "text-red-700" : "text-blue-700"}`}>
                       {totalReqMt.toFixed(4)} MT
                     </p>
                   </div>
@@ -1362,9 +2150,9 @@ export default function CommitmentPunchPage() {
             })}
 
             {/* ── Order Submission Details ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-b pb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 border-b pb-6">
               {/* Order Type is Through (is_order_through) */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="p-orderTypeThrough">Order Type is Through <span className="text-red-500">*</span></Label>
                 <Select value={processOrderTypeThrough} onValueChange={(val) => {
                   setProcessOrderTypeThrough(val)
@@ -1380,7 +2168,7 @@ export default function CommitmentPunchPage() {
                 </Select>
               </div>
               {/* Order Type: Regular / Pre-Approval */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="p-orderType">Order Type</Label>
                 <Select value={processOrderType} onValueChange={setProcessOrderType}>
                   <SelectTrigger id="p-orderType"><SelectValue placeholder="Select type" /></SelectTrigger>
@@ -1390,9 +2178,17 @@ export default function CommitmentPunchPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="p-transportType">Transport Type <span className="text-red-500">*</span></Label>
-                <Select value={transportType} onValueChange={setTransportType}>
+              <div className="space-y-3">
+                <Label htmlFor="p-transportType">
+                  Transport Type <span className="text-red-500">*</span>
+                  {processSelectedCommitment && processTransportType && processSelectedCommitment.transport_type &&
+                    processTransportType.toLowerCase() !== processSelectedCommitment.transport_type.toLowerCase() && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                        <AlertTriangle className="h-3 w-3" /> Different from planned
+                      </span>
+                    )}
+                </Label>
+                <Select value={processTransportType} onValueChange={setProcessTransportType}>
                   <SelectTrigger id="p-transportType"><SelectValue placeholder="Select transport type" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="self">FOR</SelectItem>
@@ -1416,7 +2212,7 @@ export default function CommitmentPunchPage() {
               )}
 
               {/* Delivery Purpose & Depot */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Delivery Purpose</Label>
                 <Select value={processDeliveryPurpose} onValueChange={setProcessDeliveryPurpose}>
                   <SelectTrigger><SelectValue placeholder="Select purpose" /></SelectTrigger>
@@ -1462,13 +2258,33 @@ export default function CommitmentPunchPage() {
                   <p className="text-[10px] text-blue-600 font-medium">ℹ️ Date for future delivery scheduling</p>
                 </div>
               )}
-              <div className="space-y-2">
-                <Label>Depo Name</Label>
+              <div className="space-y-3">
+                <Label>Depo Name (Dispatch From)</Label>
                 <AsyncCombobox fetchOptions={fetchDepoOptions} value={processDepoName} onValueChange={setProcessDepoName} placeholder="Select Depo" searchPlaceholder="Search depots..." />
               </div>
 
+              {/* Customer Name Override at PO raise */}
+              <div className="space-y-3 col-span-full">
+                <Label>
+                  Customer Name
+                  {processSelectedCommitment && processCustomerName && processSelectedCommitment.party_name &&
+                    processCustomerName.toLowerCase() !== processSelectedCommitment.party_name.toLowerCase() && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                        <AlertTriangle className="h-3 w-3" /> Different from planned
+                      </span>
+                    )}
+                </Label>
+                <AsyncCombobox
+                  fetchOptions={fetchCustomerOptions}
+                  value={processCustomerName}
+                  onValueChange={setProcessCustomerName}
+                  placeholder="Select Customer (filtered by commitment required)"
+                  searchPlaceholder="Search Customer Name, City, State, GST, Mobile..."
+                />
+              </div>
+
               {/* Start Date / End Date */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="p-startDate">Start Date</Label>
                 <Input
                   id="p-startDate"
@@ -1488,7 +2304,7 @@ export default function CommitmentPunchPage() {
                   }}
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="p-endDate">End Date</Label>
                 <Input
                   id="p-endDate"
@@ -1500,7 +2316,7 @@ export default function CommitmentPunchPage() {
               </div>
 
               {/* Actual Delivery Date - Calendar with in-range highlight */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Actual Delivery Date</Label>
                 <Popover open={isActualDeliveryPickerOpen} onOpenChange={setIsActualDeliveryPickerOpen}>
                   <PopoverTrigger asChild>
@@ -1563,7 +2379,7 @@ export default function CommitmentPunchPage() {
               </div>
 
               {/* Advance Payment & Payment Terms */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Advance Payment to Be Taken</Label>
                 <Select value={processAdvancePaymentTaken} onValueChange={setProcessAdvancePaymentTaken}>
                   <SelectTrigger><SelectValue placeholder="Select YES/NO" /></SelectTrigger>
@@ -1573,7 +2389,7 @@ export default function CommitmentPunchPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {processAdvancePaymentTaken === "YES" ? (
                   <>
                     <Label>Advance Amount (₹)</Label>
@@ -1586,8 +2402,16 @@ export default function CommitmentPunchPage() {
                   </div>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label>Payment Terms</Label>
+              <div className="space-y-3">
+                <Label>
+                  Payment Terms
+                  {processSelectedCommitment && processPaymentTerms && processSelectedCommitment.payment_terms &&
+                    processPaymentTerms.toLowerCase() !== processSelectedCommitment.payment_terms.toLowerCase() && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                        <AlertTriangle className="h-3 w-3" /> Different from planned
+                      </span>
+                    )}
+                </Label>
                 <Select value={processPaymentTerms} onValueChange={setProcessPaymentTerms}>
                   <SelectTrigger><SelectValue placeholder="Select terms" /></SelectTrigger>
                   <SelectContent>
@@ -1598,7 +2422,7 @@ export default function CommitmentPunchPage() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Order Category</Label>
                 <Select value={processOrderCategory} onValueChange={setProcessOrderCategory}>
                   <SelectTrigger><SelectValue placeholder="Select Category" /></SelectTrigger>
@@ -1610,7 +2434,7 @@ export default function CommitmentPunchPage() {
               </div>
 
               {/* Upload SO Copy */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <FileUploadField
                   label="Upload SO Copy"
                   accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -1622,17 +2446,17 @@ export default function CommitmentPunchPage() {
               </div>
 
               {/* Remarks */}
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-3 sm:col-span-2">
                 <Label htmlFor="p-remarks">Remarks</Label>
                 <Input id="p-remarks" placeholder="Enter any remarks..." value={processRemarks} onChange={e => setProcessRemarks(e.target.value)} />
               </div>
             </div>
 
             {/* ── PO Details ── */}
-            <div className="space-y-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b pb-1">PO Details</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
+            <div className="space-y-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b pb-2">PO Details</p>
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                <div className="space-y-3">
                   <Label htmlFor="po_no">PO No. <span className="text-red-500">*</span></Label>
                   <Input
                     id="po_no"
@@ -1641,7 +2465,7 @@ export default function CommitmentPunchPage() {
                     placeholder="Enter PO number"
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-3">
                   <Label htmlFor="po_date">PO Date <span className="text-red-500">*</span></Label>
                   <Input
                     id="po_date"
@@ -1657,9 +2481,21 @@ export default function CommitmentPunchPage() {
             <div className="space-y-3">
               <div className="flex flex-col gap-2 border-b pb-2 sm:flex-row sm:items-center sm:justify-between sm:pb-1">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-500">SKU Details</p>
-                <Button type="button" variant="outline" size="sm" onClick={addSkuRow} className="w-full gap-1 h-8 text-xs sm:h-7 sm:w-auto">
-                  <Plus className="h-3 w-3" /> Add Sku
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSkuRows([{ id: "1", sku: "", qty: "", rate: "", mt: 0 }])}
+                    className="h-7 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 gap-1"
+                    title="Reset SKU rows to initial state"
+                  >
+                    <RefreshCw className="h-3 w-3" /> Reset SKUs
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={addSkuRow} className="w-full gap-1 h-8 text-xs sm:h-7 sm:w-auto">
+                    <Plus className="h-3 w-3" /> Add Sku
+                  </Button>
+                </div>
               </div>
 
               <div className="hidden rounded-lg border overflow-hidden sm:block">
@@ -1669,8 +2505,30 @@ export default function CommitmentPunchPage() {
                       <th className="w-7 text-center py-2 px-1 font-medium text-slate-500 text-xs">#</th>
                       <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs text-nowrap">SKU Name *</th>
                       <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[110px]">Qty (Box) *</th>
+                      <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[130px]">Nos per Main UOM</th>
                       <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[120px]">Weight (MT)</th>
-                      <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[150px]">Rate *</th>
+                      <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[130px]">Rate *</th>
+                      <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[140px]">
+                        <div className="flex items-center gap-1">
+                          <span>Taxable Amount</span>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-slate-400 hover:text-blue-600">
+                                <Info className="h-3.5 w-3.5" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-64 p-3 text-xs space-y-1" align="start">
+                              <p className="font-bold text-slate-800">Taxable Amount Formula:</p>
+                              <p className="font-mono text-blue-700 bg-blue-50 p-1.5 rounded border border-blue-100">
+                                Rate × Qty (Box) × Nos per Main UOM
+                              </p>
+                              <p className="text-slate-500 text-[11px] pt-1">
+                                Nos per Main UOM is fetched from the SKU master data.
+                              </p>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      </th>
                       <th className="w-8"></th>
                     </tr>
                   </thead>
@@ -1686,6 +2544,12 @@ export default function CommitmentPunchPage() {
                         if (u.includes("PKT") || u.includes("PACKET")) return "PKT";
                         return "";
                       })();
+
+                      const skuData = skuRegistry[row.sku];
+                      const nosPerMainUom = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
+                      const qtyBox = parseFloat(row.qty) || 0;
+                      const rate = parseFloat(row.rate) || 0;
+                      const taxableAmount = rate * qtyBox * nosPerMainUom;
 
                       return (
                         <tr key={row.id} className="border-b last:border-0">
@@ -1711,6 +2575,11 @@ export default function CommitmentPunchPage() {
                           </td>
                           <td className="py-1 px-2">
                             <div className="h-8 flex items-center px-2 bg-slate-50 border rounded text-xs font-mono text-slate-600">
+                              {nosPerMainUom}
+                            </div>
+                          </td>
+                          <td className="py-1 px-2">
+                            <div className="h-8 flex items-center px-2 bg-slate-50 border rounded text-xs font-mono text-slate-600">
                               {row.mt ? row.mt.toFixed(4) : "0.0000"}
                             </div>
                           </td>
@@ -1730,12 +2599,17 @@ export default function CommitmentPunchPage() {
                               )}
                             </div>
                           </td>
+                          <td className="py-1 px-2">
+                            <div className="h-8 flex items-center px-2 bg-slate-50 border rounded text-xs font-mono font-bold text-emerald-700">
+                              ₹{taxableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </td>
                           <td className="py-1 px-1 text-center">
                             <Button
                               type="button" variant="ghost" size="icon"
-                              className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+                              className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title={skuRows.length > 1 ? "Delete this SKU row" : "Clear this SKU row"}
                               onClick={() => removeSkuRow(row.id)}
-                              disabled={skuRows.length === 1}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1794,6 +2668,15 @@ export default function CommitmentPunchPage() {
                           />
                         </div>
                         <div className="space-y-2">
+                          <Label>Nos per Main UOM</Label>
+                          <div className="h-10 flex items-center px-3 bg-slate-50 border rounded text-sm font-mono text-slate-600">
+                            {(() => {
+                              const skuData = skuRegistry[row.sku];
+                              return parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
+                            })()}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
                           <Label>Weight (MT)</Label>
                           <div className="h-10 flex items-center px-3 bg-slate-50 border rounded text-sm font-mono text-slate-600">
                             {row.mt ? row.mt.toFixed(4) : "0.0000"}
@@ -1816,12 +2699,236 @@ export default function CommitmentPunchPage() {
                             )}
                           </div>
                         </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1">
+                            <Label>Taxable Amount</Label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-slate-400 hover:text-blue-600">
+                                  <Info className="h-3.5 w-3.5" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-3 text-xs space-y-1" align="start">
+                                <p className="font-bold text-slate-800">Taxable Amount Formula:</p>
+                                <p className="font-mono text-blue-700 bg-blue-50 p-1.5 rounded border border-blue-100">
+                                  Rate × Qty (Box) × Nos per Main UOM
+                                </p>
+                                <p className="text-slate-500 text-[11px] pt-1">
+                                  Nos per Main UOM is fetched from the SKU master data.
+                                </p>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                          <div className="h-10 flex items-center px-3 bg-slate-50 border rounded text-sm font-mono font-bold text-emerald-700">
+                            ₹{(() => {
+                              const skuData = skuRegistry[row.sku];
+                              const nosPerMainUom = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
+                              const qtyBox = parseFloat(row.qty) || 0;
+                              const rate = parseFloat(row.rate) || 0;
+                              return (rate * qtyBox * nosPerMainUom).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            })()}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
             </div>
+
+            {/* ── Additional Ledgers (ERP Style) ── */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between border-b pb-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Additional Ledger / Charges</p>
+                  <p className="text-[11px] text-slate-400">Add freight, insurance, discounts, or handling charges</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addLedgerRow} className="gap-1 h-7 text-xs border-dashed text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <Plus className="h-3 w-3" /> Add Ledger
+                </Button>
+              </div>
+
+              {ledgerRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400 bg-slate-50/50">
+                  No additional ledgers added. Click <span className="font-semibold text-blue-600">"+ Add Ledger"</span> if transportation, freight, or insurance charges apply.
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden bg-white shadow-sm">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-100 border-b text-slate-600 font-semibold">
+                      <tr>
+                        <th className="w-8 text-center py-2 px-1">#</th>
+                        <th className="py-2 px-3 text-left">Ledger Name *</th>
+                        <th className="py-2 px-3 text-right w-44">Amount (₹)</th>
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {ledgerRows.map((lRow, lIdx) => (
+                        <tr key={lRow.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="text-center py-2 px-1 text-slate-400 font-bold">{lIdx + 1}</td>
+                          <td className="py-1.5 px-3">
+                            <AsyncCombobox
+                              fetchOptions={fetchLedgerOptions}
+                              value={lRow.ledgerName}
+                              onValueChange={(val) => updateLedgerRow(lRow.id, "ledgerName", val)}
+                              placeholder="Select or Search Ledger"
+                              searchPlaceholder="Search ledgers..."
+                              className="h-8 text-xs bg-white border-slate-200"
+                            />
+                          </td>
+                          <td className="py-1.5 px-3">
+                            <Input
+                              type="number" min="0" step="0.01"
+                              value={lRow.amount}
+                              onChange={e => updateLedgerRow(lRow.id, "amount", e.target.value)}
+                              placeholder="0.00"
+                              className="h-8 text-xs font-mono text-right font-semibold border-slate-200"
+                            />
+                          </td>
+                          <td className="py-1.5 px-1 text-center">
+                            <Button
+                              type="button" variant="ghost" size="icon"
+                              className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => removeLedgerRow(lRow.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* ── Total Taxable Value & GST Breakdown ── */}
+            {(() => {
+              const skuTaxableTotal = skuRows.reduce((sum, r) => {
+                const skuData = skuRegistry[r.sku];
+                const nos = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
+                const q = parseFloat(r.qty) || 0;
+                const rate = parseFloat(r.rate) || 0;
+                return sum + (rate * q * nos);
+              }, 0);
+
+              const ledgerTotal = ledgerRows.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
+              const totalTaxableValue = skuTaxableTotal + ledgerTotal;
+
+              // Calculate Dynamic GST (using gstRatePercent state, default 5.0%, CGST/SGST = rate/2)
+              const numericGstRate = parseFloat(gstRatePercent) || 0;
+              const halfRate = numericGstRate / 2;
+              const cgst = totalTaxableValue * (halfRate / 100);
+              const sgst = totalTaxableValue * (halfRate / 100);
+              const igst = totalTaxableValue * (numericGstRate / 100);
+              const totalGstAmount = gstSupplyType === "INTRA" ? (cgst + sgst) : igst;
+              const totalOrderValue = totalTaxableValue + totalGstAmount;
+
+              return (
+                <div className="space-y-4">
+                  {/* Total Taxable Card */}
+                  <div className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-slate-50 p-4 shadow-sm">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
+                      <div className="flex items-center gap-6 text-slate-600">
+                        <div>
+                          <span className="text-slate-400 font-medium">SKU Taxable Subtotal:</span>{" "}
+                          <span className="font-mono font-bold text-slate-700">₹{skuTaxableTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        {ledgerRows.length > 0 && (
+                          <div>
+                            <span className="text-slate-400 font-medium">Additional Ledgers:</span>{" "}
+                            <span className="font-mono font-bold text-indigo-600">+₹{ledgerTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right border-t pt-2 sm:border-t-0 sm:pt-0">
+                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Total Taxable Value</p>
+                        <p className="text-xl font-mono font-black text-blue-700">
+                          ₹{totalTaxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GST Breakdown Table (Indicative - Order Punch Form Style) */}
+                  <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xs">
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Indicative)</p>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-slate-500">GST Rate:</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={gstRatePercent}
+                          onChange={(e) => setGstRatePercent(e.target.value)}
+                          placeholder="5"
+                          className="w-14 h-5 px-1 text-[11px] font-mono font-bold text-blue-700 bg-white border border-slate-300 rounded text-right focus:outline-none focus:border-blue-500"
+                        />
+                        <span className="text-[10px] font-bold text-slate-600">%</span>
+                      </div>
+                    </div>
+                    <div className="p-4 max-w-sm ml-auto space-y-2 text-xs">
+                      {/* State Supply Toggle */}
+                      <div className="flex items-center justify-between bg-slate-100 p-0.5 rounded-lg text-[10px] font-semibold text-slate-600 mb-3">
+                        <button
+                          type="button"
+                          onClick={() => setGstSupplyType("INTRA")}
+                          className={cn(
+                            "flex-1 py-1 rounded text-center transition-all cursor-pointer",
+                            gstSupplyType === "INTRA"
+                              ? "bg-white text-blue-700 shadow-xs font-bold"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          Same State
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGstSupplyType("INTER")}
+                          className={cn(
+                            "flex-1 py-1 rounded text-center transition-all cursor-pointer",
+                            gstSupplyType === "INTER"
+                              ? "bg-white text-blue-700 shadow-xs font-bold"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          Other State
+                        </button>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
+                        <span className="font-mono font-bold text-slate-700">
+                          {gstSupplyType === "INTRA" ? `₹${cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
+                        <span className="font-mono font-bold text-slate-700">
+                          {gstSupplyType === "INTRA" ? `₹${sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
+                        <span className="font-mono font-bold text-slate-700">
+                          {gstSupplyType === "INTER" ? `₹${igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
+                        <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
+                        <span className="font-mono font-black text-blue-700 text-sm">
+                          ₹{totalOrderValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
           </div>
 
@@ -1843,8 +2950,8 @@ export default function CommitmentPunchPage() {
           DETAILS POPUP (PO Raised / Delivery / PO Pending)
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader>
+        <DialogContent showCloseButton={false} className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pr-6">
             <DialogTitle>
               {detailsType === "raised" ? "PO Raised Details" : detailsType === "delivered" ? "Delivery Details" : "PO Pending Details"}
             </DialogTitle>
@@ -1881,10 +2988,63 @@ export default function CommitmentPunchPage() {
                   <p className={cn("font-bold mt-0.5", detailsType === "raised" ? "text-blue-700" : detailsType === "delivered" ? "text-purple-700" : "text-amber-700")}>
                     {isLoadingDetails ? "..." : Number(
                       detailsType === "raised" ? detailsData?.total_processed_mt :
-                      detailsType === "delivered" ? detailsData?.total_delivered_mt :
-                      detailsData?.total_pending_mt || 0
+                        detailsType === "delivered" ? detailsData?.total_delivered_mt :
+                          detailsData?.total_pending_mt || 0
                     ).toFixed(4)} MT
                   </p>
+                </div>
+
+                {detailsData?.total_changed_count !== undefined && (detailsData.total_changed_count > 0) && (
+                  <div>
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Plan Deviations</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                        ⚠️ {detailsData.total_changed_count} Value Change(s)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Change Breakdown Audit Summary Pill Bar */}
+            {detailsData && (detailsData.total_changed_count || 0) > 0 && (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <Info className="h-4 w-4 text-amber-600" />
+                  Planned vs Actual Change Tracking Report
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {detailsData.changes_breakdown?.payment_terms > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Payment Terms: {detailsData.changes_breakdown.payment_terms} change(s)
+                    </span>
+                  )}
+                  {detailsData.changes_breakdown?.transport_type > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Transport Type: {detailsData.changes_breakdown.transport_type} change(s)
+                    </span>
+                  )}
+                  {detailsData.changes_breakdown?.order_through > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Channel (Through): {detailsData.changes_breakdown.order_through} change(s)
+                    </span>
+                  )}
+                  {detailsData.changes_breakdown?.depot > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Depot: {detailsData.changes_breakdown.depot} change(s)
+                    </span>
+                  )}
+                  {detailsData.changes_breakdown?.broker > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Broker: {detailsData.changes_breakdown.broker} change(s)
+                    </span>
+                  )}
+                  {detailsData.changes_breakdown?.salesperson > 0 && (
+                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
+                      Salesperson: {detailsData.changes_breakdown.salesperson} change(s)
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -1920,6 +3080,23 @@ export default function CommitmentPunchPage() {
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Qty (MT)</th>
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Invoice Amount</th>
                         </tr>
+                      ) : detailsType === "pending" ? (
+                        <tr>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[110px]">PO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">DO Date</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Manual Sauda No.</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[180px]">Customer Name</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Item Name</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Total Qty (Box)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Delivered Qty (Box)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Pending Qty (Box)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Total Qty (MT)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Delivered Qty (MT)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Pending Qty (MT)</th>
+                        </tr>
                       ) : (
                         <tr>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
@@ -1929,11 +3106,10 @@ export default function CommitmentPunchPage() {
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Item Name</th>
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[90px]">Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[120px]">
-                            {detailsType === "raised" ? "PO Raised (MT)" : "PO Pending (MT)"}
-                          </th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[120px]">PO Raised (MT)</th>
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Rate</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[130px]">Payment Terms</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Plan Deviations</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Remarks</th>
                         </tr>
                       )}
@@ -1988,7 +3164,42 @@ export default function CommitmentPunchPage() {
                           )
                         }
 
-                        const mt = detailsType === "raised" ? d.sku_weight_mt : d.pending_mt
+                        if (detailsType === "pending") {
+                          return (
+                            <tr key={d.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                {d.po_upload_copy ? (
+                                  <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
+                                    {d.po_no || "View PO"}
+                                  </a>
+                                ) : (
+                                  <span className="font-mono text-xs text-slate-700">{d.po_no || "—"}</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                {d.order_no ? (
+                                  <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
+                                    {d.order_no}
+                                  </Link>
+                                ) : <span className="text-slate-400">—</span>}
+                              </td>
+                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{doDateFormatted}</td>
+                              <td className="py-2.5 px-3 text-xs font-mono text-slate-700 whitespace-nowrap">{saudaNo}</td>
+                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{custName}</td>
+                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{d.sku || "—"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs text-slate-600 text-right whitespace-nowrap">{d.delivered_box != null ? Number(d.delivered_box).toLocaleString("en-IN") : "0"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs font-bold text-amber-700 text-right whitespace-nowrap">{d.pending_box != null ? Number(d.pending_box).toLocaleString("en-IN") : "0"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_weight_mt != null ? Number(d.sku_weight_mt).toFixed(4) : "—"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs text-slate-600 text-right whitespace-nowrap">{d.delivered_mt != null ? Number(d.delivered_mt).toFixed(4) : "0.0000"}</td>
+                              <td className="py-2.5 px-3 font-mono text-xs font-bold text-amber-700 text-right whitespace-nowrap">{d.pending_mt != null ? Number(d.pending_mt).toFixed(4) : "0.0000"}</td>
+                            </tr>
+                          )
+                        }
+
+                        const mt = d.sku_weight_mt
                         return (
                           <tr key={d.id} className="hover:bg-slate-50 transition-colors">
                             <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
@@ -2024,6 +3235,28 @@ export default function CommitmentPunchPage() {
                             </td>
                             <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap font-semibold">{d.sku_rate ? `₹${Number(d.sku_rate).toLocaleString("en-IN")}` : "—"}</td>
                             <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.payment_terms || "—"}</td>
+                            <td className="py-2.5 px-3 text-xs whitespace-nowrap">
+                              {d.changed_fields_count > 0 ? (
+                                <div className="group relative inline-block cursor-help">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition-colors">
+                                    ⚠️ {d.changed_fields_count} field(s) changed
+                                  </span>
+                                  {/* Production Grade Diff Tooltip */}
+                                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 min-w-[220px] bg-slate-900 text-white rounded-lg p-2.5 shadow-xl text-xs space-y-1.5 pointer-events-none">
+                                    <p className="font-bold text-[11px] text-amber-400 border-b border-slate-700 pb-1">Planned vs Actual Diff</p>
+                                    {d.field_diffs?.map((diff: any, i: number) => (
+                                      <div key={i} className="text-[11px]">
+                                        <span className="text-slate-300 font-semibold">{diff.field}: </span>
+                                        <span className="line-through text-red-300 mr-1">{diff.original || "None"}</span>
+                                        <span className="text-emerald-400 font-bold">→ {diff.changed}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-xs font-mono">—</span>
+                              )}
+                            </td>
                             <td className="py-2.5 px-3 text-xs text-slate-500 font-normal italic whitespace-nowrap max-w-[160px] truncate" title={d.remarks}>{d.remarks || "—"}</td>
                           </tr>
                         )
@@ -2031,13 +3264,13 @@ export default function CommitmentPunchPage() {
                     </tbody>
                     <tfoot className="bg-slate-50 border-t border-slate-200">
                       <tr>
-                        <td colSpan={detailsType === "delivered" ? 11 : 7} className="py-3 px-3 text-xs font-bold text-slate-700 text-right whitespace-nowrap">
+                        <td colSpan={detailsType === "delivered" ? 11 : detailsType === "pending" ? 13 : 7} className="py-3 px-3 text-xs font-bold text-slate-700 text-right whitespace-nowrap">
                           Total {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}:
                         </td>
                         <td className="py-3 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900">
                           {Number(detailsType === "raised" ? detailsData.total_processed_mt : detailsType === "delivered" ? detailsData.total_delivered_mt : detailsData.total_pending_mt || 0).toFixed(4)} MT
                         </td>
-                        <td colSpan={detailsType === "delivered" ? 1 : 3} />
+                        <td colSpan={detailsType === "delivered" ? 1 : detailsType === "pending" ? 1 : 4} />
                       </tr>
                     </tfoot>
                   </table>
