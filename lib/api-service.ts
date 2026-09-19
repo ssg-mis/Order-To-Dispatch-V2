@@ -206,6 +206,23 @@ export const orderApi = {
     return request(API_ENDPOINTS.orders.getByOrderNumber(orderNo));
   },
 
+  /** Order Punch screen's DO list - computed totals + Stage 3 rollup + 48h visibility rule, all server-side. */
+  getPunchList: async (params?: {
+    search?: string;
+    do_date?: string;
+    start_date?: string;
+    end_date?: string;
+    depot_id?: number;
+    customer_id?: number;
+  }): Promise<ApiResponse> => {
+    return request(`/orders/punch-list${buildQuery(params)}`);
+  },
+
+  /** One order's full header + line items, by orders.id (numeric PK) - for the detail/Modify view. */
+  getById: async (id: number): Promise<ApiResponse> => {
+    return request(`/orders/${id}`);
+  },
+
   update: async (id: number, updateData: Partial<CreateOrderRequest>): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.update(id), {
       method: 'PUT',
@@ -852,7 +869,7 @@ export const userApi = {
   saveColumnPrefs: async (
     id: number,
     stageKey: string,
-    partial: { visible?: string[]; order?: string[] },
+    partial: { visible?: string[]; order?: string[]; sort?: { field: string; dir: 'asc' | 'desc' } | null },
     opts?: { keepalive?: boolean }
   ): Promise<ApiResponse> => {
     return request(`/users/${id}/column-prefs`, {

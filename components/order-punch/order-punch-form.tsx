@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useRouter } from "next/navigation"
 import type React from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FileUploadField } from "@/components/file-upload-field"
@@ -15,11 +13,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
+import { fetchCustomerDropdownOptions } from "@/components/order-punch/customer-dropdown"
+import { useStatesMap } from "@/hooks/use-states-map"
+import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
 import { cn, fuzzyMatch } from "@/lib/utils"
 import {
@@ -89,10 +89,17 @@ const forwardEvaluateSteps = (baseRate: number, steps: any[]): number => {
   return result;
 };
 
-export default function OrderPunchPage() {
+interface OrderPunchFormProps {
+  /** Called when the user clicks Cancel. Omit to hide/no-op the button (used
+   * standalone, e.g. on the /order-punch/create page). */
+  onCancel?: () => void
+  /** Called after an order is successfully created, with the generated DO number. */
+  onSuccess?: (orderNo: string) => void
+}
+
+export function OrderPunchForm({ onCancel, onSuccess }: OrderPunchFormProps) {
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isLoading: isAuthLoading } = useAuth()
-  const router = useRouter()
 
   // New state for customers
   const [customers, setCustomers] = useState<any[]>([])
@@ -316,6 +323,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const [isDeliveryDatePickerOpen, setIsDeliveryDatePickerOpen] = useState(false)
   const [isFuturePeriodDatePickerOpen, setIsFuturePeriodDatePickerOpen] = useState(false)
   const [salespersonName, setSalespersonName] = useState<string>("")
+  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
+  const [gstRatePercent, setGstRatePercent] = useState<string>("5")
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -511,11 +520,27 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const isContactPersonAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact_person);
   const isWhatsappNoAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact && /^\d{10}$/.test(selectedCustomerRecord.contact));
   const isAddressAutoFilled = !!(selectedCustomerRecord && (
-    selectedCustomerRecord.address_line_1 || 
-    selectedCustomerRecord.address_line_2 || 
-    selectedCustomerRecord.state || 
+    selectedCustomerRecord.address_line_1 ||
+    selectedCustomerRecord.address_line_2 ||
+    selectedCustomerRecord.state ||
     selectedCustomerRecord.pincode
   ));
+
+  // Multi-address support (Section 10): a customer's addresses are its default
+  // row plus any extra customer_addresses rows - the picker below only appears
+  // when there's more than one to choose from.
+  const statesById = useStatesMap()
+  const [selectedAddressId, setSelectedAddressId] = useState<"default" | number>("default")
+  const { addresses: customerAddressOptions, hasMultiple: hasMultipleAddresses } = useCustomerAddresses(selectedCustomerRecord?.id ?? null, statesById)
+
+  useEffect(() => {
+    setSelectedAddressId("default")
+  }, [selectedCustomerRecord?.id])
+
+  useEffect(() => {
+    const picked = customerAddressOptions.find((a: CustomerAddressOption) => a.id === selectedAddressId)
+    if (picked) setCustomerAddress(formatCustomerAddress(picked))
+  }, [selectedAddressId, customerAddressOptions])
 
   // Week on Week / Future Period Date Logic - Initialize Start Date from DO Date
   useEffect(() => {
@@ -538,7 +563,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     }
   }, [startDate])
 
-  // Validate Actual Delivery Date is within Start Date to End Date range
+  // Validate Expected Delivery Date is within Start Date to End Date range
   useEffect(() => {
     if (deliveryDate && startDate && endDate && orderPurpose === "week-on-week") {
       const delivery = new Date(deliveryDate)
@@ -653,7 +678,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       if (orderPurpose === "week-on-week" && !deliveryDate) {
         toast({
           title: "Validation Error",
-          description: "Please select an actual delivery date.",
+          description: "Please select an expected delivery date.",
           variant: "destructive",
         })
         return
@@ -893,10 +918,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         })
 
         resetForm()
-
-        // setTimeout(() => {
-        //   router.push(orderType === "regular" ? "/approval-of-order" : "/pre-approval")
-        // }, 1500)
+        onSuccess?.(backendOrderNo)
       }
 
     } catch (error: any) {
@@ -931,6 +953,11 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const removeProduct = (id: string) => {
     if (products.length > 1) {
       setProducts(products.filter((p) => p.id !== id))
+    } else {
+      // If only 1 product row exists, reset its values
+      setProducts([
+        { id, productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" }
+      ])
     }
   }
 
@@ -945,6 +972,29 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
 
   // Handle product selection and auto-fill UOM fields
   const handleProductSelect = (productId: string, skuName: string, skuData?: any) => {
+    if (!skuName) {
+      setProducts((prevProducts) =>
+        prevProducts.map((p) => {
+          if (p.id !== productId) return p;
+          return {
+            ...p,
+            skuId: undefined,
+            productName: "",
+            uom: "",
+            altUom: "",
+            orderQty: "",
+            rate: "",
+            ratePer15Kg: "",
+            ratePerLtr: "",
+            oilType: "",
+            skuWeight: "",
+            nosPerMainUom: "",
+          };
+        })
+      );
+      return;
+    }
+
     const selectedSku = skuData || skuRegistryRef.current[skuName] || skus.find((sku) => sku.sku_name === skuName)
 
     if (selectedSku) {
@@ -1063,6 +1113,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     setAdvanceAmount("")
     setFuturePeriodDate("")
     setOrderPunchRemarks("")
+    setGstSupplyType("INTRA")
+    setGstRatePercent("5")
     setSoFile(null)
     const fileInput = document.getElementById("soFile") as HTMLInputElement
     if (fileInput) fileInput.value = ""
@@ -1085,55 +1137,45 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   // Customer/shipping state comes from the customer's billing address (customerAddress)
   const shippingState = extractState(customerAddress || "") || ""
 
-  console.log("[GST DEBUG] depoName:", depoName, "| billingDepot:", billingDepot?.depot_name, "| billingState:", billingState, "| shippingState:", shippingState)
+  // Auto-detect Same State vs Other State if both states are determined, but user can toggle manually
+  useEffect(() => {
+    if (billingState && shippingState) {
+      if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
+        setGstSupplyType("INTRA")
+      } else {
+        setGstSupplyType("INTER")
+      }
+    }
+  }, [billingState, shippingState])
 
+  console.log("[GST DEBUG] depoName:", depoName, "| billingDepot:", billingDepot?.depot_name, "| billingState:", billingState, "| shippingState:", shippingState, "| gstSupplyType:", gstSupplyType)
+
+  const numericGstRate = parseFloat(gstRatePercent) || 0
+  const halfRate = numericGstRate / 2
+  // Rate is the taxable (GST-exclusive) price - GST is added on top, same model
+  // as Commitment Punch's Process dialog. Previously this divided the rate by
+  // (1 + gst%) to "back out" GST and then re-added the same GST on top, which
+  // always reconstructed the original rate*qty regardless of the entered GST%
+  // (the two operations are exact inverses) - the Total never actually moved
+  // no matter what rate you typed.
   const totalTaxable = products.reduce((sum, p) => {
     const rate = parseFloat(p.rate) || 0
     const nos = parseFloat(p.nosPerMainUom) || 0
     const qty = parseFloat(p.orderQty) || 0
-    const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2))
-    return sum + (rateWoGst * qty)
+    return sum + (rate * nos * qty)
   }, 0)
-  let gstType = "same"
-  let orderCgst = 0, orderSgst = 0, orderIgst = 0
-  if (!billingState || !shippingState) {
-    gstType = "no_address"
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-    orderCgst = Math.round(totalTaxable * 0.025 * 100) / 100
-    orderSgst = orderCgst
-  } else {
-    gstType = "different"
-    orderIgst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-  // Round Off = difference between the grand total rounded to the nearest rupee and the exact total
-  const orderRawTotal = totalTaxable + orderCgst + orderSgst + orderIgst
+
+  const orderCgst = totalTaxable * (halfRate / 100)
+  const orderSgst = totalTaxable * (halfRate / 100)
+  const orderIgst = totalTaxable * (numericGstRate / 100)
+  const totalGstAmount = gstSupplyType === "INTRA" ? (orderCgst + orderSgst) : orderIgst
+  const orderRawTotal = totalTaxable + totalGstAmount
   const orderRoundedTotal = Math.round(orderRawTotal)
   const orderRoundOff = orderRoundedTotal - orderRawTotal
-  console.log("[GST DEBUG] gstType:", gstType, "| CGST:", orderCgst, "| SGST:", orderSgst, "| IGST:", orderIgst, "| RoundOff:", orderRoundOff)
 
   return (
-    <div className="p-6 max-w-full space-y-6" suppressHydrationWarning>
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <SidebarTrigger className="-ml-1" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Stage 1: Order Punch</h1>
-            <p className="text-muted-foreground">Create a new order with customer and product details.</p>
-          </div>
-        </div>
-        {/* <Button variant="outline" className="gap-2 bg-transparent">
-          <FileUp className="h-4 w-4" /> Import
-        </Button> */}
-      </div>
-
+    <>
       <form onSubmit={handleSubmit} className="space-y-6" suppressHydrationWarning>
-        <Card>
-          <CardHeader>
-            <CardTitle>Order Information</CardTitle>
-            <CardDescription>Enter all order and customer details below.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="soDate">DO Date</Label>
@@ -1214,9 +1256,9 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       className="bg-muted"
                     />
                   </div>
-                  {(orderPurpose === "week-on-week" || orderPurpose === "future-period") && (
+                  {orderPurpose === "week-on-week" && (
                     <div className="space-y-2">
-                      <Label htmlFor="deliveryDate">Actual Delivery Date</Label>
+                      <Label htmlFor="deliveryDate">Expected Delivery Date</Label>
                       <Popover open={isDeliveryDatePickerOpen} onOpenChange={setIsDeliveryDatePickerOpen}>
                         <PopoverTrigger asChild>
                           <Button
@@ -1322,6 +1364,46 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                 </div>
               )}
 
+              {/* Dispatch From (Depot) is selected BEFORE Customer - the Customer
+                  list below is filtered by whichever Godown is picked here. */}
+              <div className="space-y-2">
+                <Label htmlFor="depoName">Dispatch From (Depo)</Label>
+                {isAuthLoading ? (
+                  <div className="h-9 w-full rounded-md border border-input bg-muted animate-pulse" />
+                ) : (
+                  <AsyncCombobox
+                    placeholder="Select Depo"
+                    searchPlaceholder="Search depots..."
+                    value={depoName}
+                    onValueChange={handleDepoChange}
+                    onSelectOption={(opt: any) => {
+                      if (opt?.original) {
+                        setDepots(prev => {
+                          const exists = prev.find(d => d.depot_id === opt.original.depot_id);
+                          return exists ? prev : [...prev, opt.original];
+                        });
+                      }
+                    }}
+                    fetchOptions={async (search: string, page: number) => {
+                      const res = await depotApi.getAll({ search, page, limit: 20 });
+                      let list = res.data.depots || [];
+                      const fetchedCount = list.length;
+                      const allowedDepos = user?.depo_access?.['Order Punch'] || [];
+                      if (allowedDepos.length > 0) {
+                        list = list.filter((d: any) =>
+                          allowedDepos.some((ad: string) => ad.toLowerCase() === d.depot_name.toLowerCase())
+                        );
+                      }
+                      return {
+                        options: list.map((d: any) => ({ value: d.depot_name, label: d.depot_name, original: d })),
+                        hasMore: (fetchedCount + (page - 1) * 20) < (res.data.pagination?.total || 0)
+                      };
+                    }}
+                    className="w-full"
+                  />
+                )}
+              </div>
+
               <div className="space-y-2 hidden">
                 <Label htmlFor="customerType">Customer Type</Label>
                 <Select value={customerType} onValueChange={setCustomerType}>
@@ -1341,32 +1423,22 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   <AsyncCombobox
                     placeholder={!depoName ? "Select a Godown first" : (isLoadingCustomers ? "Loading..." : "Select existing customer")}
                     disabled={!depoName}
-                    searchPlaceholder="Search customers..."
+                    searchPlaceholder="Search by name, city, state, GST, mobile or contact person..."
                     value={customerName}
                     onValueChange={setCustomerName}
                     onSelectOption={(opt: any) => {
-                      if (opt.original) {
+                      if (opt?.original) {
                         setCustomers(prev => {
                           const exists = prev.find(c => c.id === opt.original.id);
                           return exists ? prev : [...prev, opt.original];
                         });
                       }
                     }}
-                    fetchOptions={async (search: string, page: number) => {
+                    fetchOptions={(search: string, page: number) => {
                       const selectedDepot = depots.find(d => d.depot_name === depoName);
                       // Godown-gated: only customers tagged to the selected Godown, filtered
                       // server-side (not by loading every customer and filtering in the browser).
-                      const res = await customerApi.getAll({ search, page, limit: 20, depot_id: selectedDepot?.id });
-                      const list = res.data.customers || [];
-                      return {
-                        options: list.map((c: any) => ({ 
-                          value: `${c.customer_name}|${c.gstin || ''}`, // Unique value
-                          label: c.customer_name, 
-                          dropdownLabel: `${c.customer_name}${c.gstin ? ' - ' + c.gstin : ''}`,
-                          original: c 
-                        })),
-                        hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
+                      return fetchCustomerDropdownOptions(search, page, selectedDepot?.id)
                     }}
                   />
                 ) : (
@@ -1378,6 +1450,24 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   />
                 )}
               </div>
+
+              {/* Only shown once the selected customer actually has more than one
+                  saved address (its default row + customer_addresses rows). */}
+              {hasMultipleAddresses && (
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="customerAddressSelect">Address</Label>
+                  <Select value={String(selectedAddressId)} onValueChange={(v) => setSelectedAddressId(v === "default" ? "default" : Number(v))}>
+                    <SelectTrigger id="customerAddressSelect">
+                      <SelectValue placeholder="Select an address" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customerAddressOptions.map((a) => (
+                        <SelectItem key={String(a.id)} value={String(a.id)}>{a.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {gst && (
                 <div className="space-y-2 md:col-span-2">
@@ -1459,44 +1549,6 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   readOnly={sameAsCustomerAddress}
                   className={sameAsCustomerAddress ? "bg-muted" : ""}
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="depoName">Depo Name</Label>
-                {isAuthLoading ? (
-                  <div className="h-9 w-full rounded-md border border-input bg-muted animate-pulse" />
-                ) : (
-                  <AsyncCombobox
-                    placeholder="Select Depo"
-                    searchPlaceholder="Search depots..."
-                    value={depoName}
-                    onValueChange={handleDepoChange}
-                    onSelectOption={(opt: any) => {
-                      if (opt.original) {
-                        setDepots(prev => {
-                          const exists = prev.find(d => d.depot_id === opt.original.depot_id);
-                          return exists ? prev : [...prev, opt.original];
-                        });
-                      }
-                    }}
-                    fetchOptions={async (search: string, page: number) => {
-                      const res = await depotApi.getAll({ search, page, limit: 20 });
-                      let list = res.data.depots || [];
-                      const fetchedCount = list.length;
-                      const allowedDepos = user?.depo_access?.['Order Punch'] || [];
-                      if (allowedDepos.length > 0) {
-                        list = list.filter((d: any) =>
-                          allowedDepos.some((ad: string) => ad.toLowerCase() === d.depot_name.toLowerCase())
-                        );
-                      }
-                      return {
-                        options: list.map((d: any) => ({ value: d.depot_name, label: d.depot_name, original: d })),
-                        hasMore: (fetchedCount + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
-                    }}
-                    className="w-full"
-                  />
-                )}
               </div>
 
               <div className="space-y-2">
@@ -1643,6 +1695,10 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                               value={product.productName}
                               onValueChange={(val) => handleProductSelect(product.id, val)}
                               onSelectOption={(opt: any) => {
+                                if (!opt) {
+                                  handleProductSelect(product.id, "")
+                                  return
+                                }
                                 if (opt.original) {
                                   if (opt.original.sku_name) skuRegistryRef.current[opt.original.sku_name] = opt.original
                                   setSkus(prev => {
@@ -1753,8 +1809,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                             variant="ghost"
                             size="icon"
                             onClick={() => removeProduct(product.id)}
-                            disabled={products.length === 1}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8 cursor-pointer"
+                            title={products.length > 1 ? "Remove this product" : "Reset / clear product details"}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -1791,48 +1847,92 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount</p>
                           <p className="text-sm font-bold text-blue-700">
-                            ₹{products.reduce((sum, p) => {
-                              const rate = parseFloat(p.rate) || 0;
-                              const nos = parseFloat(p.nosPerMainUom) || 0;
-                              const qty = parseFloat(p.orderQty) || 0;
-                              const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2));
-                              return sum + (rateWoGst * qty);
-                            }, 0).toFixed(2)}
+                            ₹{totalTaxable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
                         </div>
                       </div>
                     )}
                     {products.length > 0 && (
-                      <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
-                        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
+                      <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xs">
+                        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Indicative)</p>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-500">GST Rate:</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              value={gstRatePercent}
+                              onChange={(e) => setGstRatePercent(e.target.value)}
+                              placeholder="5"
+                              className="w-14 h-5 px-1 text-[11px] font-mono font-bold text-blue-700 bg-white border border-slate-300 rounded text-right focus:outline-none focus:border-blue-500"
+                            />
+                            <span className="text-[10px] font-bold text-slate-600">%</span>
+                          </div>
                         </div>
-                        <div className="p-4 max-w-sm ml-auto space-y-2">
-                          {gstType === "no_address" && (
-                            <p className="text-[10px] text-amber-600 font-semibold">Add billing &amp; delivery address to calculate GST</p>
+                        <div className="p-4 max-w-sm ml-auto space-y-2 text-xs">
+                          {/* State Supply Toggle */}
+                          <div className="flex items-center justify-between bg-slate-100 p-0.5 rounded-lg text-[10px] font-semibold text-slate-600 mb-3">
+                            <button
+                              type="button"
+                              onClick={() => setGstSupplyType("INTRA")}
+                              className={cn(
+                                "flex-1 py-1 rounded text-center transition-all cursor-pointer",
+                                gstSupplyType === "INTRA"
+                                  ? "bg-white text-blue-700 shadow-xs font-bold"
+                                  : "text-slate-500 hover:text-slate-800"
+                              )}
+                            >
+                              Same State
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setGstSupplyType("INTER")}
+                              className={cn(
+                                "flex-1 py-1 rounded text-center transition-all cursor-pointer",
+                                gstSupplyType === "INTER"
+                                  ? "bg-white text-blue-700 shadow-xs font-bold"
+                                  : "text-slate-500 hover:text-slate-800"
+                              )}
+                            >
+                              Other State
+                            </button>
+                          </div>
+
+                          {gstSupplyType === "INTRA" ? (
+                            <>
+                              <div className="flex justify-between items-center">
+                                <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-slate-700">
+                                  ₹{orderCgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-slate-700">
+                                  ₹{orderSgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex justify-between items-center">
+                              <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-slate-700">
+                                ₹{orderIgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
                           )}
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${orderCgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${orderSgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${orderIgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
+                          <div className="flex justify-between items-center">
                             <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
                             <span className="font-mono font-bold text-slate-500">
                               {`${orderRoundOff >= 0 ? "+" : "-"}₹${Math.abs(orderRoundOff).toFixed(2)}`}
                             </span>
                           </div>
-                          <div className="flex justify-between items-center border-t border-slate-200 pt-2">
+                          <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
                             <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
                             <span className="font-mono font-black text-blue-700 text-sm">
-                              ₹{orderRoundedTotal.toFixed(2)}
+                              ₹{orderRoundedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </div>
                         </div>
@@ -1867,7 +1967,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     value={brokerName}
                     onValueChange={setBrokerName}
                     onSelectOption={(opt: any) => {
-                      if (opt.original) {
+                      if (opt?.original) {
                         setBrokers(prev => {
                           const exists = prev.find(b => b.id === opt.original.id);
                           return exists ? prev : [...prev, opt.original];
@@ -1910,7 +2010,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     value={salespersonName}
                     onValueChange={setSalespersonName}
                     onSelectOption={(opt: any) => {
-                      if (opt.original) {
+                      if (opt?.original) {
                         setSalespersons(prev => {
                           const exists = prev.find(s => s.id === opt.original.id);
                           return exists ? prev : [...prev, opt.original];
@@ -1944,7 +2044,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                 </div>
               )}
 
-              {orderPurpose !== "week-on-week" && (
+              {orderPurpose === "future-period" && (
                 <div className="space-y-2">
                   <Label htmlFor="deliveryDate">Expected Delivery Date</Label>
                   <Input
@@ -2009,18 +2109,18 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
 
         <div className="flex justify-end gap-4">
-          <Button variant="ghost" type="button" disabled={isSubmitting}>
-            Cancel
-          </Button>
+          {onCancel && (
+            <Button variant="ghost" type="button" disabled={isSubmitting} onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
           <Button type="submit" className="gap-2 px-8" disabled={isSubmitting || isReadOnly} title={isReadOnly ? "View Only Access" : "Save Order"}>
             <Save className="h-4 w-4" /> {isSubmitting ? "Saving..." : "Save Order"}
           </Button>
         </div>
       </form>
-    </div>
+    </>
   )
 }

@@ -9,6 +9,7 @@ type PageAccessMap = Record<string, 'view_only' | 'modify'>
 const URL_TO_PAGE: Record<string, string> = {
   '/': 'Dashboard',
   '/order-punch': 'Order Punch',
+  '/order-punch/create': 'Order Punch',
   '/pre-approval': 'Pre Approval',
   '/approval-of-order': 'Approval of Order',
   '/dispatch-material': 'Dispatch Planning',
