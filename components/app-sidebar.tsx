@@ -223,6 +223,7 @@ export function AppSidebar() {
               style={{ color: "oklch(0.62 0.12 25)" }}
               onClick={async () => {
                 try {
+                  await flushAllColumnPrefs()
                   await userApi.logout()
                 } catch (e) {
                   console.error("Failed to call logout api:", e)

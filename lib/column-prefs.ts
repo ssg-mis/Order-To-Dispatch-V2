@@ -18,12 +18,17 @@
  * logged-in user, everything degrades gracefully to localStorage-only.
  */
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient, QueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/hooks/use-auth"
 import { userApi } from "@/lib/api-service"
 
-export type StagePrefs = { visible?: string[]; order?: string[] }
+let _globalQueryClient: QueryClient | null = null;
+
+export type SortConfig = { field: string; dir: "asc" | "desc" }
+export type StagePrefs = { visible?: string[]; order?: string[]; sort?: SortConfig | null }
 export type ColumnPrefsMap = Record<string, StagePrefs>
+type PrefField = "visible" | "order" | "sort"
+type PrefValue = string[] | SortConfig | null
 
 /**
  * Loads the current user's column-prefs map. Shared (deduped) across hooks via
@@ -32,6 +37,11 @@ export type ColumnPrefsMap = Record<string, StagePrefs>
 export function useColumnPrefsServer() {
   const { user, isLoading } = useAuth()
   const userId = user?.id
+  const queryClient = useQueryClient()
+  
+  if (typeof window !== "undefined") {
+    _globalQueryClient = queryClient
+  }
 
   const query = useQuery({
     queryKey: ["column-prefs", userId],
@@ -58,7 +68,7 @@ export function useColumnPrefsServer() {
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
-const pending = new Map<string, { userId: number; stageKey: string; field: "visible" | "order"; value: string[] }>()
+const pending = new Map<string, { userId: number; stageKey: string; field: PrefField; value: PrefValue }>()
 const DEBOUNCE_MS = 600
 
 /**
@@ -66,7 +76,7 @@ const DEBOUNCE_MS = 600
  * and clears its timer/queue entry. Used both by the normal debounce timeout
  * and by the unload/visibility flush below.
  */
-function flushSave(key: string, keepalive: boolean): void {
+export function flushSave(key: string, keepalive: boolean): Promise<any> | void {
   const entry = pending.get(key)
   if (!entry) return
   pending.delete(key)
@@ -75,7 +85,7 @@ function flushSave(key: string, keepalive: boolean): void {
     clearTimeout(timer)
     timers.delete(key)
   }
-  userApi
+  return userApi
     .saveColumnPrefs(entry.userId, entry.stageKey, { [entry.field]: entry.value }, { keepalive })
     .catch(() => {})
 }
@@ -87,11 +97,28 @@ function flushSave(key: string, keepalive: boolean): void {
 export function debouncedSaveColumnPref(
   userId: number,
   stageKey: string,
-  field: "visible" | "order",
-  value: string[],
+  field: PrefField,
+  value: PrefValue,
 ): void {
   const key = `${userId}:${stageKey}:${field}`
   pending.set(key, { userId, stageKey, field, value })
+  
+  // Optimistically update the React Query cache so client-side navigation
+  // doesn't hydrate a stale server value over our correct localStorage value.
+  if (_globalQueryClient) {
+    _globalQueryClient.setQueryData(["column-prefs", userId], (old: ColumnPrefsMap | undefined) => {
+      const current = old || {}
+      const stagePrefs = current[stageKey] || {}
+      return {
+        ...current,
+        [stageKey]: {
+          ...stagePrefs,
+          [field]: value
+        }
+      }
+    })
+  }
+
   const existing = timers.get(key)
   if (existing) clearTimeout(existing)
   timers.set(key, setTimeout(() => flushSave(key, false), DEBOUNCE_MS))
@@ -102,12 +129,14 @@ export function debouncedSaveColumnPref(
 // value that then overwrites the correct localStorage state on next load's
 // hydration. Flush any pending saves immediately (with keepalive so the
 // request survives the page teardown) whenever the page is about to go away.
+export const flushAllColumnPrefs = async () => {
+  const promises = Array.from(pending.keys()).map(key => flushSave(key, true))
+  await Promise.all(promises)
+}
+
 if (typeof window !== "undefined") {
-  const flushAll = () => {
-    for (const key of Array.from(pending.keys())) flushSave(key, true)
-  }
-  window.addEventListener("pagehide", flushAll)
+  window.addEventListener("pagehide", flushAllColumnPrefs)
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") flushAll()
+    if (document.visibilityState === "hidden") flushAllColumnPrefs()
   })
 }
