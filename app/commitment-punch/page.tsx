@@ -102,6 +102,15 @@ const LEDGER_OPTIONS = [
   "Other Charges",
 ]
 
+const PAYMENT_TERMS_LABEL: Record<string, string> = {
+  advance: "Advance",
+  "7days": "7 Days After Delivery",
+  delivery: "On Delivery",
+}
+
+const formatPaymentTerms = (val?: string | null) =>
+  val ? (PAYMENT_TERMS_LABEL[val.toLowerCase()] ?? val) : "—"
+
 // ─── Constants ────────────────────────────────────────────────
 
 const OIL_TYPES = ["Palm Oil", "Soya Oil", "Rice Oil"]
@@ -1833,7 +1842,7 @@ export default function CommitmentPunchPage() {
                   value={partyName}
                   onValueChange={setPartyName}
                   onSelectOption={(opt: any) => {
-                    if (opt.original) {
+                    if (opt?.original) {
                       setCustomerList((prev: any[]) => {
                         const exists = prev.find((c: any) => c.id === opt.original.id)
                         return exists ? prev : [...prev, opt.original]
@@ -2100,7 +2109,7 @@ export default function CommitmentPunchPage() {
               </p>
               <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-amber-900">
                 <span><span className="font-semibold">Order Through:</span> {processSelectedCommitment.order_through || '—'}</span>
-                <span><span className="font-semibold">Payment Terms:</span> {processSelectedCommitment.payment_terms || '—'}</span>
+                <span><span className="font-semibold">Payment Terms:</span> {formatPaymentTerms(processSelectedCommitment.payment_terms)}</span>
                 <span><span className="font-semibold">Transport:</span> {processSelectedCommitment.transport_type === 'others' ? 'Ex-Depot' : processSelectedCommitment.transport_type === 'self' ? 'FOR' : (processSelectedCommitment.transport_type || '—')}</span>
                 <span><span className="font-semibold">Depot:</span> {processSelectedCommitment.depot_name || '—'}</span>
                 {processSelectedCommitment.broker_name && <span><span className="font-semibold">Broker:</span> {processSelectedCommitment.broker_name}</span>}
@@ -2315,9 +2324,9 @@ export default function CommitmentPunchPage() {
                 />
               </div>
 
-              {/* Actual Delivery Date - Calendar with in-range highlight */}
+              {/* Expected Delivery Date - Calendar with in-range highlight */}
               <div className="space-y-3">
-                <Label>Actual Delivery Date</Label>
+                <Label>Expected Delivery Date</Label>
                 <Popover open={isActualDeliveryPickerOpen} onOpenChange={setIsActualDeliveryPickerOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -2899,24 +2908,29 @@ export default function CommitmentPunchPage() {
                         </button>
                       </div>
 
-                      <div className="flex justify-between items-center">
-                        <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
-                        <span className="font-mono font-bold text-slate-700">
-                          {gstSupplyType === "INTRA" ? `₹${cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
-                        <span className="font-mono font-bold text-slate-700">
-                          {gstSupplyType === "INTRA" ? `₹${sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
-                        <span className="font-mono font-bold text-slate-700">
-                          {gstSupplyType === "INTER" ? `₹${igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                        </span>
-                      </div>
+                      {gstSupplyType === "INTRA" ? (
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
+                            <span className="font-mono font-bold text-slate-700">
+                              ₹{cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
+                            <span className="font-mono font-bold text-slate-700">
+                              ₹{sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
+                          <span className="font-mono font-bold text-slate-700">
+                            ₹{igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
                         <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
@@ -2950,104 +2964,82 @@ export default function CommitmentPunchPage() {
           DETAILS POPUP (PO Raised / Delivery / PO Pending)
       ═══════════════════════════════════════════════════════ */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent showCloseButton={false} className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader className="pr-6">
-            <DialogTitle>
-              {detailsType === "raised" ? "PO Raised Details" : detailsType === "delivered" ? "Delivery Details" : "PO Pending Details"}
-            </DialogTitle>
-            <DialogDescription>
-              Breakdown for commitment <span className="font-semibold">{detailsRow?.commitment_no}</span>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-[1250px] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pr-8 pb-3 border-b border-slate-200">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <DialogTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
+                {detailsType === "raised" ? "PO Raised Details" : detailsType === "delivered" ? "Delivery Details" : "PO Pending Details"}
+              </DialogTitle>
+              <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                {detailsRow?.commitment_no}
+              </span>
+              {detailsRow?.commitment_date && (
+                <span className="text-xs font-medium text-slate-500">
+                  {new Date(detailsRow.commitment_date).toLocaleDateString("en-IN")}
+                </span>
+              )}
+            </div>
+            <DialogDescription className="text-xs text-slate-500 mt-0.5">
+              Breakdown of purchase orders and dispatches linked to this commitment.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 py-1">
+          {/* ── Compact Metadata & Metric Summary Strip ── */}
+          <div className="flex flex-wrap items-center gap-x-5 sm:gap-x-7 gap-y-2 p-2.5 px-3.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-xs w-fit max-w-full">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
+              <p className="text-xs font-bold text-slate-800 mt-0.5" title={detailsRow?.party_name}>
+                {detailsRow?.party_name || "—"}
+              </p>
+            </div>
 
-            {/* Commitment Info Strip — same style as Process Commitment */}
-            {detailsRow && (
-              <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 grid grid-cols-1 gap-3 text-sm sm:flex sm:flex-wrap sm:gap-6">
-                <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Company Name</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.party_name || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Commitment No.</p>
-                  <p className="font-mono font-semibold text-blue-700 mt-0.5">{detailsRow.commitment_no}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Oil Type</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.oil_type || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total Qty</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{detailsRow.quantity} {detailsRow.unit}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">
-                    {detailsType === "raised" ? "Total PO Raised" : detailsType === "delivered" ? "Total Delivered" : "Total PO Pending"}
-                  </p>
-                  <p className={cn("font-bold mt-0.5", detailsType === "raised" ? "text-blue-700" : detailsType === "delivered" ? "text-purple-700" : "text-amber-700")}>
-                    {isLoadingDetails ? "..." : Number(
-                      detailsType === "raised" ? detailsData?.total_processed_mt :
-                        detailsType === "delivered" ? detailsData?.total_delivered_mt :
-                          detailsData?.total_pending_mt || 0
-                    ).toFixed(4)} MT
-                  </p>
-                </div>
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
 
-                {detailsData?.total_changed_count !== undefined && (detailsData.total_changed_count > 0) && (
-                  <div>
-                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Plan Deviations</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                        ⚠️ {detailsData.total_changed_count} Value Change(s)
-                      </span>
-                    </div>
-                  </div>
-                )}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Oil Type</p>
+              <div className="mt-0.5">
+                <Badge variant="outline" className="text-[11px] font-semibold bg-white border-slate-200 text-slate-700 py-0 h-5">
+                  {detailsRow?.oil_type || "—"}
+                </Badge>
               </div>
-            )}
+            </div>
 
-            {/* Change Breakdown Audit Summary Pill Bar */}
-            {detailsData && (detailsData.total_changed_count || 0) > 0 && (
-              <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 space-y-1">
-                <p className="font-bold flex items-center gap-1.5">
-                  <Info className="h-4 w-4 text-amber-600" />
-                  Planned vs Actual Change Tracking Report
-                </p>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {detailsData.changes_breakdown?.payment_terms > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Payment Terms: {detailsData.changes_breakdown.payment_terms} change(s)
-                    </span>
-                  )}
-                  {detailsData.changes_breakdown?.transport_type > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Transport Type: {detailsData.changes_breakdown.transport_type} change(s)
-                    </span>
-                  )}
-                  {detailsData.changes_breakdown?.order_through > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Channel (Through): {detailsData.changes_breakdown.order_through} change(s)
-                    </span>
-                  )}
-                  {detailsData.changes_breakdown?.depot > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Depot: {detailsData.changes_breakdown.depot} change(s)
-                    </span>
-                  )}
-                  {detailsData.changes_breakdown?.broker > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Broker: {detailsData.changes_breakdown.broker} change(s)
-                    </span>
-                  )}
-                  {detailsData.changes_breakdown?.salesperson > 0 && (
-                    <span className="bg-white px-2 py-0.5 rounded border border-amber-300 font-medium text-amber-800">
-                      Salesperson: {detailsData.changes_breakdown.salesperson} change(s)
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Qty</p>
+              <p className="font-mono text-xs font-bold text-slate-900 mt-0.5">
+                {Number(detailsData?.commitment?.commitment?.quantity ?? detailsRow?.quantity ?? 0).toFixed(4)} MT
+              </p>
+            </div>
+
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
+                {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}
+              </p>
+              <p className="font-mono text-xs font-bold text-blue-700 mt-0.5">
+                {isLoadingDetails ? "..." : Number(
+                  detailsType === "raised" ? detailsData?.total_processed_mt :
+                  detailsType === "delivered" ? detailsData?.total_delivered_mt :
+                  detailsData?.total_pending_mt || 0
+                ).toFixed(4)} MT
+              </p>
+            </div>
+
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Pending Qty</p>
+              <p className="font-mono text-xs font-bold text-amber-800 mt-0.5">
+                {Number(detailsRow?.remaining_qty || 0).toFixed(4)} MT
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4 mt-1">
+
 
             {/* Orders Breakdown Table */}
             {isLoadingDetails ? (
@@ -3100,16 +3092,18 @@ export default function CommitmentPunchPage() {
                       ) : (
                         <tr>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Raised On</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[110px]">PO No.</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Item Name</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">SKU</th>
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[90px]">Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[120px]">PO Raised (MT)</th>
+                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Weight (MT)</th>
                           <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Rate</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Category</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Order Type</th>
+                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Depo</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[130px]">Payment Terms</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Plan Deviations</th>
                           <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Remarks</th>
                         </tr>
                       )}
@@ -3203,6 +3197,7 @@ export default function CommitmentPunchPage() {
                         return (
                           <tr key={d.id} className="hover:bg-slate-50 transition-colors">
                             <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
+                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</td>
                             <td className="py-2.5 px-3 whitespace-nowrap">
                               {d.order_no ? (
                                 <Link
@@ -3215,63 +3210,78 @@ export default function CommitmentPunchPage() {
                                 <span className="text-slate-400">—</span>
                               )}
                             </td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</td>
                             <td className="py-2.5 px-3 whitespace-nowrap">
                               {d.po_upload_copy ? (
                                 <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
                                   {d.po_no || "View PO"}
                                 </a>
                               ) : (
-                                <span className="font-mono text-xs text-slate-700">
-                                  {d.po_no || "—"}
-                                </span>
+                                <span className="font-mono text-xs text-slate-700">{d.po_no || "—"}</span>
                               )}
                             </td>
                             <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
                             <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{d.sku || "—"}</td>
                             <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900">
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900 min-w-[110px]">
                               {mt != null ? Number(mt).toFixed(4) : "—"}
                             </td>
                             <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap font-semibold">{d.sku_rate ? `₹${Number(d.sku_rate).toLocaleString("en-IN")}` : "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.payment_terms || "—"}</td>
-                            <td className="py-2.5 px-3 text-xs whitespace-nowrap">
-                              {d.changed_fields_count > 0 ? (
-                                <div className="group relative inline-block cursor-help">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition-colors">
-                                    ⚠️ {d.changed_fields_count} field(s) changed
-                                  </span>
-                                  {/* Production Grade Diff Tooltip */}
-                                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 min-w-[220px] bg-slate-900 text-white rounded-lg p-2.5 shadow-xl text-xs space-y-1.5 pointer-events-none">
-                                    <p className="font-bold text-[11px] text-amber-400 border-b border-slate-700 pb-1">Planned vs Actual Diff</p>
-                                    {d.field_diffs?.map((diff: any, i: number) => (
-                                      <div key={i} className="text-[11px]">
-                                        <span className="text-slate-300 font-semibold">{diff.field}: </span>
-                                        <span className="line-through text-red-300 mr-1">{diff.original || "None"}</span>
-                                        <span className="text-emerald-400 font-bold">→ {diff.changed}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 text-xs font-mono">—</span>
-                              )}
-                            </td>
+                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.order_category || "—"}</td>
+                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.order_type || "—"}</td>
+                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.actual_depot_name || "—"}</td>
+                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{formatPaymentTerms(d.payment_terms)}</td>
                             <td className="py-2.5 px-3 text-xs text-slate-500 font-normal italic whitespace-nowrap max-w-[160px] truncate" title={d.remarks}>{d.remarks || "—"}</td>
                           </tr>
                         )
                       })}
                     </tbody>
-                    <tfoot className="bg-slate-50 border-t border-slate-200">
-                      <tr>
-                        <td colSpan={detailsType === "delivered" ? 11 : detailsType === "pending" ? 13 : 7} className="py-3 px-3 text-xs font-bold text-slate-700 text-right whitespace-nowrap">
-                          Total {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}:
-                        </td>
-                        <td className="py-3 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900">
-                          {Number(detailsType === "raised" ? detailsData.total_processed_mt : detailsType === "delivered" ? detailsData.total_delivered_mt : detailsData.total_pending_mt || 0).toFixed(4)} MT
-                        </td>
-                        <td colSpan={detailsType === "delivered" ? 1 : detailsType === "pending" ? 1 : 4} />
-                      </tr>
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-300">
+                      {detailsType === "raised" && (() => {
+                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
+                        const totalMt = Number(detailsData.total_processed_mt || 0)
+                        return (
+                          <tr className="text-xs font-bold">
+                            <td colSpan={6} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total PO Raised:</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-900 whitespace-nowrap">{totalMt.toFixed(4)} MT</td>
+                            <td colSpan={6} />
+                          </tr>
+                        )
+                      })()}
+
+                      {detailsType === "delivered" && (() => {
+                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
+                        const totalMt = Number(detailsData.total_delivered_mt || 0)
+                        const totalInvoice = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.invoice_amount) || 0), 0)
+                        return (
+                          <tr className="text-xs font-bold">
+                            <td colSpan={10} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total Delivered:</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-900 whitespace-nowrap">{totalMt.toFixed(4)} MT</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-emerald-700 whitespace-nowrap">₹{totalInvoice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                        )
+                      })()}
+
+                      {detailsType === "pending" && (() => {
+                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
+                        const totalDeliveredBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.delivered_box) || 0), 0)
+                        const totalPendingBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.pending_box) || 0), 0)
+                        const totalMt = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_weight_mt) || 0), 0)
+                        const totalDeliveredMt = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.delivered_mt) || 0), 0)
+                        const totalPendingMt = Number(detailsData.total_pending_mt || 0)
+                        return (
+                          <tr className="text-xs font-bold">
+                            <td colSpan={8} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total PO Pending:</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 whitespace-nowrap">{totalDeliveredBox.toLocaleString("en-IN")}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-amber-700 whitespace-nowrap">{totalPendingBox.toLocaleString("en-IN")}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalMt.toFixed(4)}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 whitespace-nowrap">{totalDeliveredMt.toFixed(4)}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-amber-700 whitespace-nowrap">{totalPendingMt.toFixed(4)} MT</td>
+                          </tr>
+                        )
+                      })()}
                     </tfoot>
                   </table>
                 </div>

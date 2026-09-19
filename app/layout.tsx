@@ -79,6 +79,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/system-flow": "System Flow",
         "/commitment-punch": "Commitment Punch",
         "/order-punch": "Order Punch",
+        "/order-punch/create": "Order Punch",
         "/pre-approval": "Pre Approval",
         "/approval-of-order": "Approval of Order",
         "/dispatch-material": "Dispatch Planning",
@@ -103,7 +104,11 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         return !!(pageAccess as Record<string, string>)[permissionName]
       }
 
+      // Order Punch's row-detail route is dynamic (/order-punch/[id]) - the map
+      // above only matches exact paths, so it's gated by prefix instead of a
+      // literal entry (the app's first dynamic detail route).
       const requiredPermission = urlToPermission[pathname]
+        ?? (pathname.startsWith("/order-punch/") && pathname !== "/order-punch/create" ? "Order Punch" : undefined)
       if (requiredPermission && !hasAccess(requiredPermission)) {
         console.warn(`Unauthorized access attempt to ${pathname}`)
         const firstAvailable = Object.entries(urlToPermission).find(([, perm]) => hasAccess(perm))

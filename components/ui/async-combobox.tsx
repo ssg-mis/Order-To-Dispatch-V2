@@ -179,9 +179,15 @@ export function AsyncCombobox({
                   key={option.value}
                   value={option.value}
                   onSelect={(currentValue) => {
+                    const isDeselect = currentValue === value
                     const selected = options.find(o => o.value === currentValue)
-                    onValueChange?.(currentValue === value ? "" : currentValue)
-                    if (selected) onSelectOption?.(selected)
+                    onValueChange?.(isDeselect ? "" : currentValue)
+                    if (isDeselect) {
+                      onSelectOption?.(null)
+                      setSelectedLabel("")
+                    } else if (selected) {
+                      onSelectOption?.(selected)
+                    }
                     setOpen(false)
                   }}
                 >

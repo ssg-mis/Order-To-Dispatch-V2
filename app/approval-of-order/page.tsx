@@ -260,6 +260,7 @@ export default function CommitmentReviewPage() {
       order.order_confirmation_with_customer,
     ];
 
+    if (order.overall_status_of_order === "Required Modification") return "Required Modification";
     if (approvalChecks.some(isRejectedValue)) return "Rejected";
     if (order.overall_status_of_order === true || String(order.overall_status_of_order).toLowerCase().trim() === "true") return "Approved";
     return "Completed";
@@ -291,6 +292,11 @@ export default function CommitmentReviewPage() {
     setIsConfirming(true)
     try {
       const hasRejection = Object.values(checklistValues).includes("reject")
+      // A third Stage 3 outcome (Order Punch's Modify flow): the overall
+      // verdict itself, distinct from any individual checklist item being
+      // rejected - takes precedence over hasRejection since it's the actual
+      // decision the approver picked.
+      const isRequiredModification = checklistValues.overall === "modify"
       const timestamp = new Date().toISOString()
 
       const successfulApprovals: any[] = []
@@ -327,8 +333,9 @@ export default function CommitmentReviewPage() {
           if (product?.id) {
             // Prepare approval data for backend (v2-native camelCase)
             const approvalData = {
-              // Auto-reject if ANY checklist item is 'reject'
-              overallStatus: !hasRejection && checklistValues.overall === "approve",
+              // Required Modification (explicit overall verdict) takes precedence;
+              // otherwise auto-reject if ANY checklist item is 'reject'.
+              overallStatus: isRequiredModification ? "Required Modification" : (!hasRejection && checklistValues.overall === "approve"),
               rateIsRightlyAsPerCurrentMarketRate: checklistValues.rate === "approve",
               weAreDealingInOrderedSku: checklistValues.sku === "approve",
               partyCreditStatus: checklistValues.credit === "approve",
@@ -1140,6 +1147,16 @@ export default function CommitmentReviewPage() {
                             Approve
                           </Label>
                         </div>
+                        {/* Required Modification is only a valid verdict for the
+                            overall decision, not the individual sub-checks. */}
+                        {item.id === "overall" && (
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="modify" id={`${item.id}-modify`} className="text-amber-600" />
+                            <Label htmlFor={`${item.id}-modify`} className="text-sm font-medium text-amber-600 cursor-pointer">
+                              Required Modification
+                            </Label>
+                          </div>
+                        )}
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="reject" id={`${item.id}-no`} className="text-red-600" />
                           <Label htmlFor={`${item.id}-no`} className="text-sm font-medium text-red-600 cursor-pointer">
@@ -1155,14 +1172,19 @@ export default function CommitmentReviewPage() {
                 <Button
                   onClick={handleConfirmCommitment}
                   disabled={isConfirming || isReadOnly}
-                  className="w-full min-w-0 px-8 h-11 text-sm sm:text-base font-bold shadow-lg shadow-blue-100 transition-all hover:scale-[1.01] active:scale-[0.99] sm:w-auto"
-                  variant={Object.values(checklistValues).includes("reject") ? "destructive" : "default"}
+                  className={cn(
+                    "w-full min-w-0 px-8 h-11 text-sm sm:text-base font-bold shadow-lg shadow-blue-100 transition-all hover:scale-[1.01] active:scale-[0.99] sm:w-auto",
+                    checklistValues.overall === "modify" && "bg-amber-500 hover:bg-amber-600 shadow-amber-100"
+                  )}
+                  variant={checklistValues.overall === "modify" ? "default" : Object.values(checklistValues).includes("reject") ? "destructive" : "default"}
                 >
                   {isConfirming
                     ? "Processing..."
-                    : Object.values(checklistValues).includes("reject")
-                      ? "Reject & Save to History"
-                      : `Approve ${dialogSelectedProducts.length} Selected Item(s)`}
+                    : checklistValues.overall === "modify"
+                      ? "Send Back for Modification"
+                      : Object.values(checklistValues).includes("reject")
+                        ? "Reject & Save to History"
+                        : `Approve ${dialogSelectedProducts.length} Selected Item(s)`}
                 </Button>
               </DialogFooter>
             </DialogContent>
