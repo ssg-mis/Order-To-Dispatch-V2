@@ -714,7 +714,7 @@ export default function MaterialReceiptPage() {
   return (
     <WorkflowStageShell
       partyNames={customerNames}
-      title="Stage 12: Confirm Material Receipt"
+      title="Stage 13: Confirm Material Receipt"
       description="Confirm material receipt and report any damages."
       searchPlaceholder="Search DO Number..."
       pendingCount={pendingData?.pagination?.total || 0}

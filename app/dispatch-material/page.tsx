@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "rea
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -90,6 +90,9 @@ export default function DispatchMaterialPage() {
   const [skus, setSkus] = useState<any[]>([])
   const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false)
   const isSavingTransferRef = useRef(false)
+  const [transportingExpenses, setTransportingExpenses] = useState<Record<string, string>>({})
+  const [gstRates, setGstRates] = useState<Record<string, string>>({})
+  const [isIgst, setIsIgst] = useState<Record<string, boolean>>({})
 
   const getSkuWeight = (productName: string): number => {
     if (!productName || skus.length === 0) return 0
@@ -383,50 +386,21 @@ export default function DispatchMaterialPage() {
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
-    // { id: "processId", label: "Manual Sauda No." },
-    { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
-    { id: "orderType", label: "Order Type" },
-    { id: "customerType", label: "Customer Type" },
-    { id: "startDate", label: "Start Date" },
-    { id: "endDate", label: "End Date" },
-    { id: "deliveryDate", label: "Delivery Date" },
+    { id: "processId", label: "Manual Sauda No." },
     { id: "customerName", label: "Customer Name" },
-    { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr" },
-    { id: "rateOfMaterial", label: "Rate of Material" },
-    { id: "rate", label: "Rate" },
-    { id: "productName", label: "Product Name" },
-    { id: "uom", label: "UOM" },
-    { id: "orderQty", label: "Order Qty" },
-    { id: "altUom", label: "Alt UOM" },
-    { id: "altQty", label: "Alt Qty (Kg)" },
-    { id: "skuName", label: "SKU Name" },
-    { id: "approvalQty", label: "Approval Qty" },
-    { id: "qtyToDispatch", label: "Qty to Dispatch" },
-    { id: "deliveryFrom", label: "Delivery From" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
-    { id: "transportType", label: "Type of Transporting" },
-    { id: "contactPerson", label: "Customer Contact Person Name" },
-    { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
-    { id: "address", label: "Customer Address" },
-    { id: "paymentTerms", label: "Payment Terms" },
-    { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
-    { id: "isBroker", label: "Is this order Through Broker" },
-    { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
-    { id: "uploadSo", label: "Upload DO" },
-    { id: "orderPunchRemarks", label: "Order Punch Remarks" },
-    { id: "remark", label: "Remark" },
-    { id: "revertSecurityRemarks", label: "Revert(Security-Guard) Remarks" },
-    { id: "revertDispatchRemarks", label: "Revert(Dispatch-Planning) Remarks" },
-    { id: "revertPlanningRemarks", label: "Revert(Pre-Approval) Remarks" },
-    { id: "status", label: "Status" },
+    { id: "totalQtyBox", label: "Total Qty (Box)" },
+    { id: "totalQtyKgs", label: "Total Qty (KGS)" },
+    { id: "totalOrderAmount", label: "Total Order Amount" },
+    { id: "deliveryFrom", label: "Dispatch from" },
+    { id: "remarks", label: "Remarks" },
+    { id: "brokerName", label: "Broker" },
+    { id: "punchBy", label: "Order Punch By" },
+    { id: "actualDatetime", label: "Actual Datetime" },
   ]
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
-    "dispatch-material",
-    ["partySoDate", "orderNo", "processId", "customerName", "productName", "transportType", "orderPunchRemarks", "revertDispatchRemarks", "status"]
+    "dispatch-material-columns",
+    ["partySoDate", "orderNo", "processId", "customerName", "totalQtyBox", "totalQtyKgs", "totalOrderAmount", "deliveryFrom", "remarks", "brokerName", "punchBy", "actualDatetime"]
   )
   const [columnOrder, setColumnOrder] = useColumnOrder("dispatch-material", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = columnOrder
@@ -650,6 +624,7 @@ export default function DispatchMaterialPage() {
         try {
           if (orderId) {
             const tData = dispatchDetails[rowKey]?.transferData;
+            const groupId = selectedItems[0]?._rowKey || 'default';
             const dispatchData = {
               dispatchFrom: deliveryVal,
               dispatchQty: dispatchQty,
@@ -659,7 +634,10 @@ export default function DispatchMaterialPage() {
               billAddress: tData?.billTo?.address || item.bill_address || null,
               shipCompanyName: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
               shipAddress: tData?.shipTo?.address || item.ship_address || null,
-              freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0)
+              freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0),
+              transportingExpense: parseFloat(transportingExpenses[groupId]) || 0,
+              gstRate: parseFloat(gstRates[groupId] || "5") || 0,
+              isIgst: isIgst[groupId] || false
             };
 
             const response = await dispatchPlanningApi.submit(orderId, dispatchData);
@@ -691,9 +669,9 @@ export default function DispatchMaterialPage() {
         await refetchPending();
         queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
 
-        // setTimeout(() => {
-        //   router.push("/actual-dispatch")
-        // }, 1500)
+        setTimeout(() => {
+          router.push("/actual-dispatch")
+        }, 1500)
       }
 
       // Split failures: stale-write conflicts (row already processed/moved by another
@@ -964,7 +942,7 @@ export default function DispatchMaterialPage() {
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
 
-    filteredPendingOrders.forEach((order: any) => {
+    filteredPendingOrders.forEach((order: any, index: number) => {
       const orderId = order.order_no || order.orderNo || "DO/26-27/0001"
       // Group by Base DO (e.g. DO/26-27/0001 from DO/26-27/0001A)
       const baseDoMatch = orderId.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
@@ -1034,7 +1012,7 @@ export default function DispatchMaterialPage() {
       // Add product to the group
       const productWithMeta = {
         ...order,
-        _rowKey: `${baseDo}-${order.id}`,
+        _rowKey: `${baseDo}-${order.id}-${index}`,
         id: order.id,
         customerName,
         customer_name: customerName,
@@ -1055,6 +1033,32 @@ export default function DispatchMaterialPage() {
 
     return Object.values(grouped).map((group: any) => {
       const firstOrderDetails = Object.values(group._ordersMap)[0] as any || {};
+      const allProds = group._allProducts || [];
+
+      // Calculate totals
+      let totalQtyBox = 0;
+      let totalQtyKgs = 0;
+      let totalOrderAmount = 0;
+
+      allProds.forEach((p: any) => {
+        const qty = parseFloat(p.orderQty) || 0;
+        const rate = parseFloat(p.rate) || 0;
+        totalOrderAmount += qty * rate;
+        
+        const uom = String(p.uom || "").toUpperCase();
+        if (["BOX", "TIN", "CARTON", "PCS", "JAR", "BOTTLE"].some(u => uom.includes(u))) {
+          totalQtyBox += qty;
+        } else if (uom.includes("KG")) {
+          totalQtyKgs += qty;
+        }
+        
+        // Also add alt qty if exists
+        const altQty = parseFloat(p.altQty || p.alt_qty) || 0;
+        const altUom = String(p.altUom || p.alt_uom || "").toUpperCase();
+        if (["BOX", "TIN", "CARTON", "PCS"].some(u => altUom.includes(u))) totalQtyBox += altQty;
+        else if (altUom.includes("KG")) totalQtyKgs += altQty;
+      });
+
       return {
         ...group,
         ...firstOrderDetails, // Flatten all detail fields into the group object
@@ -1062,8 +1066,15 @@ export default function DispatchMaterialPage() {
         processId: group.processid || group._allProducts[0]?.processid || "—",
         transportType: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(t => t && t !== "—").join(", ") || "—",
         orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
+        remarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
         uploadSo: Object.values(group._ordersMap).map((o: any) => o.uploadSo).find(Boolean) || null,
-        _productCount: group._allProducts.length
+        _productCount: group._allProducts.length,
+        totalQtyBox: totalQtyBox > 0 ? totalQtyBox.toLocaleString('en-IN') : "—",
+        totalQtyKgs: totalQtyKgs > 0 ? totalQtyKgs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—",
+        totalOrderAmount: totalOrderAmount > 0 ? "₹" + totalOrderAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—",
+        deliveryFrom: firstOrderDetails.depoName || "—",
+        punchBy: firstOrderDetails.order_punch_user || "—",
+        actualDatetime: firstOrderDetails.actual_3 ? new Date(firstOrderDetails.actual_3).toLocaleString('en-IN') : (firstOrderDetails.timestamp ? new Date(firstOrderDetails.timestamp).toLocaleString('en-IN') : "—")
       };
     }).filter(group => {
       if (group._productCount <= 0) return false;
@@ -1196,14 +1207,6 @@ export default function DispatchMaterialPage() {
       }
     >
       <div className="flex flex-col justify-end gap-2 sm:flex-row">
-        <Button
-          onClick={handleOpenDialog}
-          disabled={selectedItems.length === 0}
-          className="w-full sm:w-auto"
-        >
-          {`Dispatch Selected (${selectedItems.length})`}
-        </Button>
-
         {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1241,13 +1244,6 @@ export default function DispatchMaterialPage() {
         <Table className="hidden md:table">
           <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
             <TableRow>
-              <TableHead className="w-12 text-center">
-                <Checkbox
-                  checked={displayRows.length > 0 && selectedItems.length === displayRows.length}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label="Select all"
-                />
-              </TableHead>
               <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                 {orderedVisibleCols.map((col) => (
                   <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
@@ -1255,14 +1251,12 @@ export default function DispatchMaterialPage() {
                   </SortableTableHead>
                 ))}
               </ColumnDragProvider>
-
             </TableRow>
           </TableHeader>
           <TableBody>
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                  <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                   {orderedVisibleCols.map(col => (
                     <TableCell key={col.id} className="py-4">
                       <div className={cn(
@@ -1278,14 +1272,16 @@ export default function DispatchMaterialPage() {
                 const isSelected = selectedItems.some(i => i._rowKey === row._rowKey);
 
                 return (
-                  <TableRow key={row._rowKey} className={isSelected ? "bg-blue-50/50" : ""}>
-                    <TableCell className="text-center">
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelectItem(row)}
-                      />
-                    </TableCell>
-
+                  <TableRow 
+                    key={row._rowKey} 
+                    className="cursor-pointer hover:bg-slate-50 transition-colors"
+                    onClick={() => {
+                      setSelectedItems([row]);
+                      setDialogSelectedProducts(row._allProducts.map((p: any) => p._rowKey));
+                      setExpandedOrders(Object.keys(row._ordersMap));
+                      setIsDialogOpen(true);
+                    }}
+                  >
                     {orderedVisibleCols.map((col) => (
                       <TableCell key={col.id} className={cn(
                         "whitespace-nowrap text-center text-xs",
@@ -1315,12 +1311,39 @@ export default function DispatchMaterialPage() {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={visibleColumns.length} className="text-center py-8 text-muted-foreground">
                   No orders pending for dispatch
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
+          {displayRows.length > 0 && (
+            <TableFooter className="bg-slate-50 sticky bottom-0 z-10 border-t-2 border-slate-200">
+              <TableRow className="hover:bg-slate-50">
+                {orderedVisibleCols.map((col, index) => {
+                  if (index === 0) {
+                    return <TableCell key={col.id} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</TableCell>
+                  }
+                  if (col.id === 'totalQtyBox') {
+                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => acc + (parseFloat(row.totalQtyBox) || 0), 0);
+                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum}</TableCell>
+                  }
+                  if (col.id === 'totalQtyKgs') {
+                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => acc + (parseFloat(row.totalQtyKgs) || 0), 0);
+                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum.toFixed(2)}</TableCell>
+                  }
+                  if (col.id === 'totalOrderAmount') {
+                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => {
+                      const val = String(row.totalOrderAmount || "0").replace(/[^0-9.-]+/g, "");
+                      return acc + (parseFloat(val) || 0);
+                    }, 0);
+                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                  }
+                  return <TableCell key={col.id} />
+                })}
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
         <div className="space-y-3 p-3 md:hidden">
           {isPendingLoading && pendingOrders.length === 0 ? (
@@ -1615,11 +1638,50 @@ export default function DispatchMaterialPage() {
                           Consolidated Product List - {custName}
                         </h3>
                       </div>
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                        <Table className="hidden md:table">
-                          <TableHeader className="bg-slate-50">
-                            <TableRow>
-                              <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                      <div className="border border-slate-200 rounded-2xl shadow-sm bg-white min-w-0">
+                        <Table className="hidden md:table relative" containerClassName="overflow-y-auto max-h-[400px]">
+                          <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+
+                            <TableRow className="bg-slate-50 hover:bg-slate-50 border-none">
+                              <TableHead colSpan={3} className="p-3 text-right">
+                                <span className="text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</span>
+                              </TableHead>
+                              <TableHead className="p-3 text-center">
+                                <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-sm font-semibold px-2 shadow-sm border-blue-200">
+                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}
+                                </Badge>
+                              </TableHead>
+                              <TableHead className="p-3 text-center">
+                                <Badge variant="secondary" className="bg-slate-200 text-slate-700 text-sm font-semibold px-2 shadow-sm border-slate-300">
+                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                                    return sum + (parseFloat(maxLimit) || 0);
+                                  }, 0)}
+                                </Badge>
+                              </TableHead>
+                              <TableHead className="p-3 text-center">
+                                <Badge variant="secondary" className="bg-green-100 text-green-800 text-sm font-semibold px-2 shadow-sm border-green-200 w-full justify-center">
+                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                                    const rowKey = p._rowKey;
+                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                                    return sum + (parseFloat(currentDispatchQty) || 0);
+                                  }, 0)}
+                                </Badge>
+                              </TableHead>
+                              <TableHead className="p-3 text-center">
+                                <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-sm font-semibold px-2 shadow-sm border-amber-200 w-full justify-center">
+                                  ₹{allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                                    const rowKey = p._rowKey;
+                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                                    return sum + (parseFloat(currentDispatchQty) || 0) * (parseFloat(p.rate) || 0);
+                                  }, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                </Badge>
+                              </TableHead>
+                            </TableRow>
+                            <TableRow className="bg-slate-50 hover:bg-slate-50">
+                              <TableHead className="w-12 text-center text-xs uppercase font-semibold text-slate-500 tracking-wider">
                                 <Checkbox
                                   checked={allProducts.length > 0 && allProducts.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
                                   onCheckedChange={(checked) => {
@@ -1629,16 +1691,12 @@ export default function DispatchMaterialPage() {
                                   }}
                                 />
                               </TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Sub-Order</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Name</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Rate</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Approval</TableHead>
-                              <TableHead className="w-32 text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty to Dispatch</TableHead>
-                              <TableHead className="w-40 text-[10px] uppercase font-black text-slate-500 tracking-wider">Delivery From</TableHead>
-                              <TableHead className="w-24 text-[10px] uppercase font-black text-slate-500 tracking-wider">Transfer</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Remaining</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Status</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Actions</TableHead>
+                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider">Item Name</TableHead>
+                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Rate</TableHead>
+                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Approved Qty</TableHead>
+                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Remaining Qty</TableHead>
+                              <TableHead className="min-w-[120px] text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Plan Qty</TableHead>
+                              <TableHead className="min-w-[140px] text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Taxable Amount</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1646,143 +1704,138 @@ export default function DispatchMaterialPage() {
                               const rowKey = prod._rowKey;
                               const maxLimit = prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty;
                               const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                              const taxableAmt = (parseFloat(currentDispatchQty) || 0) * (parseFloat(prod.rate) || 0);
 
                               return (
                                 <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
                                   <TableCell className="text-center p-3">
                                     <Checkbox checked={dialogSelectedProducts.includes(rowKey)} onCheckedChange={() => toggleSelectDialogProduct(rowKey)} />
                                   </TableCell>
-                                  <TableCell className="text-[10px] font-semibold text-slate-700 p-1">{prod.orderNo || "—"}</TableCell>
-                                  <TableCell className="font-medium text-[11px] p-2">{prod.productName || "—"}</TableCell>
-                                  <TableCell className="text-[10px] font-bold text-slate-600 p-2 text-center">₹{prod.rate || "—"}</TableCell>
-                                  <TableCell className="text-[10px] font-bold text-blue-600 p-2 text-center">{prod.approvalQty || "—"}</TableCell>
-                                  <TableCell className="p-2">
-                                    <Input type="number" className="h-7 text-[10px] font-bold" value={currentDispatchQty} onChange={(e) => {
+                                  <TableCell className="p-3">
+                                    <div className="font-semibold text-sm text-slate-800">{prod.productName || "—"}</div>
+                                    <div className="text-xs text-slate-400 mt-0.5">{prod.orderNo || "—"}</div>
+                                  </TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-600 p-3 text-center">₹{prod.rate || "—"}</TableCell>
+                                  <TableCell className="text-sm font-semibold text-blue-600 p-3 text-center">{prod.approvalQty || "—"}</TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-500 p-3 text-center">{maxLimit}</TableCell>
+                                  <TableCell className="p-3">
+                                    <Input type="number" className="h-8 text-sm font-semibold text-center" value={currentDispatchQty} onChange={(e) => {
                                       let val = Number(e.target.value);
                                       const maxVal = Number(maxLimit);
                                       if (val > maxVal) val = maxVal;
                                       setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], qty: val.toString() } }));
                                     }} />
                                   </TableCell>
-                                  <TableCell className="p-2">
-                                    <Select value={dispatchDetails[rowKey]?.deliveryFrom || "in-stock"} onValueChange={(val) => setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], deliveryFrom: val } }))}>
-                                      <SelectTrigger className="h-7 text-[10px] font-bold"><SelectValue placeholder="Source" /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="in-stock" className="text-[10px]">In Stock</SelectItem>
-                                        <SelectItem value="production" className="text-[10px]">Production</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="p-2">
-                                    <div className="flex items-center gap-1 justify-center">
-                                      <Select
-                                        value={dispatchDetails[rowKey]?.transfer || prod.transfer || "no"}
-                                        onValueChange={(val) => {
-                                          setDispatchDetails((prev) => {
-                                            const existing = prev[rowKey] || {};
-                                            // Initialize transferData from prod if not already present in state
-                                            const transferData = existing.transferData || {
-                                              billTo: {
-                                                company: prod.bill_company_name || "",
-                                                address: prod.bill_address || ""
-                                              },
-                                              shipTo: {
-                                                company: prod.ship_company_name || "",
-                                                address: prod.ship_address || ""
-                                              },
-                                              freightRate: prod.freight_rate?.toString() || ""
-                                            };
-                                            return {
-                                              ...prev,
-                                              [rowKey]: { ...existing, transfer: val, transferData }
-                                            };
-                                          });
-                                          if (val === "yes") {
-                                            setCurrentTransferRowKey(rowKey);
-                                            setIsTransferPopupOpen(true);
-                                          }
-                                        }}
-                                      >
-                                        <SelectTrigger className="h-7 text-[10px] font-bold w-20"><SelectValue placeholder="Transfer" /></SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="yes" className="text-[10px]">Yes</SelectItem>
-                                          <SelectItem value="no" className="text-[10px]">No</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                      {(dispatchDetails[rowKey]?.transfer === "yes" || (!dispatchDetails[rowKey]?.transfer && prod.transfer === "yes")) && (
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-6 w-6 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                          onClick={() => {
-                                            setCurrentTransferRowKey(rowKey);
-                                            setIsTransferPopupOpen(true);
-                                          }}
-                                          title="View Transfer Details"
-                                        >
-                                          <Settings2 className="h-3.5 w-3.5" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="text-[10px] font-bold text-slate-500 p-2 text-center">{maxLimit}</TableCell>
-                                  <TableCell className="p-2 text-center text-[10px] font-bold text-slate-500">
-                                    {custName.toLowerCase().includes("reliance") ? (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 text-[10px] font-bold text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
-                                        onClick={() => {
-                                          setPrecloseDialogProduct({ ...prod, maxLimit });
-                                          setPrecloseInputs(prev => ({ ...prev, [prod.id]: maxLimit.toString() }));
-                                          setPrecloseAction("close");
-                                          setPrecloseRemarks("");
-                                          setPrecloseDialogOpen(true);
-                                        }}
-                                      >
-                                        <XCircle className="h-3.5 w-3.5 mr-1" />
-                                        Preclose
-                                      </Button>
-                                    ) : "—"}
+                                  <TableCell className="text-sm font-bold text-amber-700 p-3 text-center bg-amber-50/30">
+                                    ₹{taxableAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                   </TableCell>
                                 </TableRow>
                               );
                             })}
-                          </TableBody>
-                          <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
-                            <TableRow>
-                              <TableCell colSpan={3} className="p-3 text-right">
-                                <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Totals:</span>
+                            <TableRow className="bg-slate-50/50">
+                              <TableCell colSpan={6} className="text-right py-2 pr-4">
+                                <span className="text-xs font-semibold text-slate-600">Transporting Expenses</span>
+                                <span className="text-[10px] font-medium text-slate-400 ml-2">(Max Allowable: ₹0.00)</span>
                               </TableCell>
-
-                              <TableCell className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-blue-100 text-blue-800 font-black px-2 shadow-sm border-blue-200">
-                                  {allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}
-                                </Badge>
+                              <TableCell className="p-2">
+                                <Input 
+                                  type="number" 
+                                  className="h-8 text-sm font-semibold text-center bg-white" 
+                                  placeholder="Enter Amount"
+                                  value={transportingExpenses[selectedItems[0]?._rowKey || 'default'] || ""} 
+                                  onChange={(e) => setTransportingExpenses(prev => ({ ...prev, [selectedItems[0]?._rowKey || 'default']: e.target.value }))} 
+                                />
                               </TableCell>
-                              <TableCell className="p-3">
-                                <Badge variant="secondary" className="bg-green-100 text-green-800 font-black px-2 shadow-sm border-green-200 w-full justify-center">
-                                  {allProducts.reduce((sum: number, p: any) => {
-                                    const rowKey = p._rowKey;
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                    return sum + (parseFloat(currentDispatchQty) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell />
-                              <TableCell />
-                              <TableCell className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-slate-200 text-slate-700 font-black px-2 shadow-sm border-slate-300">
-                                  {allProducts.reduce((sum: number, p: any) => {
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    return sum + (parseFloat(maxLimit) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell />
                             </TableRow>
-                          </tfoot>
+                          </TableBody>
+                          {(() => {
+                            const groupId = selectedItems[0]?._rowKey || 'default';
+                            const rawItemsTaxable = allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                              const rowKey = p._rowKey;
+                              const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                              const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                              return sum + (parseFloat(currentDispatchQty) || 0) * (parseFloat(p.rate) || 0);
+                            }, 0);
+                            const transportExp = parseFloat(transportingExpenses[groupId]) || 0;
+                            const totalTaxable = rawItemsTaxable + transportExp;
+                            
+                            const gstRateStr = gstRates[groupId] || "5";
+                            const gstRate = parseFloat(gstRateStr) || 0;
+                            const isIgstSelected = isIgst[groupId] || false;
+                            
+                            let cgst = 0, sgst = 0, igst = 0;
+                            if (isIgstSelected) {
+                              igst = (totalTaxable * gstRate) / 100;
+                            } else {
+                              cgst = (totalTaxable * gstRate) / 200; // Half of total GST
+                              sgst = (totalTaxable * gstRate) / 200;
+                            }
+                            
+                            const grandTotal = totalTaxable + cgst + sgst + igst;
+                            const roundedTotal = Math.round(grandTotal);
+                            const roundingOff = roundedTotal - grandTotal;
+
+                            return (
+                              <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
+                                <TableRow className="border-b border-slate-200 bg-slate-50/50">
+                                  <TableCell colSpan={6} className="py-2 pr-4 text-right">
+                                    <div className="flex items-center justify-end gap-5">
+                                      <div className="flex items-center space-x-2">
+                                        <Checkbox 
+                                          id={`igst-${groupId}`} 
+                                          checked={isIgstSelected}
+                                          onCheckedChange={(checked) => setIsIgst(prev => ({ ...prev, [groupId]: !!checked }))}
+                                        />
+                                        <label htmlFor={`igst-${groupId}`} className="text-xs font-semibold text-slate-600 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                                          IGST (Other State)
+                                        </label>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-xs font-semibold text-slate-500 tracking-wider">GST Rate (%):</span>
+                                        <Input 
+                                          type="number" 
+                                          className="h-8 w-20 text-sm font-semibold text-center bg-white" 
+                                          placeholder="e.g. 5"
+                                          value={gstRates[groupId] ?? "5"}
+                                          onChange={(e) => setGstRates(prev => ({ ...prev, [groupId]: e.target.value }))}
+                                        />
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="p-2" />
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value:</span></TableCell>
+                                  <TableCell className="py-1.5 text-center text-sm font-bold text-slate-800">₹{totalTaxable.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                </TableRow>
+                                {!isIgstSelected ? (
+                                  <>
+                                    <TableRow>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST ({gstRate / 2}%):</span></TableCell>
+                                      <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{cgst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST ({gstRate / 2}%):</span></TableCell>
+                                      <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{sgst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                    </TableRow>
+                                  </>
+                                ) : (
+                                  <TableRow>
+                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST ({gstRate}%):</span></TableCell>
+                                    <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{igst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow>
+                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off:</span></TableCell>
+                                  <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{roundingOff.toFixed(2)}</TableCell>
+                                </TableRow>
+                                <TableRow className="bg-blue-50/50">
+                                  <TableCell colSpan={6} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount:</span></TableCell>
+                                  <TableCell className="py-3 text-center text-base font-bold text-blue-700">₹{roundedTotal.toLocaleString('en-IN')}</TableCell>
+                                </TableRow>
+                              </tfoot>
+                            )
+                          })()}
                         </Table>
                         <div className="space-y-3 p-3 md:hidden">
                           <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
@@ -1981,8 +2034,8 @@ export default function DispatchMaterialPage() {
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-              <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto">
-                {isProcessing ? "Processing..." : `Dispatch ${dialogSelectedProducts.length} Item(s)`}
+              <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">
+                {isProcessing ? "Processing..." : `Proceed to Actual Dispatch (${dialogSelectedProducts.length})`}
               </Button>
             </div>
           </DialogFooter>

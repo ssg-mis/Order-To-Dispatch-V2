@@ -10,10 +10,12 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi } from "@/lib/api-service"
+import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi, driverMasterApi, draftApi } from "@/lib/api-service"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react"
+import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer, Download } from "lucide-react"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
@@ -395,6 +397,38 @@ export default function GateInPage() {
   const [gatepassPhotoFile, setGatepassPhotoFile] = useState<File | null>(null)
   const [uploadingField, setUploadingField] = useState<string | null>(null)
 
+  // Masters for editing vehicle/driver
+  const [vehicleMasterList, setVehicleMasterList] = useState<any[]>([])
+  const [driverMasterList, setDriverMasterList] = useState<any[]>([])
+  const [editableVehicle, setEditableVehicle] = useState("")
+  const [editableDriver, setEditableDriver] = useState("")
+
+  useEffect(() => {
+    vehicleMasterApi.getAll({ all: "true" }).then(res => {
+      const data = res?.data?.vehicles || res?.vehicles || res?.data || res;
+      setVehicleMasterList(Array.isArray(data) ? data : [])
+    }).catch(() => setVehicleMasterList([]))
+    
+    driverMasterApi.getAll({ all: "true" }).then(res => {
+      const data = res?.data?.drivers || res?.drivers || res?.data || res;
+      setDriverMasterList(Array.isArray(data) ? data : [])
+    }).catch(() => setDriverMasterList([]))
+  }, [])
+
+  const vehicleOptions = useMemo(() => (
+    (Array.isArray(vehicleMasterList) ? vehicleMasterList : [])
+      .filter(v => v.registration_no && v.status === "Active")
+      .map(v => ({ value: v.registration_no, label: v.registration_no }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }))
+  ), [vehicleMasterList])
+
+  const driverOptions = useMemo(() => (
+    (Array.isArray(driverMasterList) ? driverMasterList : [])
+      .filter(d => d.driver_name && d.status === "Active")
+      .map(d => ({ value: d.driver_name, label: d.driver_name }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }))
+  ), [driverMasterList])
+
   // ── Pending ────────────────────────────────────────────────────────────────
   const {
     data: pendingResult,
@@ -427,6 +461,18 @@ export default function GateInPage() {
       for (const sku of skuDetailsData) {
         if (sku.sku_name) {
           map.set(sku.sku_name.trim().toLowerCase(), sku.sku_weight ? String(sku.sku_weight) : "")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+
+  const skuGrossWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          map.set(sku.sku_name.trim().toLowerCase(), sku.sku_gross_weight ? String(sku.sku_gross_weight) : "")
         }
       }
     }
@@ -531,14 +577,21 @@ export default function GateInPage() {
 
   // ── Open dialog (bulk, from toolbar) ───────────────────────────────────────
   const handleOpenSelectedDialog = () => {
-    const selectedGroups = groupedPendingRecords.filter(group =>
-      group.records.some((r: any) => selectedRows.includes(r.order_key))
-    )
-    if (selectedGroups.length === 0) return
-
-    const groupRecords = selectedGroups.flatMap(group => group.records)
-    const groupKeys = groupRecords.map((r: any) => r.order_key)
-    handleOpenDialog(groupRecords[0], groupKeys, groupRecords)
+    if (selectedRows.length === 0) return
+    const recs = pendingRecords.filter(r => selectedRows.includes(r.order_key))
+    const firstGroupKey = recs[0].base_do_no
+    const groupRecs = pendingRecords.filter(r => r.base_do_no === firstGroupKey)
+    setSelectedGroupRecords(groupRecs)
+    setSelectedGroupKeys(groupRecs.map(r => r.order_key))
+    setSelectedRecord(groupRecs[0])
+    
+    // Set editable fields from draft
+    const veh = groupRecs[0]?.draft_data?.vehicleNumber || ""
+    const drv = groupRecs[0]?.draft_data?.driverName || ""
+    setEditableVehicle(veh)
+    setEditableDriver(drv)
+    
+    setIsDialogOpen(true)
   }
 
   // ── Open dialog ────────────────────────────────────────────────────────────
@@ -626,6 +679,71 @@ export default function GateInPage() {
     }
   }
 
+
+
+  
+const buildSlipParties = () => {
+    const partyGroups: Record<string, any[]> = {}
+    selectedGroupRecords.forEach(r => {
+      const pName = r.party_name || "Unknown Party"
+      if (!partyGroups[pName]) partyGroups[pName] = []
+      partyGroups[pName].push(r)
+    })
+
+    return Object.entries(partyGroups).map(([party, partyRecords]) => {
+      const firstRec = partyRecords[0]
+      const draft = firstRec.draft_data || {}
+      
+      const referenceLabel = firstRec.order_through === "Broker" ? "Broker" : firstRec.order_through === "Salesperson" ? "Salesperson" : ""
+      const referenceValue = firstRec.order_through === "Broker" 
+        ? (firstRec.broker_name || "—") 
+        : firstRec.order_through === "Salesperson" 
+          ? (firstRec.salesperson_name || "—") 
+          : "Direct"
+
+      return {
+        party,
+        commitmentNo: firstRec.base_do_no || firstRec.order_key || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        referenceLabel,
+        referenceValue,
+        place: firstRec.delivery_address || "—",
+        partyMo: firstRec.whatsapp_no || "—",
+        status: "Original",
+        processId: firstRec.process_id || "—",
+        punchBy: draft.order_punch_user || "—",
+        punchAt: draft.order_punch_at || null,
+        preApproveBy: draft.pre_approval_user || "—",
+        preApproveAt: draft.pre_approval_at || null,
+        approveBy: draft.order_approval_user || "—",
+        approveAt: draft.order_approval_at || null,
+        products: partyRecords.map(r => {
+          const qty = parseFloat(r.qty_to_be_dispatched) || 0
+          const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+          const skuGrossWt = parseFloat(skuGrossWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+          
+          return {
+            productName: r.product_name || "—",
+            uom: r.uom || "PCS",
+            qty,
+            weight: skuWt * qty,
+            grossWeight: (skuGrossWt > 0 ? skuGrossWt : skuWt) * qty
+          }
+        })
+      }
+    })
+  }
+
+  const handleDownloadSlip = () => {
+    if (!selectedRecord) return
+    generateDispatchSlipPdf(buildSlipParties(), "download")
+  }
+  
+  const handlePrintSlip = () => {
+    if (!selectedRecord) return
+    generateDispatchSlipPdf(buildSlipParties(), "print")
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!selectedRecord) return
@@ -644,7 +762,18 @@ export default function GateInPage() {
         uploadSelectedImage(gatepassPhotoFile, "gatepass"),
       ])
 
+
+      // First update draft with new vehicle/driver
+      if (editableVehicle || editableDriver) {
+        await Promise.all(selectedGroupKeys.map(orderKey => {
+          const rec = selectedGroupRecords.find(r => r.order_key === orderKey)
+          const newDraft = { ...(rec?.draft_data || {}), vehicleNumber: editableVehicle, driverName: editableDriver }
+          return draftApi.save(user?.username || "system", orderKey, newDraft)
+        }))
+      }
+
       const results = await Promise.allSettled(
+
         selectedGroupKeys.map(orderKey =>
           gateInApi.submit({
             orderKey,
@@ -1001,8 +1130,22 @@ export default function GateInPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                       { label: "DO No.", value: selectedRecord.order_key },
-                      { label: "Vehicle No.", value: getDraftField(selectedRecord, "vehicleNumber") },
-                      { label: "Driver Name", value: getDraftField(selectedRecord, "driverName") },
+                    ].map(f => (
+                      <div key={f.label} className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{f.label}</span>
+                        <span className="text-sm font-bold text-slate-800 mt-0.5">{f.value || "—"}</span>
+                      </div>
+                    ))}
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Vehicle No.</span>
+                      <Combobox options={vehicleOptions} value={editableVehicle} onValueChange={setEditableVehicle} placeholder="Select Vehicle..." />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Driver Name (Optional)</span>
+                      <Combobox options={driverOptions} value={editableDriver} onValueChange={setEditableDriver} placeholder="Select Driver..." />
+                    </div>
+                    {[
+
                       { label: "Saved By", value: selectedRecord.username },
                       { label: "Saved At", value: formatDate(selectedRecord.saved_at) },
                       { label: "Transporter", value: getDraftField(selectedRecord, "loadData.transporterName") },
@@ -1308,9 +1451,18 @@ export default function GateInPage() {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-8 pb-8 flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-            <Button
+          <DialogFooter className="mt-4 border-t pt-4 px-8 pb-8 flex flex-col sm:flex-row justify-between gap-4">
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button type="button" variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
+                <Printer className="mr-2 h-4 w-4" /> Print Slip
+              </Button>
+              <Button type="button" onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700 text-white flex-1 sm:flex-none">
+                <Download className="mr-2 h-4 w-4" /> Download PDF
+              </Button>
+            </div>
+            <div className="flex gap-3 w-full sm:w-auto justify-end">
+              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+              <Button
               onClick={handleSubmit}
               disabled={isProcessing || isReadOnly}
               className="bg-emerald-600 hover:bg-emerald-700 font-bold"
@@ -1321,6 +1473,7 @@ export default function GateInPage() {
                 <><CheckCircle2 className="h-4 w-4 mr-2" /> Confirm Gate In</>
               )}
             </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

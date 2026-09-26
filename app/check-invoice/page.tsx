@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Printer } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
@@ -1723,6 +1723,72 @@ export default function CheckInvoicePage() {
             <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
                 {viewOnly ? "Close" : "Cancel"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const group = selectedGroups[0]
+                  if (!group) return
+                  const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
+                  const customerName = group.customerName || '—'
+                  const vehicleNo = group.vehicleNo || '—'
+                  const doNumber = group.doNumber || '—'
+                  const invoiceNo = group.invoiceNo || '—'
+                  const invoiceCopy = allProducts[0]?.invoice_copy || null
+                  const productRows = allProducts.map((p: any) => `
+                    <tr>
+                      <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.actualQty || p.qtyToDispatch || '—'} ${p.unit || ''}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(p.rate || p.final_rate || 0).toFixed(2)}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${(parseFloat(p.actualQty || p.qtyToDispatch || 0) * parseFloat(p.rate || p.final_rate || 0)).toFixed(2)}</td>
+                    </tr>
+                  `).join('')
+                  const printContent = `
+                    <html><head><title>Invoice Verification - ${invoiceNo}</title>
+                    <style>
+                      body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+                      h1 { font-size: 20px; margin-bottom: 4px; }
+                      .subtitle { color: #555; font-size: 13px; margin-bottom: 20px; }
+                      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+                      .field { background: #f8f8f8; padding: 10px 14px; border-radius: 6px; }
+                      .field label { font-size: 11px; color: #666; text-transform: uppercase; }
+                      .field p { font-size: 14px; font-weight: 600; margin: 2px 0 0; }
+                      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                      th { background: #1e293b; color: white; padding: 10px 8px; font-size: 13px; }
+                      td { font-size: 13px; }
+                      .inv-link { display: block; margin: 16px 0; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; font-size: 14px; }
+                      @media print { button { display: none; } }
+                    </style></head>
+                    <body>
+                      <h1>Shree Shyam Oil Extractions</h1>
+                      <div class="subtitle">Invoice Verification Sheet — Check Invoice Stage</div>
+                      <div class="grid">
+                        <div class="field"><label>Customer Name</label><p>${customerName}</p></div>
+                        <div class="field"><label>DO Number</label><p>${doNumber}</p></div>
+                        <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
+                        <div class="field"><label>Invoice No.</label><p>${invoiceNo}</p></div>
+                        <div class="field"><label>Invoice Date</label><p>${allProducts[0]?.invoice_date || '—'}</p></div>
+                        <div class="field"><label>Bill Amount</label><p>₹${parseFloat(allProducts[0]?.bill_amount || 0).toFixed(2)}</p></div>
+                        <div class="field"><label>Insurance</label><p>${allProducts[0]?.insurance_details || '—'}</p></div>
+                        <div class="field"><label>Driver Advance (Cash)</label><p>₹${allProducts[0]?.driver_advance_cash || 0}</p></div>
+                        <div class="field"><label>Driver Advance (Bank)</label><p>₹${allProducts[0]?.driver_advance_bank || 0}</p></div>
+                        <div class="field"><label>Diesel Amount</label><p>₹${allProducts[0]?.diesel_amount || 0}</p></div>
+                      </div>
+                      ${invoiceCopy ? `<div class="inv-link">📎 Invoice Copy attached: <a href="${invoiceCopy}" target="_blank">${invoiceCopy.split('/').pop()}</a></div>` : '<div class="inv-link" style="color:#c00">⚠️ No Invoice Copy attached</div>'}
+                      <table>
+                        <thead><tr><th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+                        <tbody>${productRows}</tbody>
+                      </table>
+                    </body></html>
+                  `
+                  const win = window.open('', '_blank')
+                  if (win) { win.document.write(printContent); win.document.close(); win.focus(); win.print() }
+                }}
+                className="w-full sm:w-auto gap-2"
+                title="Print Verification Sheet"
+              >
+                <Printer className="h-4 w-4" />
+                Print Data
               </Button>
               {!viewOnly && (
                 <Button

@@ -721,7 +721,7 @@ export default function GateOutPage() {
   return (
     <WorkflowStageShell
       partyNames={customerNames}
-      title="Stage 11: Gate Out"
+      title="Stage 12: Gate Out"
       description="Record gate out details and upload gate pass grouped by Customer."
       pendingCount={displayRows.length}
       historyData={[]}

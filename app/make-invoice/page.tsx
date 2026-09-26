@@ -20,13 +20,14 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, Settings2, FileText, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, Settings2, FileText, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Printer } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { makeInvoiceApi, orderApi, skuApi, depotApi } from "@/lib/api-service"
+import { makeInvoiceApi, orderApi, skuApi, depotApi, petrolPumpApi, insuranceDetailApi } from "@/lib/api-service"
+import { Combobox } from "@/components/ui/combobox"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -283,24 +284,60 @@ export default function MakeInvoicePage() {
     qty: "",
     billAmount: "",
     invoiceFile: "" as string,
-    invoiceFileName: ""
+    invoiceFileName: "",
+    driverAdvanceCash: "",
+    driverAdvanceBank: "",
+    dieselParchiFile: "" as string,
+    dieselParchiFileName: "",
+    petrolPumpName: "",
+    dieselAmount: "",
+    insuranceDetails: ""
   })
 
   // CD Amount State for products
   const [productCdData, setProductCdData] = useState<{[key: string]: {isCd: string, cdAmount: string}}>({})
 
+
+  // Fetch Petrol Pumps
+  const { data: petrolPumpsRes } = useQuery({
+    queryKey: ['petrol-pumps'],
+    queryFn: () => petrolPumpApi.getAll({ all: "true" }),
+    staleTime: 5 * 60 * 1000,
+  })
+  const petrolPumpOptions = useMemo(() => {
+    return (petrolPumpsRes?.data?.petrol_pumps || []).map((p: any) => ({
+      value: p.petrol_pump_name,
+      label: p.petrol_pump_name
+    }))
+  }, [petrolPumpsRes])
+
+  // Fetch Insurance Details
+  const { data: insuranceRes } = useQuery({
+    queryKey: ['insurance-details'],
+    queryFn: () => insuranceDetailApi.getAll({ all: "true" }),
+    staleTime: 5 * 60 * 1000,
+  })
+  const insuranceOptions = useMemo(() => {
+    return (insuranceRes?.data?.insurance_details || []).map((ins: any) => ({
+      value: ins.insurance_company_name,
+      label: ins.insurance_company_name
+    }))
+  }, [insuranceRes])
+
   // Fetch pending invoices
-  const handleFileUpload = async (file: File) => {
+  const [isUploadingObj, setIsUploadingObj] = useState<Record<string, boolean>>({})
+
+  const handleFileUpload = async (file: File, keyName: string = 'invoiceFile', fileNameKey: string = 'invoiceFileName') => {
     if (!file) return;
 
-    setIsUploading(true);
+    setIsUploadingObj(prev => ({ ...prev, [keyName]: true }));
     try {
       const response = await orderApi.uploadFile(file);
       if (response.success) {
         setInvoiceData(p => ({
           ...p,
-          invoiceFile: response.data.url,
-          invoiceFileName: file.name
+          [keyName]: response.data.url,
+          [fileNameKey]: file.name
         }));
         toast({
           title: "Upload Successful",
@@ -315,7 +352,7 @@ export default function MakeInvoicePage() {
         variant: "destructive",
       });
     } finally {
-      setIsUploading(false);
+      setIsUploadingObj(prev => ({ ...prev, [keyName]: false }));
     }
   };
 
@@ -625,6 +662,13 @@ export default function MakeInvoicePage() {
         billAmount: "",
         invoiceFile: "",
         invoiceFileName: "",
+        driverAdvanceCash: "",
+        driverAdvanceBank: "",
+        dieselParchiFile: "",
+        dieselParchiFileName: "",
+        petrolPumpName: "",
+        dieselAmount: "",
+        insuranceDetails: "",
       })
       setInvoiceType("independent")
 
@@ -663,6 +707,90 @@ export default function MakeInvoicePage() {
       billAmount: totalBillAmount.toFixed(2)
     }));
   }, [selectedProducts, isDialogOpen, selectedGroups, productCdData]);
+
+  const handlePrint = () => {
+    const group = selectedGroups[0]
+    if (!group) return
+
+    const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
+    const customerName = group.customerName || "—"
+    const vehicleNo = group.vehicleNo || "—"
+    const doNumber = group.doNumber || "—"
+    const date = invoiceData.invoiceDate || new Date().toLocaleDateString('en-IN')
+
+    const productRows = allProducts.map((p: any) => `
+      <tr>
+        <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.qtyToDispatch || '—'} ${p.unit || ''}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0).toFixed(2)}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${((parseFloat(p.qtyToDispatch||0)) * parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0)).toFixed(2)}</td>
+      </tr>
+    `).join('')
+
+    const printContent = `
+      <html>
+      <head>
+        <title>Invoice Data - ${doNumber}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+          h1 { font-size: 20px; margin-bottom: 4px; }
+          .subtitle { color: #555; font-size: 13px; margin-bottom: 20px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+          .field { background: #f8f8f8; padding: 10px 14px; border-radius: 6px; }
+          .field label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+          .field p { font-size: 14px; font-weight: 600; margin: 2px 0 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-size: 13px; }
+          td { font-size: 13px; }
+          .total-row td { font-weight: bold; background: #f1f5f9; }
+          .footer { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+          .sig-box { border-top: 2px solid #333; padding-top: 8px; text-align: center; font-size: 12px; color: #444; }
+          @media print { button { display: none; } }
+        </style>
+      </head>
+      <body>
+        <h1>Shree Shyam Oil Extractions</h1>
+        <div class="subtitle">Invoice Data Sheet — For Tally Entry</div>
+        <div class="grid">
+          <div class="field"><label>Customer Name</label><p>${customerName}</p></div>
+          <div class="field"><label>DO Number</label><p>${doNumber}</p></div>
+          <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
+          <div class="field"><label>Invoice Date</label><p>${date}</p></div>
+          <div class="field"><label>Invoice No.</label><p>${invoiceData.invoiceNo || '—'}</p></div>
+          <div class="field"><label>Total Bill Amount</label><p>₹${parseFloat(invoiceData.billAmount || '0').toFixed(2)}</p></div>
+          <div class="field"><label>Driver Advance (Cash)</label><p>₹${invoiceData.driverAdvanceCash || '0'}</p></div>
+          <div class="field"><label>Driver Advance (Bank)</label><p>₹${invoiceData.driverAdvanceBank || '0'}</p></div>
+          <div class="field"><label>Petrol Pump</label><p>${invoiceData.petrolPumpName || '—'}</p></div>
+          <div class="field"><label>Diesel Amount</label><p>₹${invoiceData.dieselAmount || '0'}</p></div>
+          <div class="field"><label>Insurance Details</label><p>${invoiceData.insuranceDetails || '—'}</p></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th>
+          </tr></thead>
+          <tbody>${productRows}</tbody>
+          <tfoot><tr class="total-row">
+            <td style="border:1px solid #ddd;padding:8px" colspan="3">Total</td>
+            <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(invoiceData.billAmount || '0').toFixed(2)}</td>
+          </tr></tfoot>
+        </table>
+        <div class="footer">
+          <div class="sig-box">Driver Signature</div>
+          <div class="sig-box">Accounts Signature</div>
+          <div class="sig-box">Authorised Signature</div>
+        </div>
+      </body>
+      </html>
+    `
+
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(printContent)
+      win.document.close()
+      win.focus()
+      win.print()
+    }
+  }
 
   const handleSubmit = async () => {
     if (selectedGroups.length === 0 || !invoiceData.invoiceNo || !invoiceData.invoiceFile) {
@@ -703,7 +831,13 @@ export default function MakeInvoicePage() {
           billAmount: invoiceType === 'independent' ? invoiceData.billAmount : null,
           invoiceCopy: invoiceData.invoiceFile || null,
           userId: user?.id || null, // Track acting user's login id
-          cdAmount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
+          cdAmount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0,
+          driverAdvanceCash: invoiceData.driverAdvanceCash ? parseFloat(invoiceData.driverAdvanceCash) : null,
+          driverAdvanceBank: invoiceData.driverAdvanceBank ? parseFloat(invoiceData.driverAdvanceBank) : null,
+          dieselParchiFile: invoiceData.dieselParchiFile || null,
+          petrolPumpName: invoiceData.petrolPumpName || null,
+          dieselAmount: invoiceData.dieselAmount ? parseFloat(invoiceData.dieselAmount) : null,
+          insuranceDetails: invoiceData.insuranceDetails || null
         };
 
         try {
@@ -1783,19 +1917,6 @@ export default function MakeInvoicePage() {
                         placeholder="Enter Invoice No"
                       />
                     </div>
-
-                    <div className="space-y-2">
-                      <FileUploadField
-                        label={<>Upload Invoice Copy <span className="text-red-500">*</span></>}
-                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                        fileName={invoiceData.invoiceFileName}
-                        helperText="Max file size: 20 MB"
-                        uploading={isUploading}
-                        buttonText="Select Invoice Document"
-                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0])}
-                      />
-                    </div>
-
                     <div className="space-y-2">
                       <Label>Invoice Date <span className="text-red-500">*</span></Label>
                       <Input
@@ -1803,6 +1924,105 @@ export default function MakeInvoicePage() {
                         className="h-10"
                         value={invoiceData.invoiceDate}
                         onChange={(e) => setInvoiceData({ ...invoiceData, invoiceDate: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FileUploadField
+                        label={<Label>Upload Invoice Copy <span className="text-red-500">*</span></Label>}
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                        fileName={invoiceData.invoiceFileName}
+                        uploading={isUploadingObj['invoiceFile'] || false}
+                        buttonText={invoiceData.invoiceFileName ? 'REPLACE' : 'UPLOAD'}
+                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'invoiceFile', 'invoiceFileName')}
+                        capture="environment"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Driver Advance & Diesel Form */}
+                <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm mt-4">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                    <Truck className="h-4 w-4 text-purple-600" />
+                    Driver Advance & Diesel Details
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    <div className="space-y-2">
+                      <Label>Driver Advance (Cash)</Label>
+                      <Input
+                        type="number"
+                        className="h-10"
+                        value={invoiceData.driverAdvanceCash}
+                        onChange={(e) => setInvoiceData({ ...invoiceData, driverAdvanceCash: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Driver Advance (Bank)</Label>
+                      <Input
+                        type="number"
+                        className="h-10"
+                        value={invoiceData.driverAdvanceBank}
+                        onChange={(e) => setInvoiceData({ ...invoiceData, driverAdvanceBank: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    {/* Empty div to force Diesel fields to a new row on large screens */}
+                    <div className="hidden lg:block"></div>
+                    <div className="space-y-2">
+                      <Label>Petrol Pump Name</Label>
+                      <Combobox
+                        value={invoiceData.petrolPumpName}
+                        onValueChange={(v) => setInvoiceData({ ...invoiceData, petrolPumpName: v })}
+                        options={petrolPumpOptions}
+                        placeholder="Select Petrol Pump"
+                        searchPlaceholder="Search pump..."
+                        emptyText="No pump found."
+                        className="h-10 w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Diesel Amount</Label>
+                      <Input
+                        type="number"
+                        className="h-10"
+                        value={invoiceData.dieselAmount}
+                        onChange={(e) => setInvoiceData({ ...invoiceData, dieselAmount: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FileUploadField
+                        label={<Label>Upload Diesel Parchi</Label>}
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.pdf"
+                        fileName={invoiceData.dieselParchiFileName}
+                        uploading={isUploadingObj['dieselParchiFile'] || false}
+                        buttonText={invoiceData.dieselParchiFileName ? 'REPLACE' : 'UPLOAD'}
+                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'dieselParchiFile', 'dieselParchiFileName')}
+                        capture="environment"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Insurance Details Form */}
+                <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm mt-4">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                    <FileText className="h-4 w-4 text-emerald-600" />
+                    Insurance Details
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    <div className="space-y-2">
+                      <Label>Select Insurance Company</Label>
+                      <Combobox
+                        value={invoiceData.insuranceDetails}
+                        onValueChange={(v) => setInvoiceData({ ...invoiceData, insuranceDetails: v })}
+                        options={insuranceOptions}
+                        placeholder="Select Insurance Details"
+                        searchPlaceholder="Search insurance..."
+                        emptyText="No insurance found."
+                        className="h-10 w-full bg-white border-2 rounded-xl"
                       />
                     </div>
                   </div>
@@ -1813,6 +2033,15 @@ export default function MakeInvoicePage() {
             <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
                 Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handlePrint}
+                className="w-full sm:w-auto gap-2"
+                title="Print Invoice Data Sheet"
+              >
+                <Printer className="h-4 w-4" />
+                Print Data
               </Button>
               <Button
                 onClick={handleSubmit}

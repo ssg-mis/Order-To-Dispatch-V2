@@ -122,8 +122,12 @@ export default function OrderPunchListPage() {
 
   const [sort, setSort] = usePersistedSort(STAGE_KEY, { field: "do_date", dir: "desc" })
   const handleSort = (field: string) => {
-    if (sort?.field === field) setSort({ field, dir: sort.dir === "asc" ? "desc" : "asc" })
-    else setSort({ field, dir: "asc" })
+    if (sort?.field === field) {
+      if (sort.dir === "asc") setSort({ field, dir: "desc" })
+      else setSort(null)
+    } else {
+      setSort({ field, dir: "asc" })
+    }
   }
 
   const sortedRows = useMemo(() => {

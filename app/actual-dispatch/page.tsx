@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Separator } from "@/components/ui/separator"
-import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown, Info } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { actualDispatchApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
@@ -160,7 +160,14 @@ function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
       orderNo: Array.from(group._allBaseDos).join(", "),
       processId: group._allProducts[0]?.processid || "—",
       uploadSo: group._allProducts[0]?.uploadSo || group._allProducts[0]?.upload_so || null,
-      qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qtyToDispatch || 0), 0),
+      qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qty_to_be_dispatched || p.qtyToDispatch || 0), 0),
+      orderQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.order_qty || p.orderQty || 0), 0),
+      approvalQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.approval_qty || p.approvalQty || 0), 0),
+      altQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.alt_qty || p.altQty || 0), 0),
+      totalWithGst: group._allProducts.reduce((sum: number, p: any) => {
+        const val = String(p.total_amount_with_gst || p.totalWithGst || p.data?.orderData?.total_amount_with_gst || "0").replace(/[^0-9.-]+/g, "");
+        return sum + (parseFloat(val) || 0);
+      }, 0),
       orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
       _productCount: group._allProducts.length
     };
@@ -1218,7 +1225,7 @@ export default function ActualDispatchPage() {
                 <div className="border-b border-black p-1.5"><span className="font-bold">DO Date:</span> {date}</div>
                 <div className="border-b border-r border-black p-1.5"><span className="font-bold">Customer:</span> {party}</div>
                 <div className="border-b border-black p-1.5">{referenceLabel ? <><span className="font-bold">{referenceLabel}:</span> {referenceValue}</> : referenceValue}</div>
-                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Address:</span> {place}</div>
+                <div className="border-b border-r border-black p-1.5 break-words min-w-0"><span className="font-bold">Address:</span> <span className="break-all">{place}</span></div>
                 <div className="border-b border-black p-1.5">
                   <span className="font-bold">Mob.:</span> {partyMo}<br />
                   <span className="font-bold">Status:</span> {status}
@@ -1511,7 +1518,8 @@ export default function ActualDispatchPage() {
       }
 
       // 5. Validation for Overload (only mandatory for Banari depot; optional for other depots)
-      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
+      const passingWt = parseFloat(vehicleData.passing_weight) || 0;
+      const isOverloaded = passingWt > 0 && totalCombinedWeight > passingWt;
       if (isOverloaded && !loadData.overloadRemarks.trim()) {
         validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
       }
@@ -2058,6 +2066,30 @@ export default function ActualDispatchPage() {
                 </TableRow>
               )}
             </TableBody>
+            {displayRows.length > 0 && (
+              <TableFooter className="bg-slate-50 sticky bottom-0 z-10 border-t-2 border-slate-200">
+                <TableRow className="hover:bg-slate-50">
+                  <TableCell />
+                  {orderedVisibleCols.map((col, index) => {
+                    if (index === 0) {
+                      return <TableCell key={col.id} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</TableCell>
+                    }
+                    if (['qtyToDispatch', 'orderQty', 'approvalQty', 'altQty'].includes(col.id)) {
+                      const sum = sortedDisplayRows.reduce((acc, row) => acc + (parseFloat(row[col.id]) || 0), 0);
+                      return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum}</TableCell>
+                    }
+                    if (col.id === 'totalWithGst') {
+                      const sum = sortedDisplayRows.reduce((acc, row) => {
+                        const val = String(row[col.id] || "0").replace(/[^0-9.-]+/g, "");
+                        return acc + (parseFloat(val) || 0);
+                      }, 0);
+                      return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                    }
+                    return <TableCell key={col.id} />
+                  })}
+                </TableRow>
+              </TableFooter>
+            )}
           </Table>
 
           {/* Mobile Card View */}
@@ -2203,15 +2235,15 @@ export default function ActualDispatchPage() {
             </DialogHeader>
 
             {/* Gate-In Status Banner */}
-            <div className={`flex items-start sm:items-center gap-3 px-3 sm:px-5 py-3 rounded-xl mb-4 border-2 ${gateInData ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+            <div className={`flex items-start sm:items-center gap-3 px-3 sm:px-5 py-3 rounded-xl mb-4 border-2 ${gateInData ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
               <button
                 type="button"
                 onClick={() => { if (gateInData) setIsGateInPopupOpen(true); }}
-                className={`flex items-start sm:items-center gap-2 text-left font-black text-xs sm:text-sm uppercase tracking-tight ${gateInData ? 'text-emerald-700 cursor-pointer hover:underline' : 'text-red-600 cursor-default'}`}
+                className={`flex items-start sm:items-center gap-2 text-left font-black text-xs sm:text-sm uppercase tracking-tight ${gateInData ? 'text-emerald-700 cursor-pointer hover:underline' : 'text-slate-500 cursor-default'}`}
               >
                 {gateInData
                   ? <><CheckCircle2 className="h-5 w-5 text-emerald-500" /> Gate-In Verified — Click to View Images</>
-                  : <><XCircle className="h-5 w-5 text-red-400" /> Gate-In Not Done Yet</>
+                  : <><Info className="h-5 w-5 text-slate-400" /> Gate-In Pending (After Slip Generation)</>
                 }
               </button>
             </div>
@@ -2480,8 +2512,30 @@ export default function ActualDispatchPage() {
                   <div className="border border-slate-200 rounded-xl sm:rounded-3xl overflow-hidden shadow-sm bg-white">
                     {/* Desktop Table View */}
                     <Table className="hidden xl:table">
-                      <TableHeader className="bg-slate-50 sticky top-0 z-10">
-                        <TableRow>
+                      <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                        <TableRow className="bg-slate-50 border-b border-slate-200">
+                          <TableHead colSpan={3} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">
+                            Totals:
+                          </TableHead>
+                          <TableHead className="text-center text-xs font-bold text-blue-700">
+                            {selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + (parseFloat(p.qtyToDispatch) || 0), 0)}
+                          </TableHead>
+                          <TableHead></TableHead>
+                          <TableHead className="text-center text-xs font-bold text-blue-700">
+                            {selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + (parseFloat(confirmDetails[p._rowKey]?.qty) || 0), 0)}
+                          </TableHead>
+                          <TableHead className="text-center text-xs font-bold text-blue-700">
+                            {selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0).toFixed(2)}
+                          </TableHead>
+                          <TableHead></TableHead>
+                        </TableRow>
+                        <TableRow className="bg-slate-50 border-t-0 shadow-sm">
                           <TableHead className="w-12.5 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
                             <Checkbox
                               checked={dialogSelectedProducts.length > 0 && dialogSelectedProducts.length === selectedGroups.reduce((s, g) => s + g._allProducts.length, 0)}
@@ -2499,7 +2553,7 @@ export default function ActualDispatchPage() {
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">PRODUCT NAME</TableHead>
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">PLANNED QTY</TableHead>
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">DELIVERY FROM</TableHead>
-                          <TableHead className="w-45 text-[10px] uppercase font-black text-slate-500 tracking-wider">ACTUAL QTY DISPATCHED</TableHead>
+                          <TableHead className="w-45 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">ACTUAL QTY DISPATCHED</TableHead>
                           <TableHead className="w-30 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">GROSS WEIGHT (KG)</TableHead>
                           <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">STATUS</TableHead>
                         </TableRow>
@@ -2591,7 +2645,7 @@ export default function ActualDispatchPage() {
                           </TableCell>
                           <TableCell className="p-4 text-center">
                             <div className="flex flex-col items-center">
-                              <span className="text-[9px] font-black text-purple-400 uppercase tracking-tighter mb-1">TOTAL PACKING WEIGHT</span>
+                              <span className="text-[9px] font-black text-purple-400 uppercase tracking-tighter mb-1">TOTAL ITEMS GROSS WT.</span>
                               <div className="font-black text-lg text-purple-700">
                                 {selectedGroups.flatMap(g => g._allProducts)
                                   .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
@@ -2733,7 +2787,35 @@ export default function ActualDispatchPage() {
                             onValueChange={(v) => {
                               setVehicleNumber(v);
                               const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                              if (selectedV) autofillVehicleData(selectedV);
+                              if (selectedV) {
+                                autofillVehicleData(selectedV);
+                              } else if (!v) {
+                                // Clear data when deselected
+                                setLoadData(p => ({ ...p, truckNo: "" }));
+                                setVehicleData(p => ({
+                                  ...p,
+                                  registration_no: "",
+                                  vehicle_type: "",
+                                  rto: "",
+                                  passing_weight: "",
+                                  fitness_end_date: "",
+                                  insurance_end_date: "",
+                                  tax_end_date: "",
+                                  is_lifetime_tax: false,
+                                  fuel_type: "",
+                                  pollution_end_date: "",
+                                  permit1_end_date: "",
+                                  permit2_end_date: "",
+                                  fitness: "",
+                                  insurance: "",
+                                  tax_copy: "",
+                                  polution: "",
+                                  permit1: "",
+                                  permit2_out_state: "",
+                                  gvw: "",
+                                  ulw: ""
+                                }));
+                              }
                             }}
                             options={vehicleOptions}
                             placeholder="Select Vehicle"
@@ -2760,6 +2842,15 @@ export default function ActualDispatchPage() {
                                   valid_upto: selectedD.valid_upto ? new Date(selectedD.valid_upto).toISOString().split('T')[0] : "",
                                   trans_valid_upto: selectedD.trans_valid_upto ? new Date(selectedD.trans_valid_upto).toISOString().split('T')[0] : "",
                                   lmv_valid_upto: selectedD.lmv_valid_upto ? new Date(selectedD.lmv_valid_upto).toISOString().split('T')[0] : ""
+                                });
+                              } else if (!v) {
+                                setDriverData({
+                                  contact_no: "",
+                                  license_no: "",
+                                  license_type: "",
+                                  valid_upto: "",
+                                  trans_valid_upto: "",
+                                  lmv_valid_upto: ""
                                 });
                               }
                             }}
@@ -3112,7 +3203,7 @@ export default function ActualDispatchPage() {
 
                       <div className="pt-4 border-t-2 border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total packing weight</Label>
+                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Items Gross Weight</Label>
                           <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(4)} />
                         </div>
                         <div className="space-y-1.5">
@@ -3261,7 +3352,7 @@ export default function ActualDispatchPage() {
                         </div>
 
                         {/* Overload Alert & Remarks */}
-                        {totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0) && (
+                        {(parseFloat(vehicleData.passing_weight) || 0) > 0 && totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0) && (
                           <div className="p-4 bg-red-50 border-2 border-red-100 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2">
                             <div className="flex items-center gap-2">
                               <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
