@@ -64,6 +64,7 @@ const modules = [
   { title: "Security Guard Approval", icon: ShieldCheck, url: "/security-approval" },
   { title: "Make Invoice (Proforma)", icon: FileText, url: "/make-invoice" },
   { title: "Check Invoice", icon: FileCheck, url: "/check-invoice" },
+  { title: "Make Final Invoice", icon: FileText, url: "/final-invoice" },
   { title: "Gate Out", icon: Gate, url: "/gate-out" },
   { title: "Confirm Material Receipt", icon: FileSignature, url: "/material-receipt" },
   { title: "Damage Adjustment", icon: AlertCircle, url: "/damage-adjustment" },
@@ -91,6 +92,7 @@ export function AppSidebar() {
 
     const permissionMapping: Record<string, string> = {
       "Make Invoice (Proforma)": "Make Invoice",
+      "Make Final Invoice": "Check Invoice",
       "Confirm Material Receipt": "Confirm Material Receipt",
       "Damage Adjustment": "Damage Adjustment",
       "Owner Dashboard": "Owner Dashboard",

@@ -13,6 +13,7 @@ import {
   flattenGateOutStage,
   flattenMaterialReceiptStage,
   flattenDamageStage,
+  flattenGroupedOrderApproval,
 } from './v2-adapter';
 
 // Types
@@ -328,7 +329,9 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenOrderItemStage);
+    // Pending is grouped one row per DO (order), not per order_item - see
+    // orderApprovalService._groupRowsByOrder on the backend.
+    return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenGroupedOrderApproval);
   },
 
   getHistory: async (params?: {
@@ -344,7 +347,7 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenOrderItemStage);
+    return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenGroupedOrderApproval);
   },
 
   getFilters: async (): Promise<ApiResponse> => {
@@ -353,6 +356,21 @@ export const approvalApi = {
 
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/approval/${id}`);
+  },
+
+  // One full order (all items + invoice-style tax breakdown) for the
+  // single-DO Approval detail form.
+  getByOrderId: async (orderId: number): Promise<ApiResponse> => {
+    return request(`/approval/order/${orderId}`);
+  },
+
+  // Replace an order's extra taxable-amount charge lines (e.g. Transporting
+  // Expenses). Call once per order submit, not once per item.
+  setOrderCharges: async (orderId: number, charges: Array<{ ledgerId: number; amount: number }>, userId?: number | null): Promise<ApiResponse> => {
+    return request(`/approval/order/${orderId}/charges`, {
+      method: 'PUT',
+      body: JSON.stringify({ charges, userId }),
+    });
   },
 
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
@@ -673,6 +691,37 @@ export const checkInvoiceApi = {
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
     return request(`/check-invoice/submit/${id}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+export const finalInvoiceApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/final-invoice/pending${buildQuery(params)}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/final-invoice/history${buildQuery(params)}`);
+  },
+
+  submit: async (id: number | string, data: any): Promise<ApiResponse> => {
+    return request(`/final-invoice/submit/${id}`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -1865,6 +1914,7 @@ export default {
   securityGuardApproval: securityGuardApprovalApi,
   makeInvoice: makeInvoiceApi,
   checkInvoice: checkInvoiceApi,
+  finalInvoice: finalInvoiceApi,
   gateOut: gateOutApi,
   confirmMaterialReceipt: confirmMaterialReceiptApi,
   skuDetails: skuDetailsApi,

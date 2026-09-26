@@ -321,7 +321,7 @@ export function WorkflowStageShell({
                           <CommandEmpty>No party found.</CommandEmpty>
                           <CommandGroup>
                             <CommandItem
-                              value="all"
+                              value="__all__"
                               onSelect={() => {
                                 updateFilter("partyName", "all")
                                 setPartySearchOpen(false)
@@ -335,9 +335,9 @@ export function WorkflowStageShell({
                               />
                               All Parties
                             </CommandItem>
-                            {partyNames.map((name) => (
+                            {partyNames.map((name, idx) => (
                               <CommandItem
-                                key={name}
+                                key={`party-${idx}-${name}`}
                                 value={name}
                                 onSelect={(currentValue) => {
                                   updateFilter("partyName", currentValue === filters.partyName ? "" : currentValue)

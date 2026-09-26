@@ -205,6 +205,38 @@ export function flattenOrderItemStage(row: any): Record<string, any> {
   return r;
 }
 
+// Order Approval's PENDING list only (client request, Stage 3 overhaul): one
+// row per ORDER (not per order_item), with nested `items` and server-computed
+// totals - a different shape from flattenOrderItemStage's flat per-item rows,
+// so it gets its own flattener rather than overloading that one (which is
+// still used, unchanged, by History and by Pre-Approval/Dispatch-Planning).
+export function flattenGroupedOrderApproval(row: any): Record<string, any> {
+  const o = row.order || {};
+  const c = row.customer || {};
+  const d = row.depot || {};
+  const b = row.broker || {};
+  return {
+    id: o.id ?? null, // order id - the row/detail key for this new shape
+    order_id: o.id ?? null,
+    order_no: o.orderNo ?? null,
+    party_so_date: o.partySoDate ?? null,
+    manual_sauda_no: o.manualSaudaNo ?? null,
+    customer_name: c.customerName ?? null,
+    depo_name: d.depotName ?? null,
+    broker_name: b.brokerName ?? null,
+    order_punch_user: row.orderPunchUser ?? null,
+    total_qty_box: row.totalQtyBox ?? 0,
+    total_qty_kg: row.totalQtyKg ?? 0,
+    total_order_amount: row.totalOrderAmount ?? 0,
+    dispatch_from: row.dispatchFrom ?? null,
+    remarks: row.remarks ?? null,
+    actual_datetime: row.actualAt ?? null,
+    status: row.status ?? null,
+    item_count: row.itemCount ?? 0,
+    items: row.items ?? [],
+  };
+}
+
 // Actual Dispatch is per SHIPMENT: submit key = dispatch id.
 export function flattenDispatchStage(row: any): Record<string, any> {
   const r = base(row);

@@ -91,11 +91,28 @@ function layoutInfoCell(
     const spaceW = doc.getTextWidth(" ")
     curX += labelW + spaceW
     const words = String(value ?? "").split(/\s+/).filter(Boolean)
-    for (const w of words) {
+    for (let w of words) {
       const wW = doc.getTextWidth(w)
-      if (curX + wW > x0 + availW && curX > x0) { lineNo++; curX = x0 }
-      if (draw) doc.text(w, curX, baselineFor(lineNo))
-      curX += wW + spaceW
+      if (curX + wW > x0 + availW && curX > x0) { 
+        lineNo++; 
+        curX = x0; 
+      }
+      
+      if (doc.getTextWidth(w) > availW) {
+        // If a single word is wider than the entire column, let jsPDF split it exactly
+        const chunks = doc.splitTextToSize(w, availW);
+        for (let i = 0; i < chunks.length; i++) {
+          if (draw) doc.text(chunks[i], x0, baselineFor(lineNo));
+          if (i < chunks.length - 1) {
+            lineNo++;
+          } else {
+            curX = x0 + doc.getTextWidth(chunks[i]) + spaceW;
+          }
+        }
+      } else {
+        if (draw) doc.text(w, curX, baselineFor(lineNo))
+        curX += doc.getTextWidth(w) + spaceW
+      }
     }
     lineNo++
   }
@@ -220,6 +237,33 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
         else if (meta.type === "grand") { data.cell.styles.fillColor = BLACK; data.cell.styles.textColor = WHITE; data.cell.styles.fontStyle = "bold" }
         else { data.cell.styles.fillColor = WHITE }
       },
+    })
+
+    // ---- 2.5) Blank Space for Manual Entries ----
+    autoTable(doc, {
+      body: [
+        [
+          { content: "Vehicle No.: __________________________", styles: { halign: "left" } },
+          { content: "Driver Name: __________________________", styles: { halign: "left" } },
+        ],
+        [
+          { content: "Tare Wt.: __________________________", styles: { halign: "left" } },
+          { content: "Gross Wt.: __________________________", styles: { halign: "left" } },
+        ],
+        [
+          { content: "In Time: __________________________", styles: { halign: "left" } },
+          { content: "Out Time: __________________________", styles: { halign: "left" } },
+        ],
+        [
+          { content: "Guard Sign: __________________________", styles: { halign: "left" } },
+          { content: "Driver Sign: __________________________", styles: { halign: "left" } },
+        ]
+      ],
+      startY: (doc as any).lastAutoTable.finalY + 2,
+      margin: { top: margin, left: sideMargin, right: sideMargin, bottom: margin },
+      tableWidth: tableW,
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 2.5, textColor: BLACK },
     })
 
     // ---- 3) Footer: three equal columns (Punch / Pre-Approve / Approve) ----
