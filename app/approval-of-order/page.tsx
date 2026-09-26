@@ -2,221 +2,142 @@
 
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { useRouter } from "next/navigation"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { useToast } from "@/hooks/use-toast"
-import { useState, useEffect, useMemo, useCallback } from "react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { Checkbox } from "@/components/ui/checkbox"
-import { useInView } from "react-intersection-observer"
-import { ChevronLeft, ChevronRight, Settings2, CheckCircle2, Loader2, ChevronDown, ChevronUp, ChevronsUpDown, Check, CheckCircle, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { saveWorkflowHistory } from "@/lib/storage-utils"
+import { ColumnFilterPopover } from "@/components/ui/column-filter-popover"
+import { ChevronLeft, ChevronRight, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { useState, useEffect, useMemo, useCallback } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { approvalApi } from "@/lib/api-service"
-import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
+import { usePersistedSort } from "@/hooks/use-persisted-sort"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { ApprovalDetailDialog } from "@/components/approval-of-order/approval-detail-dialog"
 
+const STAGE_KEY = "approval-of-order"
 
-export default function CommitmentReviewPage() {
-  const queryClient = useQueryClient()
-  const router = useRouter()
-  const { toast } = useToast()
-  const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
-  const [isConfirming, setIsConfirming] = useState(false)
+// Client-specified column set (in the requested order) - a plain map straight
+// onto flattenGroupedOrderApproval's flat keys, one row per DO.
+const PAGE_COLUMNS = [
+  { id: "party_so_date", label: "DO Date", type: "date" as const },
+  { id: "order_no", label: "DO No.", type: "text" as const },
+  { id: "manual_sauda_no", label: "Manual Sauda No.", type: "text" as const },
+  { id: "customer_name", label: "Customer Name", type: "text" as const },
+  { id: "total_qty_box", label: "Total Qty (Box)", type: "number" as const },
+  { id: "total_qty_kg", label: "Total Qty (KGS)", type: "number" as const },
+  { id: "total_order_amount", label: "Total Order Amount", type: "number" as const },
+  { id: "dispatch_from", label: "Dispatch From", type: "text" as const },
+  { id: "status", label: "Status", type: "text" as const, historyOnly: true },
+  { id: "remarks", label: "Remarks", type: "text" as const },
+  { id: "broker_name", label: "Broker", type: "text" as const },
+  { id: "order_punch_user", label: "Order Punch By (user)", type: "text" as const },
+  { id: "actual_datetime", label: "Action Date", type: "date" as const, historyOnly: true },
+]
+const TOTAL_COLUMN_IDS = new Set(["total_qty_box", "total_qty_kg", "total_order_amount"])
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "—";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    } catch (e) {
-      return dateStr;
-    }
-  };
+const fmtDate = (v: string | null | undefined) => {
+  if (!v) return "—"
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return String(v)
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
+}
+const fmtNumber = (v: number | null | undefined) => {
+  const n = Number(v || 0)
+  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+}
+const fmtMoney = (v: number | null | undefined) => `₹${fmtNumber(v)}`
 
-  const PAGE_COLUMNS = [
-    { id: "partySoDate", label: "DO Date" },
-    { id: "orderNo", label: "DO Number" },
-    { id: "orderCategory", label: "Order Category" },
-    { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
-    { id: "orderType", label: "Order Type" },
-    { id: "customerType", label: "Customer Type" },
-    { id: "startDate", label: "Start Date" },
-    { id: "endDate", label: "End Date" },
-    { id: "deliveryDate", label: "Delivery Date" },
-    { id: "customerName", label: "Customer Name" },
-    { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr." },
-    { id: "rateOfMaterial", label: "Rate of Material" },
-    { id: "productName", label: "Product Name" },
-    { id: "uom", label: "UOM" },
-    { id: "orderQty", label: "Qty" },
-    { id: "altUom", label: "Alt UOM" },
-    { id: "altQty", label: "Alt Qty (Kg)" },
-    { id: "skuName", label: "SKU Name" },
-    { id: "approvalQty", label: "Approval Qty" },
-    { id: "rate", label: "Rate" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
-    { id: "transportType", label: "Type of Transporting" },
-    { id: "contactPerson", label: "Customer Contact Person Name" },
-    { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
-    { id: "address", label: "Customer Address" },
-    { id: "paymentTerms", label: "Payment Terms" },
-    { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
-    { id: "isBroker", label: "Is this order Through Broker" },
-    { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
-    { id: "uploadSo", label: "Upload DO." },
-    { id: "processId", label: "Manual Sauda No." },
-    { id: "orderPunchRemarks", label: "Order Punch Remarks" },
-    { id: "remark", label: "Remark" },
-    { id: "revertDispatchRemarks", label: "Revert(Dispatch-Planning) Remarks" },
-    { id: "revertPlanningRemarks", label: "Revert(Pre-Approval) Remarks" },
-    { id: "status", label: "Status" },
-  ]
+function formatCell(colId: string, value: any) {
+  if (colId === "party_so_date" || colId === "actual_datetime") return fmtDate(value)
+  if (colId === "total_order_amount") return fmtMoney(value)
+  if (colId === "total_qty_box" || colId === "total_qty_kg") return fmtNumber(value)
+  if (colId === "status") {
+    if (!value) return "—";
+    const status = String(value);
+    const badgeClass = "font-black tracking-wider text-[10px] px-2.5 py-0.5 rounded-md border-0";
+    if (status === "Approved") return <Badge variant="secondary" className={cn(badgeClass, "bg-emerald-100 text-emerald-700 hover:bg-emerald-200/80")}>APPROVED</Badge>
+    if (status === "Rejected") return <Badge variant="secondary" className={cn(badgeClass, "bg-rose-100 text-rose-700 hover:bg-rose-200/80")}>REJECTED</Badge>
+    if (status === "Required Modification") return <Badge variant="secondary" className={cn(badgeClass, "bg-amber-100 text-amber-700 hover:bg-amber-200/80")}>MODIFICATION REQUIRED</Badge>
+    return <Badge variant="secondary" className={cn(badgeClass, "bg-slate-100 text-slate-700 hover:bg-slate-200/80")}>{status.toUpperCase()}</Badge>
+  }
+  return value ?? "—"
+}
 
-  const [visibleColumns, setVisibleColumns] = usePersistedColumns(
-    "approval-of-order",
-    ["partySoDate", "orderNo", "customerName", "orderCategory", "productName", "rate", "orderPunchRemarks", "status"]
-  )
-  const [columnOrder, setColumnOrder] = useColumnOrder("approval-of-order", PAGE_COLUMNS.map(c => c.id))
-  const orderedVisibleCols = columnOrder
-    .map(id => PAGE_COLUMNS.find(c => c.id === id))
-    .filter((col): col is typeof PAGE_COLUMNS[0] => !!col && visibleColumns.includes(col.id))
-  const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
-    const hiddenCols = columnOrder.filter(id => !visibleColumns.includes(id))
-    setColumnOrder([...newVisibleOrder, ...hiddenCols])
-  }, [columnOrder, visibleColumns, setColumnOrder])
-
-  // State for list of orders
-  const [selectedOrder, setSelectedOrder] = useState<any>(null) // For the dialog interaction
-  const [sourceOfMaterial, setSourceOfMaterial] = useState<string>("in-stock")
-
-  const [checklistValues, setChecklistValues] = useState<Record<string, string>>({
-    rate: "approve",
-    sku: "approve",
-    credit: "approve",
-    dispatch: "approve",
-    overall: "approve",
-    confirm: "approve",
-  })
-
-  const [processId, setProcessId] = useState<string>("")
-
-  const [expandedOrders, setExpandedOrders] = useState<string[]>([])
-  const [pendingPage, setPendingPage] = useState(1);
-  const limit = 20;
-
+export default function ApprovalOfOrderPage() {
+  const { isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-
   const [filterValues, setFilterValues] = useState({
     search: "",
     status: "",
     startDate: "",
     endDate: "",
-    partyName: ""
+    partyName: "",
   })
+  
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
+  const limit = 20
+  const [filterOptions, setFilterOptions] = useState<{ customerNames: string[] }>({ customerNames: [] })
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
 
-  // Dynamic filter options
-  const [filterOptions, setFilterOptions] = useState<{ customerNames: string[] }>({ customerNames: [] });
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns(STAGE_KEY, PAGE_COLUMNS.filter(c => !c.historyOnly).map((c) => c.id))
+  const [columnOrder, setColumnOrder] = useColumnOrder(STAGE_KEY, PAGE_COLUMNS.map((c) => c.id))
+  const [sort, setSort] = usePersistedSort(STAGE_KEY, { field: "party_so_date", dir: "desc" })
+
+  const availableCols = PAGE_COLUMNS.filter(c => activeTab === "history" || !c.historyOnly)
+  
+  const orderedVisibleCols = columnOrder
+    .map((id) => availableCols.find((c) => c.id === id))
+    .filter((col): col is typeof PAGE_COLUMNS[0] => !!col && (visibleColumns.includes(col.id) || (activeTab === "history" && col.historyOnly)))
+    
+  const handleColumnReorder = useCallback(
+    (newVisibleOrder: string[]) => {
+      const hiddenCols = columnOrder.filter((id) => !orderedVisibleCols.find(c => c.id === id))
+      setColumnOrder([...newVisibleOrder, ...hiddenCols])
+    },
+    [columnOrder, orderedVisibleCols, setColumnOrder]
+  )
+  const handleSort = (field: string) => {
+    if (sort?.field === field) {
+      if (sort.dir === "asc") setSort({ field, dir: "desc" })
+      else setSort(null)
+    } else {
+      setSort({ field, dir: "asc" })
+    }
+  }
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sort?.field !== field) return <ArrowUpDown className="ml-1 inline h-3 w-3 text-slate-400" />
+    return sort.dir === "asc" ? <ArrowUp className="ml-1 inline h-3 w-3 text-blue-600" /> : <ArrowDown className="ml-1 inline h-3 w-3 text-blue-600" />
+  }
+
+  // Per-column Search + Filter
+  const [columnSearch, setColumnSearch] = useState<Record<string, string>>({})
+  const [columnFilterValues, setColumnFilterValues] = useState<Record<string, string[] | null>>({})
 
   useEffect(() => {
     const fetchFilters = async () => {
       try {
-        const response = await approvalApi.getFilters();
-        if (response.success && response.data) {
-          setFilterOptions(response.data);
-        }
+        const res = await approvalApi.getFilters()
+        if (res.success) setFilterOptions({ customerNames: res.data?.customerNames || [] })
       } catch (error) {
-        console.error("Failed to fetch filter options:", error);
+        console.error("Failed to fetch filter options:", error)
       }
-    };
-    fetchFilters();
-  }, []);
+    }
+    fetchFilters()
+  }, [])
 
-  // Reset page when filters change
   useEffect(() => {
-    setPendingPage(1);
-    // setHistoryPage(1);
-  }, [filterValues]);
+    setPendingPage(1)
+    setHistoryPage(1)
+  }, [filterValues])
 
-  // Map backend data (snake_case) to frontend format (camelCase)
-  const mapBackendOrderToFrontend = (backendOrder: any) => {
-    return {
-      id: backendOrder.id,
-      doNumber: backendOrder.order_no,
-      orderNo: backendOrder.order_no,
-      customerName: backendOrder.customer_name,
-      orderType: backendOrder.order_type,
-      customerType: backendOrder.customer_type,
-      orderPurpose: backendOrder.order_type_delivery_purpose,
-      deliveryDate: backendOrder.delivery_date,
-      startDate: backendOrder.start_date,
-      endDate: backendOrder.end_date,
-      soDate: backendOrder.party_so_date,
-      partySoDate: backendOrder.party_so_date,
-      contactPerson: backendOrder.customer_contact_person_name,
-      whatsappNo: backendOrder.customer_contact_person_whatsapp_no,
-      customerAddress: backendOrder.customer_address,
-      paymentTerms: backendOrder.payment_terms,
-      advancePaymentTaken: backendOrder.advance_payment_to_be_taken,
-      advanceAmount: backendOrder.advance_amount,
-      isBrokerOrder: backendOrder.is_order_through_broker,
-      isOrderThrough: backendOrder.is_order_through,
-      brokerName: backendOrder.broker_name,
-      transportType: backendOrder.type_of_transporting,
-      depoName: backendOrder.depo_name,
-      orderCategory: backendOrder.order_category,
-      orderPunchRemarks: backendOrder.order_punch_remarks,
-      uploadSo: backendOrder.upload_so,
-      remark: backendOrder.remark,
-      totalWithGst: backendOrder.total_amount_with_gst,
-      serial: backendOrder.serial,
-      // Product info (for individual row from DB)
-      products: [{
-        _pid: `${backendOrder.id}-${backendOrder.serial}`,
-        id: backendOrder.id,
-        productName: backendOrder.product_name,
-        oilType: backendOrder.oil_type,
-        uom: backendOrder.uom,
-        orderQty: backendOrder.approval_qty || backendOrder.order_quantity,
-        altUom: backendOrder.alternate_uom,
-        altQty: backendOrder.alternate_qty_kg,
-        ratePerLtr: backendOrder.rate_per_ltr,
-        rateLtr: backendOrder.rate_per_15kg,
-        rate: backendOrder.final_rate || backendOrder.rate_of_material,
-      }],
-      // Keep approval-specific fields
-      rateIsRightly: backendOrder.rate_is_rightly_as_per_current_market_rate,
-      weDealInSku: backendOrder.we_are_dealing_in_ordered_sku,
-      creditStatus: backendOrder.party_credit_status,
-      dispatchConfirmed: backendOrder.dispatch_date_confirmed,
-      overallStatus: backendOrder.overall_status_of_order,
-      customerConfirmation: backendOrder.order_confirmation_with_customer,
-    };
-  };
-
-  // Pending query with numeric pagination
   const {
     data: pendingResult,
     isLoading: isPendingLoading,
@@ -231,1166 +152,327 @@ export default function CommitmentReviewPage() {
         customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
         start_date: filterValues.startDate,
         end_date: filterValues.endDate,
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
+      })
+      return response.success ? response.data : { orders: [], pagination: { total: 0 } }
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
-  });
-
-  // ── Refetch fresh data from DB whenever stage tab changes ──
-  useEffect(() => {
-    if (activeTab === "pending") {
-      refetchPending();
-    }
-  }, [activeTab]);
-
-  const pendingOrders = useMemo(() => {
-    return pendingResult?.orders.map(mapBackendOrderToFrontend) || [];
-  }, [pendingResult]);
-
-  const isRejectedValue = (value: any) => value === false || String(value).toLowerCase().trim() === "false";
-  const getApprovalHistoryStatus = (order: any) => {
-    const approvalChecks = [
-      order.rate_is_rightly_as_per_current_market_rate,
-      order.we_are_dealing_in_ordered_sku,
-      order.party_credit_status,
-      order.dispatch_date_confirmed,
-      order.overall_status_of_order,
-      order.order_confirmation_with_customer,
-    ];
-
-    if (order.overall_status_of_order === "Required Modification") return "Required Modification";
-    if (approvalChecks.some(isRejectedValue)) return "Rejected";
-    if (order.overall_status_of_order === true || String(order.overall_status_of_order).toLowerCase().trim() === "true") return "Approved";
-    return "Completed";
-  };
-
-
-
-
-
-  const checkItems = [
-    { id: "rate", label: "Rate Right?" },
-    { id: "sku", label: "We Deal in SKU?" },
-    { id: "credit", label: "Credit OK?" },
-    { id: "dispatch", label: "Dispatch Confirmed?" },
-    { id: "overall", label: "Overall Status?" },
-    { id: "confirm", label: "Customer Confirmation?" },
-  ]
-
-  const handleChecklistChange = (itemId: string, value: string) => {
-    setChecklistValues((prev) => ({
-      ...prev,
-      [itemId]: value,
-    }))
-  }
-
-  const handleConfirmCommitment = async () => {
-    if (selectedItems.length === 0) return;
-
-    setIsConfirming(true)
-    try {
-      const hasRejection = Object.values(checklistValues).includes("reject")
-      // A third Stage 3 outcome (Order Punch's Modify flow): the overall
-      // verdict itself, distinct from any individual checklist item being
-      // rejected - takes precedence over hasRejection since it's the actual
-      // decision the approver picked.
-      const isRequiredModification = checklistValues.overall === "modify"
-      const timestamp = new Date().toISOString()
-
-      const successfulApprovals: any[] = []
-      const failedApprovals: any[] = []
-
-      // Process each selected item individually
-      // Process selected products from the dialog
-      const itemsToProcess = allProductsFromSelectedGroups.filter(p => dialogSelectedProducts.includes(p._rowKey))
-
-      for (const item of itemsToProcess) {
-        const orderData = item._orderData || {};
-        const orderIdentifier = item._originalOrderId || orderData.doNumber || orderData.orderNo || "ORD-XXX";
-        const productName = item.productName || item.oilType || "Unknown";
-        const product = item;
-
-        console.log('[APPROVAL] Processing item:', {
-          orderIdentifier,
-          productName,
-          productId: product?.id,
-          hasRejection,
-          checklistValues
-        });
-
-        // Create a focused order object with ONLY the approved/rejected product
-        const focusedOrderData = {
-          ...orderData,
-          products: orderData.orderType === "regular" ? [product] : [],
-          preApprovalProducts: orderData.orderType === "pre-approval" ? [product] : (orderData.preApprovalProducts?.some((p: any) => p.oilType) ? [product] : []),
-          _product: product // keep for reference
-        };
-
-        // Try submitting to backend API
-        try {
-          if (product?.id) {
-            // Prepare approval data for backend (v2-native camelCase)
-            const approvalData = {
-              // Required Modification (explicit overall verdict) takes precedence;
-              // otherwise auto-reject if ANY checklist item is 'reject'.
-              overallStatus: isRequiredModification ? "Required Modification" : (!hasRejection && checklistValues.overall === "approve"),
-              rateIsRightlyAsPerCurrentMarketRate: checklistValues.rate === "approve",
-              weAreDealingInOrderedSku: checklistValues.sku === "approve",
-              partyCreditStatus: checklistValues.credit === "approve",
-              dispatchDateConfirmed: checklistValues.dispatch === "approve",
-              orderConfirmationWithCustomer: checklistValues.confirm === "approve",
-              manualSaudaNo: processId || null, // Manual Sauda No.
-              userId: user?.id || null // Track acting user's login id
-            };
-
-            console.log('[APPROVAL] Submitting to API:', {
-              productId: product.id,
-              approvalData
-            });
-
-            // Call backend API to submit approval
-            const response = await approvalApi.submit(product.id, approvalData);
-            console.log('[APPROVAL] API Response:', response);
-            successfulApprovals.push(item);
-          } else {
-            console.warn('[APPROVAL] Skipping API submission:', {
-              productId: product?.id,
-              reason: !product?.id ? 'Missing product ID' : 'Unknown'
-            });
-          }
-        } catch (error: any) {
-          console.error(`[APPROVAL] Failed to submit approval for ${orderIdentifier}:`, error);
-          // Preserve error.code so stale-write (409) conflicts can be told apart below.
-          failedApprovals.push({ item, error: error?.message || "Unknown error", code: error?.code });
-        }
-
-        // Save to local history for tracking (both success and failure cases)
-        if (hasRejection) {
-          const historyEntry = {
-            orderNo: orderIdentifier,
-            customerName: orderData.customerName || "Unknown",
-            stage: "Approval Of Order",
-            status: "Rejected" as const,
-            processedBy: "Current User",
-            timestamp: timestamp,
-            remarks: `Rejected: ${productName}`,
-            data: {
-              orderData: focusedOrderData,
-              checklistResults: checklistValues,
-              rejectedAt: timestamp,
-            },
-            orderType: orderData.orderType || "regular"
-          }
-          // saveWorkflowHistory(historyEntry) - Removed as per user request to disable localStorage history
-        } else {
-          const finalData = {
-            orderData: {
-              ...focusedOrderData,
-              deliveryData: {
-                deliveryFrom: sourceOfMaterial
-              }
-            },
-            checklistResults: checklistValues,
-            confirmedAt: timestamp,
-            status: "Approved",
-          }
-
-          const historyEntry = {
-            orderNo: orderIdentifier,
-            customerName: item.customerName || "Unknown",
-            stage: "Approval Of Order",
-            status: "Approved" as const,
-            processedBy: "Current User",
-            timestamp: timestamp,
-            remarks: `Verified & Approved: ${productName}`,
-            data: finalData,
-            orderType: item.orderType || "regular"
-          }
-
-          // saveWorkflowHistory(historyEntry) - Removed as per user request to disable localStorage history
-          // setHistory((prev) => [...prev, historyEntry]) - History state no longer used in localStorage context
-        }
-      }
-
-      // Show results
-      if (successfulApprovals.length > 0) {
-        toast({
-          title: hasRejection ? "Orders Rejected" : "Approvals Submitted",
-          description: `${successfulApprovals.length} item(s) have been processed successfully.`,
-          variant: hasRejection ? "destructive" : "default",
-        })
-
-        // Refresh data from backend
-        await refetchPending()
-        queryClient.invalidateQueries({ queryKey: ["approval-history"] })
-      }
-
-      // Split failures: stale-write conflicts (order already processed or reverted to a
-      // different stage by another user) get a dedicated message and always trigger a
-      // refetch so the phantom rows drop off — even when nothing in this batch succeeded.
-      const staleApprovals = failedApprovals.filter((f: any) => isStaleWriteError(f))
-      const otherApprovals = failedApprovals.filter((f: any) => !isStaleWriteError(f))
-
-      if (staleApprovals.length > 0) {
-        toast({
-          title: "Already Processed",
-          description: `${staleApprovals.length} order(s) were already processed or moved by another user. Refreshing the list…`,
-          variant: "destructive",
-        })
-        if (successfulApprovals.length === 0) {
-          await refetchPending()
-          queryClient.invalidateQueries({ queryKey: ["approval-history"] })
-        }
-      }
-
-      if (otherApprovals.length > 0) {
-        toast({
-          title: "Some Approvals Failed",
-          description: `${otherApprovals.length} approval(s) failed. Please try again.`,
-          variant: "destructive",
-        })
-      }
-
-      if (successfulApprovals.length === 0 && failedApprovals.length === 0) {
-        toast({
-          title: hasRejection ? "Orders Rejected" : "Commitment Verified",
-          description: `${selectedItems.length} items have been processed.`,
-          variant: hasRejection ? "destructive" : "default",
-        })
-      }
-
-      if (pendingOrders.length <= selectedItems.length) {
-        // setTimeout(() => {
-        //   router.push("/dispatch-material")
-        // }, 1000)
-      }
-      setSelectedItems([])
-      setSelectedOrder(null)
-      // Reset form state after successful submission
-      setChecklistValues({
-        rate: "approve",
-        sku: "approve",
-        credit: "approve",
-        dispatch: "approve",
-        overall: "approve",
-        confirm: "approve",
-      })
-      setProcessId("")
-    } finally {
-      setIsConfirming(false)
-    }
-  }
-
-  const [selectedItems, setSelectedItems] = useState<any[]>([])
-  const [dialogSelectedProducts, setDialogSelectedProducts] = useState<string[]>([])
-
-  const toggleSelectDialogProduct = (key: string) => {
-    setDialogSelectedProducts(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    )
-  }
-
-  // Get all flattened products from selected Groups
-  const allProductsFromSelectedGroups = useMemo(() => {
-    return selectedItems.flatMap(group => group._allProducts || [])
-  }, [selectedItems])
-
-  const toggleSelectItem = (item: any) => {
-    const key = item._rowKey
-    const isSelected = selectedItems.some(i => i._rowKey === key)
-
-    if (isSelected) {
-      setSelectedItems(prev => prev.filter(i => i._rowKey !== key))
-    } else {
-      setSelectedItems(prev => [...prev, item])
-    }
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems([...displayRows])
-    }
-  }
-
-  const handleBulkVerifyOpen = (open: boolean) => {
-    if (!open) {
-      setSelectedOrder(null)
-      setDialogSelectedProducts([])
-      setExpandedOrders([])
-    } else {
-      // Pick the first one as representative for the dialog fields
-      if (selectedItems.length > 0) {
-        setSelectedOrder(selectedItems[0])
-        // Select all products by default
-        const allKeys = selectedItems.flatMap(g => g._allProducts || []).map((p: any) => p._rowKey)
-        setDialogSelectedProducts(allKeys)
-      }
-      // Default to hiding per-DO details sections on open
-      setExpandedOrders([])
-
-
-      // Reset form state whenever opening
-      setChecklistValues({
-        rate: "approve",
-        sku: "approve",
-        credit: "approve",
-        dispatch: "approve",
-        overall: "approve",
-        confirm: "approve",
-      })
-      setProcessId("")
-    }
-  }
-
-  /* Extract unique customer names */
-  const customerNames = Array.from(new Set(pendingOrders.map((order: any) => order.customerName || "Unknown")))
-
-  const filteredPendingOrders = pendingOrders.filter((order: any) => {
-    // API handles search, party name and date range.
-    // We only need to handle the "Status" (On Time / Expire) filter if present
-    if (!filterValues.status || filterValues.status === "all") return true
-
-    const targetDateStr = order.deliveryData?.expectedDeliveryDate || order.deliveryDate || order.timestamp
-    if (!targetDateStr) return true
-
-    const targetDate = new Date(targetDateStr)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-
-    if (filterValues.status === "expire") {
-      return targetDate < today
-    }
-    if (filterValues.status === "on-time") {
-      return targetDate >= today
-    }
-    return true
   })
 
+  const {
+    data: historyResult,
+    isLoading: isHistoryLoading,
+    refetch: refetchHistory,
+  } = useQuery({
+    queryKey: ["approval-history", filterValues, historyPage],
+    queryFn: async () => {
+      const response = await approvalApi.getHistory({
+        page: historyPage,
+        limit,
+        search: filterValues.search,
+        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
+        start_date: filterValues.startDate,
+        end_date: filterValues.endDate,
+      })
+      return response.success ? response.data : { orders: [], pagination: { total: 0 } }
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
 
+  useEffect(() => {
+    if (activeTab === "pending") refetchPending()
+    if (activeTab === "history") refetchHistory()
+  }, [activeTab])
 
-  // Group orders by base DO number so suffix variants like DO/26-27/0001A and DO/26-27/0001B appear as one grouped row.
+  const currentOrders: any[] = activeTab === "pending" ? (pendingResult?.orders || []) : (historyResult?.orders || [])
+  const isLoading = activeTab === "pending" ? isPendingLoading : isHistoryLoading
+
+  // Distinct values per column
+  const distinctValuesByColumn = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const col of PAGE_COLUMNS) {
+      map[col.id] = Array.from(new Set(currentOrders.map((r) => String(r[col.id] ?? "")))).sort()
+    }
+    return map
+  }, [currentOrders])
+
+  const getSortValue = (row: any, field: string, type: string) => {
+    const v = row[field]
+    if (v === null || v === undefined || v === "") return type === "number" ? -Infinity : ""
+    if (type === "number") return Number(v) || 0
+    if (type === "date") return new Date(v).getTime() || 0
+    return String(v).toLowerCase()
+  }
+
   const displayRows = useMemo(() => {
-    const grouped: { [key: string]: any } = {}
-
-    filteredPendingOrders.forEach((order: any) => {
-      const originalOrderId = order.doNumber || order.orderNo || "DO/26-27/0001"
-      const baseDoMatch = originalOrderId.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
-      const baseDo = baseDoMatch ? baseDoMatch[1].toUpperCase() : originalOrderId
-      const groupKey = baseDo
-      const products = (order.preApprovalProducts && order.preApprovalProducts.length > 0)
-        ? order.preApprovalProducts
-        : (order.products || [])
-
-      if (!grouped[groupKey]) {
-        grouped[groupKey] = {
-          ...order,
-          _displayDo: baseDo,
-          _allBaseDos: new Set([baseDo]),
-          _rowKey: groupKey,
-          _allProducts: [],
-          _seenProductKeys: new Set<string>(),
-          _productCount: 0,
-          _ordersMap: {}
-        }
-      } else {
-        grouped[groupKey]._allBaseDos.add(baseDo)
+    let out = currentOrders
+    for (const col of PAGE_COLUMNS) {
+      const search = columnSearch[col.id]
+      if (search && search.trim()) {
+        const needle = search.toLowerCase()
+        out = out.filter((r) => String(r[col.id] ?? "").toLowerCase().includes(needle))
       }
-
-      if (!grouped[groupKey]._ordersMap[baseDo]) {
-        grouped[groupKey]._ordersMap[baseDo] = {
-          customerName: order.customerName,
-          customerType: order.customerType,
-          orderPurpose: order.orderPurpose,
-          orderType: order.orderType,
-          startDate: order.startDate,
-          endDate: order.endDate,
-          deliveryDate: order.deliveryDate,
-          transportType: order.transportType,
-          contactPerson: order.contactPerson,
-          whatsappNo: order.whatsappNo,
-          customerAddress: order.customerAddress,
-          paymentTerms: order.paymentTerms,
-          advancePaymentTaken: order.advancePaymentTaken,
-          advanceAmount: order.advanceAmount,
-          isBrokerOrder: order.isBrokerOrder,
-          isOrderThrough: order.isOrderThrough,
-          brokerName: order.brokerName,
-          depoName: order.depoName,
-          orderCategory: order.orderCategory,
-          orderPunchRemarks: order.orderPunchRemarks,
-          remark: order.remark,
-          partySoDate: formatDate(order.partySoDate),
-          uploadSo: order.uploadSo,
-          _products: []
-        }
+      const filterVals = columnFilterValues[col.id]
+      if (filterVals) {
+        out = out.filter((r) => filterVals.includes(String(r[col.id] ?? "")))
       }
-
-      products.forEach((prod: any) => {
-        const pName = prod.productName || prod.oilType
-        const isVerified = false
-
-        if (!isVerified) {
-          // Unique key per (baseDo, orderId, product) so sibling A/B/C DOs of the
-          // same base DO don't collide and we never double-count the same product.
-          const prodIdentifier = prod._pid || prod.id || prod.serial || `${pName}-${prod.rate || ""}`
-          const uniqueKey = `${baseDo}::${order.id ?? "x"}::${prodIdentifier}`
-
-          if (grouped[groupKey]._seenProductKeys.has(uniqueKey)) {
-            return
-          }
-          grouped[groupKey]._seenProductKeys.add(uniqueKey)
-
-          const { _allProducts, _ordersMap, _seenProductKeys, ...cleanOrderData } = grouped[groupKey]
-          const productWithId = {
-            ...prod,
-            _originalOrderId: originalOrderId,
-            _baseDo: baseDo,
-            _orderData: cleanOrderData,
-            _rowKey: uniqueKey
-          }
-          grouped[groupKey]._allProducts.push(productWithId)
-          grouped[groupKey]._ordersMap[baseDo]._products.push(productWithId)
-        }
+    }
+    if (sort?.field) {
+      const col = PAGE_COLUMNS.find((c) => c.id === sort.field)
+      const type = col?.type || "text"
+      out = [...out].sort((a, b) => {
+        const av = getSortValue(a, sort.field, type)
+        const bv = getSortValue(b, sort.field, type)
+        if (typeof av === "number" && typeof bv === "number") return sort.dir === "asc" ? av - bv : bv - av
+        const as = String(av), bs = String(bv)
+        if (as < bs) return sort.dir === "asc" ? -1 : 1
+        if (as > bs) return sort.dir === "asc" ? 1 : -1
+        return 0
       })
-
-      grouped[groupKey]._productCount = grouped[groupKey]._allProducts.length
-    })
-
-    return Object.values(grouped)
-      .map((group: any) => {
-        const customerNames = Array.from(new Set(Object.values(group._ordersMap)
-          .map((order: any) => order.customerName)
-          .filter(Boolean)))
-
-        group._displayDo = Array.from(group._allBaseDos).join(", ")
-        group.customerName = customerNames.join(", ") || group.customerName || "—"
-        group.orderNo = group._displayDo
-        group.transportType = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(Boolean).join(", ")
-        group.orderPunchRemarks = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ")
-        group.remark = Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.remark))).filter(Boolean).join("; ")
-        return group
-      })
-      .filter((group: any) => group._productCount > 0)
-  }, [filteredPendingOrders])
-
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
     }
-  }
+    return out
+  }, [currentOrders, columnSearch, columnFilterValues, sort])
 
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
+  const totals = useMemo(() => {
+    const t: Record<string, number> = {}
+    for (const id of TOTAL_COLUMN_IDS) t[id] = displayRows.reduce((s, r) => s + (Number(r[id]) || 0), 0)
+    return t
+  }, [displayRows])
 
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (order: any, field: string) => {
-    if (field === "status") {
-      return order._productCount || 0
-    }
-    const row = buildApprovalDisplayRow(order)
-    const val = (row as any)[field]
-    if (val === undefined || val === null || val === "—") return ""
-    if (["ratePerLtr", "ratePer15Kg", "orderQty", "altQty", "rate", "totalWithGst", "advanceAmount"].includes(field)) {
-      const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""))
-      return isNaN(num) ? -Infinity : num
-    }
-    return String(val).toLowerCase()
-  }
+  const currentPage = activeTab === "pending" ? pendingPage : historyPage;
+  const currentPagination = activeTab === "pending" ? pendingResult?.pagination : historyResult?.pagination;
+  const setPage = activeTab === "pending" ? setPendingPage : setHistoryPage;
 
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField)
-      const bVal = getSortValue(b, pendingSortField)
-      if (typeof aVal === "number" && typeof bVal === "number") {
-        return pendingSortDir === "asc" ? aVal - bVal : bVal - aVal
-      }
-      const aStr = String(aVal)
-      const bStr = String(bVal)
-      if (aStr < bStr) return pendingSortDir === "asc" ? -1 : 1
-      if (aStr > bStr) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
+  const tableContent = (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        {(isAdmin || isFeatureEnabled("can_toggle_columns")) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full bg-transparent sm:w-auto">
+                <Settings2 className="mr-2 h-4 w-4" />
+                Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
+              <ColumnToggleContent 
+                columns={availableCols.filter(c => !c.historyOnly)} 
+                visibleColumns={visibleColumns} 
+                setVisibleColumns={setVisibleColumns} 
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
 
-  function buildApprovalDisplayRow(order: any) {
-    const products = order._allProducts || []
-    const firstProduct = products[0] || {}
-    const orderDetails = Object.values(order._ordersMap)[0] as any || {}
-    const baseDos = Array.from(new Set(products.map((p: any) => {
-      const id = p._originalOrderId || "DO/26-27/0001"
-      const match = id.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
-      return match ? match[1] : id
-    }))).join(", ")
-    const oilTypes = Array.from(new Set(products.map((p: any) => p.oilType || p.productName))).filter(Boolean).join(", ")
+      <Card className="overflow-hidden border-none shadow-sm md:max-h-150 md:overflow-auto">
+        <Table className="hidden md:table">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+            <TableRow>
+              <ColumnDragProvider
+                columnIds={orderedVisibleCols.map((c) => c.id)}
+                onReorder={handleColumnReorder}
+                disabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
+              >
+                {orderedVisibleCols.map((col) => (
+                  <SortableTableHead
+                    key={col.id}
+                    id={col.id}
+                    className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
+                    onClick={() => handleSort(col.id)}
+                  >
+                    {col.label}
+                    <SortIcon field={col.id} />
+                    <ColumnFilterPopover
+                      columnLabel={col.label}
+                      values={distinctValuesByColumn[col.id] || []}
+                      searchValue={columnSearch[col.id] || ""}
+                      onSearchChange={(v) => setColumnSearch((prev) => ({ ...prev, [col.id]: v }))}
+                      selectedValues={columnFilterValues[col.id] ?? null}
+                      onSelectedValuesChange={(v) => setColumnFilterValues((prev) => ({ ...prev, [col.id]: v }))}
+                    />
+                  </SortableTableHead>
+                ))}
+              </ColumnDragProvider>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading && currentOrders.length === 0 ? (
+              [...Array(5)].map((_, i) => (
+                <TableRow key={i} className="border-b border-slate-50 opacity-40">
+                  {orderedVisibleCols.map((col) => (
+                    <TableCell key={col.id} className="py-4">
+                      <div className="mx-auto h-3 w-16 animate-pulse rounded-full bg-slate-200" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : displayRows.length > 0 ? (
+              displayRows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer transition-colors hover:bg-blue-50/50"
+                  onClick={() => setSelectedOrderId(row.id)}
+                >
+                  {orderedVisibleCols.map((col) => (
+                    <TableCell
+                      key={col.id}
+                      className={cn(
+                        "whitespace-nowrap text-center text-xs",
+                        col.id === "order_no" ? "font-bold text-blue-700" : "text-slate-600"
+                      )}
+                      title={col.id === "remarks" ? row.remarks || undefined : undefined}
+                    >
+                      {col.id === "remarks" && row.remarks ? (
+                        <span className="inline-block max-w-[160px] truncate align-middle">{row.remarks}</span>
+                      ) : (
+                        formatCell(col.id, row[col.id])
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={orderedVisibleCols.length || 1} className="py-8 text-center text-muted-foreground">
+                  No orders {activeTab === "pending" ? "pending approval" : "in history"}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+          {displayRows.length > 0 && (
+            <TableFooter className="sticky bottom-0 z-10 bg-slate-50 shadow-[0_-1px_0_0_theme(colors.slate.200)]">
+              <TableRow className="hover:bg-transparent">
+                {orderedVisibleCols.map((col, idx) => (
+                  <TableCell key={col.id} className="whitespace-nowrap text-center text-xs font-black text-slate-700">
+                    {idx === 0 ? "Total" : TOTAL_COLUMN_IDS.has(col.id) ? formatCell(col.id, totals[col.id]) : ""}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableFooter>
+          )}
+        </Table>
 
-    return {
-      orderNo: baseDos || "—",
-      deliveryPurpose: orderDetails.orderPurpose || "—",
-      customerType: orderDetails.customerType || "—",
-      orderType: orderDetails.orderType || "—",
-      partySoDate: orderDetails.partySoDate || "—",
-      customerName: order.customerName || "—",
-      startDate: orderDetails.startDate || "—",
-      endDate: orderDetails.endDate || "—",
-      deliveryDate: orderDetails.deliveryDate || "—",
-      orderCategory: orderDetails.orderCategory || "—",
-      oilType: oilTypes || "—",
-      ratePerLtr: firstProduct?.ratePerLtr || "—",
-      ratePer15Kg: firstProduct?.rateLtr || "—",
-      productName: `${order._productCount} Items`,
-      uom: firstProduct?.uom || "—",
-      orderQty: products.reduce((sum: number, p: any) => sum + (Number(p.orderQty) || 0), 0).toFixed(2),
-      altUom: firstProduct?.altUom || "—",
-      altQty: products.reduce((sum: number, p: any) => sum + (Number(p.altQty) || 0), 0).toFixed(2),
-      rate: firstProduct?.rate || "—",
-      totalWithGst: products.reduce((sum: number, p: any) => sum + (Number(p.totalWithGst) || 0), 0).toFixed(2) || "—",
-      transportType: orderDetails.transportType || "—",
-      contactPerson: orderDetails.contactPerson || "—",
-      whatsapp: orderDetails.whatsappNo || "—",
-      address: orderDetails.customerAddress || "—",
-      paymentTerms: orderDetails.paymentTerms || "—",
-      advanceTaken: orderDetails.advancePaymentTaken ? "YES" : "NO",
-      advanceAmount: orderDetails.advanceAmount || "—",
-      isBroker: orderDetails.isBrokerOrder ? "YES" : "NO",
-      brokerName: orderDetails.brokerName || "—",
-      uploadSo: orderDetails.uploadSo || null,
-      orderPunchRemarks: order.orderPunchRemarks || "—",
-      status: "Pending",
-      products,
-      orderDetails,
-    }
-  }
+        <div className="space-y-3 p-3 md:hidden">
+          {isLoading && currentOrders.length === 0 ? (
+            [...Array(5)].map((_, i) => (
+              <div key={i} className="space-y-3 rounded-lg border p-4 opacity-60">
+                <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
+                <div className="grid grid-cols-2 gap-3">
+                  {[...Array(6)].map((__, j) => <div key={j} className="h-10 animate-pulse rounded bg-slate-100" />)}
+                </div>
+              </div>
+            ))
+          ) : displayRows.length > 0 ? (
+            displayRows.map((row) => (
+              <div
+                key={row.id}
+                onClick={() => setSelectedOrderId(row.id)}
+                className="cursor-pointer rounded-lg border bg-white p-4 shadow-sm active:bg-blue-50/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-all font-mono text-sm font-black text-blue-700">{row.order_no}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{fmtDate(row.party_so_date)}</p>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] font-black uppercase tracking-tighter text-slate-700">
+                    {row.item_count} Items
+                  </Badge>
+                </div>
+                <div className="mt-3">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Customer Name</p>
+                  <p className="break-words text-sm font-bold text-slate-900">{row.customer_name || "—"}</p>
+                </div>
+                {activeTab === "history" && (
+                   <div className="mt-3">
+                     {formatCell("status", row.status)}
+                   </div>
+                )}
+                <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-[10px] font-black uppercase text-slate-400">Qty (Box)</p>
+                    <p className="mt-1 font-mono font-bold">{fmtNumber(row.total_qty_box)}</p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-[10px] font-black uppercase text-slate-400">Qty (KGS)</p>
+                    <p className="mt-1 font-mono font-bold">{fmtNumber(row.total_qty_kg)}</p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-[10px] font-black uppercase text-slate-400">Total Amount</p>
+                    <p className="mt-1 font-mono font-bold">{fmtMoney(row.total_order_amount)}</p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-[10px] font-black uppercase text-slate-400">Broker</p>
+                    <p className="mt-1 font-semibold break-words">{row.broker_name || "—"}</p>
+                  </div>
+                </div>
+                {row.remarks && (
+                  <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs">
+                    <span className="font-black text-amber-800">Remarks:</span> {row.remarks}
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="py-10 text-center text-muted-foreground">No orders {activeTab === "pending" ? "pending approval" : "in history"}</div>
+          )}
+        </div>
+      </Card>
+
+      <div className="mt-4 flex w-full flex-col gap-3 rounded-2xl border border-blue-50 bg-white/50 p-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-full border border-slate-200/50 bg-slate-100/50 px-4 py-2 text-xs font-bold text-slate-500">
+          Page <span className="px-1 text-blue-600">{currentPage}</span> of <span className="px-1 text-blue-600">{currentPagination?.totalPages || 1}</span>
+          <span className="mx-2 text-slate-300">|</span>
+          Total <span className="px-1 text-blue-600">{currentPagination?.total || 0}</span> Orders
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:flex">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1 || isLoading}
+            className="h-9 rounded-xl border-slate-200 transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 active:scale-95 disabled:opacity-30"
+          >
+            <ChevronLeft className="mr-1 h-4 w-4" /> Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={currentPage >= (currentPagination?.totalPages || 1) || isLoading}
+            className="h-9 rounded-xl border-slate-200 text-xs font-bold transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 active:scale-95 disabled:opacity-30"
+          >
+            Next <ChevronRight className="ml-1 h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <WorkflowStageShell
       title="Stage 3: Approval Of Order"
-      description="Six-point verification check before commitment entry."
-      pendingCount={displayRows.length}
+      description="Review each order and Approve, Reject, or request Modification, with full invoice-style detail."
+      pendingCount={pendingResult?.pagination?.total || 0}
       historyData={[]}
       partyNames={filterOptions.customerNames}
       onFilterChange={setFilterValues}
       onTabChange={setActiveTab}
       showDateFilters={false}
-      groupBySiblingDo={true}
-      historyContent={
-        <StageHistoryTab
-          queryKeyPrefix="approval-history"
-          getHistoryApi={approvalApi.getHistory}
-          filterValues={filterValues}
-          activeTab={activeTab}
-          stageName="Approval Of Order"
-          stageLevel={2}
-          remarksColName="Approval Remarks"
-          mapStatus={getApprovalHistoryStatus}
-          getDate={(order: any) => order.actual_2 || null}
-        />
-      }
+      historyContent={tableContent}
     >
-      <div className="space-y-4">
-        <div className="flex flex-col justify-end gap-2 sm:flex-row">
-          <Dialog open={selectedOrder !== null} onOpenChange={handleBulkVerifyOpen}>
-            <DialogTrigger asChild>
-              <Button
-                disabled={selectedItems.length === 0}
-                className="w-full bg-blue-600 hover:bg-blue-700 shadow-md transition-all active:scale-95 sm:w-auto"
-              >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Verify Selected ({selectedItems.length})
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl lg:max-w-6xl max-h-[90vh] flex flex-col p-3 sm:p-6 overflow-x-hidden overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] [overflow-wrap:anywhere]">
-              <DialogHeader className="border-b pb-4 min-w-0">
-                <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words">
-                  Bulk Approval: {selectedItems.length > 1 ? `${selectedItems.length} Items Selected` : (selectedOrder?.doNumber || "Order Verification")}
-                </DialogTitle>
-                <DialogDescription className="text-slate-500 mt-1.5">Verify order details and complete the six-point check for commitment.</DialogDescription>
-              </DialogHeader>
+      {tableContent}
 
-              {/* Interleaved Order Details and Product Tables Section */}
-              <div className="space-y-6 sm:space-y-12 mt-4 sm:mt-6 min-w-0">
-                {selectedItems.map((customerGrp) => (
-                  <div key={customerGrp._rowKey} className="space-y-4 sm:space-y-6 min-w-0">
-                    <h2 className="text-base sm:text-xl font-black text-blue-900 border-b-4 border-blue-100 pb-2 mt-4 uppercase tracking-tight flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="break-words">{customerGrp.customerName}</span>
-                      <Badge className="w-fit bg-blue-600 text-white px-3 py-1 font-black sm:ml-3">
-                        {customerGrp._productCount} PRODUCTS
-                      </Badge>
-                    </h2>
-
-                    {/* Iterate through each unique base DO for this customer */}
-                    {Object.entries(customerGrp._ordersMap).map(([baseDo, orderDetails]: [string, any], orderIdx) => {
-                      const orderSectionKey = `${customerGrp._rowKey}__${baseDo}`;
-                      const isExpanded = expandedOrders.includes(orderSectionKey);
-
-                      const toggleExpand = () => {
-                        setExpandedOrders(prev =>
-                          isExpanded ? prev.filter(id => id !== orderSectionKey) : [...prev, orderSectionKey]
-                        );
-                      };
-
-                      return (
-                        <div key={orderSectionKey} className="space-y-4 border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow min-w-0">
-                          <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
-                            <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                              <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-base font-black tracking-tight rounded-full shadow-sm whitespace-normal break-all">
-                                ORDER: {baseDo}
-                              </Badge>
-                              <div className="flex flex-col">
-                                <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">Section {orderIdx + 1}</span>
-                                <span className="text-xs text-blue-100 font-bold leading-none">{orderDetails._products.length} Items Selected</span>
-                              </div>
-                            </div>
-                            <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
-                              <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2">Click to {isExpanded ? 'Hide' : 'Show'} Details</div>
-                              <span
-                                role="button"
-                                aria-label={isExpanded ? "Collapse section" : "Expand section"}
-                                className="inline-flex h-8 w-8 items-center justify-center text-white hover:bg-white/20 rounded-full"
-                                onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
-                              >
-                                {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Collapsible Order Details (product table below is always visible) */}
-                          {isExpanded && (
-                            <div className="animate-in slide-in-from-top-2 duration-200">
-                              <div className="px-3 sm:px-5 pb-5">
-                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-inner">
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Name</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight break-words">{customerGrp.customerName || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Depo Name</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.depoName || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Purpose</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderPurpose?.replace(/-/g, ' ') || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Category</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderCategory || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Order Type</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.orderType || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Start Date</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.startDate)}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">End Date</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.endDate)}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Delivery Date</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{formatDate(orderDetails.deliveryDate)}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">DO Date</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.partySoDate || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Transport Type</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Contact Person</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.contactPerson || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">WhatsApp No.</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.whatsappNo || "—"}</p>
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Customer Address</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight break-words" title={orderDetails.customerAddress}>{orderDetails.customerAddress || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Payment Terms</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.paymentTerms || "—"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
-                                      <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Payment</p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.advancePaymentTaken ? "YES" : "NO"}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">
-                                        {orderDetails.isOrderThrough === "Salesperson" ? "Salesperson Name" : "Through Broker"}
-                                      </p>
-                                      <p className="text-sm font-bold text-slate-900 leading-tight">
-                                        {orderDetails.isBrokerOrder ? orderDetails.brokerName || "Yes" : "No"}
-                                      </p>
-                                    </div>
-                                    <div className="sm:col-span-2 bg-amber-50 p-4 rounded-xl border border-amber-100 flex items-start gap-4">
-                                      <div className="bg-amber-100 p-2 rounded-lg">
-                                        <Settings2 className="h-5 w-5 text-amber-600" />
-                                      </div>
-                                      <div>
-                                        <p className="text-[11px] text-amber-800 font-black uppercase tracking-widest mb-1 leading-none">Order Punch Remarks</p>
-                                        <p className="text-sm font-medium text-slate-700 italic leading-snug break-words">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
-                                      </div>
-                                    </div>
-                                    <div className={cn(
-                                      "sm:col-span-2 p-4 rounded-xl border flex items-start gap-4 transition-all duration-300",
-                                      orderDetails.uploadSo
-                                        ? "bg-blue-50 border-blue-100 hover:bg-blue-100 cursor-pointer group"
-                                        : "bg-slate-50 border-slate-100 opacity-60"
-                                    )}
-                                      onClick={() => {
-                                        if (orderDetails.uploadSo) {
-                                          window.open(orderDetails.uploadSo, '_blank');
-                                        }
-                                      }}>
-                                      <div className={cn(
-                                        "p-2 rounded-lg",
-                                        orderDetails.uploadSo ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400"
-                                      )}>
-                                        <FileText className="h-5 w-5" />
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <p className={cn(
-                                          "text-[11px] font-black uppercase tracking-widest mb-1 leading-none",
-                                          orderDetails.uploadSo ? "text-blue-800" : "text-slate-500"
-                                        )}>PO Copy (SO Upload)</p>
-                                        {orderDetails.uploadSo ? (
-                                          <div className="flex items-center gap-1">
-                                            <p className="text-sm font-bold text-blue-700 truncate">View Attachment</p>
-                                            <ExternalLink className="h-3 w-3 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                          </div>
-                                        ) : (
-                                          <p className="text-sm font-medium text-slate-400 italic">No attachment</p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Render Product Table for this DO (always visible) */}
-                          <div className="px-3 sm:px-5 pt-2 pb-6 min-w-0">
-                            <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                              <div className="hidden md:block">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow className="bg-slate-50 border-b">
-                                      <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
-                                        <Checkbox
-                                          checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
-                                          onCheckedChange={(checked) => {
-                                            const productKeys = orderDetails._products.map((p: any) => p._rowKey);
-                                            if (checked) {
-                                              setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys]))
-                                              )
-                                            } else {
-                                              setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
-                                            }
-                                          }}
-                                        />
-                                      </TableHead>
-                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
-                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty</TableHead>
-                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate</TableHead>
-                                      <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Status</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {orderDetails._products.map((prod: any) => (
-                                      <TableRow key={prod._rowKey} className={cn(dialogSelectedProducts.includes(prod._rowKey) ? "bg-blue-50/40" : "")}>
-                                        <TableCell className="text-center p-3">
-                                          <Checkbox
-                                            checked={dialogSelectedProducts.includes(prod._rowKey)}
-                                            onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                          />
-                                        </TableCell>
-                                        <TableCell className="p-3">
-                                          <div className="flex flex-col">
-                                            <span className="text-xs font-black text-slate-900 leading-none mb-1">{prod.productName || prod.oilType || "—"}</span>
-                                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{prod._originalOrderId}</span>
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="p-3">
-                                          <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                        </TableCell>
-                                        <TableCell className="p-3 text-[10px] font-bold text-slate-700">₹{prod.rate || "—"}</TableCell>
-                                        <TableCell className="p-3">
-                                          <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                              <div className="space-y-3 p-3 md:hidden">
-                                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-                                  <div>
-                                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Products</p>
-                                    <p className="text-xs font-bold text-slate-700">{orderDetails._products.length} items</p>
-                                  </div>
-                                  <Checkbox
-                                    checked={orderDetails._products.length > 0 && orderDetails._products.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
-                                    onCheckedChange={(checked) => {
-                                      const productKeys = orderDetails._products.map((p: any) => p._rowKey);
-                                      if (checked) {
-                                        setDialogSelectedProducts(prev => Array.from(new Set([...prev, ...productKeys])))
-                                      } else {
-                                        setDialogSelectedProducts(prev => prev.filter(k => !productKeys.includes(k)))
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                {orderDetails._products.map((prod: any) => {
-                                  const selected = dialogSelectedProducts.includes(prod._rowKey)
-                                  return (
-                                    <div
-                                      key={prod._rowKey}
-                                      className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}
-                                    >
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
-                                          <p className="text-sm font-black text-slate-900 break-words">{prod.productName || prod.oilType || "—"}</p>
-                                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight break-all">{prod._originalOrderId}</p>
-                                        </div>
-                                        <Checkbox
-                                          checked={selected}
-                                          onCheckedChange={() => toggleSelectDialogProduct(prod._rowKey)}
-                                        />
-                                      </div>
-                                      <div className="grid grid-cols-2 gap-3 text-xs">
-                                        <div className="rounded-md bg-slate-50 p-2">
-                                          <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                                          <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{prod.orderQty}</Badge>
-                                        </div>
-                                        <div className="rounded-md bg-slate-50 p-2">
-                                          <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                          <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
-                                        </div>
-                                      </div>
-                                      <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 uppercase font-black">Pending Approval</Badge>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-
-              <div className="py-6 space-y-4">
-                {/* Process ID Input */}
-                <div className="space-y-3">
-                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 px-1 uppercase tracking-tight">
-                    <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
-                    Manual Sauda No.
-                  </h3>
-                  <div className="p-4 rounded-xl border border-slate-100 bg-white shadow-sm">
-                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">Enter Manual Sauda No.</Label>
-                    <Input
-                      type="text"
-                      placeholder="Enter manual sauda no..."
-                      value={processId}
-                      onChange={(e) => setProcessId(e.target.value)}
-                      className="w-full h-11 text-sm font-medium border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Six-Point Verification */}
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 px-1 uppercase tracking-tight">
-                  <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
-                  Six-Point Verification
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {checkItems.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:border-slate-200 transition-colors">
-                      <Label className="text-sm font-semibold text-slate-700">{item.label}</Label>
-                      <RadioGroup
-                        value={checklistValues[item.id]}
-                        onValueChange={(value) => handleChecklistChange(item.id, value)}
-                        className="flex gap-6"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="approve" id={`${item.id}-ok`} className="text-green-600" />
-                          <Label htmlFor={`${item.id}-ok`} className="text-sm font-medium text-green-600 cursor-pointer">
-                            Approve
-                          </Label>
-                        </div>
-                        {/* Required Modification is only a valid verdict for the
-                            overall decision, not the individual sub-checks. */}
-                        {item.id === "overall" && (
-                          <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="modify" id={`${item.id}-modify`} className="text-amber-600" />
-                            <Label htmlFor={`${item.id}-modify`} className="text-sm font-medium text-amber-600 cursor-pointer">
-                              Required Modification
-                            </Label>
-                          </div>
-                        )}
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="reject" id={`${item.id}-no`} className="text-red-600" />
-                          <Label htmlFor={`${item.id}-no`} className="text-sm font-medium text-red-600 cursor-pointer">
-                            Reject
-                          </Label>
-                        </div>
-                      </RadioGroup>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <DialogFooter className="border-t pt-4 sm:justify-center">
-                <Button
-                  onClick={handleConfirmCommitment}
-                  disabled={isConfirming || isReadOnly}
-                  className={cn(
-                    "w-full min-w-0 px-8 h-11 text-sm sm:text-base font-bold shadow-lg shadow-blue-100 transition-all hover:scale-[1.01] active:scale-[0.99] sm:w-auto",
-                    checklistValues.overall === "modify" && "bg-amber-500 hover:bg-amber-600 shadow-amber-100"
-                  )}
-                  variant={checklistValues.overall === "modify" ? "default" : Object.values(checklistValues).includes("reject") ? "destructive" : "default"}
-                >
-                  {isConfirming
-                    ? "Processing..."
-                    : checklistValues.overall === "modify"
-                      ? "Send Back for Modification"
-                      : Object.values(checklistValues).includes("reject")
-                        ? "Reject & Save to History"
-                        : `Approve ${dialogSelectedProducts.length} Selected Item(s)`}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full bg-transparent sm:w-auto">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-
-        <Card className="border-none shadow-sm overflow-hidden md:max-h-150 md:overflow-auto">
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12.5 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && selectedItems.length === displayRows.length}
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map((col) => (
-                    <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                      {col.label}<PendingSortIcon field={col.id} />
-                    </SortableTableHead>
-                  ))}
-                </ColumnDragProvider>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPendingLoading && pendingOrders.length === 0 ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    {orderedVisibleCols.map(col => (
-                      <TableCell key={col.id} className="py-4">
-                        <div className={cn(
-                          "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
-                          col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-24" : "w-16"
-                        )} />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : displayRows.length > 0 ? (
-                sortedDisplayRows.map((order: any) => {
-                  const row: any = buildApprovalDisplayRow(order)
-
-                  return (
-                    <TableRow
-                      key={order._rowKey}
-                      className={selectedItems.some(i => i._rowKey === order._rowKey) ? "bg-blue-50/50" : ""}
-                    >
-                      <TableCell className="text-center">
-                        <Checkbox
-                          checked={selectedItems.some(i => i._rowKey === order._rowKey)}
-                          onCheckedChange={() => toggleSelectItem(order)}
-                        />
-                      </TableCell>
-                      {orderedVisibleCols.map((col) => (
-                        <TableCell key={col.id} className={cn(
-                          "whitespace-nowrap text-center text-xs",
-                          col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
-                        )}>
-                          {col.id === "status" ? (
-                            <div className="flex justify-center gap-2">
-                              <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">
-                                {order._productCount} Items
-                              </Badge>
-                            </div>
-                          ) : col.id === "productName" ? (
-                            <span className="font-medium text-slate-700">{row.productName}</span>
-                          ) : row[col.id]}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  )
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
-                    No orders pending for commitment review
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-
-          <div className="space-y-3 p-3 md:hidden">
-            {isPendingLoading && pendingOrders.length === 0 ? (
-              [...Array(5)].map((_, i) => (
-                <div key={i} className="rounded-lg border p-4 space-y-3 opacity-60">
-                  <div className="h-4 w-32 bg-slate-200 animate-pulse rounded" />
-                  <div className="grid grid-cols-2 gap-3">
-                    {[...Array(6)].map((__, j) => <div key={j} className="h-10 bg-slate-100 animate-pulse rounded" />)}
-                  </div>
-                </div>
-              ))
-            ) : displayRows.length > 0 ? (
-              displayRows.map((order: any) => {
-                const row = buildApprovalDisplayRow(order)
-                const selected = selectedItems.some(i => i._rowKey === order._rowKey)
-                return (
-                  <div
-                    key={order._rowKey}
-                    className={cn("rounded-lg border bg-white p-4 shadow-sm", selected && "border-blue-200 bg-blue-50")}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-mono text-sm font-black text-blue-700 break-all">{row.orderNo}</p>
-                        <p className="mt-1 text-xs font-semibold text-slate-500">{row.partySoDate}</p>
-                      </div>
-                      <Checkbox
-                        checked={selected}
-                        onCheckedChange={() => toggleSelectItem(order)}
-                      />
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Customer Name</p>
-                      <p className="text-sm font-bold text-slate-900 break-words">{row.customerName}</p>
-                    </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Category</p>
-                        <p className="mt-1 font-bold break-words">{row.orderCategory}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Products</p>
-                        <p className="mt-1 font-bold">{order._productCount} items</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Oil Type</p>
-                        <p className="mt-1 font-semibold break-words">{row.oilType}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                        <p className="mt-1 font-mono font-bold">{row.orderQty}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                        <p className="mt-1 font-mono font-bold">₹{row.rate}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Transport</p>
-                        <p className="mt-1 font-semibold break-words">{row.transportType}</p>
-                      </div>
-                    </div>
-                    {row.orderPunchRemarks !== "—" && (
-                      <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs">
-                        <span className="font-black text-amber-800">Order Remarks:</span> {row.orderPunchRemarks}
-                      </div>
-                    )}
-                    <Badge variant="outline" className="mt-3 text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">
-                      Pending Approval
-                    </Badge>
-                  </div>
-                )
-              })
-            ) : (
-              <div className="py-10 text-center text-muted-foreground">
-                No orders pending for commitment review
-              </div>
-            )}
-          </div>
-        </Card>
-
-        {activeTab === "pending" && (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-            <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-              Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingResult?.pagination?.totalPages || 1}</span>
-              <span className="mx-2 text-slate-300">|</span>
-              Total <span className="text-blue-600 px-1">{pendingResult?.pagination?.total || 0}</span> Groups
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:flex">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-                disabled={pendingPage === 1 || isPendingLoading}
-                className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => p + 1)}
-                disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1) || isPendingLoading}
-                className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
-              >
-                Next <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+      <ApprovalDetailDialog
+        orderId={selectedOrderId}
+        open={selectedOrderId !== null}
+        onOpenChange={(v) => !v && setSelectedOrderId(null)}
+        onSubmitted={() => {
+          refetchPending()
+          refetchHistory()
+        }}
+      />
     </WorkflowStageShell>
   )
 }
