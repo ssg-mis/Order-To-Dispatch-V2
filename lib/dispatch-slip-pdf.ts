@@ -119,7 +119,7 @@ function layoutInfoCell(
   return lineNo
 }
 
-export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean }) {
+export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean; title?: string }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 10
@@ -152,7 +152,7 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
     const headerBody = [
       [banner("SHRI SHYAM OIL EXTRACTIONS PVT LTD", { halign: "center", valign: "middle", fontStyle: "bold", fontSize: 15 })],
       [banner("Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)", { halign: "center", fontStyle: "normal", fontSize: 8, textColor: [90, 90, 90] })],
-      [banner("Oil Dispatch Voucher", { halign: "center", fontStyle: "bold", fontSize: 12 })],
+      [banner(opts?.title || "Oil Dispatch Voucher", { halign: "center", fontStyle: "bold", fontSize: 12 })],
       [info([{ label: "DO no.:", value: party.commitmentNo }]), info([{ label: "DO Date:", value: party.date }])],
       [info([{ label: "Customer:", value: party.party }]), info([{ label: party.referenceLabel ? `${party.referenceLabel}:` : "", value: party.referenceValue || "—" }])],
       [

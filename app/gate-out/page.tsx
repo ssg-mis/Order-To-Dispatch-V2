@@ -20,7 +20,8 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Printer, Download } from "lucide-react"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
@@ -234,6 +235,18 @@ export default function GateOutPage() {
       for (const sku of skuDetailsData) {
         if (sku.sku_name) {
           const weight = sku.sku_weight ?? ""
+          map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+  const skuGrossWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          const weight = sku.gross_weight ?? ""
           map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
         }
       }
@@ -606,6 +619,73 @@ export default function GateOutPage() {
       setIsDialogOpen(true)
     }
   }
+
+  const buildSlipParties = () => {
+    const productsForSlip = selectedGroups.flatMap((group: any) =>
+      group._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey))
+    );
+    const partyGroups: Record<string, any[]> = {};
+    productsForSlip.forEach((p: any) => {
+      const pName = p.party_name || p.partyName || "Unknown Party";
+      if (!partyGroups[pName]) partyGroups[pName] = [];
+      partyGroups[pName].push(p);
+    });
+    return Object.entries(partyGroups).map(([party, partyProducts]) => {
+      const firstProd = partyProducts[0];
+      const orderThrough = firstProd.is_order_through || firstProd.isOrderThrough || "Direct";
+      const referenceLabel = orderThrough === "Broker" ? "Broker" : orderThrough === "Salesperson" ? "Salesperson" : "";
+      const referenceValue = orderThrough === "Broker"
+        ? (firstProd.broker_name || firstProd.brokerName || "—")
+        : orderThrough === "Salesperson"
+          ? (firstProd.salesperson_name || "—")
+          : "Direct";
+      return {
+        party,
+        commitmentNo: firstProd.so_no || firstProd.soNo || firstProd.specificOrderNo || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        referenceLabel,
+        referenceValue,
+        place: firstProd.customer_address || firstProd.customerAddress || "—",
+        partyMo: firstProd.customer_contact_person_whatsapp_no || firstProd.whatsapp || "—",
+        status: "Original",
+        processId: firstProd.processid || "—",
+        punchBy: firstProd.order_punch_user || "—",
+        punchAt: firstProd.order_punch_at || null,
+        preApproveBy: firstProd.pre_approval_user || "—",
+        preApproveAt: firstProd.pre_approval_at || null,
+        approveBy: firstProd.order_approval_user || "—",
+        approveAt: firstProd.order_approval_at || null,
+        products: partyProducts.map((prod: any) => {
+          const qty = parseFloat(prod.actual_qty_dispatch || prod.qty_to_be_dispatched || "0");
+          const skuWt = parseFloat(skuWeightMap.get(prod.productName?.trim().toLowerCase()) || "") || 0;
+          const skuGrossWt = parseFloat(skuGrossWeightMap.get(prod.productName?.trim().toLowerCase()) || "") || 0;
+          return {
+            productName: prod.productName || "—",
+            uom: prod.uom || "PCS",
+            qty,
+            weight: skuWt * qty,
+            grossWeight: (skuGrossWt > 0 ? skuGrossWt : skuWt) * qty,
+          };
+        }),
+      };
+    });
+  };
+
+  const handleDownloadSlip = () => {
+    if (selectedGroups.length === 0 || selectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to download the gate pass", variant: "destructive" });
+      return;
+    }
+    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { title: "Gate Pass" });
+  };
+
+  const handlePrintSlip = () => {
+    if (selectedGroups.length === 0 || selectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to print the gate pass", variant: "destructive" });
+      return;
+    }
+    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { print: true, title: "Gate Pass" });
+  };
 
   const handleSubmit = async () => {
     if (selectedGroups.length === 0) return
@@ -1626,10 +1706,20 @@ export default function GateOutPage() {
 
             {/* Gate Out Form (Bottom) */}
             <div className="mt-8 space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                <CheckCircle className="h-4 w-4 text-blue-600" />
-                Gate Pass & Evidence
-              </h3>
+              <div className="flex items-center justify-between border-b pb-2 flex-wrap gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  Gate Pass & Evidence
+                </h3>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={handlePrintSlip} className="gap-1.5 h-8">
+                    <Printer className="h-3.5 w-3.5" /> Print Gate Pass
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={handleDownloadSlip} className="gap-1.5 h-8">
+                    <Download className="h-3.5 w-3.5" /> Download Gate Pass
+                  </Button>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
                 <div className="space-y-2">
