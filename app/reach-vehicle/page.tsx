@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { MapPin, Truck, AlertTriangle, RefreshCcw } from "lucide-react"
-import { reachVehicleApi, vehicleMasterApi, transportMasterApi, driverMasterApi, orderApi } from "@/lib/api-service"
+import { reachVehicleApi, vehicleMasterApi, transportMasterApi, driverMasterApi, orderApi, depotApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -40,6 +40,7 @@ export default function ReachVehiclePage() {
   const [vehicles, setVehicles] = useState<any[]>([])
   const [transporters, setTransporters] = useState<any[]>([])
   const [drivers, setDrivers] = useState<any[]>([])
+  const [depots, setDepots] = useState<any[]>([])
 
   // Modal State
   const [reachMode, setReachMode] = useState<'normal' | 'accident' | 'change_vehicle'>('normal')
@@ -62,7 +63,8 @@ export default function ReachVehiclePage() {
     advanceBhadaBank: "",
     advanceBhadaDieselAdvance: "",
     advanceBhadaCash: "",
-    routeDecision: "resume_delivery"
+    routeDecision: "resume_delivery",
+    returnDepotId: ""
   })
 
   useEffect(() => {
@@ -93,14 +95,16 @@ export default function ReachVehiclePage() {
 
   const fetchMasterData = async () => {
     try {
-      const [vRes, tRes, dRes] = await Promise.all([
+      const [vRes, tRes, dRes, depRes] = await Promise.all([
         vehicleMasterApi.getAll({ all: 'true' }),
         transportMasterApi.getAll({ all: 'true' }),
-        driverMasterApi.getAll({ all: 'true' })
+        driverMasterApi.getAll({ all: 'true' }),
+        depotApi.getAll({ all: 'true' })
       ])
       if (vRes.success) setVehicles(vRes.data.vehicles || [])
       if (tRes.success) setTransporters(tRes.data.transporters || [])
       if (dRes.success) setDrivers(dRes.data.drivers || [])
+      if (depRes.success) setDepots(depRes.data.depots || [])
     } catch (err) {
       console.error(err)
     }
@@ -146,6 +150,7 @@ export default function ReachVehiclePage() {
         payload.advanceBhadaDieselAdvance = formData.advanceBhadaDieselAdvance || 0
         payload.advanceBhadaCash = formData.advanceBhadaCash || 0
         payload.routeDecision = formData.routeDecision
+        payload.returnDepotId = formData.routeDecision === 'return_to_factory' ? (formData.returnDepotId || null) : null
       }
 
       // Submit sequentially for all selected records
@@ -394,6 +399,15 @@ export default function ReachVehiclePage() {
                         <Label htmlFor="r2" className="text-rose-700 font-semibold cursor-pointer">Return Stock to Factory</Label>
                       </div>
                     </RadioGroup>
+                    {formData.routeDecision === 'return_to_factory' && (
+                      <div className="space-y-2 pt-2">
+                        <Label>Returning To (Depot)</Label>
+                        <Select value={formData.returnDepotId} onValueChange={v => setFormData({ ...formData, returnDepotId: v })}>
+                          <SelectTrigger><SelectValue placeholder="Select depot" /></SelectTrigger>
+                          <SelectContent>{depots.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.depot_name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
