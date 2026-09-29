@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { MapPin, Truck, AlertTriangle, RefreshCcw } from "lucide-react"
-import { reachVehicleApi, vehicleMasterApi, transportMasterApi, driverMasterApi } from "@/lib/api-service"
+import { reachVehicleApi, vehicleMasterApi, transportMasterApi, driverMasterApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -43,13 +43,13 @@ export default function ReachVehiclePage() {
 
   // Modal State
   const [reachMode, setReachMode] = useState<'normal' | 'accident' | 'change_vehicle'>('normal')
+  const [accidentPhotoFiles, setAccidentPhotoFiles] = useState<File[]>([])
   const [formData, setFormData] = useState({
     arrivalDate: new Date().toISOString().split('T')[0],
     arrivalTime: new Date().toTimeString().split(' ')[0].substring(0, 5),
     accidentDate: new Date().toISOString().split('T')[0],
     accidentTime: new Date().toTimeString().split(' ')[0].substring(0, 5),
     accidentLocation: "",
-    accidentPhotos: [] as string[],
     accidentDescription: "",
     accidentCause: "",
     accidentLoss: "",
@@ -120,10 +120,15 @@ export default function ReachVehiclePage() {
         payload.arrivalDate = formData.arrivalDate
         payload.arrivalTime = formData.arrivalTime
       } else if (reachMode === 'accident') {
+        const uploadedPhotoUrls: string[] = []
+        for (const file of accidentPhotoFiles) {
+          const response = await orderApi.uploadFile(file)
+          if (response.success) uploadedPhotoUrls.push(response.data.url)
+        }
         payload.accidentDate = formData.accidentDate
         payload.accidentTime = formData.accidentTime
         payload.accidentLocation = formData.accidentLocation
-        payload.accidentPhotos = formData.accidentPhotos
+        payload.accidentPhotos = uploadedPhotoUrls
         payload.accidentDescription = formData.accidentDescription
         payload.accidentCause = formData.accidentCause
         payload.accidentLoss = formData.accidentLoss
@@ -151,6 +156,7 @@ export default function ReachVehiclePage() {
       toast({ title: "Success", description: "Reach Vehicle recorded successfully" })
       setIsDialogOpen(false)
       setSelectedItems([])
+      setAccidentPhotoFiles([])
       fetchData()
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" })
@@ -308,11 +314,12 @@ export default function ReachVehiclePage() {
                 <div className="col-span-2 space-y-2">
                   <Label>Upload Photos</Label>
                   <FileUploadField
-                    value={formData.accidentPhotos.join(", ")}
-                    onChange={(url) => setFormData({ ...formData, accidentPhotos: [...formData.accidentPhotos, url] })}
-                    bucket="order-to-dispatch-bucket"
-                    folder="accidents"
                     label="Accident Spot Photos"
+                    accept="image/*"
+                    multiple
+                    fileName={accidentPhotoFiles.map(f => f.name)}
+                    onFilesSelected={(files) => setAccidentPhotoFiles(prev => [...prev, ...files])}
+                    onRemove={(index) => setAccidentPhotoFiles(prev => prev.filter((_, i) => i !== index))}
                   />
                 </div>
               </div>
