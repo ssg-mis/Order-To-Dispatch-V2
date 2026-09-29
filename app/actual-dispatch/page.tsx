@@ -124,7 +124,18 @@ function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
         extraWeight: internalOrder.extra_weight || "—",
         weightmentSlip: internalOrder.weightment_slip_copy || null,
         rstNo: internalOrder.rst_no || "—",
-        weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—"
+        weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—",
+        // Read-only reference from Plan Vehicle (Stage 5) — vehicle/transporter/
+        // driver/freight are decided there, not re-entered/re-validated here.
+        plan_vehicle_confirmed: order.plan_vehicle_confirmed ?? internalOrder.plan_vehicle_confirmed ?? false,
+        plan_vehicle_registration_no: order.plan_vehicle_registration_no ?? internalOrder.plan_vehicle_registration_no ?? null,
+        plan_vehicle_transporter_name: order.plan_vehicle_transporter_name ?? internalOrder.plan_vehicle_transporter_name ?? null,
+        plan_vehicle_driver_name: order.plan_vehicle_driver_name ?? internalOrder.plan_vehicle_driver_name ?? null,
+        plan_vehicle_freight_rate_type: order.plan_vehicle_freight_rate_type ?? internalOrder.plan_vehicle_freight_rate_type ?? null,
+        plan_vehicle_freight_amount: order.plan_vehicle_freight_amount ?? internalOrder.plan_vehicle_freight_amount ?? null,
+        plan_vehicle_advance_bank: order.plan_vehicle_advance_bank ?? internalOrder.plan_vehicle_advance_bank ?? null,
+        plan_vehicle_advance_diesel: order.plan_vehicle_advance_diesel ?? internalOrder.plan_vehicle_advance_diesel ?? null,
+        plan_vehicle_advance_cash: order.plan_vehicle_advance_cash ?? internalOrder.plan_vehicle_advance_cash ?? null,
       }
     }
 
@@ -213,40 +224,10 @@ export default function ActualDispatchPage() {
   const [gateInData, setGateInData] = useState<any>(null)
   const [isGateInPopupOpen, setIsGateInPopupOpen] = useState(false)
 
-  // Consolidated State for Stages 6 & 7
-  const [vehicleNumber, setVehicleNumber] = useState("")
-  const [vehicleData, setVehicleData] = useState({
-    checkStatus: "",
-    remarks: "",
-    fitness: "",
-    insurance: "",
-    tax_copy: "",
-    polution: "",
-    permit1: "",
-    permit2_out_state: "",
-    fitness_file_name: "",
-    insurance_file_name: "",
-    tax_file_name: "",
-    pollution_file_name: "",
-    permit1_file_name: "",
-    permit2_file_name: "",
-    fitness_end_date: "",
-    insurance_end_date: "",
-    tax_end_date: "",
-    pollution_end_date: "",
-    permit1_end_date: "",
-    permit2_end_date: "",
-    registration_no: "",
-    vehicle_type: "",
-    rto: "",
-    passing_weight: "",
-    road_tax: "",
-    is_lifetime_tax: false,
-    fuel_type: "",
-    gvw: "",
-    ulw: "",
-  })
-
+  // Consolidated State for Stage 7 (Weightment Audit). Vehicle/transporter/
+  // documents/overload/freight are no longer collected here — they're confirmed
+  // upstream at Plan Vehicle (Stage 5) and surfaced read-only via planVehicleInfo
+  // below. Driver and the 3 advance amounts stay editable at this stage.
   const [loadData, setLoadData] = useState({
     actualQty: "",
     weightmentSlip: "",
@@ -259,18 +240,14 @@ export default function ActualDispatchPage() {
     otherItemWeight: "",
     dharamkataWeight: "",
     differanceWeight: "",
-    transporterName: "",
     reason: "",
     truckNo: "",
     vehicleNoPlateImage: "",
     vehicleNoPlateImage_file_name: "",
     checkStatus: "",
     remarks: "",
-    overloadRemarks: "",
     extraWeight: "0",
     weightmentSlip_file_name: "",
-    freightRateType: "",
-    freightAmount: "",
     cash_bank: "",
     diesel_advance: "",
     bhada: ""
@@ -290,13 +267,6 @@ export default function ActualDispatchPage() {
     lmv_valid_upto: ""
   })
 
-  const vehicleOptions = useMemo(() => (
-    vehicleMaster
-      .filter(v => v.registration_no && v.status === 'Active')
-      .map(v => ({ value: v.registration_no, label: v.registration_no }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
-  ), [vehicleMaster])
-
   const driverOptions = useMemo(() => (
     driverMaster
       .filter(d => d.driver_name && d.status === 'Active')
@@ -304,81 +274,46 @@ export default function ActualDispatchPage() {
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
   ), [driverMaster])
 
-  const transporterOptions = useMemo(() => ([
-    { value: "Company Vehicle", label: "Company Vehicle" },
-    { value: "Party Vehicle", label: "Party Vehicle" },
-    ...transporterMaster
-      .filter(t => t.transporter_name)
-      .map(t => ({ value: t.transporter_name, label: t.transporter_name }))
-  ]), [transporterMaster])
-
-  // TEMP: manual override for expiry check while old Vehicle Master records get
-  // backfilled with real dates — remove docRefDate and revert minDate to `new Date()`
-  // once Vehicle Master documents are cleaned up.
+  // TEMP: manual override for the Actual Dispatch Date while historical dates get
+  // backfilled — remove this and docRefDate once no longer needed.
   const [docRefDate, setDocRefDate] = useState<string>(() => new Date().toISOString().split("T")[0])
 
-  // Date validation for vehicle documents (Min docRefDate + 5 days)
-  const minDate = useMemo(() => {
-    const parsed = new Date(docRefDate)
-    // Fall back to today while the field is empty/mid-edit, so an invalid
-    // date never reaches toISOString() (which throws on an Invalid Date).
-    const d = isNaN(parsed.getTime()) ? new Date() : parsed
-    d.setDate(d.getDate() + 5)
-    return d.toISOString().split("T")[0]
-  }, [docRefDate])
-
-  // Interstate detection logic: Check if any selected order address state differs from vehicle RTO state
-  const isInterState = useMemo(() => {
-    if (selectedGroups.length === 0 || !vehicleData.rto) return false;
-
-    const rtoPrefix = vehicleData.rto.substring(0, 2).toUpperCase();
-    const statePrefixMap: Record<string, string> = {
-      "CG": "chhattisgarh", "KA": "karnataka", "MH": "maharashtra", "DL": "delhi",
-      "UP": "uttar pradesh", "HR": "haryana", "RJ": "rajasthan", "MP": "madhya pradesh",
-      "GJ": "gujarat", "PB": "punjab", "WB": "west bengal", "BR": "bihar",
-      "OD": "odisha", "AS": "assam", "TS": "telangana", "AP": "andhra pradesh",
-      "TN": "tamil nadu", "KL": "kerala", "UK": "uttarakhand", "UA": "uttarakhand",
-      "HP": "himachal pradesh", "JH": "jharkhand", "GA": "goa", "JK": "jammu",
-      "PY": "puducherry", "TR": "tripura", "MZ": "mizoram", "NL": "nagaland",
-      "MN": "manipur", "ML": "meghalaya", "SK": "sikkim", "AR": "arunachal",
+  // Read-only reference to the vehicle/transporter/freight already confirmed at
+  // Plan Vehicle (Stage 5) — Actual Dispatch no longer re-collects or re-validates
+  // any of this, it just displays what was decided upstream. Derived from the
+  // first selected group; every group in one dialog shares the same vehicle.
+  const planVehicleInfo = useMemo(() => {
+    const g: any = selectedGroups[0] || {};
+    return {
+      confirmed: !!g.plan_vehicle_confirmed,
+      registrationNo: g.plan_vehicle_registration_no || null,
+      transporterName: g.plan_vehicle_transporter_name || null,
+      driverName: g.plan_vehicle_driver_name || null,
+      freightRateType: g.plan_vehicle_freight_rate_type || null,
+      freightAmount: g.plan_vehicle_freight_amount ?? null,
     };
+  }, [selectedGroups]);
 
-    const vehicleState = statePrefixMap[rtoPrefix];
-    if (!vehicleState) return true; // Assume interstate if prefix unknown
+  // Vehicle type for the confirmed registration, used only to choose which
+  // driver-license validity badge applies below (Trans vs LMV) — the vehicle
+  // itself is fixed at Plan Vehicle and isn't selected/edited here anymore.
+  const planVehicleType = useMemo(() => {
+    if (!planVehicleInfo.registrationNo) return "";
+    return vehicleMaster.find(v => v.registration_no === planVehicleInfo.registrationNo)?.vehicle_type || "";
+  }, [vehicleMaster, planVehicleInfo.registrationNo]);
 
-    let hasInterStateOrder = false;
-    selectedGroups.forEach(group => {
-      Object.values(group._ordersMap).forEach((order: any) => {
-        const addr = (order.address || "").toLowerCase();
-        if (!addr.includes(vehicleState)) {
-          hasInterStateOrder = true;
-        }
-      });
-    });
-
-    return hasInterStateOrder;
-  }, [selectedGroups, vehicleData.rto]);
-
-  const handleFileChange = async (field: string, fileNameField: string, file: File | null, type: 'vehicle' | 'load' = 'vehicle') => {
+  const handleFileChange = async (field: string, fileNameField: string, file: File | null) => {
     if (!file) return
 
     setIsUploading(field)
     try {
       const response = await orderApi.uploadFile(file)
       if (response.success) {
-        if (type === 'vehicle') {
-          setVehicleData(p => ({
-            ...p,
-            [field]: response.data.url,
-            [fileNameField]: file.name
-          }))
-        } else {
-          setLoadData(p => ({
-            ...p,
-            [field]: response.data.url,
-            [fileNameField]: file.name
-          }))
-        }
+        setLoadData(p => ({
+          ...p,
+          [field]: response.data.url,
+          [fileNameField]: file.name
+        }))
         toast({
           title: "Upload Successful",
           description: `${file.name} has been uploaded.`,
@@ -912,42 +847,6 @@ export default function ActualDispatchPage() {
   }
 
 
-  // Fills vehicleData/loadData from a vehicle_master record. Always call this with a fresh
-  // `selectedV` (from a just-refetched vehicleMaster) rather than trusting a saved draft —
-  // these fields are master-derived, and a stale draft can clobber documents renewed since.
-  const autofillVehicleData = (selectedV: any) => {
-    const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
-    setVehicleData(p => ({
-      ...p,
-      registration_no: selectedV.registration_no || "",
-      vehicle_type: selectedV.vehicle_type || "",
-      rto: selectedV.rto || "",
-      passing_weight: selectedV.passing || "",
-      fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
-      insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
-      tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
-      is_lifetime_tax: isLifetimeTax,
-      fuel_type: selectedV.fuel_type || "",
-      pollution_end_date: selectedV.fuel_type === 'Electrical' ? "" : (selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : ""),
-      permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
-      permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
-      // Images
-      fitness: selectedV.fitness_image || p.fitness,
-      insurance: selectedV.insurance_image || p.insurance,
-      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
-      polution: selectedV.pollution_image || p.polution,
-      permit1: selectedV.state_permit_image || p.permit1,
-      permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
-      gvw: selectedV.gvw || "",
-      ulw: selectedV.ulw || "",
-    }));
-    setLoadData(p => ({
-      ...p,
-      truckNo: selectedV.registration_no || "",
-      transporterName: selectedV.transporter || p.transporterName
-    }));
-  };
-
   const handleOpenDialog = async (group?: any) => {
     // Resolve selected DOs to a fresh, complete, authoritative set fetched
     // directly from the server (see fetchCompleteGroupsForKeys) — a DO's
@@ -962,11 +861,11 @@ export default function ActualDispatchPage() {
       .filter(Boolean);
 
     if (targetGroups.length > 0) {
-      // Refresh vehicle/driver/transporter master data so the dialog's autofill
-      // (e.g. Permit 1/State Permit) reflects documents uploaded since page load.
-      // Awaited so the draft-restore step below can re-derive vehicle docs from
-      // current master data instead of trusting a possibly stale saved draft.
-      const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
+      // Refresh driver master data so the driver combobox/badges reflect records
+      // updated since page load. Awaited so the draft-restore step below can
+      // re-derive driver data from current master data instead of trusting a
+      // possibly stale saved draft.
+      const { drivers: freshDrivers } = await fetchMasterData();
 
       // TEMP: reset the manual expiry-check reference date to today on every
       // dialog open, so a backdated value doesn't leak into an unrelated dispatch.
@@ -990,41 +889,25 @@ export default function ActualDispatchPage() {
 
       setIsDialogOpen(true)
 
-      // Reset consolidated forms
-      setVehicleNumber("")
-      setVehicleData({
-        checkStatus: "",
-        remarks: "",
-        fitness: "",
-        insurance: "",
-        tax_copy: "",
-        polution: "",
-        permit1: "",
-        permit2_out_state: "",
-        fitness_file_name: "",
-        insurance_file_name: "",
-        tax_file_name: "",
-        pollution_file_name: "",
-        permit1_file_name: "",
-        permit2_file_name: "",
-        fitness_end_date: "",
-        insurance_end_date: "",
-        tax_end_date: "",
-        pollution_end_date: "",
-        permit1_end_date: "",
-        permit2_end_date: "",
-        registration_no: "",
-        vehicle_type: "",
-        rto: "",
-        passing_weight: "",
-        road_tax: "",
-        is_lifetime_tax: false,
-        fuel_type: "",
-        gvw: "",
-        ulw: "",
-      })
-      setDriverName("")
-      setDriverData({
+      // Reset consolidated forms. Vehicle/transporter/documents/freight are no
+      // longer collected here — they were confirmed at Plan Vehicle (Stage 5)
+      // and are read straight off the row's plan_vehicle_* fields (see
+      // planVehicleInfo above). Driver and the 3 advance amounts stay editable
+      // at this stage, so pre-fill them from Plan Vehicle's values below.
+      const planInfo: any = targetGroups[0] || {};
+
+      setDriverName(planInfo.plan_vehicle_driver_name || "")
+      const planDriver = planInfo.plan_vehicle_driver_name
+        ? freshDrivers.find((drv: any) => drv.driver_name === planInfo.plan_vehicle_driver_name)
+        : null;
+      setDriverData(planDriver ? {
+        contact_no: planDriver.mobile_no || "",
+        license_no: planDriver.driving_licence_no || "",
+        license_type: planDriver.driving_licence_type || "",
+        valid_upto: planDriver.valid_upto ? new Date(planDriver.valid_upto).toISOString().split('T')[0] : "",
+        trans_valid_upto: planDriver.trans_valid_upto ? new Date(planDriver.trans_valid_upto).toISOString().split('T')[0] : "",
+        lmv_valid_upto: planDriver.lmv_valid_upto ? new Date(planDriver.lmv_valid_upto).toISOString().split('T')[0] : ""
+      } : {
         contact_no: "",
         license_no: "",
         license_type: "",
@@ -1044,47 +927,29 @@ export default function ActualDispatchPage() {
         otherItemWeight: "",
         dharamkataWeight: "",
         differanceWeight: "",
-        transporterName: "",
         reason: "",
-        truckNo: "",
+        truckNo: planInfo.plan_vehicle_registration_no || "",
         vehicleNoPlateImage: "",
         checkStatus: "",
         remarks: "",
         extraWeight: "0",
         weightmentSlip_file_name: "",
         vehicleNoPlateImage_file_name: "",
-        overloadRemarks: "",
-        freightRateType: "",
-        freightAmount: "",
-        cash_bank: "",
-        diesel_advance: "",
-        bhada: ""
+        cash_bank: planInfo.plan_vehicle_advance_bank != null ? String(planInfo.plan_vehicle_advance_bank) : "",
+        diesel_advance: planInfo.plan_vehicle_advance_diesel != null ? String(planInfo.plan_vehicle_advance_diesel) : "",
+        bhada: planInfo.plan_vehicle_advance_cash != null ? String(planInfo.plan_vehicle_advance_cash) : ""
       })
 
       // Silently restore saved draft if one exists — shared per order, so this
-      // restores drafts saved by any user, not just the current one
+      // restores drafts saved by any user, not just the current one. Restoring
+      // (below) intentionally happens after the Plan Vehicle-derived defaults
+      // above, so an in-progress draft for THIS stage wins over those defaults.
       if (targetGroups.length > 0) {
         const orderKey = targetGroups[0]._rowKey;
         try {
           const res = await draftApi.get(orderKey);
           if (res.success && res.data?.draft_data) {
             const d = res.data.draft_data;
-            if (d.vehicleNumber !== undefined) setVehicleNumber(d.vehicleNumber);
-            // Vehicle documents (fitness/insurance/tax/pollution/permits/gvw/ulw) are
-            // master-derived — re-fetch them fresh instead of trusting the draft snapshot,
-            // which may predate documents renewed/uploaded since the draft was saved.
-            // Only checkStatus/remarks are genuinely manual dialog inputs worth restoring.
-            const draftVehicle = d.vehicleNumber
-              ? freshVehicles.find((veh: any) => veh.registration_no === d.vehicleNumber)
-              : null;
-            if (draftVehicle) autofillVehicleData(draftVehicle);
-            if (d.vehicleData) {
-              setVehicleData(prev => ({
-                ...prev,
-                checkStatus: d.vehicleData.checkStatus ?? prev.checkStatus,
-                remarks: d.vehicleData.remarks ?? prev.remarks,
-              }));
-            }
             if (d.loadData) setLoadData(prev => ({ ...prev, ...d.loadData }));
             // Driver fields are entirely master-derived (license no/type/expiry, contact) —
             // re-fetch fresh from driverMaster rather than trusting the draft snapshot.
@@ -1370,8 +1235,6 @@ export default function ActualDispatchPage() {
       return;
     }
     const draftData = {
-      vehicleNumber,
-      vehicleData,
       loadData,
       confirmDetails,
       dialogSelectedProducts,
@@ -1404,79 +1267,29 @@ export default function ActualDispatchPage() {
   };
 
   const performDispatchConfirmation = async () => {
-    // ONLY IF DEPO IS BANARI — vehicle selection/details are optional for other depots
+    // ONLY IF DEPO IS BANARI — the Stage 7 weightment requirements below are optional for other depots
     const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
 
     // Collect every validation issue up front so the user sees them all in one toast,
     // instead of fixing them one at a time across repeated submit attempts.
     const validationErrors: string[] = [];
-    // Tax copy / Pollution certificate issues are soft — warn and let the user
-    // choose to continue instead of blocking the dispatch.
-    const docWarnings: string[] = [];
 
-    // 1. Basic Vehicle Check
-    if (isBanari && !vehicleNumber.trim()) {
-      validationErrors.push("Vehicle Registration Number is required");
-    }
-
-    // 2. Stage 6: Vehicle Document Validation
+    // Vehicle/transporter/documents/overload/interstate-permit are validated and
+    // confirmed upstream at Plan Vehicle (Stage 5) — this stage only re-validates
+    // what it actually collects: the Stage 7 weightment audit, the (still-editable)
+    // driver, and the (still-editable) advance amounts.
     if (isBanari) {
-      const vehicleDocs = [
-        { key: 'fitness', label: 'Fitness' },
-        { key: 'fitness_end_date', label: 'Fitness Expiry' },
-        { key: 'insurance', label: 'Insurance' },
-        { key: 'insurance_end_date', label: 'Insurance Expiry' },
-        { key: 'tax_copy', label: 'Tax' },
-        { key: 'tax_end_date', label: 'Tax Expiry' },
-        { key: 'polution', label: 'Pollution' },
-        { key: 'pollution_end_date', label: 'Pollution Expiry' },
-        { key: 'permit1', label: 'Permit 1' },
-        { key: 'permit1_end_date', label: 'Permit 1 Expiry' },
-        { key: 'permit2_out_state', label: 'Permit 2' },
-        { key: 'permit2_end_date', label: 'Permit 2 Expiry' },
-      ];
-
-      // Permit documents only apply when GVW > 3000 (same rule as Vehicle Master)
-      const isPermitApplicable = vehicleData.gvw !== '' && Number(vehicleData.gvw) > 3000;
-
-      for (const doc of vehicleDocs) {
-        const val = vehicleData[doc.key as keyof typeof vehicleData];
-        // Skip required check for Permit 2 (both file and date are optional)
-        if (doc.key === 'permit2_out_state' || doc.key === 'permit2_end_date') continue;
-        // Permit 1 is only required for vehicles with GVW > 3000
-        if ((doc.key === 'permit1' || doc.key === 'permit1_end_date') && !isPermitApplicable) continue;
-        // Lifetime tax vehicles have no expiry date — only the certificate is required
-        if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
-        // Electrical vehicles have no pollution certificate/expiry (matches Vehicle Master)
-        if ((doc.key === 'polution' || doc.key === 'pollution_end_date') && vehicleData.fuel_type === 'Electrical') continue;
-
-        if (!val) {
-          const message = `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`;
-          // Tax copy & Pollution certificate are optional — warn only, don't block.
-          if (doc.key === 'tax_copy' || doc.key === 'tax_end_date' || doc.key === 'polution' || doc.key === 'pollution_end_date') {
-            docWarnings.push(message);
-          } else {
-            validationErrors.push(message);
-          }
-        }
-      }
-
-      if (!vehicleData.checkStatus) {
-        validationErrors.push("Vehicle Check Status is required");
-      }
-      // Remarks mandatory ONLY if status is Reject
-      if (vehicleData.checkStatus === "Reject" && !vehicleData.remarks.trim()) {
-        validationErrors.push("Vehicle Remarks are required for rejection");
-      }
-
-      // 3. Stage 7: Weightment Audit Validation
+      // Stage 7: Weightment Audit Validation
       if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
         validationErrors.push("Valid Actual Qty is required");
       }
       if (!loadData.rstNo.trim()) {
         validationErrors.push("RST No is required");
       }
-      // Weightment Slip and No Plate Image are now optional per user request
+      if (!loadData.weightmentSlip) {
+        validationErrors.push("Weighment Slip upload is required");
+      }
+      // No Plate Image stays optional — not part of the Stage 7 spec's task list.
       if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
         validationErrors.push("Valid Gross Weight is required");
       }
@@ -1486,47 +1299,12 @@ export default function ActualDispatchPage() {
       if (!loadData.checkStatus) {
         validationErrors.push("Quality Status (STG 7) is required");
       }
-      if (!loadData.transporterName.trim()) {
-        validationErrors.push("Transporter Name is required");
+      if (!driverName.trim()) {
+        validationErrors.push("Driver selection is required");
       }
       // Reason mandatory ONLY if status is Reject
       if (loadData.checkStatus === "Reject" && !loadData.reason.trim()) {
         validationErrors.push("Weight Difference Reason is required for load rejection");
-      }
-
-      // 4. Validate Document End Dates (Min docRefDate + 5 Days)
-      const dateFields = [
-        { key: 'fitness_end_date', label: 'Fitness' },
-        { key: 'insurance_end_date', label: 'Insurance' },
-        { key: 'tax_end_date', label: 'Tax' },
-        { key: 'pollution_end_date', label: 'Pollution' },
-        { key: 'permit1_end_date', label: 'Permit 1' },
-        { key: 'permit2_end_date', label: 'Permit 2' },
-      ];
-
-      for (const field of dateFields) {
-        const dateVal = vehicleData[field.key as keyof typeof vehicleData];
-        if (dateVal && dateVal < minDate) {
-          const message = `${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`;
-          // Tax & Pollution expiry are optional — warn only, don't block.
-          if (field.key === 'tax_end_date' || field.key === 'pollution_end_date') {
-            docWarnings.push(message);
-          } else {
-            validationErrors.push(message);
-          }
-        }
-      }
-
-      // 5. Validation for Overload (only mandatory for Banari depot; optional for other depots)
-      const passingWt = parseFloat(vehicleData.passing_weight) || 0;
-      const isOverloaded = passingWt > 0 && totalCombinedWeight > passingWt;
-      if (isOverloaded && !loadData.overloadRemarks.trim()) {
-        validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
-      }
-
-      // 6. Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
-      if (isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
-        validationErrors.push("National / Other State Permit is mandatory for interstate dispatches.");
       }
     }
 
@@ -1540,11 +1318,6 @@ export default function ActualDispatchPage() {
         ),
         variant: "destructive"
       });
-      return;
-    }
-
-    if (docWarnings.length > 0) {
-      setDocWarningDialog({ open: true, messages: docWarnings });
       return;
     }
 
@@ -1591,30 +1364,16 @@ export default function ActualDispatchPage() {
             // historical dates are fully backfilled.
             actualDispatchDate: docRefDate || null,
 
-            // Vehicle/driver/transporter: resolved server-side by id (not
-            // collected here) or natural-key fallback.
-            registrationNo: vehicleNumber || vehicleData.registration_no || undefined,
+            // Vehicle/transporter/documents/overload are no longer entered here —
+            // they were confirmed at Plan Vehicle (Stage 5) and are left untouched
+            // by this (sparse) patch. Driver stays editable at this stage.
             driverName: driverName || undefined,
             drivingLicenceNo: driverData.license_no || undefined,
-            transporterName: loadData.transporterName || undefined,
 
-            checkStatus: vehicleData.checkStatus || undefined,
-            remarks: vehicleData.remarks || loadData.remarks || undefined,
+            checkStatus: loadData.checkStatus || undefined,
+            remarks: loadData.remarks || undefined,
 
             vehicleNoPlateImage: loadData.vehicleNoPlateImage || undefined,
-
-            fitnessImage: vehicleData.fitness || undefined,
-            fitnessEndDate: vehicleData.fitness_end_date || undefined,
-            insuranceImage: vehicleData.insurance || undefined,
-            insuranceEndDate: vehicleData.insurance_end_date || undefined,
-            taxCopyImage: vehicleData.tax_copy || undefined,
-            taxEndDate: vehicleData.tax_end_date || undefined,
-            pollutionImage: vehicleData.polution || undefined,
-            pollutionEndDate: vehicleData.pollution_end_date || undefined,
-            permit1Image: vehicleData.permit1 || undefined,
-            permit1EndDate: vehicleData.permit1_end_date || undefined,
-            permit2OutStateImage: vehicleData.permit2_out_state || undefined,
-            permit2EndDate: vehicleData.permit2_end_date || undefined,
 
             weightmentSlipCopy: loadData.weightmentSlip || undefined,
             rstNo: loadData.rstNo || undefined,
@@ -1622,14 +1381,13 @@ export default function ActualDispatchPage() {
             tareWeight: numOrUndef(loadData.tareWeight),
             netWeight: numOrUndef(loadData.netWeightPacking),
             extraWeight: numOrUndef(loadData.extraWeight),
-            passingWeight: numOrUndef(vehicleData.passing_weight),
             difference: numOrUndef(loadData.differanceWeight),
 
             reasonOfWeightDifference: loadData.reason || undefined,
-            vehicleOverloadRemarks: loadData.overloadRemarks || undefined,
 
-            freightRateType: loadData.freightRateType || undefined,
-            freightAmount: numOrUndef(loadData.freightAmount),
+            // Freight Rate Type/Amount are read-only reference at this stage —
+            // omitted so this sparse patch leaves Plan Vehicle's values in place.
+            // The 3 advance amounts stay editable and are always sent.
             advanceBhadaBank: numOrUndef(loadData.cash_bank),
             advanceBhadaDieselAdvance: numOrUndef(loadData.diesel_advance),
             advanceBhadaCash: numOrUndef(loadData.bhada),
@@ -2777,52 +2535,36 @@ export default function ActualDispatchPage() {
                     </div>
 
                     <div className="bg-slate-50 border-2 border-slate-200 rounded-xl sm:rounded-3xl p-4 sm:p-6 space-y-6 shadow-md transition-all hover:shadow-lg">
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
+                      <div className="grid grid-cols-1 gap-5 sm:gap-6">
+                        {/* Read-only reference confirmed at Plan Vehicle (Stage 5) — vehicle,
+                            transporter and documents are no longer re-entered/re-validated here. */}
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Vehicle Registration Number {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                            Vehicle &amp; Transporter (Confirmed at Plan Vehicle)
                           </Label>
-                          <Combobox
-                            value={vehicleNumber}
-                            onValueChange={(v) => {
-                              setVehicleNumber(v);
-                              const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                              if (selectedV) {
-                                autofillVehicleData(selectedV);
-                              } else if (!v) {
-                                // Clear data when deselected
-                                setLoadData(p => ({ ...p, truckNo: "" }));
-                                setVehicleData(p => ({
-                                  ...p,
-                                  registration_no: "",
-                                  vehicle_type: "",
-                                  rto: "",
-                                  passing_weight: "",
-                                  fitness_end_date: "",
-                                  insurance_end_date: "",
-                                  tax_end_date: "",
-                                  is_lifetime_tax: false,
-                                  fuel_type: "",
-                                  pollution_end_date: "",
-                                  permit1_end_date: "",
-                                  permit2_end_date: "",
-                                  fitness: "",
-                                  insurance: "",
-                                  tax_copy: "",
-                                  polution: "",
-                                  permit1: "",
-                                  permit2_out_state: "",
-                                  gvw: "",
-                                  ulw: ""
-                                }));
-                              }
-                            }}
-                            options={vehicleOptions}
-                            placeholder="Select Vehicle"
-                            searchPlaceholder="Search vehicle..."
-                            emptyText="No vehicle found."
-                            className="h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-black text-sm sm:text-lg focus:border-purple-500 transition-colors uppercase bg-white shadow-sm"
-                          />
+                          {planVehicleInfo.confirmed ? (
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3">
+                                <div className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                                  <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Vehicle No.</p>
+                                  <p className="text-sm font-black text-slate-800 uppercase leading-none">{planVehicleInfo.registrationNo || '---'}</p>
+                                </div>
+                                <div className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                                  <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Transporter</p>
+                                  <p className="text-sm font-black text-slate-800 uppercase leading-none">{planVehicleInfo.transporterName || '---'}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                                <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-tight">Documents verified at Plan Vehicle</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-3">
+                              <XCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                              <p className="text-[11px] font-bold text-amber-700 uppercase tracking-tight">Vehicle plan not yet confirmed for this dispatch</p>
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-1.5">
@@ -2862,32 +2604,6 @@ export default function ActualDispatchPage() {
                           />
                         </div>
 
-                        {/* Vehicle Details Badges */}
-                        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 mt-auto pb-1">
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Type</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.vehicle_type || '---'}</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">RTO</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.rto || '---'}</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
-                            <p className={cn("text-[11px] font-black uppercase leading-none", (totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0)) ? "text-red-600" : "text-purple-600")}>
-                              {vehicleData.passing_weight || '0.00'} KG
-                            </p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw || '---'} KG</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">ULW</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.ulw || '---'} KG</p>
-                          </div>
-                        </div>
-
                         {/* Driver Details Badges */}
                         <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 mt-2">
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
@@ -2909,216 +2625,19 @@ export default function ActualDispatchPage() {
                           {/* Trans Valid Upto for Truck/Tanker/Pickup/Hiva/Trailer, LMV Valid Upto otherwise (review Section 10) */}
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">
-                              {['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? 'Trans Valid Upto' : 'LMV Valid Upto'}
+                              {['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(planVehicleType) ? 'Trans Valid Upto' : 'LMV Valid Upto'}
                             </p>
                             <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
-                              {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
+                              {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(planVehicleType) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
                             </p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="pt-4 border-t border-slate-200">
-                        <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest leading-none">Digital Documents (STAGE 6)</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Fitness {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.fitness && vehicleData.fitness !== 'pending' ? vehicleData.fitness : null}
-                                fileName={vehicleData.fitness_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'fitness'}
-                                buttonText={vehicleData.fitness_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('fitness', 'fitness_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.fitness_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, fitness_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Insurance {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.insurance && vehicleData.insurance !== 'pending' ? vehicleData.insurance : null}
-                                fileName={vehicleData.insurance_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'insurance'}
-                                buttonText={vehicleData.insurance_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('insurance', 'insurance_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.insurance_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, insurance_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Tax Copy {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.tax_copy && vehicleData.tax_copy !== 'pending' ? vehicleData.tax_copy : null}
-                                fileName={vehicleData.tax_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'tax_copy'}
-                                buttonText={vehicleData.tax_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('tax_copy', 'tax_file_name', files[0] || null)}
-                              />
-                            </div>
-                            {vehicleData.is_lifetime_tax ? (
-                              <div className="h-7 text-[10px] border border-slate-200 rounded-lg px-2 font-bold bg-slate-100 opacity-80 flex items-center text-slate-500" title="Lifetime Tax">
-                                LTT
-                              </div>
-                            ) : (
-                              <Input
-                                type="date"
-                                className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                                min={minDate}
-                                value={vehicleData.tax_end_date}
-                                onChange={(e) => setVehicleData(p => ({ ...p, tax_end_date: e.target.value }))}
-                                readOnly
-                              />
-                            )}
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Pollution {vehicleData.fuel_type === 'Electrical' ? <span className="text-slate-400 normal-case font-medium">(N/A - Electrical)</span> : selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.polution && vehicleData.polution !== 'pending' ? vehicleData.polution : null}
-                                fileName={vehicleData.pollution_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'polution'}
-                                buttonText={vehicleData.pollution_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('polution', 'pollution_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.pollution_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, pollution_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
-                            !(Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
-                          )}>
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase transition-colors break-words",
-                                Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
-                              )}>
-                                State Permit {Number(vehicleData.gvw) > 3000 ? (selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>) : <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.permit1 && vehicleData.permit1 !== 'pending' ? vehicleData.permit1 : null}
-                                fileName={vehicleData.permit1_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'permit1'}
-                                buttonText={vehicleData.permit1_file_name ? 'REPLACE' : 'UPLOAD'}
-                                disabled={!(Number(vehicleData.gvw) > 3000)}
-                                onFilesSelected={(files) => handleFileChange('permit1', 'permit1_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className={cn(
-                                "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
-                                Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed opacity-80"
-                              )}
-                              min={minDate}
-                              value={vehicleData.permit1_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, permit1_end_date: e.target.value }))}
-                              disabled={!(Number(vehicleData.gvw) > 3000)}
-                            />
-                          </div>
-                          <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
-                            !(isInterState && Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
-                          )}>
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase transition-colors break-words",
-                                isInterState && Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
-                              )}>
-                                National / Other State Permit {isInterState && Number(vehicleData.gvw) > 3000 ? <span className="text-red-500">*</span> : (Number(vehicleData.gvw) <= 3000 && <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>)}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.permit2_out_state && vehicleData.permit2_out_state !== 'pending' ? vehicleData.permit2_out_state : null}
-                                fileName={vehicleData.permit2_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'permit2_out_state'}
-                                buttonText={vehicleData.permit2_file_name ? 'REPLACE' : 'UPLOAD'}
-                                disabled={!(isInterState && Number(vehicleData.gvw) > 3000)}
-                                onFilesSelected={(files) => handleFileChange('permit2_out_state', 'permit2_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className={cn(
-                                "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
-                                isInterState && Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed"
-                              )}
-                              min={minDate}
-                              value={vehicleData.permit2_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, permit2_end_date: e.target.value }))}
-                              disabled={!(isInterState && Number(vehicleData.gvw) > 3000) || isReadOnly}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Check Status <span className="text-red-500">*</span></Label>
-                          <Select value={vehicleData.checkStatus} onValueChange={(v) => setVehicleData(p => ({ ...p, checkStatus: v }))}>
-                            <SelectTrigger className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white focus:ring-2 focus:ring-purple-500">
-                              <SelectValue placeholder="Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Accept">Accept</SelectItem>
-                              <SelectItem value="Reject">Reject</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Remarks {vehicleData.checkStatus === "Reject" ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
-                          </Label>
-                          <Input
-                            placeholder="Add notes..."
-                            className="h-12 border-2 border-slate-200 rounded-xl bg-white font-medium focus:border-purple-500 transition-colors"
-                            value={vehicleData.remarks}
-                            onChange={(e) => setVehicleData(p => ({ ...p, remarks: e.target.value }))}
-                          />
-                        </div>
-                      </div>
+                      {/* --- REMOVED: Digital Documents (Stage 6) upload/expiry fields and the
+                          vehicle-condition Check Status/Remarks below — all vehicle document
+                          verification now happens exclusively at Plan Vehicle (Stage 5); see
+                          the read-only summary card above. --- */}
                     </div>
                   </div>
 
@@ -3146,7 +2665,7 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1">Truck No</Label>
-                          <Input className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50 font-mono uppercase" value={loadData.truckNo || vehicleNumber} readOnly />
+                          <Input className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50 font-mono uppercase" value={loadData.truckNo || planVehicleInfo.registrationNo || ''} readOnly />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1 flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-1">
@@ -3159,7 +2678,7 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'weightmentSlip'}
                             buttonText={loadData.weightmentSlip_file_name ? 'REPLACE' : 'UPLOAD'}
-                            onFilesSelected={(files) => handleFileChange('weightmentSlip', 'weightmentSlip_file_name', files[0] || null, 'load')}
+                            onFilesSelected={(files) => handleFileChange('weightmentSlip', 'weightmentSlip_file_name', files[0] || null)}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -3173,7 +2692,7 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'vehicleNoPlateImage'}
                             buttonText={loadData.vehicleNoPlateImage_file_name ? 'REPLACE' : 'UPLOAD'}
-                            onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null, 'load')}
+                            onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null)}
                           />
                         </div>
                       </div>
@@ -3218,7 +2737,7 @@ export default function ActualDispatchPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Status (STG 7) <span className="text-red-500">*</span></Label>
                           <Select value={loadData.checkStatus} onValueChange={(v) => setLoadData(p => ({ ...p, checkStatus: v }))}>
@@ -3231,67 +2750,27 @@ export default function ActualDispatchPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className={cn("space-y-1.5 w-full transition-all duration-300", (loadData.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(loadData.transporterName)) ? "col-span-1 sm:col-span-2 md:col-span-2" : "col-span-1 sm:col-span-2")}>
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Transporter <span className="text-red-500">*</span></Label>
-                          <Combobox
-                            value={loadData.transporterName}
-                            onValueChange={(v) => {
-                              const isNormal = !['Company Vehicle', 'Party Vehicle'].includes(v);
-                              setLoadData(p => ({
-                                ...p,
-                                transporterName: v,
-                                freightRateType: isNormal ? p.freightRateType : "",
-                                freightAmount: isNormal ? p.freightAmount : "",
-                                cash_bank: isNormal ? p.cash_bank : "",
-                                diesel_advance: isNormal ? p.diesel_advance : "",
-                                bhada: isNormal ? p.bhada : ""
-                              }));
-                            }}
-                            options={transporterOptions}
-                            placeholder="Select Transporter"
-                            searchPlaceholder="Search transporter..."
-                            emptyText="No transporter found."
-                            className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white w-full shadow-sm text-blue-700"
-                          />
-                        </div>
                       </div>
 
-                      {loadData.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(loadData.transporterName) && (
+                      {/* Freight Rate Type/Amount: read-only reference confirmed at Plan
+                          Vehicle — not editable here, only the advance amounts below are. */}
+                      {planVehicleInfo.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(planVehicleInfo.transporterName) && (
                         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Freight Rate Type <span className="text-red-500">*</span></Label>
-                              <Select
-                                value={loadData.freightRateType}
-                                onValueChange={(v) => setLoadData(p => ({ ...p, freightRateType: v }))}
-                              >
-                                <SelectTrigger className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white focus:ring-2 focus:ring-blue-500">
-                                  <SelectValue placeholder="Select Type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Fixed Bhada" className="font-medium">Fixed Bhada</SelectItem>
-                                  <SelectItem value="Bhada Rate" className="font-medium">Bhada Rate</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {loadData.freightRateType && (
-                              <div className="space-y-1.5 animate-in slide-in-from-right-2 duration-300">
-                                <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">
-                                  {loadData.freightRateType === 'Bhada Rate' ? 'Bhada Rate (Per MT)' : 'Fixed Bhada Amount'} <span className="text-red-500">*</span>
-                                </Label>
-                                <div className="relative">
-                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    className="h-10 pl-7 border-2 border-slate-200 rounded-lg font-bold bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-                                    placeholder="0.00"
-                                    value={loadData.freightAmount}
-                                    onChange={(e) => setLoadData(p => ({ ...p, freightAmount: e.target.value }))}
-                                  />
-                                </div>
+                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Freight Rate Type</Label>
+                              <div className="h-10 flex items-center px-3 border-2 border-slate-200 rounded-xl font-bold bg-slate-50 text-slate-700">
+                                {planVehicleInfo.freightRateType || '---'}
                               </div>
-                            )}
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">
+                                {planVehicleInfo.freightRateType === 'Bhada Rate' ? 'Bhada Rate (Per MT)' : 'Fixed Bhada Amount'}
+                              </Label>
+                              <div className="h-10 flex items-center px-3 border-2 border-slate-200 rounded-xl font-bold bg-slate-50 text-slate-700">
+                                {planVehicleInfo.freightAmount != null ? `₹${planVehicleInfo.freightAmount}` : '---'}
+                              </div>
+                            </div>
                           </div>
 
                           {/* Advance Bhada Section */}
@@ -3350,27 +2829,8 @@ export default function ActualDispatchPage() {
                             placeholder={Math.abs(parseFloat(loadData.differanceWeight) || 0) > 20 ? "Required: explain weight difference..." : "Specify reason..."}
                             value={loadData.reason} onChange={(e) => setLoadData(p => ({ ...p, reason: e.target.value }))} />
                         </div>
-
-                        {/* Overload Alert & Remarks */}
-                        {(parseFloat(vehicleData.passing_weight) || 0) > 0 && totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0) && (
-                          <div className="p-4 bg-red-50 border-2 border-red-100 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                              <p className="text-sm font-black text-red-600 uppercase tracking-tighter">Vehicle is overload!</p>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-[10px] font-black uppercase text-red-500 tracking-widest ml-1">
-                                Overload Remarks {selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>}
-                              </Label>
-                              <Input
-                                placeholder={selectedDepoTab?.toUpperCase() === 'BANARI' ? "Why is the vehicle being overloaded? (MANDATORY)" : "Why is the vehicle being overloaded? (Optional)"}
-                                className="h-10 border-2 border-red-200 rounded-xl bg-white font-bold text-red-700 placeholder:text-red-300 focus:border-red-500 transition-all"
-                                value={loadData.overloadRemarks}
-                                onChange={(e) => setLoadData(p => ({ ...p, overloadRemarks: e.target.value }))}
-                              />
-                            </div>
-                          </div>
-                        )}
+                        {/* Overload is validated exclusively at Plan Vehicle (Stage 5) now — no
+                            re-check/alert here. */}
                       </div>
                     </div>
                   </div>
@@ -3414,7 +2874,7 @@ export default function ActualDispatchPage() {
               <Button
                 variant="outline"
                 onClick={handleSaveDraft}
-                disabled={isSavingDraft || isProcessing || (selectedDepoTab?.toUpperCase() === 'BANARI' && (!vehicleNumber || !loadData.transporterName))}
+                disabled={isSavingDraft || isProcessing || (selectedDepoTab?.toUpperCase() === 'BANARI' && (!planVehicleInfo.confirmed || !driverName.trim()))}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50 font-semibold h-11 sm:h-10"
               >
                 {isSavingDraft ? "Saving..." : "Save Draft"}

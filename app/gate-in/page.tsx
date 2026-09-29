@@ -736,17 +736,26 @@ const buildSlipParties = () => {
 
   const handleDownloadSlip = () => {
     if (!selectedRecord) return
-    generateDispatchSlipPdf(buildSlipParties(), "download")
+    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { title: "Gate Pass" })
   }
-  
+
   const handlePrintSlip = () => {
     if (!selectedRecord) return
-    generateDispatchSlipPdf(buildSlipParties(), "print")
+    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { print: true, title: "Gate Pass" })
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!selectedRecord) return
+
+    if (!editableVehicle.trim()) {
+      toast({
+        title: "Vehicle No. is required",
+        description: "Select a Vehicle No. before completing Gate In (mandatory when only a Transporter was chosen at Plan Vehicle).",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsProcessing(true)
     try {
