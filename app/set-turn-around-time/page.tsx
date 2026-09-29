@@ -25,7 +25,8 @@ const STAGE_OPTIONS = [
   "Make Invoice (Proforma)",
   "Check Invoice",
   "Gate Out",
-  "Confirm Material Receipt",
+  "Reach Vehicle",
+  "Unloading",
   "Damage Adjustment",
   "Gate In",
 ]

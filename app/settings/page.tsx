@@ -56,6 +56,7 @@ const PAGE_ACCESS_OPTIONS = [
   "Pre Approval",
   "Approval of Order",
   "Dispatch Planning",
+  "Plan Vehicle",
   "Actual Dispatch",
   "Vehicle Details",
   "Material Load",
@@ -63,7 +64,8 @@ const PAGE_ACCESS_OPTIONS = [
   "Make Invoice",
   "Check Invoice",
   "Gate Out",
-  "Confirm Material Receipt",
+  "Reach Vehicle",
+  "Unloading",
   "Damage Adjustment",
   "Gate In",
   "Variable Parameters",
@@ -76,7 +78,7 @@ const PAGE_ACCESS_OPTIONS = [
 ]
 
 // Pages that support per-page accessible depot/location selection
-const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Actual Dispatch", "Inventory"]
+const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Plan Vehicle", "Actual Dispatch", "Inventory"]
 
 // Values selectable in Order Punch's "Is This Order Through" field
 const ORDER_THROUGH_OPTIONS = ["Direct", "Broker", "Salesperson"]

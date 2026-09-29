@@ -263,6 +263,22 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   // and has no approval row of its own — the names above were resolved from
   // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
   if (row.approvalInherited !== undefined) r.approval_inherited = row.approvalInherited;
+  // Read-only reference from Stage 5 (Plan Vehicle) — vehicle/transporter are
+  // decided there, not re-entered at Actual Dispatch; plan_vehicle_confirmed
+  // distinguishes an actually-confirmed plan from a reverted/attempted one.
+  const vp = row.vehiclePlanning || null;
+  r.plan_vehicle_confirmed = !!vp?.actualAt;
+  r.plan_vehicle_registration_no = row.planVehicleRegNo ?? null;
+  r.plan_vehicle_transporter_name = row.planVehicleTransporterName ?? null;
+  r.plan_vehicle_driver_name = row.planVehicleDriverName ?? null;
+  // Advance amounts stay editable at Actual Dispatch per spec ("allow the user
+  // to modify it here as well") — these are just the Plan Vehicle-confirmed
+  // starting values to pre-fill that editable field with.
+  r.plan_vehicle_freight_rate_type = vp?.freightRateType ?? null;
+  r.plan_vehicle_freight_amount = vp?.freightAmount ?? null;
+  r.plan_vehicle_advance_bank = vp?.advanceBhadaBank ?? null;
+  r.plan_vehicle_advance_diesel = vp?.advanceBhadaDieselAdvance ?? null;
+  r.plan_vehicle_advance_cash = vp?.advanceBhadaCash ?? null;
   return r;
 }
 
@@ -341,7 +357,7 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   return r;
 }
 
-// Confirm Material Receipt: submit key = material_receipts id.
+// Unloading: submit key = material_receipts id.
 export function flattenMaterialReceiptStage(row: any): Record<string, any> {
   const r = base(row);
   const dsp = row.dispatch || {};

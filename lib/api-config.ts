@@ -49,6 +49,14 @@ export const API_ENDPOINTS = {
     submit: (dsrNumber: string) => `/actual-dispatch/submit/${dsrNumber}`,
   },
   
+  // Reach Vehicle Endpoints (Stage 13)
+  reachVehicle: {
+    pending: '/reach-vehicle/pending',
+    history: '/reach-vehicle/history',
+    submit: (id: number) => `/reach-vehicle/submit/${id}`,
+    revert: (id: number) => `/reach-vehicle/revert/${id}`,
+  },
+  
   // Dashboard Endpoints
   dashboard: {
     stats: '/dashboard/stats',

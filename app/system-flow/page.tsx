@@ -68,7 +68,13 @@ const stages = [
     icon: FileCheck, color: "#059669", bg: "#ecfdf5", border: "#a7f3d0",
   },
   {
-    no: "09", title: "Gate Out", actor: "Security Gate",
+    no: "12", title: "Gate Out", actor: "Security Gate",
+    action: "Verifies documents, takes photo, marks gate out.",
+    isAutomated: false,
+  },
+  {
+    no: "13", title: "Reach Vehicle", actor: "Company/Customer",
+    action: "Marks arrival, records accidents, or handles vehicle change.",
     action: "Capture vehicle exit time and final seal confirmation.",
     icon: Gauge, color: "#d97706", bg: "#fffbeb", border: "#fde68a",
   },

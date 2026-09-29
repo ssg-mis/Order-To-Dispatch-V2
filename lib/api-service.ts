@@ -504,6 +504,93 @@ export const actualDispatchApi = {
   },
 };
 
+export const reachVehicleApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/pending${buildQuery(params)}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/history${buildQuery(params)}`);
+  },
+
+  submit: async (id: number, data: any): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/submit/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/revert/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+};
+
+// Stage 5 (carved out of Actual Dispatch): consolidate DOs, assign a vehicle/
+// transporter, generate the gate pass. Same row shape as actual-dispatch's
+// pending/history rows (dispatches.id space) — reuses flattenDispatchStage as-is.
+export const planVehicleApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return adaptList(await request(`/plan-vehicle/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return adaptList(await request(`/plan-vehicle/history${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
+  },
+
+  submit: async (id: number, data?: any): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/submit/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  },
+
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/revert/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+};
+
 export const gateInApi = {
   getPending: (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
     return request(`/gate-in/pending${buildQuery(params)}`);
@@ -765,7 +852,7 @@ export const gateOutApi = {
   },
 };
 
-export const confirmMaterialReceiptApi = {
+export const unloadingApi = {
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -778,7 +865,7 @@ export const confirmMaterialReceiptApi = {
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return adaptList(await request(`/confirm-receipt/pending${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
+    return adaptList(await request(`/unloading/pending${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
   },
 
   getHistory: async (params?: {
@@ -1911,12 +1998,13 @@ export default {
   approval: approvalApi,
   dispatchPlanning: dispatchPlanningApi,
   actualDispatch: actualDispatchApi,
+  planVehicle: planVehicleApi,
   securityGuardApproval: securityGuardApprovalApi,
   makeInvoice: makeInvoiceApi,
   checkInvoice: checkInvoiceApi,
   finalInvoice: finalInvoiceApi,
   gateOut: gateOutApi,
-  confirmMaterialReceipt: confirmMaterialReceiptApi,
+  unloading: unloadingApi,
   skuDetails: skuDetailsApi,
   skuSellingPrice: skuSellingPriceApi,
   common: commonApi,

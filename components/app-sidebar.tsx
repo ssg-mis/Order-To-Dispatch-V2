@@ -30,6 +30,7 @@ import {
   Clock,
   Workflow,
   Warehouse,
+  MapPin,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
 import { useMemo } from "react"
@@ -60,15 +61,17 @@ const modules = [
   { title: "Pre Approval", icon: BadgeCheck, url: "/pre-approval" },
   { title: "Approval of Order", icon: FileSearch, url: "/approval-of-order" },
   { title: "Dispatch Planning", icon: PackageCheck, url: "/dispatch-material" },
+  { title: "Plan Vehicle", icon: Truck, url: "/plan-vehicle" },
+  { title: "Gate In", icon: Car, url: "/gate-in" },
   { title: "Actual Dispatch", icon: Send, url: "/actual-dispatch" },
   { title: "Security Guard Approval", icon: ShieldCheck, url: "/security-approval" },
   { title: "Make Invoice (Proforma)", icon: FileText, url: "/make-invoice" },
   { title: "Check Invoice", icon: FileCheck, url: "/check-invoice" },
   { title: "Make Final Invoice", icon: FileText, url: "/final-invoice" },
   { title: "Gate Out", icon: Gate, url: "/gate-out" },
-  { title: "Confirm Material Receipt", icon: FileSignature, url: "/material-receipt" },
+  { title: "Reach Vehicle", icon: MapPin, url: "/reach-vehicle" },
+  { title: "Unloading", icon: FileSignature, url: "/material-receipt" },
   { title: "Damage Adjustment", icon: AlertCircle, url: "/damage-adjustment" },
-  { title: "Gate In", icon: Car, url: "/gate-in" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },
   { title: "Production", icon: Factory, url: "/production" },

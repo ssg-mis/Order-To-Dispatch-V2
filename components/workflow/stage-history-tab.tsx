@@ -381,8 +381,8 @@ export function StageHistoryTab({
 
                       {/* Child rows when expanded */}
                       {isExpanded &&
-                        item.items.map((sibling: any) => (
-                          <TableRow key={sibling.orderNo} className="bg-white hover:bg-blue-50/10 border-b transition-colors">
+                        item.items.map((sibling: any, siblingIdx: number) => (
+                          <TableRow key={sibling.id ?? sibling.dsrNumber ?? `${sibling.orderNo}-${siblingIdx}`} className="bg-white hover:bg-blue-50/10 border-b transition-colors">
                             <TableCell className="px-4 py-2.5 text-xs text-slate-400 pl-8">{sibling.date || "-"}</TableCell>
                             <TableCell className="px-4 py-2.5 font-bold text-blue-700 text-xs pl-8 flex items-center gap-1">
                               <span className="text-slate-300 font-normal">↳</span>
@@ -510,8 +510,8 @@ export function StageHistoryTab({
 
                     {isExpanded && (
                       <div className="pl-4 border-l-2 border-slate-200 space-y-2">
-                        {item.items.map((sibling: any) => (
-                          <Card key={sibling.orderNo} className="p-3 border border-slate-100 bg-white shadow-sm space-y-3">
+                        {item.items.map((sibling: any, siblingIdx: number) => (
+                          <Card key={sibling.id ?? sibling.dsrNumber ?? `${sibling.orderNo}-${siblingIdx}`} className="p-3 border border-slate-100 bg-white shadow-sm space-y-3">
                             <div className="flex justify-between items-start">
                               <div className="space-y-1">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{sibling.date || "-"}</p>
