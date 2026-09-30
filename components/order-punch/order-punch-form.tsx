@@ -2116,8 +2116,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
               Cancel
             </Button>
           )}
-          <Button type="submit" className="gap-2 px-8" disabled={isSubmitting || isReadOnly} title={isReadOnly ? "View Only Access" : "Save Order"}>
-            <Save className="h-4 w-4" /> {isSubmitting ? "Saving..." : "Save Order"}
+          <Button type="submit" className="gap-2 px-8" disabled={isSubmitting || isReadOnly} title={isReadOnly ? "View Only Access" : "Confirm Order"}>
+            <Save className="h-4 w-4" /> {isSubmitting ? "Confirming..." : "Confirm Order"}
           </Button>
         </div>
       </form>

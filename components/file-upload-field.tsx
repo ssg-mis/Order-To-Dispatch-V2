@@ -135,10 +135,12 @@ export function FileUploadField({
           <Upload className="h-5 w-5 text-blue-600" />
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              {uploading ? "Uploading..." : hasSelection ? "Replace file" : primaryLabel}
+              {uploading ? "Uploading..." : hasSelection ? (multiple ? "Add more files" : "Replace file") : primaryLabel}
             </p>
             <p className="mt-1 break-words text-xs text-slate-700">
-              {uploadedNames[0] || placeholder}
+              {multiple && uploadedNames.length > 0
+                ? `${uploadedNames.length} file${uploadedNames.length > 1 ? "s" : ""} selected`
+                : uploadedNames[0] || placeholder}
             </p>
           </div>
         </button>

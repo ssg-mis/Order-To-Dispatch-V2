@@ -36,6 +36,7 @@ import { usePathname } from "next/navigation"
 import { useMemo } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { userApi } from "@/lib/api-service"
+import { flushAllColumnPrefs } from "@/lib/column-prefs"
 import { useAuth } from "@/hooks/use-auth"
 
 import {
@@ -70,7 +71,7 @@ const modules = [
   { title: "Make Final Invoice", icon: FileText, url: "/final-invoice" },
   { title: "Gate Out", icon: Gate, url: "/gate-out" },
   { title: "Reach Vehicle", icon: MapPin, url: "/reach-vehicle" },
-  { title: "Unloading", icon: FileSignature, url: "/material-receipt" },
+  { title: "Unloading", icon: FileSignature, url: "/unloading" },
   { title: "Damage Adjustment", icon: AlertCircle, url: "/damage-adjustment" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },

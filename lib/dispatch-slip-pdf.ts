@@ -28,6 +28,12 @@ export interface SlipPartyData {
   preApproveAt?: string | null
   approveBy?: string
   approveAt?: string | null
+  vehicleNo?: string
+  driverName?: string
+  tareWt?: string | number
+  grossWt?: string | number
+  inTime?: string
+  outTime?: string
 }
 
 const WHITE: [number, number, number] = [255, 255, 255]
@@ -239,20 +245,20 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
       },
     })
 
-    // ---- 2.5) Blank Space for Manual Entries ----
+    // ---- 2.5) Blank Space for Manual Entries (Or pre-filled if provided) ----
     autoTable(doc, {
       body: [
         [
-          { content: "Vehicle No.: __________________________", styles: { halign: "left" } },
-          { content: "Driver Name: __________________________", styles: { halign: "left" } },
+          { content: `Vehicle No.: ${party.vehicleNo ? party.vehicleNo : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Driver Name: ${party.driverName ? party.driverName : "__________________________"}`, styles: { halign: "left" } },
         ],
         [
-          { content: "Tare Wt.: __________________________", styles: { halign: "left" } },
-          { content: "Gross Wt.: __________________________", styles: { halign: "left" } },
+          { content: `Tare Wt.: ${party.tareWt ? party.tareWt + " KGS" : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Gross Wt.: ${party.grossWt ? party.grossWt + " KGS" : "__________________________"}`, styles: { halign: "left" } },
         ],
         [
-          { content: "In Time: __________________________", styles: { halign: "left" } },
-          { content: "Out Time: __________________________", styles: { halign: "left" } },
+          { content: `In Time: ${party.inTime ? party.inTime : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Out Time: ${party.outTime ? party.outTime : "__________________________"}`, styles: { halign: "left" } },
         ],
         [
           { content: "Guard Sign: __________________________", styles: { halign: "left" } },
