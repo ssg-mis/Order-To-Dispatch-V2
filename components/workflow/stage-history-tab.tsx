@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { FIELD_GROUPS, STAGE_NAMES, FIELD_LABELS, fieldOrderPriority } from "./workflow-stage-shell"
 import { ISTDateTime } from "@/components/ui/ist-datetime"
 import { isTimestamp } from "@/lib/date-utils"
+import { LOSS_CAUSES, BORNE_BY_LABEL, type BorneBy } from "@/lib/loss-causes"
 
 interface StageHistoryTabProps {
   // Query configurations
@@ -274,6 +275,21 @@ export function StageHistoryTab({
       return v === "true" || v === "approved" ? "Approved" : "Rejected"
     }
     if (typeof value === "boolean") return value ? "Yes" : "No"
+    if (key === "shortage_cause" && LOSS_CAUSES[value]) return LOSS_CAUSES[value].label
+    if ((key === "shortage_borne_by") && BORNE_BY_LABEL[value as BorneBy]) return BORNE_BY_LABEL[value as BorneBy]
+    if (key === "approval_status" && typeof value === "string") return value.charAt(0).toUpperCase() + value.slice(1)
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "—"
+      return (
+        <span className="flex flex-col gap-1">
+          {value.map((v, i) => typeof v === "string" && v.startsWith("http") ? (
+            <a key={i} href={v} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">View Attachment {i + 1}</a>
+          ) : (
+            <span key={i}>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+          ))}
+        </span>
+      )
+    }
     if (typeof value === "string" && (value.startsWith("http") || value.includes("/uploads/"))) {
       return (
         <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">

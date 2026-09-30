@@ -74,6 +74,28 @@ function mergeVisible(saved: string[]): string[] {
   return saved.filter((id) => typeof id === "string" && !seen.has(id) && seen.add(id))
 }
 
+const SEEN_PREFIX = "col_seen_"
+
+/**
+ * One-time roll-out of newly introduced columns. `newColumns` are ids added to a
+ * stage after users may already have saved a preference; each is appended to the
+ * saved list exactly once (tracked per browser under `col_seen_<stage>`), so
+ * existing users get the new column without it re-appearing after they hide it.
+ */
+function withNewColumns(stageKey: string, visible: string[], newColumns: string[]): string[] {
+  if (typeof window === "undefined" || newColumns.length === 0) return visible
+  try {
+    const raw = localStorage.getItem(SEEN_PREFIX + stageKey)
+    const seen: string[] = raw ? JSON.parse(raw) : []
+    const fresh = newColumns.filter((id) => !seen.includes(id))
+    if (fresh.length === 0) return visible
+    localStorage.setItem(SEEN_PREFIX + stageKey, JSON.stringify([...seen, ...fresh]))
+    return [...visible, ...fresh.filter((id) => !visible.includes(id))]
+  } catch {
+    return visible
+  }
+}
+
 /**
  * Reads and validates a column preference array from localStorage.
  * Returns null if nothing is stored or the stored value is invalid.
@@ -117,18 +139,20 @@ function writeToStorage(stageKey: string, columns: string[]): void {
  * @param stageKey       Unique identifier for this workflow stage (e.g. "make-invoice").
  *                       This becomes the localStorage key suffix.
  * @param defaultColumns The columns to show on first visit (or if preferences are lost).
+ * @param newColumns     Ids introduced after users may have saved prefs; auto-enabled once per browser.
  * @returns              [visibleColumns, setVisibleColumns] — a drop-in replacement
  *                       for useState<string[]>.
  */
 export function usePersistedColumns(
   stageKey: string,
-  defaultColumns: string[]
+  defaultColumns: string[],
+  newColumns: string[] = []
 ): [string[], Dispatch<SetStateAction<string[]>>] {
   const [visibleColumns, setVisibleColumnsInternal] = useState<string[]>(() => {
     // localStorage acts as an instant cache so there's no flash of defaults
     // before the per-user server value hydrates.
     const saved = readFromStorage(stageKey)
-    return saved ? mergeVisible(saved) : defaultColumns
+    return saved ? withNewColumns(stageKey, mergeVisible(saved), newColumns) : defaultColumns
   })
 
   // ── Hydrate from the logged-in user's server-saved prefs (once) ──────────
@@ -140,9 +164,11 @@ export function usePersistedColumns(
     hydratedRef.current = true
     const serverVisible = prefs?.[stageKey]?.visible
     if (Array.isArray(serverVisible) && serverVisible.length > 0) {
-      const merged = mergeVisible(serverVisible)
+      const base = mergeVisible(serverVisible)
+      const merged = withNewColumns(stageKey, base, newColumns)
       setVisibleColumnsInternal(merged)
       writeToStorage(stageKey, merged) // refresh the cache to match the server
+      if (userId && merged.length !== base.length) debouncedSaveColumnPref(userId, stageKey, "visible", merged)
     }
     // defaultColumns is conceptually constant per stage; hydration runs once.
     // eslint-disable-next-line react-hooks/exhaustive-deps

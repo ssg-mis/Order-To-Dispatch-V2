@@ -97,16 +97,19 @@ export const FIELD_GROUPS: Record<string, number> = {
   bill_type: 6, invoice_date: 6, invoice_no: 6, invoice_copy: 6, bill_amount: 6,
   make_invoice_user: 6, actual_5: 6, planned_5: 6,
 
-  // Level 7: Check Invoice (Stage 11)
+  // Level 7: Check Invoice (Stage 10)
   verification_status: 7, actual_7: 7, planned_7: 7, check_invoice_user: 7,
 
   // Level 8: Gate Out (Stage 12)
   gate_pass_copy: 8, actual_8: 8, planned_8: 8, gate_out_user: 8,
 
-  // Level 9: Material Receipt (Stage 13)
+  // Level 9: Material Receipt (Stage 14)
   damage_qty: 9, damage_status: 9, actual_9: 9, planned_9: 9, material_receipt_user: 9,
+  // Unloading (Stage 14) report
+  received_date: 9, received_proof: 9, damage_photos: 9, shortage_qty: 9, shortage_cause: 9, shortage_borne_by: 9,
+  total_loss_qty: 9, total_loss_value: 9, approval_status: 9, approval_remarks: 9,
 
-  // Level 10: Damage Adjustment
+  // Level 10: Damage Adjustment (Stage 15)
   credit_note_no: 10, actual_10: 10, planned_10: 10, damage_adjustment_user: 10,
 }
 
@@ -124,7 +127,7 @@ export const STAGE_NAMES: Record<number, string> = {
   6: "Make Invoice",
   7: "Check Invoice",
   8: "Gate Out",
-  9: "Material Receipt",
+  9: "Unloading",
   10: "Damage Adjustment",
 }
 
@@ -132,6 +135,16 @@ export const STAGE_NAMES: Record<number, string> = {
 // auto-generated (underscore-split, title-cased) label reads awkwardly.
 export const FIELD_LABELS: Record<string, string> = {
   approved_qty: "Pre Approved Quantity",
+  received_date: "Unloading Completed On",
+  received_proof: "Received Proof",
+  damage_photos: "Damage Photos",
+  shortage_qty: "Shortage Quantity",
+  shortage_cause: "Shortage Cause",
+  shortage_borne_by: "Shortage Borne By",
+  total_loss_qty: "Total Loss (Units)",
+  total_loss_value: "Total Loss Value (₹)",
+  approval_status: "Loss Approval",
+  approval_remarks: "Approval Remarks",
   approval_qty: "Approval Quantity",
   overall_status_of_order: "Approval Status",
   order_punch_user: "Order Punch Doer",
