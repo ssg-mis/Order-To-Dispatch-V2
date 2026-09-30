@@ -655,6 +655,10 @@ export default function GateOutPage() {
         preApproveAt: firstProd.pre_approval_at || null,
         approveBy: firstProd.order_approval_user || "—",
         approveAt: firstProd.order_approval_at || null,
+        vehicleNo: firstProd.vehicle_no || firstProd.truck_no || firstProd.truckNo || firstProd.registration_no || "",
+        driverName: firstProd.driver_name || firstProd.driverName || "",
+        tareWt: firstProd.tareWeight || firstProd.tare_weight || "",
+        grossWt: firstProd.grossWeight || firstProd.gross_weight || "",
         products: partyProducts.map((prod: any) => {
           const qty = parseFloat(prod.actual_qty_dispatch || prod.qty_to_be_dispatched || "0");
           const skuWt = parseFloat(skuWeightMap.get(prod.productName?.trim().toLowerCase()) || "") || 0;

@@ -81,8 +81,8 @@ export default function DashboardPage() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {[
           { title: "Total Orders", key: "totalOrders", icon: Package, color: "text-indigo-600", bg: "bg-indigo-50", desc: "Across all stages" },
-          { title: "Pending Pre-Approval", key: "pendingPreApproval", icon: Clock, color: "text-orange-500", bg: "bg-orange-50", desc: "Awaiting Stage 1" },
-          { title: "Pending Approval", key: "pendingApproval", icon: FileText, color: "text-blue-500", bg: "bg-blue-50", desc: "Awaiting Stage 2" },
+          { title: "Pending Pre-Approval", key: "pendingPreApproval", icon: Clock, color: "text-orange-500", bg: "bg-orange-50", desc: "Awaiting Stage 2" },
+          { title: "Pending Approval", key: "pendingApproval", icon: FileText, color: "text-blue-500", bg: "bg-blue-50", desc: "Awaiting Stage 3" },
           { title: "Completed", key: "completedOrders", icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-50", desc: "Processed orders" }
         ].map((item, idx) => (
           <Card key={idx} className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all duration-300">

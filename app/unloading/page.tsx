@@ -1,92 +1,36 @@
 "use client"
 
 import { useEffect, useState, useMemo, useCallback } from "react"
-import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
-import { FileUploadField } from "@/components/file-upload-field"
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { unloadingApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
+import { unloadingApi, orderApi } from "@/lib/api-service"
+import { isStaleWriteError } from "@/lib/stale-write"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, ChevronLeft, ChevronRight, Settings2, CheckCircle, Upload, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { ChevronLeft, ChevronRight, Settings2, CheckCircle, ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { UnloadingForm, UnloadingFormData } from "@/components/unloading-form"
-
-const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
-const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
-
-async function compressImageForUpload(file: File): Promise<File> {
-  if (!file.type.startsWith("image/")) return file
-
-  const bitmap = await createImageBitmap(file)
-  const canvas = document.createElement("canvas")
-  const context = canvas.getContext("2d")
-
-  if (!context) {
-    bitmap.close()
-    return file
-  }
-
-  const toBlob = (quality: number) =>
-    new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", quality))
-
-  let maxDimension = Math.min(MAX_COMPRESSED_IMAGE_DIMENSION, Math.max(bitmap.width, bitmap.height))
-  let blob: Blob | null = null
-
-  while (maxDimension >= 320) {
-    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
-    const width = Math.max(1, Math.round(bitmap.width * scale))
-    const height = Math.max(1, Math.round(bitmap.height * scale))
-
-    canvas.width = width
-    canvas.height = height
-    context.clearRect(0, 0, width, height)
-    context.drawImage(bitmap, 0, 0, width, height)
-
-    let quality = 0.82
-    blob = await toBlob(quality)
-
-    while (blob && blob.size > MAX_COMPRESSED_IMAGE_BYTES && quality > 0.34) {
-      quality -= 0.08
-      blob = await toBlob(quality)
-    }
-
-    if (blob && blob.size <= MAX_COMPRESSED_IMAGE_BYTES) break
-    maxDimension -= 250
-  }
-
-  bitmap.close()
-
-  if (!blob || blob.size > MAX_COMPRESSED_IMAGE_BYTES) return file
-
-  const cleanName = file.name.replace(/\.[^.]+$/, "")
-  return new File([blob], `${cleanName}.jpg`, { type: "image/jpeg", lastModified: Date.now() })
-}
+import { LossApprovalsDialog } from "@/components/loss-approvals-dialog"
 
 const PAGE_COLUMNS = [
   { id: "partySoDate",       label: "DO Date" },
@@ -100,125 +44,22 @@ const PAGE_COLUMNS = [
 ] as const
 type ColId = typeof PAGE_COLUMNS[number]["id"]
 
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
+const CORE_COLUMN_IDS: string[] = PAGE_COLUMNS.map(c => c.id)
 
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return "—"
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
-// GST & Invoice summary — billing state from depot master, shipping state from customer address.
-// Taxable uses the same per-unit rate as the product table: (rate_of_material × nos + freight) ÷ 1.05 × qty.
-function InvoiceSummary({ selectedGroup, selectedProducts }: {
-  selectedGroup: any
-  selectedProducts: string[]
-}) {
-  const selProds = (selectedGroup?._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey))
-  const firstProd = selProds[0]
-  const depoName = (selectedGroup?.depoName && selectedGroup.depoName !== "—")
-    ? selectedGroup.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || selectedGroup?.customerAddress || ""
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum: number, p: any) => {
-    const rateOfMaterial = parseFloat(p.rate_of_material) || 0
-    const nos = parseFloat(p.nos_per_main_uom) || 1
-    const freight = parseFloat(p.freight_rate) || 0
-    const rateWoGst = parseFloat(((rateOfMaterial * nos + freight) / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
-
-  return (
-    <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
-      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
-      </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
-          <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
-          </span>
-        </div>
-        <div className="flex justify-between items-center border-t border-slate-200 pt-2">
-          <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default function MaterialReceiptPage() {
-  const router = useRouter()
+export default function UnloadingPage() {
   const { user, isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const [pendingPage, setPendingPage] = useState(1);
-  const limit = 20;
+  const [pendingPage, setPendingPage] = useState(1)
+  const limit = 20
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -230,240 +71,88 @@ export default function MaterialReceiptPage() {
   })
   const [isProcessing, setIsProcessing] = useState(false)
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "—";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    } catch (e) {
-      return dateStr;
-    }
-  };
-
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
-    "material-receipt",
-    ["partySoDate", "orderNo", "customerName", "invoiceNo", "status"]
+    "unloading",
+    ["partySoDate", "doNumber", "customerName", "invoiceNo", "vehicleNo", "products"]
   )
 
-  // Selection & Dialog State
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
-  const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isApprovalsOpen, setIsApprovalsOpen] = useState(false)
 
-  // Receipt Form State
-  const [isUploading, setIsUploading] = useState<string | null>(null)
-  const [receiptData, setReceiptData] = useState({
-    receivedDate: "",
-    hasDamage: "no",
-    receivedProof: null as File | null,
-    receivedProofName: "",
-    remarks: "",
-  })
+  const depoNames = user?.depo_access?.['Unloading']
 
-  // Per-product damage data
-  const [productDamageData, setProductDamageData] = useState<Record<string, {
-    damageQty: string
-    damageImage: File | null
-    damageImageName: string
-  }>>({})
-
-  // Pending Receipts Query
   const {
     data: pendingData,
     isLoading: isPendingLoading,
     refetch: refetchPending,
   } = useQuery({
-    queryKey: ["pending-material-receipt", filterValues.search, filterValues.manualSaudaNo, filterValues.startDate, filterValues.endDate, filterValues.partyName, user?.depo_access?.['Unloading'], pendingPage],
+    queryKey: ["pending-unloading", filterValues, depoNames, pendingPage],
     queryFn: async () => {
-      const response = await confirmMaterialReceiptApi.getPending({
+      const response = await unloadingApi.getPending({
         page: pendingPage,
-        limit: limit,
-        search: filterValues.search,
+        limit,
+        order_no: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
-        do_date_from: filterValues.startDate,
-        do_date_to: filterValues.endDate,
-        party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
-        depo_names: user?.depo_access?.['Confirm Material Receipt'] || []
-      });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
+        start_date: filterValues.startDate,
+        end_date: filterValues.endDate,
+        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
+        depo_names: depoNames,
+      })
+      return response.success ? response.data : { orders: [], pagination: { total: 0, totalPages: 1 } }
     },
-  });
-
-  const pendingOrders = pendingData?.orders || [];
-
-  // SKU weight lookup
-  const { data: skuDetailsData } = useQuery({
-    queryKey: ["sku-details-all"],
-    queryFn: async () => {
-      const res = await skuApi.getAll({ all: "true" })
-      return res.success ? res.data?.skuDetails ?? [] : []
-    },
-    staleTime: 5 * 60 * 1000,
   })
-  const skuWeightMap = useMemo(() => {
-    const map = new Map<string, string>()
-    if (Array.isArray(skuDetailsData)) {
-      for (const sku of skuDetailsData) {
-        if (sku.sku_name) {
-          const weight = sku.sku_weight ?? ""
-          map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
-        }
-      }
-    }
-    return map
-  }, [skuDetailsData])
 
-  const getProductWeight = (product: any) => {
-    const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase())
-    const skuWt = parseFloat(skuWtStr || "") || 0
-    const qty = parseFloat(product.actualQty) || 0
-    return skuWt * qty
-  }
+  const pendingOrders = useMemo(() => pendingData?.orders || [], [pendingData])
 
-  // Reset to page 1 on filter change
+  // Loss approvals are a Company Admin task; the count drives the button badge.
+  const { data: approvalsData } = useQuery({
+    queryKey: ["unloading-approvals-count"],
+    queryFn: async () => {
+      const res = await unloadingApi.getApprovals({ page: 1, limit: 1 })
+      return res.success ? res.data?.pagination?.total || 0 : 0
+    },
+    enabled: isAdmin,
+    refetchInterval: 60000,
+  })
+  const totalPages = pendingData?.pagination?.totalPages || 1
+
   useEffect(() => {
-    setPendingPage(1);
-  }, [filterValues.search, filterValues.partyName]);
+    setPendingPage(1)
+  }, [filterValues])
 
-  const handleFileUpload = (file: File, type: 'damage' | 'proof', rowKey?: string) => {
-    if (!file) return;
-
-    if (type === 'damage' && rowKey) {
-      setProductDamageData(prev => ({
-        ...prev,
-        [rowKey]: {
-          ...prev[rowKey],
-          damageImage: file,
-          damageImageName: file.name
-        }
-      }))
-    } else if (type === 'proof') {
-      setReceiptData(p => ({
-        ...p,
-        receivedProof: file,
-        receivedProofName: file.name
-      }));
-    }
-  };
-
-  const uploadSelectedFile = async (file: File, type: 'damage' | 'proof', rowKey?: string) => {
-    setIsUploading(rowKey ? `${type}-${rowKey}` : type);
-    try {
-      const uploadFile = await compressImageForUpload(file);
-      const response = await orderApi.uploadFile(uploadFile);
-      if (response.success) {
-        return response.data.url;
-      }
-      throw new Error(response.message || "Failed to upload file to S3");
-    } catch (error: any) {
-      console.error("Upload failed:", error);
-      throw error;
-    } finally {
-      setIsUploading(null);
-    }
-  };
-
-  /* Grouping Logic */
+  /* One row per invoice; each product line is its own unloading record. */
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
 
     pendingOrders.forEach((order: any) => {
-      // Group by Invoice Number, falling back to the unique receipt id (not a
-      // shared literal) so unlinked receipts don't collapse into one row.
-      const invoiceNo = order.invoice_no || "No Invoice"
-      const groupKey = order.invoice_no || `MR-${order.material_receipt_id}`
-      const doNumber = order.so_no || order.d_sr_number || "DO/26-27/0001"
-
+      const groupKey = order.invoice_no || `UL-${order.id}`
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
           _rowKey: groupKey,
-          doNumber: doNumber,
-          invoiceNo: invoiceNo,
+          doNumber: order.so_no || "—",
+          invoiceNo: order.invoice_no || "No Invoice",
           customerName: order.party_name || "—",
-          deliveryPurpose: order.order_type_delivery_purpose || "—",
-          orderType: order.order_type || "—",
-          startDate: order.start_date,
-          endDate: order.end_date,
-          deliveryDate: order.delivery_date,
-          transportType: order.type_of_transporting || "—",
-          contactPerson: order.customer_contact_person_name || "—",
-          contactWhatsapp: order.customer_contact_person_whatsapp_no || "—",
-          customerAddress: order.customer_address || "—",
-          totalAmount: order.total_amount_with_gst || "—",
-          isBroker: order.is_order_through_broker || false,
-          isOrderThrough: order.is_order_through || "—",
-          brokerName: order.broker_name || "—",
-          advanceAmount: order.advance_amount || 0,
-          paymentTerms: order.payment_terms || "—",
-          partySoDate: order.party_so_date,
-          partyCredit: order.party_credit_status || "—",
-          invoiceDate: order.invoice_date,
-          biltyNo: order.bilty_no || "—",
-          rstNo: order.rst_no || "—",
-          weightmentSlip: order.weightment_slip_copy || null,
-          grossWeight: order.gross_weight || "—",
-          tareWeight: order.tare_weight || "—",
-          netWeight: order.net_weight || "—",
-          weightDiff: order.difference || order.weight_diff || "—",
-          extraWeight: order.extra_weight || "—",
-          vehicleNo: order.truck_no || "—",
-          transporterName: order.transporter_name || "—",
-          truckNo: order.truck_no || "—",
-          vehicleType: order.vehicle_type || "—",
-          rto: order.rto || "—",
-          passingWeight: order.passing_weight || "—",
-          roadTax: order.road_tax || "—",
-          gvw: order.gvw || "—",
-          ulw: order.ulw || "—",
-          driverName: order.driver_name || "—",
-          driverContact: order.driver_contact_no || "—",
-          driverLicense: order.driving_license_no || "—",
-          dlValidUpto: order.dl_valid_upto,
-          diffReason: order.reason_of_difference_in_weight_if_any_speacefic || "—",
-          uploadSo: order.upload_so || null,
+          invoiceCopy: order.invoice_copy || null,
           _allProducts: [],
-          _productCount: 0
         }
       }
-
-      const rate = parseFloat(order.rate_of_material) || 0;
-      const nosPerMainUom = parseFloat(order.nos_per_main_uom) || 1;
-      const actualQty = parseFloat(order.actual_qty_dispatch) || 0;
-      const freightRate = parseFloat(order.freight_rate) || 0;
-      const computedBillAmount = (rate * nosPerMainUom + freightRate) * actualQty;
-
       grouped[groupKey]._allProducts.push({
         ...order,
-        _rowKey: `${invoiceNo}-${order.id}`,
-        id: order.id,
-        specificOrderNo: order.so_no,
         productName: order.product_name,
-        invoiceNo: order.invoice_no,
-        billAmount: computedBillAmount.toFixed(2),
         actualQty: order.actual_qty_dispatch,
-        truckNo: order.truck_no,
-        netWeight: order.net_weight,
-        weightDiff: order.difference || 0,
-        reason_of_difference_in_weight_if_any_speacefic: order.reason_of_difference_in_weight_if_any_speacefic,
-        processid: order.processid || null
       })
-
-      grouped[groupKey]._productCount = grouped[groupKey]._allProducts.length
     })
 
     return Object.values(grouped).map((g: any) => ({
       ...g,
-      formattedPartySoDate: formatDate(g._allProducts[0]?.party_so_date),
+      _productCount: g._allProducts.length,
+      partySoDate: formatDate(g._allProducts[0]?.party_so_date),
       processId: g._allProducts[0]?.processid || "—",
-      vehicleNo: (g._allProducts[0]?.truckNo || "—").toUpperCase(),
+      vehicleNo: (g._allProducts[0]?.truck_no || "—").toUpperCase(),
       orderPunchRemarks: g._allProducts[0]?.order_punch_remarks || "—",
-      uploadSo: g._allProducts[0]?.upload_so || g._allProducts[0]?.uploadSo || null,
+      rejectionNote: (g._allProducts.find((p: any) => String(p.approval_remarks || "").startsWith("Rejected"))?.approval_remarks as string | undefined) || null,
     }))
   }, [pendingOrders])
 
@@ -487,22 +176,20 @@ export default function MaterialReceiptPage() {
       : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
   }
 
+  function getDynamicColumnValue(group: any, colId: string) {
+    const directValue = group?.[colId]
+    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
+    const productValue = group?._allProducts?.[0]?.[colId]
+    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
+    return "—"
+  }
+
   const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
-    if (colId === "processId" || colId === "processid") return group.processId || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "productCount") return String(group._productCount || 0)
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group._allProducts?.every((p: any) => p.status_1 === "Completed") ? "Verified" : "Pending Verification"
-    }
-    if (colId === "invoiceNo") return group.invoiceNo || ""
+    if (colId === "products") return String(group._productCount || 0)
+    if (CORE_COLUMN_IDS.includes(colId)) return String(group[colId] || "")
     return String(getDynamicColumnValue(group, colId))
   }
 
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
   const sortedDisplayRows = useMemo(() => {
     if (!pendingSortField || displayRows.length === 0) return displayRows
     return [...displayRows].sort((a, b) => {
@@ -512,41 +199,29 @@ export default function MaterialReceiptPage() {
       if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
       return 0
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayRows, pendingSortField, pendingSortDir])
 
-  const [columnOrder, setColumnOrder] = useColumnOrder("material-receipt", PAGE_COLUMNS.map(c => c.id))
+  const [columnOrder, setColumnOrder] = useColumnOrder("unloading", CORE_COLUMN_IDS)
   const orderedVisibleCols = useMemo(() =>
     columnOrder
       .map(id => PAGE_COLUMNS.find(c => c.id === id))
-      .filter((c): c is typeof PAGE_COLUMNS[number] => {
-        if (!c) return false
-        if (c.id === "invoiceNo") return visibleColumns.includes("invoiceNo")
-        return true
-      }),
+      .filter((c): c is typeof PAGE_COLUMNS[number] => !!c && visibleColumns.includes(c.id)),
     [columnOrder, visibleColumns]
   )
+  const dynamicColumns = visibleColumns.filter(colId => !CORE_COLUMN_IDS.includes(colId))
   const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
-    const coreInNewOrder = newVisibleOrder.filter(id => PAGE_COLUMNS.some(c => c.id === id))
+    const coreInNewOrder = newVisibleOrder.filter(id => CORE_COLUMN_IDS.includes(id))
     const hiddenCols = columnOrder.filter(id => !coreInNewOrder.includes(id))
     setColumnOrder([...coreInNewOrder, ...hiddenCols])
   }, [columnOrder, setColumnOrder])
 
-  const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    partySoDate:       "partySoDate",
-    doNumber:          "doNumber",
-    processId:         "processId",
-    customerName:      "customerName",
-    invoiceNo:         "invoiceNo",
-    vehicleNo:         "vehicleNo",
-    orderPunchRemarks: "orderPunchRemarks",
-  }
-
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
-        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.formattedPartySoDate}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
       case "doNumber":
-        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-blue-700 font-bold">{group.doNumber.replace(/[A-Za-z]+$/, '')}</TableCell>
+        return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-blue-700 font-bold">{group.doNumber}</TableCell>
       case "processId":
         return <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">{group.processId}</TableCell>
       case "customerName":
@@ -554,14 +229,14 @@ export default function MaterialReceiptPage() {
       case "products":
         return (
           <TableCell key={colId} className="whitespace-nowrap text-center text-xs">
-            <Badge className="bg-slate-100 text-slate-600 font-black text-[10px] uppercase border-none ring-1 ring-inset ring-slate-200">{group._productCount} items</Badge>
+            <Badge variant="secondary" className="font-black text-[10px]">{group._productCount}</Badge>
           </TableCell>
         )
       case "invoiceNo":
         return (
           <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">
-            {group._allProducts?.[0]?.invoice_copy ? (
-              <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">
+            {group.invoiceCopy ? (
+              <a href={group.invoiceCopy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">
                 {group.invoiceNo}
               </a>
             ) : (
@@ -579,88 +254,153 @@ export default function MaterialReceiptPage() {
   }
 
   const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
-    )
+    setSelectedItems(prev => prev.includes(itemKey) ? prev.filter(k => k !== itemKey) : [...prev, itemKey])
   }
 
   const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length && displayRows.length > 0) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems(displayRows.map(r => r._rowKey))
-    }
+    if (selectedItems.length === displayRows.length && displayRows.length > 0) setSelectedItems([])
+    else setSelectedItems(displayRows.map(r => r._rowKey))
   }
 
+  // The damage report is filed for one invoice at a time.
   const handleOpenDialog = () => {
     if (selectedItems.length === 0) return
+    if (selectedItems.length > 1) {
+      toast({ title: "Select one invoice", description: "Unloading is reported one invoice at a time.", variant: "destructive" })
+      return
+    }
     const targetGroup = displayRows.find(r => r._rowKey === selectedItems[0])
     if (targetGroup) {
       setSelectedGroup(targetGroup)
-      setSelectedProducts(targetGroup._allProducts.map((p: any) => p._rowKey))
-      setReceiptData({
-        receivedDate: "",
-        hasDamage: "no",
-        receivedProof: null,
-        receivedProofName: "",
-        remarks: "",
-      })
-      setProductDamageData({})
       setIsDialogOpen(true)
     }
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (formData: UnloadingFormData) => {
     if (!selectedGroup) return
-    if (!receiptData.receivedDate) {
-      toast({ title: "Validation Error", description: "Received Date is required.", variant: "destructive" })
+
+    const lines: any[] = selectedGroup._allProducts
+    const totalDispatched = lines.reduce((sum, l) => sum + (Number(l.actualQty) || 0), 0)
+    const shortage = formData.shortageQty === "" ? 0 : Number(formData.shortageQty)
+    if (!formData.receivedDate) {
+      toast({ title: "Validation Error", description: "Enter the date unloading was completed.", variant: "destructive" })
       return
     }
-
-    const productsToSubmit = selectedGroup._allProducts.filter((p: any) =>
-      selectedProducts.includes(p._rowKey)
-    )
-
-    if (productsToSubmit.length === 0) {
-      toast({ title: "Error", description: "Please select at least one product", variant: "destructive" })
+    if (!Number.isFinite(shortage) || shortage < 0) {
+      toast({ title: "Validation Error", description: "Shortage quantity cannot be negative.", variant: "destructive" })
       return
     }
+    if (totalDispatched > 0 && shortage > totalDispatched) {
+      toast({ title: "Validation Error", description: `Shortage (${shortage}) cannot exceed the dispatched quantity (${totalDispatched}).`, variant: "destructive" })
+      return
+    }
+    if (shortage > 0 && !formData.shortageCause) {
+      toast({ title: "Validation Error", description: "Select the cause of the shortage.", variant: "destructive" })
+      return
+    }
+    if (formData.damagedContainers.length > 0 && formData.damagePhotoFiles.length === 0) {
+      toast({ title: "Validation Error", description: "Upload at least one photo of the damage.", variant: "destructive" })
+      return
+    }
+    for (const [i, c] of formData.damagedContainers.entries()) {
+      if (!c.containerSerialNumber.trim()) {
+        toast({ title: "Validation Error", description: `Damaged container #${i + 1}: serial number is required.`, variant: "destructive" })
+        return
+      }
+      if (!c.cause) {
+        toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: select the cause of the damage.`, variant: "destructive" })
+        return
+      }
+      if (c.damageType === "partial") {
+        if (c.items.length === 0) {
+          toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: add the affected internal items.`, variant: "destructive" })
+          return
+        }
+        for (const item of c.items) {
+          if (!item.sfgSerialNumber.trim()) {
+            toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: every internal item needs a serial number.`, variant: "destructive" })
+            return
+          }
+          if (item.lossType === "partial" && !(Number(item.oilWeightLost) > 0)) {
+            toast({ title: "Validation Error", description: `Item ${item.sfgSerialNumber}: enter the oil weight lost.`, variant: "destructive" })
+            return
+          }
+        }
+      }
+    }
 
+    // One unloading record exists per product line. The damage report is filed on
+    // the first line; the shortage is spread across the lines (each capped at what
+    // was dispatched on it); every line gets the received date and proof.
     setIsProcessing(true)
     try {
-      const successfulSubmissions: any[] = []
-      const receivedProofUrl = receiptData.receivedProof
-        ? await uploadSelectedFile(receiptData.receivedProof, 'proof')
-        : null
+      const uploadOne = async (file: File) => {
+        const res = await orderApi.uploadFile(file)
+        if (!res.success) throw new Error(res.message || "File upload failed")
+        return res.data.url as string
+      }
+      const receivedProof = formData.receivedProofFile ? await uploadOne(formData.receivedProofFile) : null
+      const damagePhotos: string[] = []
+      for (const f of formData.damagePhotoFiles) damagePhotos.push(await uploadOne(f))
 
-      for (const product of productsToSubmit) {
-        const pDamage = productDamageData[product._rowKey] || {};
-        const isItemDamaged = receiptData.hasDamage === "yes" && (pDamage.damageQty || pDamage.damageImage);
-        const damageImageUrl = isItemDamaged && pDamage.damageImage
-          ? await uploadSelectedFile(pDamage.damageImage, 'damage', product._rowKey)
-          : null
+      let shortageLeft = shortage
+      let succeeded = 0
+      let stale = 0
+      let failed = 0
+      for (const [idx, line] of lines.entries()) {
+        const lineCap = Number(line.actualQty) || Infinity
+        const lineShortage = idx === lines.length - 1 ? shortageLeft : Math.min(shortageLeft, lineCap)
+        shortageLeft -= lineShortage
+        const common = {
+          receivedDate: formData.receivedDate,
+          receivedProof,
+          shortageCause: formData.shortageCause || null,
+          remarks: formData.remarks || null,
+          userId: user?.id || null,
+        }
+        const payload = idx === 0
+          ? {
+              ...common,
+              shortageQty: lineShortage,
+              damagePhotos,
+              damagedContainers: formData.damagedContainers.map(c => ({
+                containerSerialNumber: c.containerSerialNumber.trim(),
+                damageType: c.damageType,
+                cause: c.cause,
+                items: c.damageType === "partial"
+                  ? c.items.map(item => ({
+                      sfgSerialNumber: item.sfgSerialNumber.trim(),
+                      lossType: item.lossType,
+                      oilWeightLost: item.lossType === "partial" ? Number(item.oilWeightLost) : null,
+                    }))
+                  : [],
+              })),
+            }
+          : { ...common, shortageQty: lineShortage, damagePhotos: [], damagedContainers: [] }
 
-        const submitData = {
-          materialReceivedDate: receiptData.receivedDate,
-          damageStatus: isItemDamaged ? "Damaged" : "Delivered",
-          receivedImageProof: receivedProofUrl,
-          damageQty: isItemDamaged ? pDamage.damageQty : null,
-          damageImage: isItemDamaged ? damageImageUrl : null,
-          remarks: receiptData.remarks || null,
-          billAmount: product.billAmount ? parseFloat(product.billAmount) : null,
-          userId: user?.id || null
-        };
-
-        const response = await confirmMaterialReceiptApi.submit(product.id, submitData);
-        if (response.success) successfulSubmissions.push(product);
+        try {
+          const response = await unloadingApi.submit(line.id, payload)
+          if (response.success) succeeded++
+          else failed++
+        } catch (err: any) {
+          if (isStaleWriteError(err)) stale++
+          else failed++
+        }
       }
 
-      if (successfulSubmissions.length > 0) {
-        toast({ title: "Receipt Confirmed", description: `Processed ${successfulSubmissions.length} items.` })
-        await refetchPending();
-        queryClient.invalidateQueries({ queryKey: ["material-receipt-history"] });
+      if (succeeded > 0) {
+        toast({ title: "Unloading Confirmed", description: `Processed ${succeeded} item(s).` })
+      }
+      if (stale > 0) {
+        toast({ title: "Already processed", description: `${stale} item(s) were already processed by another user. Refreshing the list…`, variant: "destructive" })
+      }
+      if (failed > 0) {
+        toast({ title: "Partial Failure", description: `Failed to process ${failed} item(s).`, variant: "destructive" })
+      }
+      if (succeeded > 0 || stale > 0) {
+        await refetchPending()
+        queryClient.invalidateQueries({ queryKey: ["unloading-history"] })
+        queryClient.invalidateQueries({ queryKey: ["unloading-approvals-count"] })
         setIsDialogOpen(false)
         setSelectedItems([])
       }
@@ -673,50 +413,11 @@ export default function MaterialReceiptPage() {
 
   const customerNames = Array.from(new Set(pendingOrders.map((order: any) => order.party_name || "Unknown Customer"))) as string[]
 
-  const totals = useMemo(() => {
-    if (!selectedGroup) return { billAmt: 0, actualQty: 0, netWt: 0, taxable: 0 }
-    return selectedGroup._allProducts
-      .filter((p: any) => selectedProducts.includes(p._rowKey))
-      .reduce((acc: any, p: any) => {
-        const rateOfMaterial = parseFloat(p.rate_of_material) || 0;
-        const nos = parseFloat(p.nos_per_main_uom) || 1;
-        const freight = parseFloat(p.freight_rate) || 0;
-        const rateWoGst = parseFloat(((rateOfMaterial * nos + freight) / 1.05).toFixed(2));
-        const qty = parseFloat(p.actualQty) || 0;
-        return {
-          billAmt: acc.billAmt + (parseFloat(p.billAmount) || 0),
-          actualQty: acc.actualQty + (parseFloat(p.actualQty) || 0),
-          netWt: acc.netWt + getProductWeight(p),
-          taxable: acc.taxable + (rateWoGst * qty),
-        }
-      }, { billAmt: 0, actualQty: 0, netWt: 0, taxable: 0 })
-  }, [selectedGroup, selectedProducts, skuWeightMap])
-
-  const dynamicColumns = visibleColumns.filter(
-    (colId) => !["partySoDate", "doNumber", "processId", "customerName", "productCount", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo"].includes(colId)
-  )
-
-  function getDynamicColumnValue(group: any, colId: string) {
-    const directValue = group?.[colId]
-    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
-
-    const firstProduct = group?._allProducts?.[0] || {}
-    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
-
-    const orderValue = (firstOrder as any)?.[colId]
-    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
-
-    const productValue = (firstProduct as any)?.[colId]
-    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
-
-    return "—"
-  }
-
   return (
     <WorkflowStageShell
       partyNames={customerNames}
-      title="Stage 13: Confirm Material Receipt"
-      description="Confirm material receipt and report any damages."
+      title="Stage 14: Unloading"
+      description="Customer reports shortage, damage, and drives inventory logic."
       searchPlaceholder="Search DO Number..."
       pendingCount={pendingData?.pagination?.total || 0}
       historyData={[]}
@@ -729,28 +430,29 @@ export default function MaterialReceiptPage() {
       dateLabel="DO Date"
       historyContent={
         <StageHistoryTab
-          queryKeyPrefix="material-receipt-history"
-          getHistoryApi={(params: any) => confirmMaterialReceiptApi.getHistory({
-            page: params.page,
-            limit: params.limit,
-            search: params.order_no,
-            manual_sauda_no: filterValues.manualSaudaNo,
-            do_date_from: params.start_date,
-            do_date_to: params.end_date,
-            party_name: params.customer_name,
-            depo_names: user?.depo_access ? (user.depo_access['Confirm Material Receipt'] || []) : undefined,
+          queryKeyPrefix="unloading-history"
+          getHistoryApi={(params: any) => unloadingApi.getHistory({
+            ...params,
+            manual_sauda_no: filterValues.manualSaudaNo || undefined,
+            depo_names: depoNames,
           })}
           filterValues={filterValues}
           activeTab={activeTab}
-          stageName="Material Receipt"
+          stageName="Unloading"
           stageLevel={9}
           remarksColName="Remarks"
           orderListKey="orders"
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => order.party_name || "—"}
-          mapStatus={(order: any) => order.damage_status || "Completed"}
-          mapRemarks={(order: any) => order.damage_status === "Damaged" ? `Damaged: ${order.damage_qty}` : "Received OK"}
-          getDate={(order: any) => order.actual_8 || order.timestamp || null}
+          mapStatus={(order: any) =>
+            (Number(order.shortage_qty) > 0 || (order.damagedContainers?.length ?? 0) > 0) ? "Damage Reported" : "Received OK"}
+          mapRemarks={(order: any) => {
+            const parts: string[] = []
+            if (Number(order.shortage_qty) > 0) parts.push(`Shortage: ${order.shortage_qty}`)
+            if (order.damagedContainers?.length) parts.push(`Damaged containers: ${order.damagedContainers.length}`)
+            return parts.length ? parts.join(", ") : (order.remarks_3 || "Received OK")
+          }}
+          getDate={(order: any) => order.actual_8 || null}
         />
       }
     >
@@ -759,17 +461,24 @@ export default function MaterialReceiptPage() {
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 font-bold shadow-lg shadow-blue-200"
-            title={isReadOnly ? "View Receipt Details" : "Confirm Receipt"}
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+            title={isReadOnly ? "View Unloading Details" : "Report Unloading"}
           >
             <CheckCircle className="mr-2 h-4 w-4" />
-            Confirm Receipt ({selectedItems.length})
+            Report Unloading ({selectedItems.length})
           </Button>
+
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setIsApprovalsOpen(true)} className="w-full sm:w-auto">
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Loss Approvals{approvalsData ? ` (${approvalsData})` : ""}
+            </Button>
+          )}
 
           {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full sm:w-auto bg-transparent border-slate-200 text-slate-600">
+                <Button variant="outline" size="sm" className="w-full sm:w-auto bg-transparent">
                   <Settings2 className="mr-2 h-4 w-4" />
                   Columns
                 </Button>
@@ -781,199 +490,217 @@ export default function MaterialReceiptPage() {
           )}
         </div>
 
-        <div className="md:hidden space-y-3">
-          {isPendingLoading ? (
-            [...Array(4)].map((_, i) => (
-              <Card key={i} className="p-4 rounded-2xl border border-slate-100 shadow-sm bg-white">
-                <div className="space-y-3 opacity-50">
-                  <div className="flex items-center justify-between">
-                    <div className="h-4 w-4 bg-slate-200 animate-pulse rounded" />
-                    <div className="h-5 w-24 bg-slate-200 animate-pulse rounded-full" />
-                  </div>
-                  <div className="h-4 w-36 bg-slate-200 animate-pulse rounded-full" />
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="h-3 w-full bg-slate-200 animate-pulse rounded-full" />
-                    <div className="h-3 w-full bg-slate-200 animate-pulse rounded-full" />
-                  </div>
-                </div>
-              </Card>
-            ))
-          ) : displayRows.length > 0 ? (
-            displayRows.map((group) => (
-              <Card key={group._rowKey} className={cn("p-4 rounded-2xl border shadow-sm bg-white transition-colors", selectedItems.includes(group._rowKey) ? "border-blue-200 bg-blue-50/40" : "border-slate-100")}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">DO Number</p>
-                    <p className="break-words text-sm font-black text-slate-900">{group.doNumber.replace(/[A-Za-z]+$/, '')}</p>
-                  </div>
-                  <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                </div>
-                <div className="mt-3 min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Customer</p>
-                  <p className="break-words text-xs font-black uppercase italic text-slate-800">{group.customerName}</p>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">DO Date</p>
-                    <p className="font-bold text-slate-600">{group.formattedPartySoDate}</p>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Manual Sauda No.</p>
-                    <p className="break-words font-black text-blue-600">{group.processId}</p>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Vehicle</p>
-                    <p className="break-words font-black text-slate-700">{group.vehicleNo}</p>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</p>
-                    {group._allProducts?.[0]?.invoice_copy ? (
-                      <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="break-words font-black text-blue-600 hover:underline">
-                        {group.invoiceNo}
-                      </a>
-                    ) : (
-                      <p className="break-words font-black text-blue-800">{group.invoiceNo}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <Badge className="bg-slate-100 text-slate-600 font-black text-[10px] uppercase border-none ring-1 ring-inset ring-slate-200">{group._productCount} items</Badge>
-                  <Badge className="bg-cyan-100 text-cyan-700 font-black text-[9px] uppercase tracking-widest px-3 py-1 ring-1 ring-inset ring-cyan-200">In Transit</Badge>
-                </div>
-                <div className="mt-3 min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Punch Remarks</p>
-                  <p className="break-words text-xs font-bold text-slate-500">{group.orderPunchRemarks}</p>
-                </div>
-                {dynamicColumns.length > 0 && (
-                  <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs">
+        <Card className="border-none shadow-sm overflow-hidden">
+          {/* Desktop Table View */}
+          <div className="hidden md:block max-h-[600px] overflow-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+                <TableRow className="bg-slate-50">
+                  <TableHead className="w-10 text-center">
+                    <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
+                  </TableHead>
+                  <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...dynamicColumns]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
+                    {orderedVisibleCols.map(col => (
+                      <SortableTableHead
+                        key={col.id}
+                        id={col.id}
+                        className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
+                        onClick={() => handlePendingSort(col.id)}
+                      >
+                        {col.label}<PendingSortIcon field={col.id} />
+                      </SortableTableHead>
+                    ))}
                     {dynamicColumns.map((colId) => {
                       const col = ALL_COLUMNS.find((c) => c.id === colId)
                       if (!col) return null
                       return (
-                        <div key={colId} className="min-w-0">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{col.label}</p>
-                          <p className="break-words font-bold text-slate-700">{String(getDynamicColumnValue(group, colId))}</p>
-                        </div>
+                        <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
+                          {col.label}<PendingSortIcon field={colId} />
+                        </SortableTableHead>
                       )
                     })}
-                  </div>
-                )}
-              </Card>
-            ))
-          ) : (
-            <Card className="p-10 text-center rounded-2xl border border-slate-100 bg-white text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">
-              No orders pending for receipt confirmation
-            </Card>
-          )}
-        </div>
-
-        <Card className="hidden md:block border-none shadow-xl rounded-[2rem] overflow-hidden bg-white/50 backdrop-blur-sm">
-          <Table>
-            <TableHeader className="bg-slate-50 sticky top-0 z-10">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
-                </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...dynamicColumns]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map(col => {
-                    const sf = COL_SORT_FIELD[col.id]
-                    return (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
-                        onClick={sf ? () => handlePendingSort(sf) : undefined}
-                      >
-                        {col.label}{sf && <PendingSortIcon field={sf} />}
-                      </SortableTableHead>
-                    )
-                  })}
-                  {dynamicColumns.map((colId) => {
-                    const col = ALL_COLUMNS.find((c) => c.id === colId)
-                    if (!col) return null
-                    return (
-                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
-                        {col.label}<PendingSortIcon field={colId} />
-                      </SortableTableHead>
-                    )
-                  })}
-                </ColumnDragProvider>
-                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPendingLoading ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-5 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                  </TableRow>
-                ))
-              ) : sortedDisplayRows.length > 0 ? (
-                sortedDisplayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={cn("hover:bg-blue-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : "")}>
-                    <TableCell className="text-center p-4">
-                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
-                    {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
-                    {dynamicColumns.map((colId) => (
-                      <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">
-                        {String(getDynamicColumnValue(group, colId))}
-                      </TableCell>
-                    ))}
-                    <TableCell className="text-center">
-                      <Badge className="bg-cyan-100 text-cyan-700 font-black text-[10px] uppercase tracking-tighter px-3 py-1 ring-1 ring-inset ring-cyan-200">In Transit</Badge>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + dynamicColumns.length} className="text-center py-20 text-slate-400 font-black uppercase text-[10px] tracking-[0.3em] bg-slate-50/50">
-                    No orders pending for receipt confirmation
-                  </TableCell>
+                  </ColumnDragProvider>
+                  <TableHead className="whitespace-nowrap text-center">Status</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {isPendingLoading && pendingOrders.length === 0 ? (
+                  [...Array(5)].map((_, i) => (
+                    <TableRow key={i} className="opacity-40 border-b border-slate-50">
+                      <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                      {[...Array(orderedVisibleCols.length + dynamicColumns.length)].map((_, k) => (
+                        <TableCell key={k} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                      ))}
+                      <TableCell className="text-center py-4"><div className="h-5 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : sortedDisplayRows.length > 0 ? (
+                  sortedDisplayRows.map((group) => (
+                    <TableRow
+                      key={group._rowKey}
+                      className={cn(
+                        "cursor-pointer transition-colors",
+                        selectedItems.includes(group._rowKey) ? "bg-blue-50/40" : "hover:bg-slate-50/60"
+                      )}
+                      onClick={() => toggleSelectItem(group._rowKey)}
+                    >
+                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
+                      </TableCell>
+                      {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
+                      {dynamicColumns.map((colId) => (
+                        <TableCell key={colId} className="whitespace-nowrap text-center text-xs text-slate-600">
+                          {String(getDynamicColumnValue(group, colId))}
+                        </TableCell>
+                      ))}
+                      <TableCell className="text-center">
+                        {group.rejectionNote ? (
+                          <Badge title={group.rejectionNote} className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200 text-[10px] font-black whitespace-nowrap">Rejected — re-report</Badge>
+                        ) : (
+                          <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap">In Transit</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={orderedVisibleCols.length + dynamicColumns.length + 2} className="text-center py-12 text-muted-foreground">
+                      No orders pending for unloading
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden max-h-[600px] overflow-y-auto p-3">
+            {isPendingLoading && pendingOrders.length === 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <Card key={i} className="p-4 space-y-4 border-slate-100 shadow-sm animate-pulse">
+                    <div className="flex justify-between">
+                      <div className="h-4 w-32 bg-slate-200 rounded" />
+                      <div className="h-5 w-20 bg-slate-200 rounded-full" />
+                    </div>
+                    <div className="h-5 w-3/4 bg-slate-100 rounded" />
+                  </Card>
+                ))}
+              </div>
+            ) : displayRows.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {displayRows.map((group) => (
+                  <Card
+                    key={group._rowKey}
+                    className={cn(
+                      "p-4 border-2 transition-all shadow-sm bg-white cursor-pointer",
+                      selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-md" : "border-slate-100 hover:border-blue-200"
+                    )}
+                    onClick={() => toggleSelectItem(group._rowKey)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{group.partySoDate}</p>
+                        <h3 className="text-sm font-bold text-slate-900 leading-tight break-words">{group.customerName}</h3>
+                      </div>
+                      <Checkbox
+                        checked={selectedItems.includes(group._rowKey)}
+                        onCheckedChange={() => toggleSelectItem(group._rowKey)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 h-5 w-5"
+                      />
+                    </div>
+                    <div className="mt-4 flex flex-col gap-1">
+                      <p className="font-mono text-sm font-black text-blue-700 break-all">{group.doNumber}</p>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 border-y border-slate-100 py-3">
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Vehicle No.</p>
+                        <p className="text-xs font-bold text-slate-700">{group.vehicleNo}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Invoice</p>
+                        <p className="text-xs font-bold text-slate-700 break-words">{group.invoiceNo}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary" className="font-black text-[10px]">{group._productCount} items</Badge>
+                      <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black">In Transit</Badge>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                No orders pending for unloading
+              </div>
+            )}
+          </div>
         </Card>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-slate-100">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50 text-center sm:text-left">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{Math.ceil((pendingData?.pagination?.total || 0) / limit) || 1}</span>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
+          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
+            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{totalPages}</span>
             <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Invoices
+            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Loads
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1 || isPendingLoading} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-              <ChevronLeft className="h-4 w-4" /> Previous
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
+              disabled={pendingPage === 1}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={isPendingLoading || (pendingPage * limit >= (pendingData?.pagination?.total || 0))} className="h-8 rounded-lg gap-1 px-3 border-slate-200 font-black uppercase text-[10px]">
-              Next <ChevronRight className="h-4 w-4" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingPage(p => p + 1)}
+              disabled={pendingPage >= totalPages}
+              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           </div>
         </div>
 
-        {/* Restore Previous Design Dialog */}
+        <LossApprovalsDialog open={isApprovalsOpen} onOpenChange={setIsApprovalsOpen} />
+
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 border-none rounded-2xl sm:rounded-[2.5rem] shadow-2xl bg-slate-50 [overflow-wrap:anywhere]">
-            <div className="p-3 sm:p-8 space-y-6 sm:space-y-8">
-              <DialogHeader className="border-b-2 border-slate-100 pb-4 sm:pb-6 -mx-3 sm:-mx-8 px-3 sm:px-8 bg-white rounded-t-2xl sm:rounded-t-[2.5rem]">
-                <DialogTitle className="text-base sm:text-2xl font-black text-slate-900 tracking-tight flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span>Unloading Form - Invoice: <span className="text-blue-600 italic uppercase">{selectedGroup?.invoiceNo}</span></span>
+          <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-y-auto p-0 [overflow-wrap:anywhere]">
+            <div className="p-4 sm:p-6">
+              <DialogHeader className="pr-8">
+                <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
+                  Unloading Report - Invoice: <span className="text-blue-600">{selectedGroup?.invoiceNo}</span>
                 </DialogTitle>
                 <DialogDescription className="hidden" />
               </DialogHeader>
 
               {selectedGroup && (
-                <UnloadingForm onSubmit={handleSubmit} isSubmitting={isProcessing} />
+                <div className="space-y-6">
+                  {selectedGroup.rejectionNote && (
+                    <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      <b>Previous report was rejected.</b> {selectedGroup.rejectionNote.replace(/^Rejected:\s*/, "")}
+                    </div>
+                  )}
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 mb-1">
+                      {selectedGroup.customerName} — {selectedGroup.doNumber}
+                    </p>
+                    <p className="text-slate-700">
+                      {selectedGroup._allProducts.map((p: any) => `${p.productName || "—"} × ${Number(p.actualQty) || 0}`).join("  •  ")}
+                    </p>
+                  </div>
+                  <UnloadingForm
+                    onSubmit={handleSubmit}
+                    onCancel={() => setIsDialogOpen(false)}
+                    isSubmitting={isProcessing || isReadOnly}
+                    dispatchedQty={selectedGroup._allProducts.reduce((sum: number, p: any) => sum + (Number(p.actualQty) || 0), 0)}
+                    sfgOilKg={Number(selectedGroup._allProducts[0]?.sfg_oil_kg) || null}
+                  />
+                </div>
               )}
             </div>
           </DialogContent>

@@ -10,10 +10,9 @@ import { Label } from "@/components/ui/label"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Printer, CheckCircle, FileText, Receipt, ExternalLink } from "lucide-react"
-import { finalInvoiceApi } from "@/lib/api-service"
+import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { uploadApi } from "@/lib/api-service"
 import { Loader2 } from "lucide-react"
 
 export default function FinalInvoicePage() {
@@ -59,22 +58,15 @@ export default function FinalInvoicePage() {
   const handleFileUpload = async (file: File, fileKey: string, nameKey: string) => {
     setIsUploading(prev => ({ ...prev, [fileKey]: true }))
     try {
-      const formDataUpload = new FormData()
-      formDataUpload.append("file", file)
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001/api/v1"}/upload`, {
-        method: "POST",
-        body: formDataUpload,
-        credentials: "include",
-      })
-      const result = await response.json()
-      if (result.success && result.data?.url) {
-        setFormData(prev => ({ ...prev, [fileKey]: result.data.url, [nameKey]: file.name }))
+      const response = await orderApi.uploadFile(file)
+      if (response.success && response.data?.url) {
+        setFormData(prev => ({ ...prev, [fileKey]: response.data.url, [nameKey]: file.name }))
         toast({ title: "Upload Successful", description: `${file.name} uploaded.` })
       } else {
-        throw new Error(result.message || "Upload failed")
+        throw new Error(response.message || "Upload failed")
       }
     } catch (err: any) {
-      toast({ title: "Upload Failed", description: err.message, variant: "destructive" })
+      toast({ title: "Upload Failed", description: err.message || "Network error", variant: "destructive" })
     } finally {
       setIsUploading(prev => ({ ...prev, [fileKey]: false }))
     }
@@ -256,91 +248,120 @@ export default function FinalInvoicePage() {
       </WorkflowStageShell>
       {/* Upload Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <Receipt className="h-5 w-5 text-blue-600" />
+        <DialogContent className="sm:max-w-4xl p-0 overflow-hidden bg-slate-50 border-0 shadow-2xl rounded-2xl">
+          <DialogHeader className="px-6 py-5 bg-white border-b border-slate-100">
+            <DialogTitle className="text-lg font-black flex items-center gap-3 text-slate-800">
+              <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
+                <Receipt className="h-5 w-5" />
+              </div>
               Upload Final Documents
             </DialogTitle>
           </DialogHeader>
 
           {selectedRow && (
-            <div className="space-y-4 py-2">
-              {/* Summary */}
-              <div className="bg-blue-50 rounded-lg p-3 grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-slate-500">Customer:</span> <span className="font-semibold">{selectedRow.customer_name}</span></div>
-                <div><span className="text-slate-500">Invoice No:</span> <span className="font-semibold font-mono">{selectedRow.invoice_no}</span></div>
-                <div><span className="text-slate-500">Vehicle:</span> <span className="font-semibold">{selectedRow.vehicle_no}</span></div>
-                <div><span className="text-slate-500">Amount:</span> <span className="font-semibold">₹{parseFloat(selectedRow.bill_amount || 0).toFixed(2)}</span></div>
+            <div className="px-6 py-5 space-y-6 max-h-[75vh] overflow-y-auto">
+              {/* Summary Block */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 font-bold text-xs text-slate-700">
+                  Order Summary
+                </div>
+                <div className="grid grid-cols-2 p-4 gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Customer</p>
+                    <p className="text-sm font-bold text-slate-800">{selectedRow.customer_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Invoice No</p>
+                    <p className="text-sm font-black text-blue-700 font-mono bg-blue-50 px-2 py-0.5 rounded-md inline-block">
+                      {selectedRow.invoice_no}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Vehicle</p>
+                    <p className="text-sm font-bold text-slate-800">{selectedRow.vehicle_no}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Amount</p>
+                    <p className="text-sm font-black text-slate-900">₹{parseFloat(selectedRow.bill_amount || 0).toFixed(2)}</p>
+                  </div>
+                </div>
               </div>
 
-              {/* eInvoice Upload */}
-              <div className="space-y-2 border rounded-lg p-4 bg-white">
-                <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  eInvoice (from Tally / GST Portal)
-                </h3>
-                <p className="text-xs text-slate-500 mb-2">Generate from Tally or GST Portal first, then upload the PDF here.</p>
-                <FileUploadField
-                  label={<Label>Upload eInvoice PDF</Label>}
-                  accept=".pdf,image/*"
-                  fileName={formData.eInvoiceFileName}
-                  uploading={isUploading["eInvoiceFile"] || false}
-                  buttonText={formData.eInvoiceFileName ? "REPLACE" : "UPLOAD"}
-                  onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "eInvoiceFile", "eInvoiceFileName")}
-                  capture="environment"
-                />
-              </div>
+              {/* Uploads */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                {/* eInvoice Upload */}
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm transition-all hover:border-blue-300 flex flex-col">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="h-4 w-4 text-green-500" />
+                    <h3 className="text-sm font-black text-slate-800">eInvoice Document</h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-4 font-medium italic">Generate from Tally or GST Portal first, then upload the PDF here.</p>
+                  <div className="flex-1 flex flex-col justify-end">
+                    <FileUploadField
+                      accept=".pdf,image/*"
+                      value={formData.eInvoiceFile}
+                      fileName={formData.eInvoiceFileName}
+                      uploading={isUploading["eInvoiceFile"] || false}
+                      variant="dropzone"
+                      buttonText={formData.eInvoiceFileName ? "Replace eInvoice PDF" : "Upload eInvoice PDF"}
+                      onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "eInvoiceFile", "eInvoiceFileName")}
+                      onRemove={() => setFormData(prev => ({ ...prev, eInvoiceFile: "", eInvoiceFileName: "" }))}
+                    />
+                  </div>
+                </div>
 
-              {/* eWay Bill Upload */}
-              <div className="space-y-2 border rounded-lg p-4 bg-white">
-                <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <Receipt className="h-4 w-4 text-purple-600" />
-                  eWay Bill (from GST Portal)
-                </h3>
-                <p className="text-xs text-slate-500 mb-2">Generate eWay Bill from GST Portal, then upload here.</p>
-                <FileUploadField
-                  label={<Label>Upload eWay Bill PDF</Label>}
-                  accept=".pdf,image/*"
-                  fileName={formData.eWayBillFileName}
-                  uploading={isUploading["eWayBillFile"] || false}
-                  buttonText={formData.eWayBillFileName ? "REPLACE" : "UPLOAD"}
-                  onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "eWayBillFile", "eWayBillFileName")}
-                  capture="environment"
-                />
+                {/* eWay Bill Upload */}
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm transition-all hover:border-purple-300 flex flex-col">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Receipt className="h-4 w-4 text-purple-500" />
+                    <h3 className="text-sm font-black text-slate-800">eWay Bill Document</h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-4 font-medium italic">Generate eWay Bill from GST Portal, then upload here.</p>
+                  <div className="flex-1 flex flex-col justify-end">
+                    <FileUploadField
+                      accept=".pdf,image/*"
+                      value={formData.eWayBillFile}
+                      fileName={formData.eWayBillFileName}
+                      uploading={isUploading["eWayBillFile"] || false}
+                      variant="dropzone"
+                      buttonText={formData.eWayBillFileName ? "Replace eWay Bill PDF" : "Upload eWay Bill PDF"}
+                      onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "eWayBillFile", "eWayBillFileName")}
+                      onRemove={() => setFormData(prev => ({ ...prev, eWayBillFile: "", eWayBillFileName: "" }))}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Proforma Invoice link */}
               {selectedRow.invoice_copy && (
-                <div className="flex items-center gap-2 text-sm text-blue-600">
+                <div className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 p-3 rounded-lg justify-center border border-blue-100">
                   <FileText className="h-4 w-4" />
-                  <a href={selectedRow.invoice_copy} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-800">
-                    View Proforma Invoice Copy
+                  <a href={selectedRow.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1">
+                    View Original Proforma Invoice <ExternalLink className="h-3 w-3" />
                   </a>
-                  <ExternalLink className="h-3 w-3" />
                 </div>
               )}
             </div>
           )}
 
-          <DialogFooter className="mt-4 border-t pt-4 gap-2">
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing}>
+          <DialogFooter className="px-6 py-4 bg-white border-t border-slate-100 flex flex-row sm:justify-end gap-2">
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="font-bold">
               Cancel
             </Button>
             <Button
               variant="outline"
               onClick={() => selectedRow && handlePrint(selectedRow)}
-              className="gap-2"
+              className="gap-2 font-bold"
             >
               <Printer className="h-4 w-4" /> Print
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={isProcessing}
-              className="bg-blue-600 hover:bg-blue-700 gap-2"
+              disabled={isProcessing || !formData.eInvoiceFileName || !formData.eWayBillFileName}
+              className="bg-blue-600 hover:bg-blue-700 gap-2 font-bold shadow-md shadow-blue-500/20"
             >
               {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              {isProcessing ? "Submitting..." : "Submit Final Invoice"}
+              {isProcessing ? "Submitting..." : "Submit Documents"}
             </Button>
           </DialogFooter>
         </DialogContent>

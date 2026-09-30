@@ -31,7 +31,7 @@ import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi } from "@/lib/api-service"
+import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi, oilTagApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
@@ -39,6 +39,8 @@ import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useStatesMap } from "@/hooks/use-states-map"
+import { useCustomerAddresses, formatCustomerAddress } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 
@@ -215,6 +217,10 @@ export default function CommitmentPunchPage() {
   const [whatsappNo, setWhatsappNo] = useState("")
   const [customerAddress, setCustomerAddress] = useState("")
   const [shipToAddress, setShipToAddress] = useState("")
+  // Ship to = dropdown of the customer's Customer Master addresses (same as Order Punch)
+  const statesById = useStatesMap()
+  const [addCustomerId, setAddCustomerId] = useState<number | null>(null)
+  const { addresses: shipToOptions, hasMultiple: hasMultipleShipTo } = useCustomerAddresses(addCustomerId, statesById)
   const [customerList, setCustomerList] = useState<any[]>([])
   const [orderType, setOrderType] = useState("")
   const [transportType, setTransportType] = useState("self")
@@ -318,19 +324,19 @@ export default function CommitmentPunchPage() {
         .map((c: any) => {
           const addr1 = c.address_line_1 || ""
           const city = addr1 ? addr1.split(",").pop().trim() : ""
-          const stateShort = c.state ? (STATE_SHORT_MAP[c.state] || c.state.substring(0, 2).toUpperCase()) : ""
+          // Prefer the real GST short name from the States master (joined server-side).
+          const stateShort = c.state_short_name || (c.state ? (STATE_SHORT_MAP[c.state] || c.state.substring(0, 2).toUpperCase()) : "")
           const locationPart = [city, stateShort ? `(${stateShort})` : ""].filter(Boolean).join(" ")
 
-          const gstinPart = c.gstin ? ` | GST: ${c.gstin}` : ""
-          const contactPart = c.contact ? ` | Mob: ${c.contact}` : ""
-          const contactPersonPart = c.contact_person ? ` | CP: ${c.contact_person}` : ""
+          // Spec format: Customer Name, City (State short name), GST No. – Mobile No. – Contact Person Name
+          const idPart = [c.gstin, c.contact, c.contact_person].filter(Boolean).join(" – ")
 
           const fullSearchLabel = [c.customer_name, locationPart, c.gstin, c.contact, c.contact_person].filter(Boolean).join(" ")
 
           const formattedDropdownLabel = (
             <div className="text-xs whitespace-normal break-words py-1 w-full text-left font-normal text-slate-700 max-w-[500px]">
               <span className="font-semibold text-slate-900">{c.customer_name}</span>
-              {`, ${locationPart}${gstinPart}${contactPart}${contactPersonPart}`}
+              {[`, ${locationPart}`, idPart].filter(Boolean).join(", ")}
             </div>
           )
 
@@ -407,6 +413,18 @@ export default function CommitmentPunchPage() {
     } catch { return { options: [], hasMore: false } }
   }, [])
 
+  // Oil Tag master (id + name) — used to match SKUs to the commitment's oil type
+  const [oilTags, setOilTags] = useState<any[]>([])
+  useEffect(() => {
+    let cancelled = false
+    oilTagApi.getAll({ all: "true" }).then((res: any) => {
+      if (cancelled || !res?.success) return
+      const list = Array.isArray(res.data?.items) ? res.data.items : (Array.isArray(res.data) ? res.data : [])
+      setOilTags(list)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   // Fetch SKU options — only show SKUs with tag = "Yes" and matching commitment's oil_type if present
   const fetchSkuOptions = useCallback(async (search: string, _page: number) => {
     try {
@@ -427,7 +445,21 @@ export default function CommitmentPunchPage() {
         else if (oilTypeLower.includes("palm")) keywords = ["palm", "p.o.", " po "]
         else if (oilTypeLower.includes("soya")) keywords = ["soya", "s.o.", " so ", "sbo"]
 
-        if (keywords.length > 0) {
+        // Preferred: the Oil Tag master (skus.oil_tag_id -> oil_tags.name). Falls
+        // back to the name keywords below only when no tagged SKU matches.
+        const family = ["rice", "palm", "soya"].find(f => oilTypeLower.includes(f))
+        const matchingTagIds = new Set(
+          oilTags
+            .filter((t: any) => { const n = String(t.name || "").toLowerCase().trim(); return n === oilTypeLower.trim() || (!!family && n.includes(family)) })
+            .map((t: any) => Number(t.id))
+        )
+        const taggedItems = matchingTagIds.size > 0
+          ? goodLifeItems.filter((s: any) => s.oil_tag_id != null && matchingTagIds.has(Number(s.oil_tag_id)))
+          : []
+
+        if (taggedItems.length > 0) {
+          goodLifeItems = taggedItems
+        } else if (keywords.length > 0) {
           goodLifeItems = goodLifeItems.filter((s: any) => {
             const nameLower = (s.sku_name || s.name || "").toLowerCase()
             return keywords.some(kw => nameLower.includes(kw))
@@ -448,7 +480,7 @@ export default function CommitmentPunchPage() {
       setSkuRegistry(prev => ({ ...prev, ...newlyFetched }))
       return { options, hasMore: false }
     } catch { return { options: [], hasMore: false } }
-  }, [processSelectedCommitment])
+  }, [processSelectedCommitment, oilTags])
 
   // ── Checkbox selection ──────────────────────────────────────
   const toggleSelect = (id: number) => {
@@ -475,6 +507,7 @@ export default function CommitmentPunchPage() {
     setWhatsappNo("")
     setCustomerAddress("")
     setShipToAddress("")
+    setAddCustomerId(null)
     setBrokerName("")
     setSalespersonName("")
     setOrderThrough("Direct")
@@ -565,6 +598,8 @@ export default function CommitmentPunchPage() {
     if (!commitmentDate) { toast({ title: "Validation Error", description: "Commitment date is required.", variant: "destructive" }); return }
     if (orderThrough === "Broker" && !brokerName) { toast({ title: "Validation Error", description: "Broker name is required.", variant: "destructive" }); return }
     if (orderThrough === "Salesperson" && !salespersonName) { toast({ title: "Validation Error", description: "Salesperson is required.", variant: "destructive" }); return }
+    // Client spec: the user must upload the Commitment PDF (when creating).
+    if (!isEditMode && !pdfFile) { toast({ title: "Validation Error", description: "Commitment PDF is required.", variant: "destructive" }); return }
     // Oil row validation only applies when creating — edits don't change oil details
     if (!isEditMode && rows.some(r => !r.oil_type || !r.quantity || !r.rate)) {
       toast({ title: "Validation Error", description: "Fill Oil Type, Quantity and Rate for all rows.", variant: "destructive" }); return
@@ -1854,6 +1889,7 @@ export default function CommitmentPunchPage() {
                       const fullAddr = parts.join(", ")
                       setCustomerAddress(fullAddr)
                       setShipToAddress(fullAddr)
+                      setAddCustomerId(typeof c.id === "number" ? c.id : null)
                     }
                   }}
                   placeholder="Select customer"
@@ -1874,7 +1910,24 @@ export default function CommitmentPunchPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="d-shipTo">Ship to</Label>
-                <Input id="d-shipTo" placeholder="Enter shipping address" value={shipToAddress} onChange={e => setShipToAddress(e.target.value)} />
+                {hasMultipleShipTo ? (
+                  <Select
+                    value={shipToOptions.find(a => formatCustomerAddress(a) === shipToAddress)?.id?.toString() ?? ""}
+                    onValueChange={(v) => {
+                      const picked = shipToOptions.find(a => String(a.id) === v)
+                      if (picked) setShipToAddress(formatCustomerAddress(picked))
+                    }}
+                  >
+                    <SelectTrigger id="d-shipTo"><SelectValue placeholder="Select ship to address" /></SelectTrigger>
+                    <SelectContent>
+                      {shipToOptions.map(a => (
+                        <SelectItem key={String(a.id)} value={String(a.id)}>{a.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input id="d-shipTo" placeholder="Enter shipping address" value={shipToAddress} onChange={e => setShipToAddress(e.target.value)} />
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Dispatch from <span className="text-red-500">*</span></Label>
@@ -1960,7 +2013,7 @@ export default function CommitmentPunchPage() {
                 {orderThrough === "Direct" && null}
               </div>
               <div className="space-y-2">
-                <Label>Upload Commitment PDF</Label>
+                <Label>Upload Commitment PDF{!isEditMode && <span className="text-red-500"> *</span>}</Label>
                 <FileUploadField
                   label=""
                   accept=".pdf"
@@ -3129,7 +3182,15 @@ export default function CommitmentPunchPage() {
                               </td>
                               <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-IN") : "—"}</td>
                               <td className="py-2.5 px-3 whitespace-nowrap">
-                                {d.order_no ? (
+                                {Array.isArray(d.invoice_do_nos) && d.invoice_do_nos.length > 1 ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    {d.invoice_do_nos.map((no: string) => (
+                                      <Link key={no} href={`/approval-of-order?search=${no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
+                                        {no}
+                                      </Link>
+                                    ))}
+                                  </div>
+                                ) : d.order_no ? (
                                   <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
                                     {d.order_no}
                                   </Link>

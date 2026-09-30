@@ -186,9 +186,17 @@ export default function SecurityApprovalPage() {
     biltyNo: "",
     biltyImage: null as File | null,
     biltyImageName: "",
-    vehicleImages: [] as File[],
-    vehicleImagePreviews: [] as string[],
-    vehicleImageNames: [] as string[],
+    biltyImagePreview: "",
+    // Segregated vehicle images
+    frontImage: null as File | null,
+    frontImagePreview: "",
+    frontImageName: "",
+    backImage: null as File | null,
+    backImagePreview: "",
+    backImageName: "",
+    loadedImage: null as File | null,
+    loadedImagePreview: "",
+    loadedImageName: "",
     checklist: {
       mallLoad: false,
       qtyMatch: false,
@@ -245,29 +253,23 @@ export default function SecurityApprovalPage() {
     setPendingPage(1);
   }, [filterValues]);
 
-  const handleFileUpload = (file: File, type: 'bilty' | 'vehicle') => {
+  const handleFileUpload = (file: File, type: 'bilty' | 'front' | 'back' | 'loaded') => {
     if (!file) return;
-
+    const preview = URL.createObjectURL(file);
     if (type === 'bilty') {
-      setUploadData(p => ({
-        ...p,
-        biltyImage: file,
-        biltyImageName: file.name
-      }));
-    } else {
-      setUploadData(p => ({
-        ...p,
-        vehicleImages: [...p.vehicleImages, file],
-        vehicleImagePreviews: [...p.vehicleImagePreviews, URL.createObjectURL(file)],
-        vehicleImageNames: [...p.vehicleImageNames, file.name]
-      }));
+      const preview = URL.createObjectURL(file);
+      setUploadData(p => { if (p.biltyImagePreview) URL.revokeObjectURL(p.biltyImagePreview); return { ...p, biltyImage: file, biltyImageName: file.name, biltyImagePreview: preview }; });
+    } else if (type === 'front') {
+      setUploadData(p => { if (p.frontImagePreview) URL.revokeObjectURL(p.frontImagePreview); return { ...p, frontImage: file, frontImagePreview: preview, frontImageName: file.name }; });
+    } else if (type === 'back') {
+      setUploadData(p => { if (p.backImagePreview) URL.revokeObjectURL(p.backImagePreview); return { ...p, backImage: file, backImagePreview: preview, backImageName: file.name }; });
+    } else if (type === 'loaded') {
+      setUploadData(p => { if (p.loadedImagePreview) URL.revokeObjectURL(p.loadedImagePreview); return { ...p, loadedImage: file, loadedImagePreview: preview, loadedImageName: file.name }; });
     }
   };
 
-  const uploadSelectedFile = async (file: File, type: 'bilty' | 'vehicle', index?: number) => {
-    const uploadId = type === 'bilty' ? 'bilty' : `vehicle-${index ?? Date.now()}`;
+  const uploadSelectedFile = async (file: File, uploadId: string) => {
     setIsUploading(uploadId);
-
     try {
       const uploadFile = await compressImageForUpload(file);
       const response = await orderApi.uploadFile(uploadFile);
@@ -329,9 +331,15 @@ export default function SecurityApprovalPage() {
       const biltyImageUrl = uploadData.biltyImage
         ? await uploadSelectedFile(uploadData.biltyImage, 'bilty')
         : null
-      const vehicleImageUrls = await Promise.all(
-        uploadData.vehicleImages.map((file, index) => uploadSelectedFile(file, 'vehicle', index))
-      )
+      const frontImageUrl = uploadData.frontImage
+        ? await uploadSelectedFile(uploadData.frontImage, 'front')
+        : null
+      const backImageUrl = uploadData.backImage
+        ? await uploadSelectedFile(uploadData.backImage, 'back')
+        : null
+      const loadedImageUrl = uploadData.loadedImage
+        ? await uploadSelectedFile(uploadData.loadedImage, 'loaded')
+        : null
 
       // Submit each selected product to backend API
       for (const product of allSelectedProducts) {
@@ -342,7 +350,9 @@ export default function SecurityApprovalPage() {
             const submitData = {
               biltyNo: uploadData.biltyNo || null,
               biltyImage: biltyImageUrl,
-              vehicleImageAttachment: vehicleImageUrls.length > 0 ? vehicleImageUrls.join(',') : null,
+              frontImage: frontImageUrl,
+              backImage: backImageUrl,
+              loadedVehicleImage: loadedImageUrl,
               verdictStatus: uploadData.verdict, // Adding verdict to API
               userId: user?.id || null, // Track acting user's login id
               remarks: uploadData.verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
@@ -381,9 +391,16 @@ export default function SecurityApprovalPage() {
           biltyNo: "",
           biltyImage: null,
           biltyImageName: "",
-          vehicleImages: [],
-          vehicleImagePreviews: [],
-          vehicleImageNames: [],
+          biltyImagePreview: "",
+          frontImage: null,
+          frontImagePreview: "",
+          frontImageName: "",
+          backImage: null,
+          backImagePreview: "",
+          backImageName: "",
+          loadedImage: null,
+          loadedImagePreview: "",
+          loadedImageName: "",
           checklist: {
             mallLoad: false,
             qtyMatch: false,
@@ -762,9 +779,15 @@ export default function SecurityApprovalPage() {
         biltyNo: "",
         biltyImage: null,
         biltyImageName: "",
-        vehicleImages: [],
-        vehicleImagePreviews: [],
-        vehicleImageNames: [],
+        frontImage: null,
+        frontImagePreview: "",
+        frontImageName: "",
+        backImage: null,
+        backImagePreview: "",
+        backImageName: "",
+        loadedImage: null,
+        loadedImagePreview: "",
+        loadedImageName: "",
         checklist: {
           mallLoad: false,
           qtyMatch: false,
@@ -1473,35 +1496,66 @@ export default function SecurityApprovalPage() {
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest italic">Verification Checklist</h3>
                 </div>
 
-                <div className="bg-slate-50 border-2 border-slate-100 rounded-xl sm:rounded-3xl p-4 md:p-8 space-y-6 sm:space-y-8 shadow-sm">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 md:gap-8">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-6 space-y-6 shadow-sm">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 items-start">
                     <div className="space-y-2">
-                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Bilty/GR No</Label>
+                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Bilty/GR No</Label>
                       <Input
                         placeholder="BL-100293"
-                        className="h-12 md:h-14 border-2 border-slate-200 rounded-2xl px-4 sm:px-6 font-black text-sm sm:text-lg text-slate-700 focus:border-blue-600 transition-all uppercase placeholder:text-slate-300"
+                        className="h-11 border border-slate-300 rounded-xl px-4 font-bold text-sm text-slate-800 focus:border-blue-600 transition-all uppercase placeholder:text-slate-300 placeholder:font-medium"
                         value={uploadData.biltyNo}
                         onChange={(e) => setUploadData(p => ({ ...p, biltyNo: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <FileUploadField
-                        label={<span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Bilty Image</span>}
-                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                        fileName={uploadData.biltyImageName}
-                        variant="dropzone"
-                        helperText="Max file size: 20 MB"
-                        uploading={isUploading === 'bilty'}
-                        buttonText="SCAN COPY"
-                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'bilty')}
-                      />
+                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Bilty Image</Label>
+                      <label className="flex h-11 w-full items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 cursor-pointer hover:border-blue-400 hover:bg-blue-50/20 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                          className="sr-only"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'bilty'); e.target.value = ''; }}
+                          disabled={isUploading === 'bilty'}
+                        />
+                        <svg className="h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        <span className="truncate text-xs font-bold text-slate-500 uppercase tracking-wide flex-1">
+                          {isUploading === 'bilty' ? 'Uploading…' : uploadData.biltyImageName || 'SCAN COPY — Choose file'}
+                        </span>
+                        {uploadData.biltyImageName && (
+                          <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Uploaded</span>
+                        )}
+                      </label>
+                      {/* Preview card below — same as FileUploadField style */}
+                      {uploadData.biltyImagePreview && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => window.open(uploadData.biltyImagePreview, '_blank', 'noopener,noreferrer')}
+                            className="group flex w-full items-center gap-3 rounded-md border border-slate-200 bg-white p-2 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <img src={uploadData.biltyImagePreview} alt={uploadData.biltyImageName} className="h-12 w-12 rounded-md border border-slate-200 object-cover" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-slate-700">{uploadData.biltyImageName}</p>
+                              <p className="truncate text-[10px] text-slate-400">Click to open</p>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { if (uploadData.biltyImagePreview) URL.revokeObjectURL(uploadData.biltyImagePreview); setUploadData(p => ({ ...p, biltyImage: null, biltyImageName: '', biltyImagePreview: '' })); }}
+                            className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm transition-colors hover:bg-rose-700"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
+
                     <div className="space-y-2">
-                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Security Verdict</Label>
+                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Security Verdict <span className="text-red-500">*</span></Label>
                       <Select value={uploadData.verdict} onValueChange={(v) => {
                         setUploadData(p => ({ ...p, verdict: v, remarks: v === "APPROVE" ? "" : p.remarks }))
                       }}>
-                        <SelectTrigger className={cn("h-12 md:h-14 border-2 rounded-2xl px-4 sm:px-6 font-black text-sm uppercase transition-all", uploadData.verdict === "APPROVE" ? "border-green-200 bg-green-50 text-green-700" : uploadData.verdict === "REJECT" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white")}>
+                        <SelectTrigger className={cn("h-11 w-full border rounded-xl px-4 font-bold text-sm uppercase transition-all", uploadData.verdict === "APPROVE" ? "border-green-200 bg-green-50 text-green-700" : uploadData.verdict === "REJECT" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white")}>
                           <SelectValue placeholder="Verdict" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1511,6 +1565,7 @@ export default function SecurityApprovalPage() {
                       </Select>
                     </div>
                   </div>
+
 
                   {uploadData.verdict === "REJECT" && (
                     <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
@@ -1524,59 +1579,135 @@ export default function SecurityApprovalPage() {
                     </div>
                   )}
 
+                  <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Load Checks</span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {Object.values(uploadData.checklist).filter(Boolean).length} / {Object.values(uploadData.checklist).length} checked
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-5 gap-3">
                     {Object.entries(uploadData.checklist).map(([key, val]) => (
-                      <div 
-                        key={key} 
+                      <div
+                        key={key}
                         onClick={() => setUploadData(p => ({ ...p, checklist: { ...p.checklist, [key]: !val } }))}
-                        className={cn("flex items-center gap-2 p-3 rounded-xl border-2 transition-all cursor-pointer min-w-0", val ? "bg-blue-600 border-blue-600 shadow-md" : "bg-white border-slate-100")}
+                        className={cn("flex items-center gap-2.5 px-3 py-3 rounded-xl border transition-all cursor-pointer min-w-0 select-none", val ? "bg-blue-600 border-blue-600 shadow-sm" : "bg-white border-slate-300 hover:border-blue-400 hover:bg-blue-50/40")}
                       >
                         <Checkbox id={key} checked={val} onCheckedChange={(checked) => setUploadData(p => ({ ...p, checklist: { ...p.checklist, [key]: !!checked } }))} className={cn(val ? "border-white bg-white data-[state=checked]:text-blue-600" : "")} />
-                        <Label htmlFor={key} className={cn("text-[9px] font-black uppercase cursor-pointer tracking-tighter leading-none truncate", val ? "text-white" : "text-slate-600")}>{key.replace(/([A-Z])/g, ' $1')}</Label>
+                        <Label htmlFor={key} className={cn("text-[11px] font-bold uppercase cursor-pointer tracking-wide leading-tight", val ? "text-white" : "text-slate-700")}>
+                          {({ mallLoad: "Mal Load", qtyMatch: "Qty Match", gaadiCovered: "Gaadi Covered", image: "Image", driverCond: "Driver Condition" } as Record<string, string>)[key] ?? key.replace(/([A-Z])/g, ' $1')}
+                        </Label>
                       </div>
                     ))}
                   </div>
-
-                  <div className="space-y-3">
-                    <FileUploadField
-                      label={<span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Proof Images</span>}
-                      accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-                      multiple
-                      value={uploadData.vehicleImagePreviews}
-                      fileName={uploadData.vehicleImageNames}
-                      variant="dropzone"
-                      helperText="Max file size: 20 MB"
-                      uploading={isUploading?.startsWith('vehicle')}
-                      buttonText="Add vehicle images"
-                      previewClassName="grid grid-cols-3 min-[420px]:grid-cols-4 sm:grid-cols-5"
-                      onFilesSelected={(files) => files.forEach((file) => handleFileUpload(file, 'vehicle'))}
-                      onRemove={(idx) => {
-                        const images = [...uploadData.vehicleImages]
-                        const previews = [...uploadData.vehicleImagePreviews]
-                        const names = [...uploadData.vehicleImageNames]
-                        URL.revokeObjectURL(previews[idx])
-                        images.splice(idx, 1)
-                        previews.splice(idx, 1)
-                        names.splice(idx, 1)
-                        setUploadData(p => ({ ...p, vehicleImages: images, vehicleImagePreviews: previews, vehicleImageNames: names }))
-                      }}
-                    />
                   </div>
+
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Proof Images</span>
+                    <div className="flex flex-row gap-3 w-full">
+                      {/* Front Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>🚗</span> Front</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.frontImagePreview ? [uploadData.frontImagePreview] : []}
+                          fileName={uploadData.frontImageName ? [uploadData.frontImageName] : []}
+                          variant="dropzone"
+                          placeholder="Front photo"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'front'}
+                          buttonText="Front Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'front') }}
+                          onRemove={() => {
+                            if (uploadData.frontImagePreview) URL.revokeObjectURL(uploadData.frontImagePreview)
+                            setUploadData(p => ({ ...p, frontImage: null, frontImagePreview: '', frontImageName: '' }))
+                          }}
+                        />
+                      </div>
+                      {/* Back Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>🔙</span> Back</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.backImagePreview ? [uploadData.backImagePreview] : []}
+                          fileName={uploadData.backImageName ? [uploadData.backImageName] : []}
+                          variant="dropzone"
+                          placeholder="Back photo"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'back'}
+                          buttonText="Back Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'back') }}
+                          onRemove={() => {
+                            if (uploadData.backImagePreview) URL.revokeObjectURL(uploadData.backImagePreview)
+                            setUploadData(p => ({ ...p, backImage: null, backImagePreview: '', backImageName: '' }))
+                          }}
+                        />
+                      </div>
+                      {/* Loaded Vehicle Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>📦</span> Loaded</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.loadedImagePreview ? [uploadData.loadedImagePreview] : []}
+                          fileName={uploadData.loadedImageName ? [uploadData.loadedImageName] : []}
+                          variant="dropzone"
+                          placeholder="Loaded vehicle"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'loaded'}
+                          buttonText="Loaded Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'loaded') }}
+                          onRemove={() => {
+                            if (uploadData.loadedImagePreview) URL.revokeObjectURL(uploadData.loadedImagePreview)
+                            setUploadData(p => ({ ...p, loadedImage: null, loadedImagePreview: '', loadedImageName: '' }))
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
           )}
 
-          <DialogFooter className="mt-8 border-t p-4 md:p-8 bg-slate-50/50 flex flex-col sm:flex-row gap-4">
-            <Button variant="ghost" className="font-bold text-slate-500 uppercase text-xs order-last sm:order-none h-11 sm:h-10" onClick={() => setIsDialogOpen(false)}>Cancel Action</Button>
-            <Button
-              onClick={handleBulkSubmit}
-              disabled={isProcessing || selectedProducts.length === 0 || isReadOnly}
-              className="bg-blue-600 hover:bg-blue-700 h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none"
-            >
-              {isProcessing ? "WAIT..." : `Authorize Gatepass (${selectedProducts.length})`}
-            </Button>
+          <DialogFooter className="mt-8 border-t p-4 md:p-8 bg-slate-50/50">
+            <div className="flex flex-col gap-2 w-full">
+              {/* Buttons row */}
+              <div className="flex flex-col sm:flex-row gap-4 items-center justify-end w-full">
+                <Button variant="ghost" className="font-bold text-slate-500 uppercase text-xs order-last sm:order-none h-11 sm:h-10" onClick={() => setIsDialogOpen(false)}>Cancel Action</Button>
+                <Button
+                  onClick={handleBulkSubmit}
+                  disabled={isProcessing || selectedProducts.length === 0 || isReadOnly || !uploadData.verdict}
+                  className={cn(
+                    "h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none transition-colors text-white",
+                    uploadData.verdict === "REJECT"
+                      ? "bg-red-600 hover:bg-red-700"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  )}
+                >
+                  {isProcessing
+                    ? "WAIT..."
+                    : uploadData.verdict === "APPROVE"
+                      ? `AUTHORIZE GATEPASS (${selectedProducts.length})`
+                      : uploadData.verdict === "REJECT"
+                        ? `REJECT & REVERT (${selectedProducts.length})`
+                        : `SELECT A VERDICT FIRST`}
+                </Button>
+              </div>
+              {/* Stage hint — below buttons row */}
+              {uploadData.verdict && !isProcessing && (
+                <p className={cn("text-[10px] font-medium tracking-wide text-right", uploadData.verdict === "APPROVE" ? "text-blue-400" : "text-slate-400")}>
+                  {uploadData.verdict === "APPROVE" ? "✓ Next: Make Invoice (Proforma)" : "⚠ Returns to: Actual Dispatch"}
+                </p>
+              )}
+            </div>
           </DialogFooter>
+
+
+
+
+
+
         </DialogContent>
       </Dialog>
     </WorkflowStageShell>

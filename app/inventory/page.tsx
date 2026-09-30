@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, Warehouse, RefreshCw, TrendingUp, TrendingDown, Package, X, Settings2 } from "lucide-react"
+import { Loader2, Warehouse, RefreshCw, TrendingUp, TrendingDown, Package, X, Settings2, Truck, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   Dialog,
@@ -50,6 +50,8 @@ const INVENTORY_COLUMNS = [
   { id: "production", label: "Production" },
   { id: "sales", label: "Sales" },
   { id: "closingStock", label: "Closing Stock" },
+  { id: "inTransit", label: "Stock in Transit" },
+  { id: "damages", label: "Damages due to Transit" },
 ]
 const INVENTORY_COLUMN_IDS = INVENTORY_COLUMNS.map((c) => c.id)
 
@@ -60,6 +62,8 @@ type InventoryRow = {
   stock_in: number
   stock_out: number
   sales: number
+  in_transit: number
+  damages: number
   opening_qty: number
   opening_qty_updated_at: string | null
   production_qty: number
@@ -76,14 +80,14 @@ export default function InventoryPage() {
   const [skuWiseMode, setSkuWiseMode] = useState(false)
 
   // Column visibility — persisted per-browser under col_prefs_inventory, same as workflow stages
-  const [visibleColumns, setVisibleColumns] = usePersistedColumns("inventory", INVENTORY_COLUMN_IDS)
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("inventory", INVENTORY_COLUMN_IDS, ["inTransit", "damages"])
   const isVis = (id: string) => visibleColumns.includes(id)
   const leadingCount = ["sku_id", "depot_name", "product_name"].filter(isVis).length
   const visibleCount = INVENTORY_COLUMN_IDS.filter(isVis).length
 
 
   // Drill-down modal
-  type DrillDown = { depot: string; product: string; type: 'stockIn' | 'stockOut' | 'sales' | 'closingStock' | 'openingQty'; row: any }
+  type DrillDown = { depot: string; product: string; type: 'stockIn' | 'stockOut' | 'sales' | 'inTransit' | 'damages' | 'closingStock' | 'openingQty'; row: any }
   const [drillDown, setDrillDown] = useState<DrillDown | null>(null)
   const [detailRows, setDetailRows] = useState<any[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
@@ -95,7 +99,7 @@ export default function InventoryPage() {
     setDetailLoading(true)
     setDetailRows([])
     try {
-      const apiType = type === 'stockIn' ? 'stock_in' : type === 'stockOut' ? 'stock_out' : 'sales'
+      const apiType = type === 'stockIn' ? 'stock_in' : type === 'stockOut' ? 'stock_out' : type === 'inTransit' ? 'in_transit' : type === 'damages' ? 'damages' : 'sales'
       const res = await inventoryApi.getDetail(row.depot_name, row.product_name, apiType)
       setDetailRows(res.success ? res.data : [])
     } finally {
@@ -167,13 +171,15 @@ export default function InventoryPage() {
         const stockIn      = Number(r.stock_in)       || 0
         const stockOut     = Number(r.stock_out)      || 0
         const sales        = Number(r.sales)          || 0
+        const inTransit    = Number(r.in_transit)     || 0
+        const damages      = Number(r.damages)        || 0
         if (!productMap.has(r.product_name)) {
           productMap.set(r.product_name, {
             key: `sku-wise|||${r.product_name}`,
             depot_name: "All Depots",
             product_name: r.product_name,
             sku_id: r.sku_id ?? "",
-            openingQty: 0, production: 0, stockIn: 0, stockOut: 0, sales: 0, closingStock: 0,
+            openingQty: 0, production: 0, stockIn: 0, stockOut: 0, sales: 0, inTransit: 0, damages: 0, closingStock: 0,
             _skuWise: true,
           })
         }
@@ -183,6 +189,8 @@ export default function InventoryPage() {
         entry.stockIn    += stockIn
         entry.stockOut   += stockOut
         entry.sales      += sales
+        entry.inTransit  += inTransit
+        entry.damages    += damages
       })
       return Array.from(productMap.values())
         .map((e) => ({ ...e, closingStock: e.openingQty + e.production + e.stockIn - e.stockOut - e.sales }))
@@ -203,8 +211,10 @@ export default function InventoryPage() {
         const stockIn      = Number(row.stock_in)       || 0
         const stockOut     = Number(row.stock_out)      || 0
         const sales        = Number(row.sales)          || 0
+        const inTransit    = Number(row.in_transit)     || 0
+        const damages      = Number(row.damages)        || 0
         const closingStock = openingQty + production + stockIn - stockOut - sales
-        return { ...row, key, openingQty, production, stockIn, stockOut, sales, closingStock, _skuWise: false }
+        return { ...row, key, openingQty, production, stockIn, stockOut, sales, inTransit, damages, closingStock, _skuWise: false }
       })
   }, [filteredRawData, selectedDepo, selectedProduct, skuWiseMode])
 
@@ -214,6 +224,8 @@ export default function InventoryPage() {
     stockIn: rows.reduce((s, r) => s + r.stockIn, 0),
     stockOut: rows.reduce((s, r) => s + r.stockOut, 0),
     sales: rows.reduce((s, r) => s + r.sales, 0),
+    inTransit: rows.reduce((s, r) => s + r.inTransit, 0),
+    damages: rows.reduce((s, r) => s + r.damages, 0),
     closingStock: rows.reduce((s, r) => s + r.closingStock, 0),
   }), [rows])
 
@@ -371,10 +383,12 @@ export default function InventoryPage() {
       </div>
 
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <SummaryCard label="Total Stock In" value={totals.stockIn} color="green" icon={TrendingUp} />
         <SummaryCard label="Total Stock Out" value={totals.stockOut} color="orange" icon={TrendingDown} />
         <SummaryCard label="Total Sales" value={totals.sales} color="red" icon={Package} />
+        <SummaryCard label="Stock in Transit" value={totals.inTransit} color="blue" icon={Truck} />
+        <SummaryCard label="Damages due to Transit" value={totals.damages} color="red" icon={AlertTriangle} />
         <SummaryCard
           label="Net Closing Stock"
           value={totals.closingStock}
@@ -399,6 +413,8 @@ export default function InventoryPage() {
                   {isVis("production") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Production</TableHead>}
                   {isVis("sales") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Sales</TableHead>}
                   {isVis("closingStock") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Closing Stock</TableHead>}
+                  {isVis("inTransit") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Stock in Transit</TableHead>}
+                  {isVis("damages") && <TableHead className="font-semibold text-slate-700 text-center whitespace-nowrap">Damages due to Transit</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -527,6 +543,33 @@ export default function InventoryPage() {
                         )}
                       </TableCell>
                       )}
+
+                      {/* Stock in Transit */}
+                      {isVis("inTransit") && (
+                      <TableCell className="text-center">
+                        {row.inTransit !== 0 && !row._skuWise ? (
+                          <button onClick={() => openDrillDown(row, 'inTransit')} className="text-sm font-medium text-sky-700 underline decoration-dotted underline-offset-2 hover:text-sky-900 cursor-pointer">
+                            {row.inTransit}
+                          </button>
+                        ) : (
+                          <span className="text-sm font-medium text-sky-700">{row.inTransit}</span>
+                        )}
+                      </TableCell>
+                      )}
+
+                      {/* Damages due to Transit */}
+                      {isVis("damages") && (
+                      <TableCell className="text-center">
+                        {row.damages !== 0 && !row._skuWise ? (
+                          <button onClick={() => openDrillDown(row, 'damages')} className="text-sm font-medium text-red-600 underline decoration-dotted underline-offset-2 hover:text-red-800 cursor-pointer">
+                            {row.damages}
+                          </button>
+                        ) : (
+                          <span className="text-sm font-medium text-red-600">{row.damages}</span>
+                        )}
+                      </TableCell>
+                      )}
+
                     </TableRow>
                   ))
                 )}
@@ -540,6 +583,12 @@ export default function InventoryPage() {
                       <td colSpan={leadingCount} className="px-4 py-3 text-sm font-semibold text-slate-600">
                         Totals ({rows.length} row{rows.length !== 1 ? "s" : ""})
                       </td>
+                    )}
+                    {isVis("inTransit") && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-sky-700">{totals.inTransit}</td>
+                    )}
+                    {isVis("damages") && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-red-600">{totals.damages}</td>
                     )}
                     {isVis("openingQty") && (
                       <td className="px-4 py-3 text-center text-sm font-semibold text-slate-700">
@@ -586,7 +635,7 @@ export default function InventoryPage() {
 
       {/* Formula note */}
       <p className="text-xs text-slate-400 text-center">
-        Closing Stock = Opening Qty + Production + Stock In − Stock Out − Sales
+        Closing Stock = Opening Qty + Production + Stock In − Stock Out − Sales. Sales and Stock Out are recognised at Gate Out; Stock in Transit is Gate Out done but Reach Vehicle (Stage 13) pending; Stock In (transfers) starts at Stage 13 and is reduced by Company-Admin-approved transit damages.
       </p>
 
       {/* Drill-down modal */}
@@ -598,6 +647,8 @@ export default function InventoryPage() {
               {drillDown?.type === 'stockIn' && 'Stock In — Source Records'}
               {drillDown?.type === 'stockOut' && 'Stock Out — Source Records'}
               {drillDown?.type === 'sales' && 'Sales — Source Records'}
+              {drillDown?.type === 'inTransit' && 'Stock in Transit — Source Records'}
+              {drillDown?.type === 'damages' && 'Damages due to Transit — Approved Losses'}
               {drillDown?.type === 'closingStock' && 'Closing Stock — Breakdown'}
             </DialogTitle>
             {drillDown && (

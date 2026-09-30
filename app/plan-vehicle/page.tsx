@@ -982,6 +982,27 @@ export default function PlanVehiclePage() {
       }
     }
 
+    // Client spec: warn the user if any of the selected vehicle's documents have
+    // expired. BANARI already gets the full check above; for the other depots
+    // this is a warning only (never blocks the plan).
+    if (!isBanari && vehicleNumber.trim()) {
+      const todayStr = new Date().toISOString().split("T")[0];
+      const expiryFields = [
+        { key: 'fitness_end_date', label: 'Fitness' },
+        { key: 'insurance_end_date', label: 'Insurance' },
+        { key: 'tax_end_date', label: 'Tax' },
+        { key: 'pollution_end_date', label: 'Pollution' },
+        { key: 'permit1_end_date', label: 'Permit 1' },
+        { key: 'permit2_end_date', label: 'Permit 2' },
+      ];
+      for (const field of expiryFields) {
+        const dateVal = vehicleData[field.key as keyof typeof vehicleData];
+        if (dateVal && String(dateVal) < todayStr) {
+          docWarnings.push(`${field.label} has expired (valid up to ${formatDate(String(dateVal))}).`);
+        }
+      }
+    }
+
     if (validationErrors.length > 0) {
       toast({
         title: `${validationErrors.length} Validation ${validationErrors.length > 1 ? 'Issues' : 'Issue'} Found`,
@@ -1292,6 +1313,14 @@ export default function PlanVehiclePage() {
                   <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm bg-white">
                     <Table>
                       <TableHeader className="bg-slate-50">
+                        <TableRow className="bg-purple-50 border-b-2 border-purple-200">
+                          <TableCell colSpan={3} className="text-right font-black text-xs uppercase text-purple-900 tracking-wider">Totals:</TableCell>
+                          <TableCell className="text-center font-black text-sm text-purple-700">
+                            {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)}
+                          </TableCell>
+                          <TableCell />
+                          <TableCell className="text-center font-black text-sm text-purple-700">{totalPackingWeightFromSku.toFixed(4)} kg</TableCell>
+                        </TableRow>
                         <TableRow>
                           <TableHead className="w-12 text-center">
                             <Checkbox
@@ -1340,14 +1369,6 @@ export default function PlanVehiclePage() {
                             </TableRow>
                           )
                         })}
-                        <TableRow className="bg-purple-50 border-t-2 border-purple-200">
-                          <TableCell colSpan={3} className="text-right font-black text-xs uppercase text-purple-900 tracking-wider">Totals:</TableCell>
-                          <TableCell className="text-center font-black text-sm text-purple-700">
-                            {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)}
-                          </TableCell>
-                          <TableCell />
-                          <TableCell className="text-center font-black text-sm text-purple-700">{totalPackingWeightFromSku.toFixed(4)} kg</TableCell>
-                        </TableRow>
                       </TableBody>
                     </Table>
                   </div>
@@ -1397,7 +1418,7 @@ export default function PlanVehiclePage() {
 
                       <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                          Driver Name {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                          Driver Name <span className="text-slate-400 font-normal normal-case">(Optional)</span>
                         </Label>
                         <Combobox
                           value={driverName}

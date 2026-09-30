@@ -670,7 +670,7 @@ export default function DispatchMaterialPage() {
         queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
 
         setTimeout(() => {
-          router.push("/actual-dispatch")
+          router.push("/plan-vehicle")
         }, 1500)
       }
 
@@ -1492,7 +1492,7 @@ export default function DispatchMaterialPage() {
                     <h2 className="text-base sm:text-xl font-black text-blue-900 border-b-4 border-blue-100 pb-2 mt-4 uppercase tracking-tight flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="break-words">{custName}</span>
                       <Badge className="w-fit bg-blue-600 text-white px-3 py-1 font-black sm:ml-3">
-                        {group._productCount} PRODUCTS
+                        {(group._allProducts || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length} SELECTED
                       </Badge>
                     </h2>
 
@@ -1512,7 +1512,7 @@ export default function DispatchMaterialPage() {
                               </Badge>
                               <div className="flex flex-col">
                                 <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">Section {orderIdx + 1}</span>
-                                <span className="text-xs text-blue-100 font-bold leading-none">{orderDetails._products?.length || 0} Items Selected</span>
+                                <span className="text-xs text-blue-100 font-bold leading-none">{(orderDetails._products || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length} Items Selected</span>
                               </div>
                             </div>
                             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
@@ -1882,26 +1882,6 @@ export default function DispatchMaterialPage() {
                                     <p className="text-[10px] font-black uppercase text-slate-400">Remaining</p>
                                     <p className="mt-1 font-mono font-bold text-slate-700">{maxLimit}</p>
                                   </div>
-                                  {custName.toLowerCase().includes("reliance") && (
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Preclose</p>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="mt-1 h-7 text-[10px] font-bold text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
-                                        onClick={() => {
-                                          setPrecloseDialogProduct({ ...prod, maxLimit });
-                                          setPrecloseInputs(prev => ({ ...prev, [prod.id]: maxLimit.toString() }));
-                                          setPrecloseAction("close");
-                                          setPrecloseRemarks("");
-                                          setPrecloseDialogOpen(true);
-                                        }}
-                                      >
-                                        <XCircle className="h-3.5 w-3.5 mr-1" />
-                                        Preclose
-                                      </Button>
-                                    </div>
-                                  )}
                                 </div>
 
                                 <div className="grid grid-cols-1 gap-3">

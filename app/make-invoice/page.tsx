@@ -793,11 +793,26 @@ export default function MakeInvoicePage() {
   }
 
   const handleSubmit = async () => {
-    if (selectedGroups.length === 0 || !invoiceData.invoiceNo || !invoiceData.invoiceFile) {
+    const validationErrors = [];
+    if (selectedGroups.length === 0) validationErrors.push("No order selected for invoice generation");
+    if (!invoiceData.invoiceNo) validationErrors.push("Invoice Number is missing");
+    if (!invoiceData.invoiceFile) validationErrors.push("Invoice Copy is not uploaded");
+
+    if (validationErrors.length > 0) {
       toast({
         title: "Validation Error",
-        description: "Please fill all required invoice details (Invoice Number and Copy).",
-        variant: "destructive"
+        description: (
+          <div className="flex flex-col gap-1 mt-1">
+            <p className="font-semibold text-sm">Please resolve the following before submitting:</p>
+            <ul className="list-disc pl-5 text-xs space-y-0.5 font-medium">
+              {validationErrors.map((err, idx) => (
+                <li key={idx}>{err}</li>
+              ))}
+            </ul>
+          </div>
+        ),
+        variant: "destructive",
+        duration: 8000, // Increased duration so user has time to read
       })
       return
     }
@@ -1323,204 +1338,204 @@ export default function MakeInvoicePage() {
                                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                                     {/* Order Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Delivery Purpose</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.deliveryPurpose}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Delivery Purpose</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.deliveryPurpose || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Start Date / End Date</p>
-                                      <p className="text-xs font-bold text-slate-700 leading-none">
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Start Date / End Date</p>
+                                      <p className="text-sm font-semibold text-slate-800 leading-none">
                                         {formatDate(orderDetails.startDate)} / {formatDate(orderDetails.endDate)}
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">DO Date</p>
-                                      <p className="text-xs font-bold text-slate-700">{orderDetails.partySoDate || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">DO Date</p>
+                                      <p className="text-sm font-semibold text-slate-800">{orderDetails.partySoDate || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Actual Dispatch Date</p>
-                                      <p className="text-xs font-bold text-blue-700 leading-none">{formatDate(firstProd.lrc_actual_1 || firstProd.actual_1)}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Actual Dispatch Date</p>
+                                      <p className="text-sm font-semibold text-blue-700 leading-none">{formatDate(firstProd.lrc_actual_1 || firstProd.actual_1)}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transport Type</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.transportType}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Transport Type</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.transportType || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Credit Status</p>
-                                      <Badge className={cn("text-[10px] font-black px-2 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-                                        {orderDetails.partyCredit}
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Status</p>
+                                      <Badge className={cn("text-[11px] font-bold px-2.5 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+                                        {orderDetails.partyCredit || "—"}
                                       </Badge>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Customer Address</p>
-                                      <p className="text-[10px] font-medium text-slate-600 leading-tight break-words" title={orderDetails.address}>{orderDetails.address}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Customer Address</p>
+                                      <p className="text-xs font-medium text-slate-600 leading-tight break-words" title={orderDetails.address}>{orderDetails.address || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact Person</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-tight break-words">{orderDetails.contactPerson} ({orderDetails.whatsapp})</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Contact Person</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-tight break-words">{orderDetails.contactPerson || "—"} ({orderDetails.whatsapp || "—"})</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName} / ₹{orderDetails.advanceAmount}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Broker / Advance</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{orderDetails.advanceAmount || "0"}</p>
                                     </div>
 
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Order Punch Remarks</p>
-                                      <p className="text-[10px] font-medium text-slate-600 leading-tight italic break-words">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Order Punch Remarks</p>
+                                      <p className="text-xs font-medium text-slate-600 leading-tight italic break-words">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
                                     </div>
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">PO Copy (SO Upload)</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">PO Copy (SO Upload)</p>
                                       {orderDetails.uploadSo ? (
                                         <a
                                           href={orderDetails.uploadSo}
                                           target="_blank" 
                                           rel="noopener noreferrer"
-                                          className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
                                         >
-                                          <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
-                                          <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
-                                          <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                          <FileText className="h-3.5 w-3.5 group-hover:scale-110 transition-transform" />
+                                          <span className="text-xs font-bold uppercase tracking-tight">VIEW PO COPY</span>
+                                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                         </a>
                                       ) : (
-                                        <p className="text-[10px] font-black text-slate-400 leading-none">NOT UPLOADED</p>
+                                        <p className="text-xs font-bold text-slate-400 leading-none mt-1">NOT UPLOADED</p>
                                       )}
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Dispatch Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Truck No</p>
-                                      <p className="text-sm font-black text-blue-800">{(firstProd.truckNo || "—").toUpperCase()}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Truck No</p>
+                                      <p className="text-base font-bold text-blue-800">{(firstProd.truckNo || "—").toUpperCase()}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Bilty No</p>
-                                      <p className="text-xs font-black text-blue-600">{firstProd.bilty_no || firstProd.biltyNo || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bilty No</p>
+                                      <p className="text-sm font-bold text-blue-600">{firstProd.bilty_no || firstProd.biltyNo || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transporter</p>
-                                      <p className="text-xs font-bold text-slate-700 leading-none">{firstProd.transporterName || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Transporter</p>
+                                      <p className="text-sm font-semibold text-slate-800 leading-none">{firstProd.transporterName || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Audit Status</p>
-                                      <Badge variant="outline" className={cn("text-[9px] font-black px-2 py-0.5 uppercase", firstProd.check_status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200')}>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Audit Status</p>
+                                      <Badge variant="outline" className={cn("text-[10px] font-bold px-2 py-0.5 uppercase", firstProd.check_status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200')}>
                                         {firstProd.check_status || "Pending"}
                                       </Badge>
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Vehicle Info */}
-                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-8px]">
-                                      <div className="h-3 w-1 bg-blue-600 rounded-full" />
-                                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-900/60">Vehicle Specifications</p>
+                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-4px]">
+                                      <div className="h-3.5 w-1 bg-blue-600 rounded-full" />
+                                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-900/60">Vehicle Specifications</p>
                                     </div>
 
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Vehicle Type</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.vehicle_type || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Vehicle Type</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.vehicle_type || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">RTO</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.rto || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">RTO</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.rto || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Passing Weight</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.road_tax || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Road Tax</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.road_tax || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">GVW</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.gvw || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">GVW</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.gvw || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">ULW</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.ulw || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">ULW</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.ulw || "—"}</p>
                                     </div>
 
                                     {/* Driver Info */}
-                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-8px] mt-2">
-                                      <div className="h-3 w-1 bg-amber-600 rounded-full" />
-                                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-amber-900/60">Driver Information</p>
+                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-4px] mt-2">
+                                      <div className="h-3.5 w-1 bg-amber-600 rounded-full" />
+                                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-900/60">Driver Information</p>
                                     </div>
 
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Driver Name</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driver_name || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Driver Name</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driver_name || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact No</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driver_contact_no || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Contact No</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driver_contact_no || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">License No</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driving_license_no || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">License No</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driving_license_no || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Valid Upto</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{formatDate(firstProd.dl_valid_upto)}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Valid Upto</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{formatDate(firstProd.dl_valid_upto)}</p>
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Security Audit Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Fitness</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Fitness</p>
                                       {renderPartyDetailLink(firstProd.fitness, firstProd.fitness_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Insurance</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Insurance</p>
                                       {renderPartyDetailLink(firstProd.insurance, firstProd.insurance_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Pollution</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pollution</p>
                                       {renderPartyDetailLink(firstProd.polution, firstProd.pollution_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Tax Copy</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Tax Copy</p>
                                       {renderPartyDetailLink(firstProd.tax_copy, firstProd.tax_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Permit 1</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Permit 1</p>
                                       {renderPartyDetailLink(firstProd.permit1, firstProd.permit1_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Permit 2 (Out State)</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Permit 2 (Out State)</p>
                                       {renderPartyDetailLink(firstProd.permit2_out_state, firstProd.permit2_end_date)}
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Weight Details */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">RST No</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">RST No</p>
                                       {firstProd.weightment_slip_copy ? (
-                                        <a href={firstProd.weightment_slip_copy} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-blue-600 hover:text-blue-800 underline">
+                                        <a href={firstProd.weightment_slip_copy} target="_blank" rel="noopener noreferrer" className="text-base font-bold text-blue-600 hover:text-blue-800 underline">
                                           #{firstProd.rst_no || firstProd.rstNo || "—"}
                                         </a>
                                       ) : (
-                                        <p className="text-sm font-black text-slate-900 tracking-tight">#{firstProd.rst_no || firstProd.rstNo || "—"}</p>
+                                        <p className="text-base font-bold text-slate-900 tracking-tight">#{firstProd.rst_no || firstProd.rstNo || "—"}</p>
                                       )}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
-                                      <p className="text-xs font-black text-slate-900 leading-tight">
-                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-black">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Gross / Tare / Net</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">
+                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-bold">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff</p>
-                                      <p className="text-xs font-black text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff</p>
+                                      <p className="text-sm font-bold text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Extra Weight</p>
-                                      <p className="text-xs font-black text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Extra Weight</p>
+                                      <p className="text-sm font-bold text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
                                     </div>
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff Reason</p>
-                                      <p className="text-[10px] font-bold text-red-500 italic">{firstProd.reason_of_difference_in_weight_if_any_speacefic || firstProd.reasonForDiff || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff Reason</p>
+                                      <p className="text-xs font-medium text-red-600 italic">{firstProd.reason_of_difference_in_weight_if_any_speacefic || firstProd.reasonForDiff || "—"}</p>
                                     </div>
                                   </div>
                                 </div>
@@ -1930,10 +1945,12 @@ export default function MakeInvoicePage() {
                       <FileUploadField
                         label={<Label>Upload Invoice Copy <span className="text-red-500">*</span></Label>}
                         accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                        value={invoiceData.invoiceFile}
                         fileName={invoiceData.invoiceFileName}
                         uploading={isUploadingObj['invoiceFile'] || false}
                         buttonText={invoiceData.invoiceFileName ? 'REPLACE' : 'UPLOAD'}
                         onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'invoiceFile', 'invoiceFileName')}
+                        onRemove={() => setInvoiceData(p => ({ ...p, invoiceFile: "", invoiceFileName: "" }))}
                         capture="environment"
                       />
                     </div>

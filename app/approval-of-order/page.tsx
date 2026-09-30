@@ -33,11 +33,12 @@ const PAGE_COLUMNS = [
   { id: "total_qty_box", label: "Total Qty (Box)", type: "number" as const },
   { id: "total_qty_kg", label: "Total Qty (KGS)", type: "number" as const },
   { id: "total_order_amount", label: "Total Order Amount", type: "number" as const },
-  { id: "dispatch_from", label: "Dispatch From", type: "text" as const },
+  { id: "dispatch_from", label: "Dispatch from", type: "text" as const },
   { id: "status", label: "Status", type: "text" as const, historyOnly: true },
   { id: "remarks", label: "Remarks", type: "text" as const },
   { id: "broker_name", label: "Broker", type: "text" as const },
   { id: "order_punch_user", label: "Order Punch By (user)", type: "text" as const },
+  { id: "order_datetime", label: "Actual Datetime", type: "date" as const },
   { id: "actual_datetime", label: "Action Date", type: "date" as const, historyOnly: true },
 ]
 const TOTAL_COLUMN_IDS = new Set(["total_qty_box", "total_qty_kg", "total_order_amount"])
@@ -54,7 +55,15 @@ const fmtNumber = (v: number | null | undefined) => {
 }
 const fmtMoney = (v: number | null | undefined) => `₹${fmtNumber(v)}`
 
+const fmtDateTime = (v: string | null | undefined) => {
+  if (!v) return "—"
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return String(v)
+  return d.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
+}
+
 function formatCell(colId: string, value: any) {
+  if (colId === "order_datetime") return fmtDateTime(value)
   if (colId === "party_so_date" || colId === "actual_datetime") return fmtDate(value)
   if (colId === "total_order_amount") return fmtMoney(value)
   if (colId === "total_qty_box" || colId === "total_qty_kg") return fmtNumber(value)

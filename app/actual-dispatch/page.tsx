@@ -621,12 +621,9 @@ export default function ActualDispatchPage() {
       }, 0)
   }, [selectedGroups, confirmDetails, skus, dialogSelectedProducts])
 
-  // Auto-fill Gross Weight from calculated total packing weight
-  useEffect(() => {
-    if (totalPackingWeightFromSku > 0 && !loadData.grossWeight) {
-      setLoadData(p => ({ ...p, grossWeight: totalPackingWeightFromSku.toFixed(4) }))
-    }
-  }, [totalPackingWeightFromSku])
+  // Gross Weight is NOT pre-filled: per the spec the user enters the weighbridge
+  // Gross (loaded vehicle) and Tare (empty vehicle) weights; the goods' expected
+  // weight is only used below to compute the Difference.
 
   // Auto-calculate Total Weight and Difference
   const totalCombinedWeight = useMemo(() => {
@@ -641,7 +638,9 @@ export default function ActualDispatchPage() {
 
     setLoadData(prev => ({
       ...prev,
-      differanceWeight: (loadData.netWeightPacking || totalCombinedWeight > 0) ? diff.toFixed(4) : ""
+      // Only once Gross/Tare have been entered (Net is computed) — otherwise the
+      // Difference would show a meaningless negative before the user types anything.
+      differanceWeight: loadData.netWeightPacking ? diff.toFixed(4) : ""
     }))
   }, [loadData.netWeightPacking, totalCombinedWeight])
 
@@ -1278,29 +1277,32 @@ export default function ActualDispatchPage() {
     // confirmed upstream at Plan Vehicle (Stage 5) — this stage only re-validates
     // what it actually collects: the Stage 7 weightment audit, the (still-editable)
     // driver, and the (still-editable) advance amounts.
+    // Client spec (Stage 7): Actual Qty Loaded, Weighment Slip, Gross/Tare Weight and
+    // Driver are required at EVERY depot (the spec names no depot).
+    if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
+      validationErrors.push("Valid Actual Qty is required");
+    }
+    if (!loadData.weightmentSlip) {
+      validationErrors.push("Weighment Slip upload is required");
+    }
+    // No Plate Image stays optional — not part of the Stage 7 spec's task list.
+    if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
+      validationErrors.push("Valid Gross Weight is required");
+    }
+    if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
+      validationErrors.push("Valid Tare Weight is required");
+    }
+    if (!driverName.trim()) {
+      validationErrors.push("Driver selection is required");
+    }
+
     if (isBanari) {
-      // Stage 7: Weightment Audit Validation
-      if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
-        validationErrors.push("Valid Actual Qty is required");
-      }
+      // Not in the spec — kept as-is for BANARI only.
       if (!loadData.rstNo.trim()) {
         validationErrors.push("RST No is required");
       }
-      if (!loadData.weightmentSlip) {
-        validationErrors.push("Weighment Slip upload is required");
-      }
-      // No Plate Image stays optional — not part of the Stage 7 spec's task list.
-      if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
-        validationErrors.push("Valid Gross Weight is required");
-      }
-      if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
-        validationErrors.push("Valid Tare Weight is required");
-      }
       if (!loadData.checkStatus) {
         validationErrors.push("Quality Status (STG 7) is required");
-      }
-      if (!driverName.trim()) {
-        validationErrors.push("Driver selection is required");
       }
       // Reason mandatory ONLY if status is Reject
       if (loadData.checkStatus === "Reject" && !loadData.reason.trim()) {
@@ -1657,7 +1659,7 @@ export default function ActualDispatchPage() {
 
   return (
     <WorkflowStageShell
-      title="Stage 5: Actual Dispatch"
+      title="Stage 7: Actual Dispatch"
       description="Confirm actual dispatch details before vehicle assignment."
       pendingCount={displayRows.length}
       historyData={[]}
@@ -2531,7 +2533,7 @@ export default function ActualDispatchPage() {
                         <Truck className="h-6 w-6 text-white" />
                         <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tighter italic">Vehicle Setup</h3>
                       </div>
-                      <Badge className="bg-white text-purple-700 font-black">STAGE 6</Badge>
+                      <Badge className="bg-white text-purple-700 font-black">STAGE 5</Badge>
                     </div>
 
                     <div className="bg-slate-50 border-2 border-slate-200 rounded-xl sm:rounded-3xl p-4 sm:p-6 space-y-6 shadow-md transition-all hover:shadow-lg">
@@ -2569,7 +2571,7 @@ export default function ActualDispatchPage() {
 
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Driver Name {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                            Driver Name <span className="text-red-500">*</span>
                           </Label>
                           <Combobox
                             value={driverName}
@@ -2669,7 +2671,7 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1 flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-1">
-                            Weightment Slip <span className="text-slate-400 font-normal normal-case">(Optional)</span> {loadData.weightmentSlip_file_name && <span className="text-blue-600 text-[8px] truncate max-w-20">({loadData.weightmentSlip_file_name})</span>}
+                            Weightment Slip <span className="text-red-500">*</span> {loadData.weightmentSlip_file_name && <span className="text-blue-600 text-[8px] truncate max-w-20">({loadData.weightmentSlip_file_name})</span>}
                           </Label>
                           <FileUploadField
                             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -2678,6 +2680,7 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'weightmentSlip'}
                             buttonText={loadData.weightmentSlip_file_name ? 'REPLACE' : 'UPLOAD'}
+                            onRemove={() => setLoadData(p => ({ ...p, weightmentSlip: "", weightmentSlip_file_name: "" }))}
                             onFilesSelected={(files) => handleFileChange('weightmentSlip', 'weightmentSlip_file_name', files[0] || null)}
                           />
                         </div>
@@ -2692,6 +2695,7 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'vehicleNoPlateImage'}
                             buttonText={loadData.vehicleNoPlateImage_file_name ? 'REPLACE' : 'UPLOAD'}
+                            onRemove={() => setLoadData(p => ({ ...p, vehicleNoPlateImage: "", vehicleNoPlateImage_file_name: "" }))}
                             onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null)}
                           />
                         </div>

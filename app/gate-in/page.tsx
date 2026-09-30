@@ -791,6 +791,8 @@ const buildSlipParties = () => {
             backVehicleImage: uploadedBackVehicleImage,
             driverPhoto: uploadedDriverPhoto,
             gatepassPhoto: uploadedGatepassPhoto,
+            vehicleNumber: editableVehicle,
+            driverName: editableDriver,
           }).then(res => {
             if (!res.success) throw new Error(res.message)
             return orderKey
@@ -842,7 +844,7 @@ const buildSlipParties = () => {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <WorkflowStageShell
-      title="Gate In"
+      title="Stage 6: Gate In"
       description="Record vehicle gate-in photos before Actual Dispatch confirmation."
       pendingCount={pendingRecords.length}
       historyData={[]}

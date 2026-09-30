@@ -305,6 +305,10 @@ export default function DamageAdjustmentPage() {
         // Damage Info
         damageQty: order.damage_qty,
         damageStatus: order.damage_status,
+        lossCompany: order.loss_company,
+        lossTransporter: order.loss_transporter,
+        lossCustomer: order.loss_customer,
+        creditQty: order.credit_qty,
         damageSku: order.sku,
         damageImage: order.damage_image,
         difference: order.difference,
@@ -493,8 +497,10 @@ export default function DamageAdjustmentPage() {
         const submitData = {
           creditNoteDate: adjustmentData.creditNoteDate,
           creditNoteNo: adjustmentData.creditNoteNo,
-          creditNoteQty: 0,
-          creditNoteAmount: 0,
+          // Customer is credited for everything not caused by the customer; the
+          // transporter share is recovered separately (debit note).
+          creditNoteQty: Number(product.creditQty) || 0,
+          creditNoteAmount: (Number(product.lossCompany) || 0) + (Number(product.lossTransporter) || 0),
           netBalance: 0,
           status: "Completed",
           creditNoteCopy: creditNoteCopyUrl,
@@ -556,7 +562,7 @@ export default function DamageAdjustmentPage() {
   return (
     <WorkflowStageShell
       partyNames={customerNames}
-      title="Stage 14: Damage Adjustment"
+      title="Stage 15: Damage Adjustment"
       description="Process credit notes and adjustments for damaged goods."
       pendingCount={displayRows.length}
       historyData={[]}
@@ -1119,6 +1125,39 @@ export default function DamageAdjustmentPage() {
                     </Table>
                   </Card>
                 </div>
+
+                {/* Loss liability (from the Unloading report) */}
+                {(() => {
+                  const sel = selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey))
+                  const sum = (k: string) => sel.reduce((t: number, p: any) => t + (Number(p[k]) || 0), 0)
+                  const company = sum("lossCompany"), transporter = sum("lossTransporter"), customer = sum("lossCustomer")
+                  const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-6 w-1.5 bg-red-600 rounded-full shadow-sm" />
+                        <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-red-900">Loss Liability (from Unloading)</h3>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Borne by Company</p>
+                          <p className="mt-1 text-lg font-black text-blue-900">{fmt(company)}</p>
+                        </div>
+                        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-orange-700">Recover from Transporter</p>
+                          <p className="mt-1 text-lg font-black text-orange-900">{fmt(transporter)}</p>
+                        </div>
+                        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-purple-700">Borne by Customer / Depot</p>
+                          <p className="mt-1 text-lg font-black text-purple-900">{fmt(customer)}</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        Credit note to the customer: <span className="font-bold text-slate-700">{fmt(company + transporter)}</span> (loss not caused by the customer). Enter the credit note details below.
+                      </p>
+                    </div>
+                  )
+                })()}
 
                 {/* Section 3: Credit Note Details */}
                 <div className="space-y-6">
