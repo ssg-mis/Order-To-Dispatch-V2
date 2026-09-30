@@ -20,7 +20,7 @@ const URL_TO_PAGE: Record<string, string> = {
   '/check-invoice': 'Check Invoice',
   '/gate-out': 'Gate Out',
   '/reach-vehicle': 'Reach Vehicle',
-  '/material-receipt': 'Unloading',
+  '/unloading': 'Unloading',
   '/damage-adjustment': 'Damage Adjustment',
   '/gate-in': 'Gate In',
   '/variable-parameters': 'Variable Parameters',

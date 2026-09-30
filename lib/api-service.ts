@@ -11,7 +11,7 @@ import {
   flattenSecurityStage,
   flattenInvoiceStage,
   flattenGateOutStage,
-  flattenMaterialReceiptStage,
+  flattenUnloadingStage,
   flattenDamageStage,
   flattenGroupedOrderApproval,
 } from './v2-adapter';
@@ -509,6 +509,10 @@ export const reachVehicleApi = {
     page?: number;
     limit?: number;
     search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
     party_name?: string;
     depo_names?: string[];
     manual_sauda_no?: string;
@@ -608,6 +612,8 @@ export const gateInApi = {
     backVehicleImage?: string;
     driverPhoto?: string;
     gatepassPhoto?: string;
+    vehicleNumber?: string;
+    driverName?: string;
   }): Promise<ApiResponse> =>
     request('/gate-in/submit', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -861,11 +867,15 @@ export const unloadingApi = {
     party_name?: string;
     depo_names?: string[];
     search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
     manual_sauda_no?: string;
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return adaptList(await request(`/unloading/pending${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
+    return adaptList(await request(`/unloading/pending${buildQuery(params)}`), 'orders', flattenUnloadingStage);
   },
 
   getHistory: async (params?: {
@@ -876,15 +886,37 @@ export const unloadingApi = {
     party_name?: string;
     depo_names?: string[];
     search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
     manual_sauda_no?: string;
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return adaptList(await request(`/confirm-receipt/history${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
+    return adaptList(await request(`/unloading/history${buildQuery(params)}`), 'orders', flattenUnloadingStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
-    return request(`/confirm-receipt/submit/${id}`, {
+    return request(`/unloading/submit/${id}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Losses reported at Unloading that wait for Company Admin approval.
+  getApprovals: async (params?: { page?: number; limit?: number }): Promise<ApiResponse> => {
+    return adaptList(await request(`/unloading/approvals${buildQuery(params)}`), 'orders', flattenUnloadingStage);
+  },
+
+  // Company Admin only. decision: 'approve' | 'reject' (reject needs remarks).
+  review: async (id: number | string, data: {
+    decision: 'approve' | 'reject';
+    remarks?: string;
+    shortageBorneBy?: string;
+    containerBorneBy?: Record<number, string>;
+  }): Promise<ApiResponse> => {
+    return request(`/unloading/review/${id}`, {
       method: "POST",
       body: JSON.stringify(data),
     });

@@ -34,7 +34,7 @@ const STAGES = [
   { id: "Check Invoice", label: "Check Invoice", shortLabel: "Check", color: "#22c55e", url: "/check-invoice" },
   { id: "Gate Out", label: "Gate Out", shortLabel: "Gate", color: "#10b981", url: "/gate-out" },
   { id: "Reach Vehicle", label: "Reach Vehicle", shortLabel: "Reach", color: "#06b6d4", url: "/reach-vehicle" },
-  { id: "Material Receipt", label: "Confirm Receipt", shortLabel: "Receipt", color: "#14b8a6", url: "/material-receipt" },
+  { id: "Material Receipt", label: "Confirm Receipt", shortLabel: "Receipt", color: "#14b8a6", url: "/unloading" },
   { id: "Damage Adjustment", label: "Damage Adjustment", shortLabel: "Damage", color: "#06b6d4", url: "/damage-adjustment" },
   { id: "Final Delivery", label: "Final Delivery", shortLabel: "Done", color: "#22d3ee", url: "/" }
 ]

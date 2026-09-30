@@ -228,9 +228,12 @@ export function flattenGroupedOrderApproval(row: any): Record<string, any> {
     total_qty_box: row.totalQtyBox ?? 0,
     total_qty_kg: row.totalQtyKg ?? 0,
     total_order_amount: row.totalOrderAmount ?? 0,
-    dispatch_from: row.dispatchFrom ?? null,
+    // Client spec: "Dispatch from" is the depot. The order_approvals.dispatchFrom
+    // flag ('in-stock'/'production') is only a fallback when no depot is set.
+    dispatch_from: d.depotName ?? row.dispatchFrom ?? null,
     remarks: row.remarks ?? null,
     actual_datetime: row.actualAt ?? null,
+    order_datetime: o.createdAt ?? null,
     status: row.status ?? null,
     item_count: row.itemCount ?? 0,
     items: row.items ?? [],
@@ -354,30 +357,44 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   r.invoice_date = inv.invoiceDate ?? null;
   r.invoice_copy = inv.invoiceCopy ?? null;
   r.bill_amount = inv.billAmount ?? null;
+  if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
+  if (row.preApprovalActualAt !== undefined) r.pre_approval_at = row.preApprovalActualAt;
+  if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
+  if (row.orderApprovalActualAt !== undefined) r.order_approval_at = row.orderApprovalActualAt;
   return r;
 }
 
-// Unloading: submit key = material_receipts id.
-export function flattenMaterialReceiptStage(row: any): Record<string, any> {
+// Unloading: submit key = unloadings id.
+export function flattenUnloadingStage(row: any): Record<string, any> {
   const r = base(row);
   const dsp = row.dispatch || {};
-  const mr = row.materialReceipt || {};
+  const ul = row.unloading || {};
   const inv = row.invoice || {};
-  r.id = mr.id ?? null;
-  r.material_receipt_id = mr.id ?? null;
+  r.id = ul.id ?? null;
+  r.unloading_id = ul.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
   r.invoice_no = inv.invoiceNo ?? null;
+  r.invoice_copy = inv.invoiceCopy ?? null;
+  r.truck_no = row.vehicle?.registrationNo ?? r.truck_no ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
-  r.material_received_date = mr.materialReceivedDate ?? null;
-  r.received_image_proof = mr.receivedImageProof ?? null;
-  r.damage_status = mr.damageStatus ?? null;
-  r.damage_qty = mr.damageQty ?? null;
-  r.damage_image = mr.damageImage ?? null;
-  r.remarks_3 = mr.remarks ?? null;
-  r.planned_8 = mr.plannedAt ?? null;
-  r.actual_8 = mr.actualAt ?? null;
+  r.actual_qty_dispatch = dsp.actualQtyDispatch ?? r.actual_qty_dispatch ?? null;
+  r.shortage_qty = ul.shortageQty ?? null;
+  r.received_date = ul.receivedDate ?? null;
+  r.received_proof = ul.receivedProof ?? null;
+  r.damage_photos = ul.damagePhotos ?? null;
+  r.sfg_oil_kg = row.sfgOilKg ?? null;
+  r.damaged_containers = row.damagedContainers ?? [];
+  r.shortage_cause = ul.shortageCause ?? null;
+  r.shortage_borne_by = ul.shortageBorneBy ?? null;
+  r.total_loss_value = ul.totalLossValue ?? null;
+  r.total_loss_qty = ul.totalLossQty ?? null;
+  r.approval_status = ul.approvalStatus ?? null;
+  r.approval_remarks = ul.approvalRemarks ?? null;
+  r.remarks_3 = ul.remarks ?? null;
+  r.planned_8 = ul.plannedAt ?? null;
+  r.actual_8 = ul.actualAt ?? null;
   return r;
 }
 
@@ -392,6 +409,15 @@ export function flattenDamageStage(row: any): Record<string, any> {
   r.d_sr_number = dsp.dsrNumber ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
+  const ul = row.unloading || {};
+  r.shortage_qty = ul.shortageQty ?? null;
+  r.damage_qty = ul.shortageQty ?? null;
+  r.damaged_container_count = row.damagedContainerCount ?? 0;
+  r.loss_company = Number(row.lossCompany) || 0;
+  r.loss_transporter = Number(row.lossTransporter) || 0;
+  r.loss_customer = Number(row.lossCustomer) || 0;
+  r.credit_qty = Number(row.creditQty) || 0;
+  r.damage_status = (Number(ul.shortageQty) > 0 || Number(row.damagedContainerCount) > 0) ? 'Damaged' : 'Delivered';
   r.status_2 = da.status ?? null;
   r.credit_note_date = da.creditNoteDate ?? null;
   r.credit_note_no = da.creditNoteNo ?? null;

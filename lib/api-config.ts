@@ -42,7 +42,7 @@ export const API_ENDPOINTS = {
     submit: (id: number) => `/dispatch-planning/submit/${id}`,
   },
   
-  // Actual Dispatch Endpoints (Stage 5)
+  // Actual Dispatch Endpoints (Stage 7)
   actualDispatch: {
     pending: '/actual-dispatch/pending',
     history: '/actual-dispatch/history',
