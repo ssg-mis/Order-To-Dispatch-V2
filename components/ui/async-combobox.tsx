@@ -74,7 +74,17 @@ export function AsyncCombobox({
     setIsLoading(true)
     try {
       const result = await fetchOptions(currentSearch, currentPage)
-      setOptions(prev => isNewSearch ? result.options : [...prev, ...result.options])
+      // De-duplicate by value: overlapping loads (initial + scroll) or a backend join can return
+      // the same record twice, which breaks React's unique-key rule for the list.
+      setOptions(prev => {
+        const seen = new Set<string>(isNewSearch ? [] : prev.map(o => o.value))
+        const fresh = result.options.filter(o => {
+          if (seen.has(o.value)) return false
+          seen.add(o.value)
+          return true
+        })
+        return isNewSearch ? fresh : [...prev, ...fresh]
+      })
       setHasMore(result.hasMore)
       
       // If we find the current value in the new options, update the label
