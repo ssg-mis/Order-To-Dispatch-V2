@@ -111,6 +111,10 @@ export const FIELD_GROUPS: Record<string, number> = {
 
   // Level 10: Damage Adjustment (Stage 15)
   credit_note_no: 10, actual_10: 10, planned_10: 10, damage_adjustment_user: 10,
+  credit_note_date: 10, credit_note_taxable: 10, credit_note_gst_percent: 10, credit_note_amount: 10, credit_note_copy: 10,
+  debit_note_no: 10, debit_note_date: 10, debit_note_amount: 10, debit_note_copy: 10,
+  reverse_transfer_no: 10, reverse_transfer_date: 10, reverse_transfer_qty: 10, reverse_transfer_copy: 10,
+  company_loss_amount: 10, company_loss_head: 10, settlement_remarks: 10,
 }
 
 // Human-readable stage name for each FIELD_GROUPS level — drives the
@@ -146,6 +150,20 @@ export const FIELD_LABELS: Record<string, string> = {
   approval_status: "Loss Approval",
   approval_remarks: "Approval Remarks",
   approval_qty: "Approval Quantity",
+  credit_note_taxable: "Credit Note Taxable Value (₹)",
+  credit_note_gst_percent: "Credit Note GST %",
+  credit_note_amount: "Credit Note Total (₹)",
+  debit_note_no: "Debit Note No.",
+  debit_note_date: "Debit Note Date",
+  debit_note_amount: "Debit Note Amount (₹)",
+  debit_note_copy: "Debit Note Copy",
+  reverse_transfer_no: "Reverse Transfer No.",
+  reverse_transfer_date: "Reverse Transfer Date",
+  reverse_transfer_qty: "Reverse Transfer Qty",
+  reverse_transfer_copy: "Reverse Transfer Copy",
+  company_loss_amount: "Company Loss - P&L (₹)",
+  company_loss_head: "P&L Head",
+  settlement_remarks: "Settlement Remarks",
   overall_status_of_order: "Approval Status",
   order_punch_user: "Order Punch Doer",
   pre_approval_user: "Pre-Approval Doer",

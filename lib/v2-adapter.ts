@@ -426,6 +426,22 @@ export function flattenDamageStage(row: any): Record<string, any> {
   r.credit_note_amount = da.creditNoteAmount ?? null;
   r.net_banalce = da.netBalance ?? null; // legacy misspelling kept for the page
   r.net_balance = da.netBalance ?? null;
+  // Stage 15 settlement documents
+  r.total_loss_qty = ul.totalLossQty ?? null;
+  r.gst_rate = row.gstRate ?? null; // GST % from the SKU master
+  r.credit_note_taxable = da.creditNoteTaxable ?? null;
+  r.credit_note_gst_percent = da.creditNoteGstPercent ?? null;
+  r.debit_note_no = da.debitNoteNo ?? null;
+  r.debit_note_date = da.debitNoteDate ?? null;
+  r.debit_note_copy = da.debitNoteCopy ?? null;
+  r.debit_note_amount = da.debitNoteAmount ?? null;
+  r.reverse_transfer_no = da.reverseTransferNo ?? null;
+  r.reverse_transfer_date = da.reverseTransferDate ?? null;
+  r.reverse_transfer_copy = da.reverseTransferCopy ?? null;
+  r.reverse_transfer_qty = da.reverseTransferQty ?? null;
+  r.company_loss_amount = da.companyLossAmount ?? null;
+  r.company_loss_head = da.companyLossHead ?? null;
+  r.settlement_remarks = da.settlementRemarks ?? null;
   r.planned_9 = da.plannedAt ?? null;
   r.actual_9 = da.actualAt ?? null;
   return r;

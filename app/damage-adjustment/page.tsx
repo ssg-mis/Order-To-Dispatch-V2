@@ -20,6 +20,8 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
+import { DamageSettlement, LossOverview, SectionHeading, EMPTY_SETTLEMENT_DOCS, computeSettlement, settlementComplete, type SettlementDocs } from "@/components/damage-settlement"
+import { Package, Scale, Truck } from "lucide-react"
 import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
@@ -142,12 +144,7 @@ export default function DamageAdjustmentPage() {
 
   // Adjustment Form State
   const [isUploading, setIsUploading] = useState<boolean>(false)
-  const [adjustmentData, setAdjustmentData] = useState({
-    creditNoteDate: "",
-    creditNoteNo: "",
-    creditNoteCopy: null as File | null,
-    creditNoteCopyName: "",
-  })
+  const [adjustmentData, setAdjustmentData] = useState<SettlementDocs>(EMPTY_SETTLEMENT_DOCS)
 
   // Pending query with infinite pagination
   const {
@@ -187,16 +184,6 @@ export default function DamageAdjustmentPage() {
       fetchNextPending();
     }
   }, [pendingInView, hasNextPending, fetchNextPending]);
-
-  const handleFileUpload = (file: File) => {
-    if (!file) return;
-
-    setAdjustmentData(p => ({
-      ...p,
-      creditNoteCopy: file,
-      creditNoteCopyName: file.name
-    }));
-  };
 
   const uploadSelectedFile = async (file: File) => {
     setIsUploading(true);
@@ -309,6 +296,9 @@ export default function DamageAdjustmentPage() {
         lossTransporter: order.loss_transporter,
         lossCustomer: order.loss_customer,
         creditQty: order.credit_qty,
+        orderCategory: order.order_category,
+        gstRate: order.gst_rate,
+        lossQty: order.total_loss_qty,
         damageSku: order.sku,
         damageImage: order.damage_image,
         difference: order.difference,
@@ -402,7 +392,7 @@ export default function DamageAdjustmentPage() {
     })
   }, [displayRows, pendingSortField, pendingSortDir])
 
-  const dynamicColumns = visibleColumns.filter((colId) => !FIXED_COLUMN_IDS.includes(colId))
+  const dynamicColumns = visibleColumns.filter((colId) => !FIXED_COLUMN_IDS.includes(colId) && ALL_COLUMNS.some((c) => c.id === colId))
 
   function getDynamicColumnValue(group: any, colId: string) {
     const directValue = group?.[colId]
@@ -448,12 +438,7 @@ export default function DamageAdjustmentPage() {
       setSelectedProducts(targetGroup._allProducts.map((p: any) => p._rowKey)) // Select all by default
 
       // Reset form
-      setAdjustmentData({
-        creditNoteDate: "",
-        creditNoteNo: "",
-        creditNoteCopy: null,
-        creditNoteCopyName: "",
-      })
+      setAdjustmentData(EMPTY_SETTLEMENT_DOCS)
 
       setIsDetailsExpanded(false)
       setIsDialogOpen(true)
@@ -462,15 +447,6 @@ export default function DamageAdjustmentPage() {
 
   const handleSubmit = async () => {
     if (!selectedGroup) return
-
-    // Validation: Require Credit Note Details generally, though backend might allow slightly less.
-    // Let's enforce basic credit note details if quantities are involved.
-    if (!adjustmentData.creditNoteDate || !adjustmentData.creditNoteNo) {
-      toast({ title: "Validation Error", description: "Credit Note details are required.", variant: "destructive" })
-      return
-    }
-
-    // Numeric Validation - Removed since quantity/amount/balance fields were removed
 
     const productsToSubmit = selectedGroup._allProducts.filter((p: any) =>
       selectedProducts.includes(p._rowKey)
@@ -485,25 +461,35 @@ export default function DamageAdjustmentPage() {
       return
     }
 
+    // Every document that applies to the selected lines must be filled in.
+    if (!settlementComplete(computeSettlement(productsToSubmit), adjustmentData)) {
+      toast({ title: "Validation Error", description: "Fill the number and date of every document shown (and a valid GST %).", variant: "destructive" })
+      return
+    }
+
     setIsProcessing(true)
     try {
       const successfulSubmissions: any[] = []
       const failedSubmissions: any[] = []
-      const creditNoteCopyUrl = adjustmentData.creditNoteCopy
-        ? await uploadSelectedFile(adjustmentData.creditNoteCopy)
-        : null
+      const creditNoteCopyUrl = adjustmentData.creditNoteCopy ? await uploadSelectedFile(adjustmentData.creditNoteCopy) : null
+      const debitNoteCopyUrl = adjustmentData.debitNoteCopy ? await uploadSelectedFile(adjustmentData.debitNoteCopy) : null
+      const reverseTransferCopyUrl = adjustmentData.reverseTransferCopy ? await uploadSelectedFile(adjustmentData.reverseTransferCopy) : null
 
       for (const product of productsToSubmit) {
+        // Amounts are computed by the backend from the approved Stage 14 loss;
+        // only the document details are sent from here.
         const submitData = {
-          creditNoteDate: adjustmentData.creditNoteDate,
           creditNoteNo: adjustmentData.creditNoteNo,
-          // Customer is credited for everything not caused by the customer; the
-          // transporter share is recovered separately (debit note).
-          creditNoteQty: Number(product.creditQty) || 0,
-          creditNoteAmount: (Number(product.lossCompany) || 0) + (Number(product.lossTransporter) || 0),
-          netBalance: 0,
-          status: "Completed",
+          creditNoteDate: adjustmentData.creditNoteDate,
+          creditNoteGstPercent: adjustmentData.creditNoteGstPercent === "" ? null : Number(adjustmentData.creditNoteGstPercent),
           creditNoteCopy: creditNoteCopyUrl,
+          debitNoteNo: adjustmentData.debitNoteNo,
+          debitNoteDate: adjustmentData.debitNoteDate,
+          debitNoteCopy: debitNoteCopyUrl,
+          reverseTransferNo: adjustmentData.reverseTransferNo,
+          reverseTransferDate: adjustmentData.reverseTransferDate,
+          reverseTransferCopy: reverseTransferCopyUrl,
+          settlementRemarks: adjustmentData.settlementRemarks,
           userId: user?.id || null // Track acting user's login id
         };
 
@@ -746,11 +732,12 @@ export default function DamageAdjustmentPage() {
         </div>
 
         {/* Main Table (Grouped) */}
-        <Card className="hidden md:block border-none shadow-sm overflow-auto max-h-[600px]">
+        <Card className="hidden md:block border-none shadow-sm overflow-hidden py-0 gap-0">
+          <div className="max-h-[600px] overflow-auto">
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
+              <TableRow className="bg-slate-50">
+                <TableHead className="w-10 text-center">
                   <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
                 </TableHead>
                 <ColumnDragProvider columnIds={[...orderedVisibleStd, ...dynamicColumns]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
@@ -848,7 +835,9 @@ export default function DamageAdjustmentPage() {
               )}
             </TableBody>
           </Table>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
+          </div>
+        </Card>
+          <div ref={pendingEndRef} className="hidden md:flex justify-center">
             {isFetchingNextPending && (
               <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -856,50 +845,52 @@ export default function DamageAdjustmentPage() {
               </div>
             )}
           </div>
-        </Card>
+
       </div>
 
       {/* Split-View Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 border-none rounded-2xl sm:rounded-[2.5rem] shadow-2xl bg-slate-50 [overflow-wrap:anywhere]">
-          <div className="p-3 sm:p-8 space-y-6 sm:space-y-8">
-            <DialogHeader className="border-b-2 border-slate-100 pb-4 sm:pb-6 -mx-3 sm:-mx-8 px-3 sm:px-8 bg-white rounded-t-2xl sm:rounded-t-[2.5rem]">
-              <DialogTitle className="text-base sm:text-2xl font-black text-slate-900 tracking-tight flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>Damage Adjustment - Invoice: <span className="text-blue-600 italic uppercase">{selectedGroup?.invoiceNo}</span></span>
-                <span className="w-fit text-[10px] sm:text-sm font-black text-slate-300 uppercase tracking-widest sm:ml-4 ring-2 ring-slate-100 px-3 sm:px-4 py-1.5 rounded-full italic">[{selectedGroup?.customerName}]</span>
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-y-auto p-0 [overflow-wrap:anywhere]">
+          <div className="p-4 sm:p-6">
+            <DialogHeader className="pr-8">
+              <DialogTitle className="text-xl sm:text-2xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
+                Damage Adjustment - Invoice: <span className="text-blue-600">{selectedGroup?.invoiceNo}</span>
               </DialogTitle>
               <DialogDescription className="hidden" />
             </DialogHeader>
 
             {selectedGroup && (
-              <div className="space-y-8 sm:space-y-10 animate-in fade-in zoom-in-95 duration-500">
+              <div className="space-y-6">
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-1.5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <p className="text-[15px] font-semibold text-slate-900 leading-snug break-words">{selectedGroup.customerName}</p>
+                    <p className="font-mono text-[13px] font-semibold text-blue-700">{selectedGroup.doNumber}</p>
+                  </div>
+                </div>
                 {/* Section 1: Order & Logistics Details */}
                 <div className="space-y-6">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
-                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Order & Logistics Details</h3>
-                  </div>
+                  <SectionHeading icon={Truck} title="Order & Logistics Details" hint="Vehicle, driver and weighment information" />
 
-                  <div className="border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm min-w-0">
+                  <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm min-w-0">
                     <div 
-                      className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" 
+                      className="bg-slate-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" 
                       onClick={() => setIsDetailsExpanded(prev => !prev)}
                     >
                       <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                        <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
-                          DETAILS FOR INVOICE {selectedGroup.invoiceNo}
+                        <Badge className="max-w-full bg-white text-slate-800 hover:bg-white border border-slate-200 px-3 py-1 text-xs font-semibold rounded-md shadow-none whitespace-normal break-words">
+                          Invoice {selectedGroup.invoiceNo}
                         </Badge>
                         <div className="flex flex-col">
-                          <span className="text-xs text-blue-100 font-bold leading-none">
+                          <span className="text-xs text-slate-500 font-medium leading-none">
                             Logistics, Vehicle & Driver Information
                           </span>
                         </div>
                       </div>
                       <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
-                        <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2 leading-none cursor-pointer">
-                          {isDetailsExpanded ? 'HIDE DETAILS ▲' : 'SHOW DETAILS ▼'}
+                        <div className="text-xs text-slate-600 font-medium sm:mr-2 leading-none cursor-pointer">
+                          {isDetailsExpanded ? 'Hide details' : 'Show details'}
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/20 rounded-full">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-200/60 rounded-full">
                           {isDetailsExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                         </Button>
                       </div>
@@ -907,7 +898,7 @@ export default function DamageAdjustmentPage() {
 
                     {isDetailsExpanded && (
                       <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
-                        <Card className="p-4 sm:p-8 border-none shadow-xl rounded-2xl sm:rounded-[2rem] bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 lg:gap-x-12 gap-y-5 sm:gap-y-8">
+                        <Card className="p-4 sm:p-6 shadow-none border rounded-lg bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 lg:gap-x-12 gap-y-5 sm:gap-y-8">
                           {[
                             { label: "Delivery Purpose", value: selectedGroup.deliveryPurpose },
                             { label: "Order Type", value: selectedGroup.orderType },
@@ -940,12 +931,12 @@ export default function DamageAdjustmentPage() {
                             { label: "Extra Weight", value: selectedGroup.extraWeight, color: "text-[#d946ef]" },
                           ].map((item, idx) => (
                             <div key={idx} className="space-y-1.5 min-w-0">
-                              <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.1em] block leading-none">{item.label}</Label>
-                              <p className={cn("break-words text-xs font-black tracking-tight leading-snug", item.color || "text-slate-800")}>{item.value || "—"}</p>
+                              <Label className="text-[11px] font-medium uppercase text-slate-500 tracking-wide block leading-none">{item.label}</Label>
+                              <p className={cn("break-words text-sm font-medium leading-snug", item.color || "text-slate-800")}>{item.value || "—"}</p>
                             </div>
                           ))}
                           <div className="space-y-1.5 sm:col-span-2 min-w-0">
-                            <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.1em] block leading-none">PO Copy (SO Upload)</Label>
+                            <Label className="text-[11px] font-medium uppercase text-slate-500 tracking-wide block leading-none">PO Copy (SO Upload)</Label>
                             {selectedGroup.uploadSo ? (
                               <a 
                                 href={selectedGroup.uploadSo} 
@@ -969,17 +960,14 @@ export default function DamageAdjustmentPage() {
 
                 {/* Section 2: Products */}
                 <div className="space-y-6">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
-                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Products ({selectedProducts.length}/{selectedGroup._productCount} selected)</h3>
-                  </div>
+                  <SectionHeading icon={Package} title="Products" hint={`${selectedProducts.length} of ${selectedGroup._productCount} selected`} />
 
-                  <Card className="border-none shadow-xl rounded-2xl sm:rounded-[2rem] overflow-hidden bg-white">
+                  <Card className="border shadow-none rounded-lg overflow-hidden py-0 gap-0">
                     <div className="md:hidden p-3 space-y-3">
-                      <div className="flex items-center justify-between gap-3 rounded-xl bg-blue-600 px-3 py-3 text-white">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border bg-slate-50 px-3 py-3 text-slate-700">
                         <span className="text-[10px] font-black uppercase tracking-widest">Select All</span>
                         <Checkbox
-                          className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-blue-600"
+                          className=""
                           checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
                           onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
                         />
@@ -987,18 +975,18 @@ export default function DamageAdjustmentPage() {
                       {selectedGroup._allProducts.map((product: any) => {
                         const selected = selectedProducts.includes(product._rowKey);
                         return (
-                          <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-red-200 bg-red-50/20")}>
+                          <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Product Info</p>
                                 <p className="text-sm font-black text-slate-800 uppercase tracking-tight break-words">{product.productName}</p>
                                 <div className="mt-1 flex flex-col gap-1">
                                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest break-all">{product.specificOrderNo}</span>
-                                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest break-words">{product.party_name || product.partyName}</span>
+                                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide break-words">{product.party_name || product.partyName}</span>
                                 </div>
                               </div>
                               <Checkbox
-                                className="data-[state=checked]:bg-red-600"
+                                
                                 checked={selected}
                                 onCheckedChange={(checked) => {
                                   if (checked) {
@@ -1013,11 +1001,11 @@ export default function DamageAdjustmentPage() {
                             <div className="grid grid-cols-2 gap-3 text-xs">
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Inv Qty</p>
-                                  <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                                  <p className="mt-1 font-mono font-semibold text-slate-900">{product.actualQty || "0"}</p>
                               </div>
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Damage Qty</p>
-                                <p className="mt-1 font-mono font-black text-red-600">{product.damageQty || 0}</p>
+                                <p className="mt-1 font-mono font-semibold text-slate-900">{product.damageQty || 0}</p>
                               </div>
                               <div className="rounded-md bg-slate-50 p-2 col-span-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Status</p>
@@ -1034,13 +1022,13 @@ export default function DamageAdjustmentPage() {
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <p className="text-[9px] uppercase font-black text-slate-500">Total Inv Qty</p>
-                            <p className="mt-1 font-black text-blue-700">
+                            <p className="mt-1 font-semibold text-slate-900">
                               {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
                             </p>
                           </div>
                           <div>
                             <p className="text-[9px] uppercase font-black text-slate-500">Total Damaged Qty</p>
-                            <p className="mt-1 font-black text-red-600">
+                            <p className="mt-1 font-semibold text-slate-900">
                               {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
                             </p>
                           </div>
@@ -1050,27 +1038,26 @@ export default function DamageAdjustmentPage() {
 
                     <Table className="hidden md:table">
                       <TableHeader className="bg-slate-50">
-                        <TableRow className="border-none">
-                          <TableHead className="w-12 text-center h-10">
+                        <TableRow>
+                          <TableHead className="w-10 text-center">
                             <Checkbox
                               checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
                               onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
                             />
                           </TableHead>
-                          <TableHead className="text-[10px] font-black uppercase tracking-wider h-10">PRODUCT INFO</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">INV QTY</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">DAMAGE QTY</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase text-center tracking-wider h-10">STATUS</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="text-center">Invoice Qty</TableHead>
+                          <TableHead className="text-center">Damage Qty</TableHead>
+                          <TableHead className="text-center">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {selectedGroup._allProducts.map((product: any) => {
                           const selected = selectedProducts.includes(product._rowKey);
                           return (
-                            <TableRow key={product._rowKey} className={cn("h-14 transition-colors", selected ? "bg-red-50/10" : "")}>
+                            <TableRow key={product._rowKey} className={cn(selected && "bg-blue-50/40")}>
                               <TableCell className="text-center">
                                 <Checkbox
-                                  className="data-[state=checked]:bg-red-600"
                                   checked={selected}
                                   onCheckedChange={(checked) => {
                                     if (checked) {
@@ -1081,43 +1068,30 @@ export default function DamageAdjustmentPage() {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell className="p-2">
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
-                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
-                                  <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
-                                </div>
+                              <TableCell>
+                                <p className="text-sm font-medium text-slate-900">{product.productName}</p>
+                                <p className="text-xs text-slate-500">{product.specificOrderNo}</p>
                               </TableCell>
+                              <TableCell className="text-center text-sm">{product.actualQty || "0"}</TableCell>
+                              <TableCell className="text-center text-sm font-medium text-slate-900">{product.damageQty || 0}</TableCell>
                               <TableCell className="text-center">
-                                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                  {product.actualQty || "0"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-center font-black text-xs text-red-600">
-                                {product.damageQty || 0}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50 text-[9px] font-black uppercase tracking-wider">
-                                  {product.damageStatus || "Pending"}
+                                <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700 text-[11px] font-medium capitalize">
+                                  {(product.damageStatus || "Pending").toLowerCase()}
                                 </Badge>
                               </TableCell>
                             </TableRow>
                           );
                         })}
                       </TableBody>
-                      <TableFooter className="bg-slate-50/50">
-                        <TableRow className="h-14 font-black text-xs border-none">
+                      <TableFooter className="bg-slate-50">
+                        <TableRow>
                           <TableCell />
-                          <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
-                          <TableCell className="text-center">
-                            <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                            </Badge>
+                          <TableCell className="text-sm font-semibold text-slate-900">Total selected</TableCell>
+                          <TableCell className="text-center text-sm font-semibold text-slate-900">
+                            {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
                           </TableCell>
-                          <TableCell className="text-center">
-                            <Badge className="bg-red-600 text-white font-black text-xs px-3">
-                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
-                            </Badge>
+                          <TableCell className="text-center text-sm font-semibold text-slate-900">
+                            {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
                           </TableCell>
                           <TableCell />
                         </TableRow>
@@ -1126,94 +1100,53 @@ export default function DamageAdjustmentPage() {
                   </Card>
                 </div>
 
-                {/* Loss liability (from the Unloading report) */}
+                {/* Loss liability (from the Unloading report) + settlement documents */}
                 {(() => {
                   const sel = selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey))
+                  const st = computeSettlement(sel)
                   const sum = (k: string) => sel.reduce((t: number, p: any) => t + (Number(p[k]) || 0), 0)
                   const company = sum("lossCompany"), transporter = sum("lossTransporter"), customer = sum("lossCustomer")
                   const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  const isTransfer = sel.length > 0 && sel.every((p: any) => String(p.orderCategory ?? "").toLowerCase().trim() === "stock transfer")
                   return (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-6 w-1.5 bg-red-600 rounded-full shadow-sm" />
-                        <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-red-900">Loss Liability (from Unloading)</h3>
+                    <div className="space-y-6">
+                      <div className="space-y-4">
+                        <SectionHeading icon={Scale} accent="amber" title="Loss Liability" hint="Split of the approved Unloading loss between the parties" />
+                        <LossOverview
+                          invoiceQty={sum("actualQty")}
+                          damageQty={sum("damageQty")}
+                          company={company}
+                          transporter={transporter}
+                          customer={customer}
+                          isStockTransfer={isTransfer}
+                        />
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Borne by Company</p>
-                          <p className="mt-1 text-lg font-black text-blue-900">{fmt(company)}</p>
-                        </div>
-                        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-orange-700">Recover from Transporter</p>
-                          <p className="mt-1 text-lg font-black text-orange-900">{fmt(transporter)}</p>
-                        </div>
-                        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-purple-700">Borne by Customer / Depot</p>
-                          <p className="mt-1 text-lg font-black text-purple-900">{fmt(customer)}</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        Credit note to the customer: <span className="font-bold text-slate-700">{fmt(company + transporter)}</span> (loss not caused by the customer). Enter the credit note details below.
-                      </p>
+
+                      <DamageSettlement
+                        isStockTransfer={isTransfer}
+                        settlement={st}
+                        docs={adjustmentData}
+                        onChange={(patch) => setAdjustmentData(prev => ({ ...prev, ...patch }))}
+                        transporterName={selectedGroup.transporterName}
+                        isUploading={isUploading}
+                      />
                     </div>
                   )
                 })()}
 
-                {/* Section 3: Credit Note Details */}
-                <div className="space-y-6">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-6 w-1.5 bg-blue-600 rounded-full shadow-sm" />
-                    <h3 className="min-w-0 text-xs sm:text-sm font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-blue-900">Credit Note & Adjustment Details</h3>
-                  </div>
-
-                  <Card className="p-4 sm:p-10 border-none shadow-xl rounded-2xl sm:rounded-[2rem] bg-white grid grid-cols-1 md:grid-cols-3 gap-6 relative overflow-hidden">
-                    <div className="space-y-4">
-                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Credit Note Date <span className="text-red-500">*</span></Label>
-                      <Input
-                        type="date"
-                        className="h-12 sm:h-16 border-2 border-slate-50 bg-slate-50/30 rounded-2xl px-4 sm:px-8 font-black text-slate-700 text-sm sm:text-lg focus:bg-white focus:border-blue-100 transition-all shadow-inner"
-                        value={adjustmentData.creditNoteDate}
-                        onChange={(e) => setAdjustmentData({ ...adjustmentData, creditNoteDate: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-4">
-                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Credit Note No <span className="text-red-500">*</span></Label>
-                      <Input
-                        className="h-12 sm:h-16 border-2 border-slate-50 bg-slate-50/30 rounded-2xl px-4 sm:px-8 font-black text-slate-700 text-sm sm:text-lg focus:bg-white focus:border-blue-100 transition-all shadow-inner"
-                        value={adjustmentData.creditNoteNo}
-                        onChange={(e) => setAdjustmentData({ ...adjustmentData, creditNoteNo: e.target.value })}
-                        placeholder="e.g. CN-2023-001"
-                      />
-                    </div>
-
-                    <div className="space-y-4">
-                      <Label className="text-[10px] font-black uppercase text-slate-300 tracking-[0.2em] ml-1">Upload CN Copy</Label>
-                      <FileUploadField
-                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                        value={null}
-                        fileName={adjustmentData.creditNoteCopyName}
-                        variant="dropzone"
-                        helperText="Max file size: 20 MB"
-                        uploading={isUploading}
-                        buttonText="Click to Select Copy"
-                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0])}
-                      />
-                    </div>
-                  </Card>
-                </div>
               </div>
             )}
 
-            <DialogFooter className="mt-8 sm:mt-12 pt-5 sm:pt-8 border-t-2 border-slate-100 -mx-3 sm:-mx-8 px-3 sm:px-12 bg-white rounded-b-2xl sm:rounded-b-[2.5rem]">
-              <div className="grid w-full grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
-                <Button variant="ghost" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-12 sm:h-14 w-full sm:w-auto px-6 sm:px-10 font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl">Cancel</Button>
+            <DialogFooter className="mt-6 border-t pt-4">
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-11 sm:h-10">Cancel</Button>
                 <Button
+                  type="button"
                   onClick={handleSubmit}
-                  disabled={isProcessing || isReadOnly || !adjustmentData.creditNoteDate || !adjustmentData.creditNoteNo}
-                  className="h-12 sm:h-16 w-full sm:w-auto px-6 sm:px-16 bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-100 rounded-2xl text-sm sm:text-xl font-black italic tracking-tighter uppercase transition-all duration-500"
+                  disabled={isProcessing || isReadOnly || !settlementComplete(computeSettlement(selectedGroup?._allProducts?.filter((p: any) => selectedProducts.includes(p._rowKey)) ?? []), adjustmentData)}
+                  className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
                 >
-                  {isProcessing ? <Loader2 className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 animate-spin" /> : <CheckCircle className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6" />}
+                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                   Complete Adjustment
                 </Button>
               </div>
@@ -1224,3 +1157,4 @@ export default function DamageAdjustmentPage() {
     </WorkflowStageShell>
   )
 }
+
