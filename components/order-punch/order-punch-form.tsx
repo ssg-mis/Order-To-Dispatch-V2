@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi } from "@/lib/api-service"
+import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi, returnApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { fetchCustomerDropdownOptions } from "@/components/order-punch/customer-dropdown"
 import { useStatesMap } from "@/hooks/use-states-map"
@@ -297,6 +297,11 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const [deliveryAddress, setDeliveryAddress] = useState<string>("")
   const [sameAsCustomerAddress, setSameAsCustomerAddress] = useState<boolean>(true)
   const [orderCategory, setOrderCategory] = useState<string>("Sales")
+  // Sales Return: the ORIGINAL invoice being returned against, why, and its returnable lines
+  const [refInvoiceNo, setRefInvoiceNo] = useState<string>("")
+  const [returnReason, setReturnReason] = useState<string>("")
+  const [returnLines, setReturnLines] = useState<any[]>([])
+  const [isLoadingReturnLines, setIsLoadingReturnLines] = useState(false)
 
   // Pre-Approval Products State
   const [preApprovalProducts, setPreApprovalProducts] = useState<PreApprovalProduct[]>([])
@@ -363,7 +368,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     ? ["regular", "pre-approval"]
     : (user?.features?.order_punch_access?.order_type || [])
   const allowedOrderCategories: string[] = isAdmin
-    ? ["Sales", "Stock Transfer"]
+    ? ["Sales", "Stock Transfer", "Sales Return"]
     : (user?.features?.order_punch_access?.order_category || [])
 
   useEffect(() => {
@@ -517,6 +522,79 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       })()
     : null;
 
+  // ---- Sales Return support -------------------------------------------------------------
+  const isSalesReturn = orderCategory === "Sales Return"
+  const { data: returnInvoices = [], isFetching: isLoadingReturnInvoices } = useQuery({
+    queryKey: ["return-invoices", selectedCustomerRecord?.id],
+    enabled: isSalesReturn && !!selectedCustomerRecord?.id,
+    queryFn: async () => {
+      const res = await returnApi.getReturnableInvoices(selectedCustomerRecord!.id)
+      return res.success ? (res.data?.invoices || []) : []
+    },
+  })
+  const { data: returnOptions } = useQuery({
+    queryKey: ["return-options"],
+    enabled: isSalesReturn,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const res = await returnApi.getOptions()
+      return res.success ? res.data : { reasons: [], dispositions: [] }
+    },
+  })
+
+  // A different customer / leaving the category clears the chosen invoice.
+  useEffect(() => {
+    setRefInvoiceNo("")
+    setReturnLines([])
+  }, [selectedCustomerRecord?.id, isSalesReturn])
+
+  // A return is always a regular order.
+  useEffect(() => {
+    if (isSalesReturn && orderType !== "regular") setOrderType("regular")
+  }, [isSalesReturn, orderType])
+
+  // Allow deep links such as /order-punch/create?category=Stock%20Transfer&remarks=Stock%20return
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const cat = params.get("category")
+    if (cat && ["Sales", "Stock Transfer", "Sales Return"].includes(cat)) setOrderCategory(cat)
+    const rem = params.get("remarks")
+    if (rem) setOrderPunchRemarks(rem)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleReturnInvoiceSelect = async (invoiceNo: string) => {
+    setRefInvoiceNo(invoiceNo)
+    if (!invoiceNo || !selectedCustomerRecord?.id) { setReturnLines([]); return }
+    try {
+      setIsLoadingReturnLines(true)
+      const res = await returnApi.getInvoiceLines(selectedCustomerRecord.id, invoiceNo)
+      const lines: any[] = res.success ? (res.data?.lines || []) : []
+      setReturnLines(lines)
+      const rows = lines.filter((l) => l.returnable_qty > 0).map((l) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        skuId: l.sku_id,
+        productName: l.sku_name || "",
+        uom: l.main_uom || "",
+        altUom: l.alternate_uom || "",
+        orderQty: String(l.returnable_qty),
+        altQty: "",
+        rate: l.rate != null ? String(l.rate) : "",
+        ratePer15Kg: l.rate_per_15kg != null ? String(l.rate_per_15kg) : "",
+        ratePerLtr: l.rate_per_ltr != null ? String(l.rate_per_ltr) : "",
+        oilType: "",
+        skuWeight: l.sku_weight != null ? String(l.sku_weight) : "",
+        nosPerMainUom: l.nos_per_main_uom != null ? String(l.nos_per_main_uom) : "",
+      }))
+      if (rows.length) setProducts(rows as any)
+    } catch (error) {
+      toast({ title: "Error", description: "Could not load the invoice lines", variant: "destructive" })
+    } finally {
+      setIsLoadingReturnLines(false)
+    }
+  }
+
   const isContactPersonAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact_person);
   const isWhatsappNoAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact && /^\d{10}$/.test(selectedCustomerRecord.contact));
   const isAddressAutoFilled = !!(selectedCustomerRecord && (
@@ -664,6 +742,29 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       }
     }
 
+    // Sales Return: original invoice + reason are mandatory and qty can never exceed what is returnable
+    if (orderCategory === "Sales Return") {
+      if (!refInvoiceNo) {
+        toast({ title: "Original Invoice Required", description: "Select the invoice this return is against.", variant: "destructive" })
+        return
+      }
+      if (!returnReason) {
+        toast({ title: "Return Reason Required", description: "Select why the stock is being returned.", variant: "destructive" })
+        return
+      }
+      for (const p of products) {
+        const line = returnLines.find((l) => l.sku_id === p.skuId)
+        if (!line) {
+          toast({ title: "Product Not On Invoice", description: `${p.productName || "A product"} is not on invoice ${refInvoiceNo}.`, variant: "destructive" })
+          return
+        }
+        if (parseFloat(p.orderQty) > line.returnable_qty + 0.0001) {
+          toast({ title: "Return Quantity Too High", description: `${p.productName}: only ${line.returnable_qty} is returnable on this invoice.`, variant: "destructive" })
+          return
+        }
+      }
+    }
+
     // Validate dates based on orderPurpose
     if (orderPurpose === "future-period" || orderPurpose === "week-on-week") {
       if (!startDate) {
@@ -778,6 +879,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         userId: user?.id || null,
         orderCategory: orderCategory,
         gst: gst || null,
+        ...(orderCategory === "Sales Return" ? { refInvoiceNo, returnReason } : {}),
       }
 
       // Add items array for backend (for regular and pre-approval order types)
@@ -1194,6 +1296,9 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     )}
                     {allowedOrderCategories.includes("Stock Transfer") && (
                       <SelectItem value="Stock Transfer">Stock Transfer</SelectItem>
+                    )}
+                    {allowedOrderCategories.includes("Sales Return") && (
+                      <SelectItem value="Sales Return">Sales Return</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
@@ -1669,6 +1774,77 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           ))}
                         </TableBody>
                       </Table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Sales Return: which invoice is being returned, and why */}
+              {isSalesReturn && (
+                <div className="md:col-span-2 space-y-4 p-4 bg-amber-50/60 rounded-lg border border-amber-200">
+                  <div>
+                    <Label className="text-lg font-semibold">Return Against Invoice</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Pick the customer's original invoice. Products load with the quantity still returnable and the original invoice rate.
+                    </p>
+                  </div>
+                  {!selectedCustomerRecord ? (
+                    <p className="text-sm text-amber-800">Select the customer first to see their invoices.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Original Invoice <span className="text-red-500">*</span></Label>
+                        <Select value={refInvoiceNo} onValueChange={handleReturnInvoiceSelect}>
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder={isLoadingReturnInvoices ? "Loading invoices..." : returnInvoices.length ? "Select invoice" : "No returnable invoices"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {returnInvoices.map((inv: any) => (
+                              <SelectItem key={inv.invoice_no} value={inv.invoice_no}>
+                                {inv.invoice_no} · {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-IN") : "—"} · ₹{Number(inv.bill_amount || 0).toLocaleString("en-IN")} · returnable {inv.returnable_qty}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Return Reason <span className="text-red-500">*</span></Label>
+                        <Select value={returnReason} onValueChange={setReturnReason}>
+                          <SelectTrigger className="h-10"><SelectValue placeholder="Select reason" /></SelectTrigger>
+                          <SelectContent>
+                            {(returnOptions?.reasons || []).map((r: string) => (
+                              <SelectItem key={r} value={r}>{r}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                  {isLoadingReturnLines && <p className="text-xs text-muted-foreground">Loading invoice lines...</p>}
+                  {returnLines.length > 0 && (
+                    <div className="overflow-x-auto rounded-md border bg-white">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 text-slate-600">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Product</th>
+                            <th className="px-3 py-2 text-right">Invoiced</th>
+                            <th className="px-3 py-2 text-right">Already returned</th>
+                            <th className="px-3 py-2 text-right">Returnable</th>
+                            <th className="px-3 py-2 text-right">Invoice rate</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {returnLines.map((l: any) => (
+                            <tr key={l.sku_id} className="border-t">
+                              <td className="px-3 py-2 font-medium">{l.sku_name}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{l.invoiced_qty}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{l.already_returned_qty}</td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{l.returnable_qty}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{l.rate != null ? `₹${l.rate}` : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>

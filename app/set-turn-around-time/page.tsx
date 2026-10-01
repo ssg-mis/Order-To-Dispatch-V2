@@ -28,6 +28,8 @@ const STAGE_OPTIONS = [
   "Reach Vehicle",
   "Unloading",
   "Damage Adjustment",
+  "Credit Note",
+  "Unload Returned Stock",
   "Gate In",
 ]
 

@@ -91,6 +91,8 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/reach-vehicle": "Reach Vehicle",
         "/unloading": "Unloading",
         "/damage-adjustment": "Damage Adjustment",
+        "/return": "Return",
+        "/unload-returned-stock": "Unload Returned Stock",
         "/gate-in": "Gate In",
         "/variable-parameters": "Variable Parameters",
         "/settings": "Settings",

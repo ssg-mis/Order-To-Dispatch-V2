@@ -68,6 +68,8 @@ const PAGE_ACCESS_OPTIONS = [
   "Unloading",
   "Damage Adjustment",
   "Collection",
+  "Return",
+  "Unload Returned Stock",
   "Gate In",
   "Variable Parameters",
   "Settings",
@@ -94,6 +96,7 @@ const ORDER_TYPE_OPTIONS = [
 const ORDER_CATEGORY_OPTIONS = [
   { value: "Sales", label: "Sales" },
   { value: "Stock Transfer", label: "Stock Transfer" },
+  { value: "Sales Return", label: "Sales Return" },
 ]
 
 const MASTER_TABS = [

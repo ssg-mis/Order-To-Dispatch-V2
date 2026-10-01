@@ -72,7 +72,7 @@ export interface CreateOrderRequest {
   depotId?: number;
   brokerId?: number;
   salespersonId?: number;
-  orderCategory?: 'Sales' | 'Stock Transfer';
+  orderCategory?: 'Sales' | 'Stock Transfer' | 'Sales Return';
   deliveryPurpose?: 'week-on-week' | 'future-period';
   orderThrough?: 'Direct' | 'Broker' | 'Salesperson';
   items: OrderItem[];
@@ -975,6 +975,33 @@ export const unloadingApi = {
       body: JSON.stringify(data),
     });
   },
+};
+
+export const returnApi = {
+  getOptions: async (): Promise<ApiResponse> => request(`/returns/options`),
+
+  // Order Punch (category = Sales Return)
+  getReturnableInvoices: async (customerId: number | string): Promise<ApiResponse> =>
+    request(`/returns/invoices${buildQuery({ customer_id: customerId })}`),
+
+  getInvoiceLines: async (customerId: number | string, invoiceNo: string): Promise<ApiResponse> =>
+    request(`/returns/invoices/${encodeURIComponent(invoiceNo)}/lines${buildQuery({ customer_id: customerId })}`),
+
+  // Stage 17 - Credit Note
+  getPendingCreditNotes: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/pending${buildQuery(params)}`),
+  getCreditNoteHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/history${buildQuery(params)}`),
+  submitCreditNote: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
+
+  // Stage 18 - Unload Returned Stock
+  getPendingUnloadings: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/unloading/pending${buildQuery(params)}`),
+  getUnloadingHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/unloading/history${buildQuery(params)}`),
+  submitUnloading: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/returns/unloading/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const damageAdjustmentApi = {
@@ -1988,6 +2015,12 @@ export const reportsApi = {
       : '';
     return request(`${API_ENDPOINTS.reports.dailyDispatch}${queryString}`);
   },
+  getTransitLoss: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params && Object.keys(params).length
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.transitLoss}${queryString}`);
+  },
 };
 
 export const commitmentPunchApi = {
@@ -2069,12 +2102,6 @@ export const masterHistoryApi = {
     });
   },
   deleteHistory: async (id: number | string): Promise<ApiResponse> => {
-  getTransitLoss: async (params?: any): Promise<ApiResponse> => {
-    const queryString = params && Object.keys(params).length
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`${API_ENDPOINTS.reports.transitLoss}${queryString}`);
-  },
     return request(`/master-history/${id}`, { method: 'DELETE' });
   },
   deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
@@ -2097,6 +2124,7 @@ export default {
   finalInvoice: finalInvoiceApi,
   gateOut: gateOutApi,
   unloading: unloadingApi,
+  returns: returnApi,
   skuDetails: skuDetailsApi,
   skuSellingPrice: skuSellingPriceApi,
   common: commonApi,
