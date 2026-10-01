@@ -67,6 +67,7 @@ const PAGE_ACCESS_OPTIONS = [
   "Reach Vehicle",
   "Unloading",
   "Damage Adjustment",
+  "Collection",
   "Gate In",
   "Variable Parameters",
   "Settings",

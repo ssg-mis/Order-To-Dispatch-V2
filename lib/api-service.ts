@@ -790,6 +790,60 @@ export const checkInvoiceApi = {
   },
 };
 
+export const collectionApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    invoice_no?: string;
+    customer_name?: string;
+    view?: "receivable" | "disputed" | "all";
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/collections/pending${buildQuery(params)}`);
+  },
+
+  getSuggestion: async (params: {
+    invoiceId: number;
+    receiptDate?: string;
+    tdsRuleId?: number;
+    gstPercent?: number;
+  }): Promise<ApiResponse> => {
+    return request(`/collections/suggestion${buildQuery(params)}`);
+  },
+
+  getInvoiceReceipts: async (invoiceId: number): Promise<ApiResponse> => {
+    return request(`/collections/receipts/${invoiceId}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    customer_name?: string;
+    from?: string;
+    to?: string;
+    entry?: "receipts" | "disputes" | "cleared";
+  }): Promise<ApiResponse> => {
+    return request(`/collections/history${buildQuery(params)}`);
+  },
+
+  setDispute: async (data: { invoiceId: number; disputed: boolean; remarks: string }): Promise<ApiResponse> => {
+    return request(`/collections/dispute`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  addReceipt: async (data: any): Promise<ApiResponse> => {
+    return request(`/collections/add-receipt`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
 export const finalInvoiceApi = {
   getPending: async (params?: {
     page?: number;

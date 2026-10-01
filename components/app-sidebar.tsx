@@ -75,6 +75,7 @@ const modules = [
   { title: "Damage Adjustment", icon: AlertCircle, url: "/damage-adjustment" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },
+  { title: "Collection", icon: Receipt, url: "/collection" },
   { title: "Production", icon: Factory, url: "/production" },
   { title: "Master", icon: BookMarked, url: "/master" },
   { title: "Inventory", icon: Warehouse, url: "/inventory" },
