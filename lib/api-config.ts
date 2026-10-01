@@ -83,5 +83,6 @@ export const API_ENDPOINTS = {
     pendingSaudaSku: '/reports/pending-sauda-sku',
     oilDispatchVoucher: '/reports/oil-dispatch-voucher',
     dailyDispatch: '/reports/daily-dispatch',
+    transitLoss: '/reports/transit-loss',
   },
 };

@@ -34,7 +34,8 @@ import { CustomerWiseSaudaModal } from "@/components/customer-wise-sauda-modal"
 import { CustomerWiseDetailedModal } from "@/components/customer-wise-detailed-modal"
 import { SkuCustomerWisePendingModal } from "@/components/sku-customer-wise-pending-modal"
 import { DailyDispatchModal } from "@/components/daily-dispatch-modal"
-import { FileText, FileDown, Users, FileSpreadsheet, CalendarDays, Boxes } from "lucide-react"
+import { TransitLossModal } from "@/components/transit-loss-modal"
+import { FileText, FileDown, Users, FileSpreadsheet, CalendarDays, Boxes, Landmark } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -93,6 +94,7 @@ export default function ReportsPage() {
   const [custDetailedOpen, setCustDetailedOpen] = useState(false)
   const [custSkuOpen, setCustSkuOpen] = useState(false)
   const [dailyOpen, setDailyOpen] = useState(false)
+  const [transitLossOpen, setTransitLossOpen] = useState(false)
 
   const handlePendingSaudaPdf = useCallback(async () => {
     setPendingSaudaLoading(true)
@@ -344,6 +346,11 @@ export default function ReportsPage() {
                 onClick={() => { setExportMenuOpen(false); setDailyOpen(true) }}>
                 <CalendarDays className="h-3.5 w-3.5" /> Daily Dispatch Report
               </Button>
+              <Button variant="ghost" size="sm"
+                className="w-full justify-start rounded-xl text-xs font-bold gap-2 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                onClick={() => { setExportMenuOpen(false); setTransitLossOpen(true) }}>
+                <Landmark className="h-3.5 w-3.5" /> Transit Damage Loss (P&amp;L)
+              </Button>
             </PopoverContent>
           </Popover>
 
@@ -359,6 +366,7 @@ export default function ReportsPage() {
           <CustomerWiseDetailedModal hideTrigger open={custDetailedOpen} onOpenChange={setCustDetailedOpen} />
           <SkuCustomerWisePendingModal hideTrigger open={custSkuOpen} onOpenChange={setCustSkuOpen} />
           <DailyDispatchModal hideTrigger open={dailyOpen} onOpenChange={setDailyOpen} />
+          <TransitLossModal open={transitLossOpen} onOpenChange={setTransitLossOpen} />
         </div>
       </div>
 

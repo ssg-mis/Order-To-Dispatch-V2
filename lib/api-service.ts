@@ -2015,6 +2015,12 @@ export const masterHistoryApi = {
     });
   },
   deleteHistory: async (id: number | string): Promise<ApiResponse> => {
+  getTransitLoss: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params && Object.keys(params).length
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.transitLoss}${queryString}`);
+  },
     return request(`/master-history/${id}`, { method: 'DELETE' });
   },
   deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
