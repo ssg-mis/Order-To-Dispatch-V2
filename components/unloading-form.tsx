@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FileUploadField } from "@/components/file-upload-field"
+import { SerialInput } from "@/components/serial-input"
+import { ToggleSelect } from "@/components/toggle-select"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Trash2, Box, Package, Droplets, CheckCircle } from "lucide-react"
 import { LOSS_CAUSES, SHORTAGE_CAUSES, DAMAGE_CAUSES, BORNE_BY_LABEL, BORNE_BY_STYLE } from "@/lib/loss-causes"
@@ -126,15 +128,29 @@ export function UnloadingForm({
 
   const hasDamage = formData.damagedContainers.length > 0
 
+  // The same TIN/Box (or SFG inside one box) cannot be reported twice.
+  const containerCounts = new Map<string, number>()
+  formData.damagedContainers.forEach(c => { if (c.containerSerialNumber) containerCounts.set(c.containerSerialNumber, (containerCounts.get(c.containerSerialNumber) || 0) + 1) })
+  const containerError = (c: UnloadingDamagedContainer) =>
+    c.containerSerialNumber && (containerCounts.get(c.containerSerialNumber) || 0) > 1 ? "Already added - duplicate serial" : null
+  const itemError = (c: UnloadingDamagedContainer, item: UnloadingDamagedItem) =>
+    item.sfgSerialNumber && c.items.filter(i => i.sfgSerialNumber === item.sfgSerialNumber).length > 1 ? "Already added - duplicate serial" : null
+  // "Other" is a free-text cause, so the reason must be written in Remarks for the approving admin.
+  const usesOtherCause =
+    (Number(formData.shortageQty) > 0 && formData.shortageCause === "other") ||
+    formData.damagedContainers.some(c => c.cause === "other")
+  const remarksMissing = usesOtherCause && !formData.remarks.trim()
+  const hasDuplicates = formData.damagedContainers.some(c => containerError(c) || c.items.some(i => itemError(c, i)))
+
   return (
     <div className="space-y-8">
       {/* Receipt details */}
       <section className="space-y-4">
-        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-          <CheckCircle className="h-4 w-4 text-blue-600" />
+        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2.5 border-b pb-3">
+          <CheckCircle className="h-5 w-5 text-blue-600" />
           Receipt Details
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 items-start">
           <div className="space-y-2">
             <Label>Unloading Completed On <span className="text-red-500">*</span></Label>
             <Input
@@ -146,10 +162,10 @@ export function UnloadingForm({
           </div>
           <div className="space-y-2">
             <FileUploadField
-              label="Received Proof (optional)"
+              label={<Label>Proof of Delivery <span className="text-xs font-normal text-slate-500">(optional)</span></Label>}
               accept="image/*,.pdf"
               variant="dropzone"
-              helperText="Max file size: 20 MB"
+              helperText="Photo / scan of the signed challan or invoice copy with the customer's stamp & signature. Max 20 MB."
               buttonText="Click to select proof"
               fileName={formData.receivedProofFile?.name || ""}
               onFilesSelected={(files) => files[0] && setFormData(prev => ({ ...prev, receivedProofFile: files[0] }))}
@@ -161,13 +177,13 @@ export function UnloadingForm({
 
       {/* Shortage */}
       <section className="space-y-4">
-        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-          <Package className="h-4 w-4 text-blue-600" />
+        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2.5 border-b pb-3">
+          <Package className="h-5 w-5 text-blue-600" />
           Shortage & Remarks
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 items-start">
           <div className="space-y-2">
-            <Label>
+            <Label className="min-h-5">
               Total Shortage Quantity
               {dispatchedQty ? <span className="ml-1 text-xs font-normal text-slate-500">(dispatched: {dispatchedQty})</span> : null}
             </Label>
@@ -181,26 +197,31 @@ export function UnloadingForm({
             />
           </div>
           <div className="space-y-2">
-            <Label>Remarks</Label>
+            <Label className="min-h-5">Remarks {usesOtherCause && <span className="text-red-500">*</span>}</Label>
             <Textarea
-              placeholder="Any additional notes..."
+              placeholder={usesOtherCause ? "Explain the 'Other' cause (required)..." : "Any additional notes..."}
+              aria-invalid={remarksMissing}
               value={formData.remarks}
               onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-              className="h-10"
+              rows={1}
+              className={`min-h-9 h-9 resize-y py-1.5 ${remarksMissing ? "border-red-400 focus-visible:ring-red-300" : ""}`}
             />
+            {remarksMissing && <p className="text-xs font-medium text-red-600">Describe the cause - "Other" needs an explanation.</p>}
           </div>
           {Number(formData.shortageQty) > 0 && (
             <div className="space-y-2 sm:col-span-2">
               <Label>Cause of Shortage <span className="text-red-500">*</span></Label>
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-                <Select value={formData.shortageCause} onValueChange={(val) => setFormData({ ...formData, shortageCause: val })}>
-                  <SelectTrigger className="w-full sm:max-w-sm"><SelectValue placeholder="Select cause" /></SelectTrigger>
-                  <SelectContent>
-                    {SHORTAGE_CAUSES.map(k => <SelectItem key={k} value={k}>{LOSS_CAUSES[k].label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="w-full sm:max-w-sm">
+                  <ToggleSelect
+                    value={formData.shortageCause}
+                    onChange={(val) => setFormData(prev => ({ ...prev, shortageCause: val }))}
+                    options={SHORTAGE_CAUSES.map(k => ({ value: k, label: LOSS_CAUSES[k].label }))}
+                    placeholder="Select cause"
+                  />
+                </div>
                 {formData.shortageCause && (
-                  <Badge className={`${BORNE_BY_STYLE[LOSS_CAUSES[formData.shortageCause].borneBy]} text-[10px] font-black`}>
+<Badge className={`${BORNE_BY_STYLE[LOSS_CAUSES[formData.shortageCause].borneBy]} text-[10px] font-black`}>
                     Borne by: {BORNE_BY_LABEL[LOSS_CAUSES[formData.shortageCause].borneBy]}
                   </Badge>
                 )}
@@ -212,9 +233,9 @@ export function UnloadingForm({
 
       {/* Damage */}
       <section className="space-y-4">
-        <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2">
-          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <Box className="h-4 w-4 text-red-500" />
+        <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2.5">
+            <Box className="h-5 w-5 text-red-500" />
             Damage Tracking
           </h3>
           <Button type="button" onClick={addContainer} variant="outline" size="sm" className="border-red-200 text-red-600 hover:bg-red-50">
@@ -242,13 +263,15 @@ export function UnloadingForm({
                 <Trash2 className="h-4 w-4" />
               </Button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pr-10">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 pr-10 items-start">
                 <div className="space-y-2">
                   <Label>Container Serial No. (TIN/Box) <span className="text-red-500">*</span></Label>
-                  <Input
-                    placeholder="Scan or enter barcode..."
+                  <SerialInput
                     value={container.containerSerialNumber}
-                    onChange={(e) => updateContainer(cIdx, "containerSerialNumber", e.target.value)}
+                    onChange={(v) => updateContainer(cIdx, "containerSerialNumber", v)}
+                    onEnter={() => (container.damageType === "partial" ? addItem(cIdx) : addContainer())}
+                    error={containerError(container)}
+                    autoFocus={cIdx === formData.damagedContainers.length - 1 && !container.containerSerialNumber}
                   />
                 </div>
                 <div className="space-y-2">
@@ -298,10 +321,13 @@ export function UnloadingForm({
                     <div key={iIdx} className="flex flex-wrap sm:flex-nowrap items-end gap-3 p-3 rounded-lg border border-red-100 bg-background">
                       <div className="w-full sm:flex-1 space-y-1.5">
                         <Label className="text-[10px] uppercase text-slate-500">SFG Serial No. <span className="text-red-500">*</span></Label>
-                        <Input
-                          placeholder="Inner bottle/pouch..."
+                        <SerialInput
+                          placeholder="Scan or type inner bottle / pouch no."
                           value={item.sfgSerialNumber}
-                          onChange={(e) => updateItem(cIdx, iIdx, "sfgSerialNumber", e.target.value)}
+                          onChange={(v) => updateItem(cIdx, iIdx, "sfgSerialNumber", v)}
+                          onEnter={() => addItem(cIdx)}
+                          error={itemError(container, item)}
+                          autoFocus={iIdx === container.items.length - 1 && !item.sfgSerialNumber}
                         />
                       </div>
                       <div className="w-full sm:flex-1 space-y-1.5">
@@ -335,7 +361,7 @@ export function UnloadingForm({
                           </div>
                         )}
                       </div>
-                      <Button type="button" variant="ghost" size="icon" className="mb-0.5 text-slate-400 hover:text-red-600 shrink-0" onClick={() => removeItem(cIdx, iIdx)}>
+                      <Button type="button" variant="ghost" size="icon" className="mt-6 text-slate-400 hover:text-red-600 shrink-0" onClick={() => removeItem(cIdx, iIdx)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -376,7 +402,7 @@ export function UnloadingForm({
         <Button
           type="button"
           onClick={() => onSubmit(formData)}
-          disabled={isSubmitting}
+          disabled={isSubmitting || hasDuplicates || remarksMissing}
           className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
         >
           {isSubmitting ? "Processing..." : "Submit Unloading Report"}

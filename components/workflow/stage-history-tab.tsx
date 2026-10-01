@@ -416,6 +416,8 @@ export function StageHistoryTab({
                                     ? "bg-green-100 text-green-700 border border-green-200"
                                     : sibling.status === "Rejected"
                                     ? "bg-red-100 text-red-700 border border-red-200"
+                                    : sibling.status === "Pending Approval"
+                                    ? "bg-amber-100 text-amber-800 border border-amber-300"
                                     : "bg-slate-100 text-slate-700 border border-slate-200"
                                 }`}
                               >
@@ -458,6 +460,8 @@ export function StageHistoryTab({
                               ? "bg-green-100 text-green-700 border border-green-200"
                               : rowItem.status === "Rejected"
                               ? "bg-red-100 text-red-700 border border-red-200"
+                              : rowItem.status === "Pending Approval"
+                              ? "bg-amber-100 text-amber-800 border border-amber-300"
                               : "bg-slate-100 text-slate-700 border border-slate-200"
                           }`}
                         >
@@ -539,6 +543,8 @@ export function StageHistoryTab({
                                     ? "bg-green-100 text-green-700 border border-green-200"
                                     : sibling.status === "Rejected"
                                     ? "bg-red-100 text-red-700 border border-red-200"
+                                    : sibling.status === "Pending Approval"
+                                    ? "bg-amber-100 text-amber-800 border border-amber-300"
                                     : "bg-slate-100 text-slate-700 border border-slate-200"
                                 }`}
                               >
@@ -578,6 +584,8 @@ export function StageHistoryTab({
                             ? "bg-green-100 text-green-700 border border-green-200"
                             : rowItem.status === "Rejected"
                             ? "bg-red-100 text-red-700 border border-red-200"
+                            : rowItem.status === "Pending Approval"
+                            ? "bg-amber-100 text-amber-800 border border-amber-300"
                             : "bg-slate-100 text-slate-700 border border-slate-200"
                         }`}
                       >

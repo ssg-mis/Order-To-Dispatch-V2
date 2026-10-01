@@ -345,6 +345,7 @@ export default function UnloadingPage() {
 
       let shortageLeft = shortage
       let succeeded = 0
+      let needsApproval = 0
       let stale = 0
       let failed = 0
       for (const [idx, line] of lines.entries()) {
@@ -380,7 +381,7 @@ export default function UnloadingPage() {
 
         try {
           const response = await unloadingApi.submit(line.id, payload)
-          if (response.success) succeeded++
+          if (response.success) { succeeded++; if (response.data?.needsApproval) needsApproval++ }
           else failed++
         } catch (err: any) {
           if (isStaleWriteError(err)) stale++
@@ -389,7 +390,9 @@ export default function UnloadingPage() {
       }
 
       if (succeeded > 0) {
-        toast({ title: "Unloading Confirmed", description: `Processed ${succeeded} item(s).` })
+        toast(needsApproval > 0
+          ? { title: "Sent for approval", description: `Loss report for ${needsApproval} item(s) is waiting for Company Admin approval. Stock is adjusted once approved - track it in History.` }
+          : { title: "Unloading Confirmed", description: `Processed ${succeeded} item(s).` })
       }
       if (stale > 0) {
         toast({ title: "Already processed", description: `${stale} item(s) were already processed by another user. Refreshing the list…`, variant: "destructive" })
@@ -445,11 +448,14 @@ export default function UnloadingPage() {
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => order.party_name || "—"}
           mapStatus={(order: any) =>
-            (Number(order.shortage_qty) > 0 || (order.damagedContainers?.length ?? 0) > 0) ? "Damage Reported" : "Received OK"}
+            order.approval_status === "pending" ? "Pending Approval"
+              : (Number(order.shortage_qty) > 0 || (order.damagedContainers?.length ?? 0) > 0) ? "Approved"
+              : "Received OK"}
           mapRemarks={(order: any) => {
             const parts: string[] = []
             if (Number(order.shortage_qty) > 0) parts.push(`Shortage: ${order.shortage_qty}`)
             if (order.damagedContainers?.length) parts.push(`Damaged containers: ${order.damagedContainers.length}`)
+            if (order.approval_status === "pending") parts.push("Awaiting Company Admin approval")
             return parts.length ? parts.join(", ") : (order.remarks_3 || "Received OK")
           }}
           getDate={(order: any) => order.actual_8 || null}
@@ -672,7 +678,7 @@ export default function UnloadingPage() {
           <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-y-auto p-0 [overflow-wrap:anywhere]">
             <div className="p-4 sm:p-6">
               <DialogHeader className="pr-8">
-                <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
+                <DialogTitle className="text-xl sm:text-2xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
                   Unloading Report - Invoice: <span className="text-blue-600">{selectedGroup?.invoiceNo}</span>
                 </DialogTitle>
                 <DialogDescription className="hidden" />
@@ -685,13 +691,21 @@ export default function UnloadingPage() {
                       <b>Previous report was rejected.</b> {selectedGroup.rejectionNote.replace(/^Rejected:\s*/, "")}
                     </div>
                   )}
-                  <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 mb-1">
-                      {selectedGroup.customerName} — {selectedGroup.doNumber}
-                    </p>
-                    <p className="text-slate-700">
-                      {selectedGroup._allProducts.map((p: any) => `${p.productName || "—"} × ${Number(p.actualQty) || 0}`).join("  •  ")}
-                    </p>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-1.5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <p className="text-[15px] font-semibold text-slate-900 leading-snug break-words">
+                        {selectedGroup.customerName}
+                      </p>
+                      <p className="font-mono text-[13px] font-semibold text-blue-700">{selectedGroup.doNumber}</p>
+                    </div>
+                    <ul className="space-y-1">
+                      {selectedGroup._allProducts.map((p: any, i: number) => (
+                        <li key={i} className="flex items-baseline justify-between gap-4 text-[13px] text-slate-600">
+                          <span className="break-words">{p.productName || "—"}</span>
+                          <span className="shrink-0 font-semibold text-slate-900">× {Number(p.actualQty) || 0}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                   <UnloadingForm
                     onSubmit={handleSubmit}
