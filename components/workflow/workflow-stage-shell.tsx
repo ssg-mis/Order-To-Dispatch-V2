@@ -115,6 +115,10 @@ export const FIELD_GROUPS: Record<string, number> = {
   debit_note_no: 10, debit_note_date: 10, debit_note_amount: 10, debit_note_copy: 10,
   reverse_transfer_no: 10, reverse_transfer_date: 10, reverse_transfer_qty: 10, reverse_transfer_copy: 10,
   company_loss_amount: 10, company_loss_head: 10, settlement_remarks: 10,
+
+  // Level 12: Gate In (Stage 6) - a gate_in_records row
+  gate_in_do: 12, gate_in_vehicle_no: 12, gate_in_driver_name: 12, gate_in_by: 12, gate_in_at: 12,
+  front_vehicle_image: 12, back_vehicle_image: 12, driver_photo: 12, gatepass_photo: 12,
 }
 
 // Human-readable stage name for each FIELD_GROUPS level — drives the
@@ -133,11 +137,21 @@ export const STAGE_NAMES: Record<number, string> = {
   8: "Gate Out",
   9: "Unloading",
   10: "Damage Adjustment",
+  12: "Gate In",
 }
 
 // Friendly overrides for field labels in the history "View" dialog, where the
 // auto-generated (underscore-split, title-cased) label reads awkwardly.
 export const FIELD_LABELS: Record<string, string> = {
+  gate_in_do: "DO Number",
+  gate_in_vehicle_no: "Vehicle No.",
+  gate_in_driver_name: "Driver Name",
+  gate_in_by: "Gate-In By",
+  gate_in_at: "Gate-In At",
+  front_vehicle_image: "Front Vehicle Photo",
+  back_vehicle_image: "Back Vehicle Photo",
+  driver_photo: "Driver Photo",
+  gatepass_photo: "Gate Pass Photo",
   approved_qty: "Pre Approved Quantity",
   received_date: "Unloading Completed On",
   received_proof: "Received Proof",

@@ -854,10 +854,26 @@ const buildSlipParties = () => {
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="gate-in-history"
-          getHistoryApi={(params: any) => gateInApi.getHistory({
-            page: params.page,
-            limit: params.limit,
-          })}
+          getHistoryApi={async (params: any) => {
+            const res = await gateInApi.getHistory({ page: params.page, limit: params.limit })
+            const list = res?.data?.records
+            if (!Array.isArray(list)) return res
+            // Shape each record for the "View" audit dialog (draft_data carries the vehicle / driver chosen at Gate In).
+            return {
+              ...res,
+              data: {
+                ...res.data,
+                records: list.map((r: any) => ({
+                  ...r,
+                  gate_in_do: r.order_key,
+                  gate_in_vehicle_no: r.draft_data?.vehicleNumber ?? null,
+                  gate_in_driver_name: r.draft_data?.driverName ?? null,
+                  gate_in_by: r.username,
+                  gate_in_at: r.submitted_at,
+                })),
+              },
+            }
+          }}
           filterValues={{
             search: "",
             partyName: "all",
@@ -866,7 +882,7 @@ const buildSlipParties = () => {
           }}
           activeTab={activeTab}
           stageName="Gate In"
-          stageLevel={1}
+          stageLevel={12}
           remarksColName="Remarks"
           orderListKey="records"
           mapOrderNo={(r: any) => r.order_key}
