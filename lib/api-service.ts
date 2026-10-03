@@ -999,6 +999,7 @@ export const returnApi = {
   getReturnableTransfers: async (depotId: number | string): Promise<ApiResponse> =>
     request(`/returns/stock/transfers${buildQuery({ depot_id: depotId })}`),
   getStockReturns: async (): Promise<ApiResponse> => request(`/returns/stock/list`),
+  getSalesReturns: async (): Promise<ApiResponse> => request(`/returns/sales/list`),
 
   // Main Gate "Stock Return" gate pass
   createGatePass: async (data: any): Promise<ApiResponse> =>
