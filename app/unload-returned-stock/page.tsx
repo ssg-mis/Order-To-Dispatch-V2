@@ -17,7 +17,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { depotApi, orderApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Boxes, Loader2, PackageOpen } from "lucide-react"
+import { Boxes, Loader2, PackageOpen, Scale } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN") : "—")
@@ -37,6 +37,12 @@ const emptyForm = () => ({
   remarks: "",
   receivedProof: "",
   receivedProofName: "",
+  rstNo: "",
+  weighmentSlip: "",
+  weighmentSlipName: "",
+  grossWeight: "",
+  tareWeight: "",
+  weightDifferenceReason: "",
 })
 
 export default function UnloadReturnedStockPage() {
@@ -52,6 +58,7 @@ export default function UnloadReturnedStockPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [form, setForm] = useState(emptyForm())
   const [isUploading, setIsUploading] = useState(false)
+  const [isUploadingSlip, setIsUploadingSlip] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
 
   const filters = {
@@ -128,10 +135,31 @@ export default function UnloadReturnedStockPage() {
   const overReceived = received > expected + 0.0001
   const needsDisposition = damaged > 0
   const needsDepot = good > 0
+
+  // Weighment: truck weighed loaded (gross) and empty (tare); net is compared with the items' total gross weight.
+  const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000
+  const skuGross = num(selected?.sku?.grossWeight)
+  const grossWt = num(form.grossWeight)
+  const tareWt = num(form.tareWeight)
+  const netWt = round3(grossWt - tareWt)
+  const expectedWt = round3(skuGross * received)
+  const diffWt = round3(netWt - expectedWt)
+  const diffTolerance = Math.max(0.5, expectedWt * 0.01)
+  const needsDiffReason = received > 0 && expectedWt > 0 && grossWt > 0 && Math.abs(diffWt) > diffTolerance
   const error = !form.receivedDate
     ? "Received date is required"
     : received > 0 && !form.batchNo.trim()
       ? "Batch number of the returned goods is required"
+    : received > 0 && !form.rstNo.trim()
+      ? "RST No. is required"
+    : received > 0 && !form.weighmentSlip
+      ? "Upload the weighing slip"
+    : received > 0 && !(grossWt > 0 && form.tareWeight !== "" && tareWt >= 0)
+      ? "Gross weight and tare weight are required"
+    : received > 0 && grossWt <= tareWt
+      ? "Gross weight must be more than the tare weight"
+    : needsDiffReason && !form.weightDifferenceReason.trim()
+      ? "Enter the reason for the weight difference"
     : received < 0 || good < 0 || damaged < 0
       ? "Quantities cannot be negative"
       : overReceived
@@ -145,15 +173,22 @@ export default function UnloadReturnedStockPage() {
               : ""
   const canSave = !isProcessing && !isReadOnly && !error
 
-  const upload = async (file: File) => {
-    setIsUploading(true)
+  const upload = async (file: File, kind: "proof" | "slip" = "proof") => {
+    const setBusy = kind === "slip" ? setIsUploadingSlip : setIsUploading
+    setBusy(true)
     try {
       const res = await orderApi.uploadFile(file)
-      if (res.success) setForm((f) => ({ ...f, receivedProof: res.data.url, receivedProofName: file.name }))
+      if (res.success) {
+        setForm((f) =>
+          kind === "slip"
+            ? { ...f, weighmentSlip: res.data.url, weighmentSlipName: file.name }
+            : { ...f, receivedProof: res.data.url, receivedProofName: file.name },
+        )
+      }
     } catch (e: any) {
       toast({ title: "Upload Failed", description: e.message || "Could not upload the file", variant: "destructive" })
     } finally {
-      setIsUploading(false)
+      setBusy(false)
     }
   }
 
@@ -172,13 +207,16 @@ export default function UnloadReturnedStockPage() {
         expiryDate: form.expiryDate || null,
         remarks: form.remarks || null,
         receivedProof: form.receivedProof || null,
+        rstNo: form.rstNo.trim() || null,
+        weighmentSlip: form.weighmentSlip || null,
+        grossWeight: grossWt || null,
+        tareWeight: form.tareWeight === "" ? null : tareWt,
+        weightDifferenceReason: form.weightDifferenceReason.trim() || null,
       })
       if (res.success) {
-        const shortVsCn = Number(res.data?.shortAgainstCreditNote) || 0
         toast({
           title: "Returned Stock Recorded",
-          description: `${good} restocked${damaged ? `, ${damaged} held (${form.damagedDisposition})` : ""}${shortVsCn > 0 ? `. Note: ${shortVsCn} less than the credit note (${res.data?.creditNoteNo || "CN"}) was received - review the credit note.` : ""}`,
-          ...(shortVsCn > 0 ? { variant: "destructive" as const } : {}),
+          description: `${good} restocked (deducted from Sales)${damaged ? `, ${damaged} held (${form.damagedDisposition})` : ""}.${res.data?.documentsQueued ? " Sent to Billing: Stage 19 - Issue Documents Against Returned Stock." : ""}`,
         })
         setIsDialogOpen(false)
         setSelectedId(null)
@@ -210,7 +248,7 @@ export default function UnloadReturnedStockPage() {
     <WorkflowStageShell
       partyNames={[]}
       title="Stage 18: Unload Returned Stock"
-      description="Receive the returned goods, check them (batch, condition) and restock the good quantity actually received."
+      description="Weighment and RST recording for returned stock: receive, weigh, check and restock. Billing then issues the documents (Stage 19)."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -228,16 +266,16 @@ export default function UnloadReturnedStockPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
                 <TableRow className="bg-slate-50">
-                  {["Received On", "DO Number", "Customer", "Original Invoice", "Product", "Batch No.", "Expiry", "Expected", "Received", "Good (restocked)", "Damaged", "Shortage", "Restock Depot", "Remarks"].map((h) => (
+                  {["Received On", "DO Number", "Customer", "Original Invoice", "Product", "Batch No.", "Expiry", "Expected", "Received", "Good (restocked)", "Damaged", "Shortage", "Restock Depot", "RST No.", "Net Wt (kg)", "Wt Diff (kg)", "Remarks"].map((h) => (
                     <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isHistoryLoading ? (
-                  <TableRow><TableCell colSpan={14} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={17} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
                 ) : history.length === 0 ? (
-                  <TableRow><TableCell colSpan={14} className="py-10 text-center text-slate-500">No returned stock received yet.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={17} className="py-10 text-center text-slate-500">No returned stock received yet.</TableCell></TableRow>
                 ) : (
                   history.map((r) => (
                     <TableRow key={r.gate.id}>
@@ -258,6 +296,9 @@ export default function UnloadReturnedStockPage() {
                       </TableCell>
                       <TableCell className={cn("text-center text-xs tabular-nums", num(r.gate.shortageQty) > 0 && "font-semibold text-red-600")}>{num(r.gate.shortageQty)}</TableCell>
                       <TableCell className="text-center text-xs">{r.restockDepotName || "—"}</TableCell>
+                      <TableCell className="text-center text-xs">{r.gate.rstNo || "—"}</TableCell>
+                      <TableCell className="text-center text-xs tabular-nums">{r.gate.netWeight != null ? num(r.gate.netWeight) : "—"}</TableCell>
+                      <TableCell className={cn("text-center text-xs tabular-nums", Math.abs(num(r.gate.weightDifference)) > 0.5 && "font-semibold text-amber-700")}>{r.gate.weightDifference != null ? num(r.gate.weightDifference) : "—"}</TableCell>
                       <TableCell className="max-w-[200px] truncate text-xs" title={r.gate.remarks || ""}>{r.gate.remarks || "—"}</TableCell>
                     </TableRow>
                   ))
@@ -407,6 +448,61 @@ export default function UnloadReturnedStockPage() {
                 </div>
 
                 <div className="space-y-6 rounded-lg border bg-white p-4 shadow-sm sm:p-6">
+                  <h3 className="flex items-center gap-2 border-b pb-2 text-sm font-bold text-slate-800">
+                    <Scale className="h-4 w-4 text-amber-600" />
+                    Weighment (RST)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-2">
+                      <Label>RST No. {received > 0 && <span className="text-red-500">*</span>}</Label>
+                      <Input className="h-10" placeholder="Weighbridge RST no." value={form.rstNo} onChange={(e) => setForm((f) => ({ ...f, rstNo: e.target.value }))} />
+                    </div>
+                    <div className="space-y-2 md:col-span-1 lg:col-span-1">
+                      <FileUploadField
+                        label={<Label>Weighing Slip {received > 0 && <span className="text-red-500">*</span>}</Label>}
+                        accept="image/*,.pdf"
+                        value={form.weighmentSlip}
+                        fileName={form.weighmentSlipName}
+                        uploading={isUploadingSlip}
+                        buttonText={form.weighmentSlipName ? "REPLACE" : "UPLOAD"}
+                        onFilesSelected={(files) => files[0] && upload(files[0], "slip")}
+                        onRemove={() => setForm((f) => ({ ...f, weighmentSlip: "", weighmentSlipName: "" }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-2">
+                      <Label>Gross Wt (kg) - truck loaded {received > 0 && <span className="text-red-500">*</span>}</Label>
+                      <Input type="number" min={0} className="h-10" placeholder="Weighed on arrival" value={form.grossWeight} onChange={(e) => setForm((f) => ({ ...f, grossWeight: e.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tare Wt (kg) - truck empty {received > 0 && <span className="text-red-500">*</span>}</Label>
+                      <Input type="number" min={0} className="h-10" placeholder="Weighed after unloading" value={form.tareWeight} onChange={(e) => setForm((f) => ({ ...f, tareWeight: e.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Net Weight (kg)</Label>
+                      <Input className="h-10 bg-muted" readOnly value={grossWt > 0 ? String(netWt) : ""} placeholder="Gross − Tare" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total Items Gross Wt (kg)</Label>
+                      <Input className="h-10 bg-muted" readOnly value={expectedWt > 0 ? String(expectedWt) : ""} placeholder="SKU gross wt × received qty" />
+                    </div>
+                  </div>
+                  {grossWt > 0 && expectedWt > 0 && (
+                    <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm", needsDiffReason ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                      <span>Net weight vs items' total gross weight</span>
+                      <span className="font-semibold tabular-nums">{diffWt > 0 ? "+" : ""}{diffWt} kg {needsDiffReason ? "· reason required" : "· within tolerance"}</span>
+                    </div>
+                  )}
+                  {needsDiffReason && (
+                    <div className="space-y-2">
+                      <Label>Reason for weight difference <span className="text-red-500">*</span></Label>
+                      <Input className="h-10" placeholder="Why does the net weight differ from the items' gross weight?" value={form.weightDifferenceReason} onChange={(e) => setForm((f) => ({ ...f, weightDifferenceReason: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+                
+                                <div className="space-y-6 rounded-lg border bg-white p-4 shadow-sm sm:p-6">
                   <h3 className="flex items-center gap-2 border-b pb-2 text-sm font-bold text-slate-800">
                     <Boxes className="h-4 w-4 text-emerald-600" />
                     Disposition
