@@ -841,7 +841,8 @@ export default function PlanVehiclePage() {
           successfulItems.push(item);
         } catch (error: any) {
           console.error('[PLAN VEHICLE SUBMISSION ERROR]', { dispatchId, error });
-          failedItems.push({ item, error: error?.message || 'Unknown error', code: error?.code });
+          const fieldErrors = Array.isArray(error?.errors) ? error.errors.map((e: any) => e?.message).filter(Boolean).join('; ') : ''
+          failedItems.push({ item, error: [error?.message, fieldErrors].filter(Boolean).join(' — ') || 'Unknown error', code: error?.code });
         }
       }
 
@@ -877,7 +878,7 @@ export default function PlanVehiclePage() {
       if (otherFailures.length > 0) {
         toast({
           title: "Partial Success",
-          description: `${otherFailures.length} item(s) failed to save.`,
+          description: `${otherFailures.length} item(s) failed to save. ${otherFailures[0]?.error || ''}`.trim(),
           variant: "destructive",
         })
       }
@@ -1050,7 +1051,7 @@ export default function PlanVehiclePage() {
         if (!dispatchId) continue;
 
         try {
-          const res = await planVehicleApi.revert(dispatchId, user?.id || null, revertRemarks.trim());
+          const res = await planVehicleApi.revertToDispatchPlanning(dispatchId, user?.id || null, revertRemarks.trim());
           if (res.success) {
             successfulReverts.push(item);
           } else {
@@ -1064,7 +1065,7 @@ export default function PlanVehiclePage() {
       if (successfulReverts.length > 0) {
         toast({
           title: "Revert Successful",
-          description: `${successfulReverts.length} item(s) reverted — back to pending in Plan Vehicle.`,
+          description: `${successfulReverts.length} item(s) sent back to Dispatch Planning.`,
         });
 
         setIsDialogOpen(false);
@@ -1711,7 +1712,7 @@ export default function PlanVehiclePage() {
                 <Input
                   className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white"
                   disabled={isReadOnly}
-                  placeholder="Enter reason for reverting..."
+                  placeholder="Enter reason for reverting to Dispatch Planning..."
                   value={revertRemarks}
                   onChange={(e) => setRevertRemarks(e.target.value)}
                 />
@@ -1722,7 +1723,7 @@ export default function PlanVehiclePage() {
                 disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
                 className="font-black uppercase tracking-tight h-10 px-6"
               >
-                {isProcessing ? "Wait..." : `Revert Vehicle Plan (${dialogSelectedProducts.length})`}
+                {isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`}
               </Button>
             </div>
 

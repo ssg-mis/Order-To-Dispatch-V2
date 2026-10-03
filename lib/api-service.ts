@@ -587,6 +587,14 @@ export const planVehicleApi = {
     });
   },
 
+  // One stage back: the shipment returns to Dispatch Planning.
+  revertToDispatchPlanning: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/revert-to-planning/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+
   revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
     return request(`/plan-vehicle/revert/${id}`, {
       method: 'POST',
