@@ -231,7 +231,7 @@ export default function ReturnPage() {
           </Card>
           <Card className="gap-1 p-4 shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Case III · Customer return</p>
-            <p className="text-sm text-slate-700">Punch an order in the <b>Sales Return</b> category against the original invoice, then issue the credit note here once the pickup is dispatched.</p>
+            <p className="text-sm text-slate-700">Punch an order in the <b>Sales Return</b> category against the original invoice, then issue the credit note here once the pickup is dispatched. Stage 18 then receives and checks the goods.</p>
             <Button
               variant="outline"
               size="sm"
@@ -245,7 +245,7 @@ export default function ReturnPage() {
           <Card className="gap-1 p-4 shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Awaiting credit note</p>
             <p className="text-3xl font-bold tracking-tight text-slate-900">{pending.length}</p>
-            <p className="text-sm text-slate-500">return pickups dispatched, CN not yet issued</p>
+            <p className="text-sm text-slate-500">return pickups dispatched, credit note not yet issued</p>
           </Card>
         </div>
 
@@ -302,10 +302,6 @@ export default function ReturnPage() {
             </Table>
           </div>
         </Card>
-      </div>
-
-      {/* Credit Note dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
 
         {/* Stock Returns (Cases I / II) */}
         <div className="space-y-2">
@@ -356,6 +352,10 @@ export default function ReturnPage() {
             </div>
           </Card>
         </div>
+      </div>
+
+      {/* Credit Note dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-h-[95vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere] sm:!max-w-[95vw]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">

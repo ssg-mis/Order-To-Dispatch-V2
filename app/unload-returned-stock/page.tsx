@@ -32,6 +32,8 @@ const emptyForm = () => ({
   damagedQty: "",
   damagedDisposition: "",
   restockDepotId: "",
+  batchNo: "",
+  expiryDate: "",
   remarks: "",
   receivedProof: "",
   receivedProofName: "",
@@ -128,6 +130,8 @@ export default function UnloadReturnedStockPage() {
   const needsDepot = good > 0
   const error = !form.receivedDate
     ? "Received date is required"
+    : received > 0 && !form.batchNo.trim()
+      ? "Batch number of the returned goods is required"
     : received < 0 || good < 0 || damaged < 0
       ? "Quantities cannot be negative"
       : overReceived
@@ -164,11 +168,18 @@ export default function UnloadReturnedStockPage() {
         damagedQty: damaged,
         damagedDisposition: damaged > 0 ? form.damagedDisposition : null,
         restockDepotId: good > 0 ? Number(form.restockDepotId) : null,
+        batchNo: form.batchNo.trim() || null,
+        expiryDate: form.expiryDate || null,
         remarks: form.remarks || null,
         receivedProof: form.receivedProof || null,
       })
       if (res.success) {
-        toast({ title: "Returned Stock Recorded", description: `${good} restocked${damaged ? `, ${damaged} held (${form.damagedDisposition})` : ""}` })
+        const shortVsCn = Number(res.data?.shortAgainstCreditNote) || 0
+        toast({
+          title: "Returned Stock Recorded",
+          description: `${good} restocked${damaged ? `, ${damaged} held (${form.damagedDisposition})` : ""}${shortVsCn > 0 ? `. Note: ${shortVsCn} less than the credit note (${res.data?.creditNoteNo || "CN"}) was received - review the credit note.` : ""}`,
+          ...(shortVsCn > 0 ? { variant: "destructive" as const } : {}),
+        })
         setIsDialogOpen(false)
         setSelectedId(null)
         queryClient.invalidateQueries({ queryKey: ["return-unloading-pending"] })
@@ -199,7 +210,7 @@ export default function UnloadReturnedStockPage() {
     <WorkflowStageShell
       partyNames={[]}
       title="Stage 18: Unload Returned Stock"
-      description="Receive the returned goods, check condition, and restock the good quantity."
+      description="Receive the returned goods, check them (batch, condition) and restock the good quantity actually received."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -217,16 +228,16 @@ export default function UnloadReturnedStockPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
                 <TableRow className="bg-slate-50">
-                  {["Received On", "DO Number", "Customer", "Original Invoice", "Product", "Expected", "Received", "Good (restocked)", "Damaged", "Shortage", "Restock Depot", "Remarks"].map((h) => (
+                  {["Received On", "DO Number", "Customer", "Original Invoice", "Product", "Batch No.", "Expiry", "Expected", "Received", "Good (restocked)", "Damaged", "Shortage", "Restock Depot", "Remarks"].map((h) => (
                     <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isHistoryLoading ? (
-                  <TableRow><TableCell colSpan={12} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={14} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
                 ) : history.length === 0 ? (
-                  <TableRow><TableCell colSpan={12} className="py-10 text-center text-slate-500">No returned stock received yet.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={14} className="py-10 text-center text-slate-500">No returned stock received yet.</TableCell></TableRow>
                 ) : (
                   history.map((r) => (
                     <TableRow key={r.gate.id}>
@@ -235,6 +246,8 @@ export default function UnloadReturnedStockPage() {
                       <TableCell className="text-center text-xs font-medium">{r.customer?.customerName || "—"}</TableCell>
                       <TableCell className="text-center text-xs">{r.order.refInvoiceNo || "—"}</TableCell>
                       <TableCell className="text-center text-xs">{r.sku?.skuName || "—"}</TableCell>
+                      <TableCell className="text-center text-xs">{r.gate.batchNo || "—"}</TableCell>
+                      <TableCell className="text-center text-xs">{fmtDate(r.gate.expiryDate)}</TableCell>
                       <TableCell className="text-center text-xs tabular-nums">{num(r.gate.expectedQty)}</TableCell>
                       <TableCell className="text-center text-xs tabular-nums">{num(r.gate.receivedQty)}</TableCell>
                       <TableCell className="text-center text-xs font-semibold text-emerald-600 tabular-nums">{num(r.gate.goodQty)}</TableCell>
@@ -369,6 +382,16 @@ export default function UnloadReturnedStockPage() {
                     <div className="space-y-2">
                       <Label>Good Qty (restock)</Label>
                       <Input type="number" min={0} className="h-10 bg-muted" value={form.goodQty} readOnly />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-2">
+                      <Label>Batch No. {received > 0 && <span className="text-red-500">*</span>}</Label>
+                      <Input className="h-10" placeholder="Batch of the returned goods" value={form.batchNo} onChange={(e) => setForm((f) => ({ ...f, batchNo: e.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Expiry / Best Before</Label>
+                      <Input type="date" className="h-10" value={form.expiryDate} onChange={(e) => setForm((f) => ({ ...f, expiryDate: e.target.value }))} />
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm">
