@@ -302,6 +302,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const [returnReason, setReturnReason] = useState<string>("")
   const [returnLines, setReturnLines] = useState<any[]>([])
   const [isLoadingReturnLines, setIsLoadingReturnLines] = useState(false)
+  // Stock Return (Cases I / II): a Stock Transfer sent BACK against the original transfer it came from
+  const [isStockReturn, setIsStockReturn] = useState(false)
 
   // Pre-Approval Products State
   const [preApprovalProducts, setPreApprovalProducts] = useState<PreApprovalProduct[]>([])
@@ -534,7 +536,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   })
   const { data: returnOptions } = useQuery({
     queryKey: ["return-options"],
-    enabled: isSalesReturn,
+    enabled: isSalesReturn || orderCategory === "Stock Transfer",
     staleTime: 10 * 60 * 1000,
     queryFn: async () => {
       const res = await returnApi.getOptions()
@@ -544,9 +546,14 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
 
   // A different customer / leaving the category clears the chosen invoice.
   useEffect(() => {
+    if (isStockReturn) return // stock return picks its own customer from the original transfer
     setRefInvoiceNo("")
     setReturnLines([])
-  }, [selectedCustomerRecord?.id, isSalesReturn])
+  }, [selectedCustomerRecord?.id, isSalesReturn, isStockReturn])
+
+  useEffect(() => {
+    if (orderCategory !== "Stock Transfer" && isStockReturn) setIsStockReturn(false)
+  }, [orderCategory, isStockReturn])
 
   // A return is always a regular order.
   useEffect(() => {
@@ -561,8 +568,74 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     if (cat && ["Sales", "Stock Transfer", "Sales Return"].includes(cat)) setOrderCategory(cat)
     const rem = params.get("remarks")
     if (rem) setOrderPunchRemarks(rem)
+    if (params.get("stockReturn") === "1") setIsStockReturn(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ---- Stock Return (Cases I / II) --------------------------------------------------------
+  const isStockTransferCat = orderCategory === "Stock Transfer"
+  const stockReturnActive = isStockTransferCat && isStockReturn
+  const { data: depotLookupRes } = useQuery({
+    queryKey: ["billing-depot-state", depoName],
+    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
+    enabled: !!depoName,
+    staleTime: 10 * 60 * 1000,
+  })
+  const returningDepotId: number | undefined = (depotLookupRes?.data?.depots || []).find(
+    (d: any) => d.depot_name?.toLowerCase() === depoName.toLowerCase(),
+  )?.id
+  const { data: returnableTransfers = [], isFetching: isLoadingTransfers } = useQuery({
+    queryKey: ["stock-return-transfers", returningDepotId],
+    enabled: stockReturnActive && !!returningDepotId,
+    queryFn: async () => {
+      const res = await returnApi.getReturnableTransfers(returningDepotId!)
+      return res.success ? (res.data?.transfers || []) : []
+    },
+  })
+  // Changing the returning depot invalidates the picked original.
+  useEffect(() => {
+    if (stockReturnActive) { setRefInvoiceNo(""); setReturnLines([]) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returningDepotId, stockReturnActive])
+
+  const handleTransferSelect = async (orderNo: string) => {
+    setRefInvoiceNo(orderNo)
+    const t: any = returnableTransfers.find((x: any) => x.order_no === orderNo)
+    if (!t) { setReturnLines([]); return }
+    setReturnLines(t.lines)
+    const rows = (t.lines as any[]).filter((l) => l.returnable_qty > 0).map((l) => ({
+      id: Math.random().toString(36).substr(2, 9),
+      skuId: l.sku_id,
+      productName: l.sku_name || "",
+      uom: l.main_uom || "",
+      altUom: l.alternate_uom || "",
+      orderQty: String(l.returnable_qty),
+      altQty: "",
+      rate: "",
+      ratePer15Kg: "",
+      ratePerLtr: "",
+      oilType: "",
+      skuWeight: l.sku_weight != null ? String(l.sku_weight) : "",
+      nosPerMainUom: l.nos_per_main_uom != null ? String(l.nos_per_main_uom) : "",
+    }))
+    if (rows.length) setProducts(rows as any)
+    // The stock goes back to the depot the original transfer came from - pick that depot's customer record.
+    const rc = t.return_customer
+    if (rc) {
+      try {
+        const res = await customerApi.getAll({ search: rc.customer_name, limit: 20 })
+        const rec = (res.success ? (res.data.customers || []) : []).find((c: any) => c.id === rc.id)
+        if (rec) {
+          setCustomers((prev) => (prev.find((c) => c.id === rec.id) ? prev : [...prev, rec]))
+          setCustomerName(`${rec.customer_name}|${rec.gstin || ""}|${rec.id}`)
+        }
+      } catch {
+        toast({ title: "Select the receiving depot", description: `Choose ${rc.customer_name} as the customer.`, variant: "destructive" })
+      }
+    } else {
+      toast({ title: "Receiving depot not set up", description: `No customer is linked to ${t.source_depot || "the source depot"}. Set its depot link in the customer master first.`, variant: "destructive" })
+    }
+  }
 
   const handleReturnInvoiceSelect = async (invoiceNo: string) => {
     setRefInvoiceNo(invoiceNo)
@@ -765,6 +838,29 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
       }
     }
 
+    // Stock Return: original transfer + reason mandatory; qty can never exceed what is returnable
+    if (stockReturnActive) {
+      if (!refInvoiceNo) {
+        toast({ title: "Original Transfer Required", description: "Select the transfer this stock came in on.", variant: "destructive" })
+        return
+      }
+      if (!returnReason) {
+        toast({ title: "Return Reason Required", description: "Select why the stock is being returned.", variant: "destructive" })
+        return
+      }
+      for (const p of products) {
+        const line = returnLines.find((l) => l.sku_id === p.skuId)
+        if (!line) {
+          toast({ title: "Product Not In Transfer", description: `${p.productName || "A product"} was not part of transfer ${refInvoiceNo}.`, variant: "destructive" })
+          return
+        }
+        if (parseFloat(p.orderQty) > line.returnable_qty + 0.0001) {
+          toast({ title: "Return Quantity Too High", description: `${p.productName}: only ${line.returnable_qty} is returnable.`, variant: "destructive" })
+          return
+        }
+      }
+    }
+
     // Validate dates based on orderPurpose
     if (orderPurpose === "future-period" || orderPurpose === "week-on-week") {
       if (!startDate) {
@@ -879,7 +975,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         userId: user?.id || null,
         orderCategory: orderCategory,
         gst: gst || null,
-        ...(orderCategory === "Sales Return" ? { refInvoiceNo, returnReason } : {}),
+        ...(orderCategory === "Sales Return" || stockReturnActive ? { refInvoiceNo, returnReason } : {}),
       }
 
       // Add items array for backend (for regular and pre-approval order types)
@@ -1774,6 +1870,79 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           ))}
                         </TableBody>
                       </Table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Stock Return (Cases I / II): send stock back against the original transfer */}
+              {isStockTransferCat && (
+                <div className="md:col-span-2 space-y-4 rounded-lg border border-sky-200 bg-sky-50/60 p-4">
+                  <div className="flex items-start gap-3">
+                    <Checkbox id="isStockReturn" checked={isStockReturn} onCheckedChange={(v) => setIsStockReturn(v === true)} className="mt-1" />
+                    <div>
+                      <Label htmlFor="isStockReturn" className="cursor-pointer text-base font-semibold">This is a Stock Return</Label>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Send stock back to the depot it came from, against the original transfer. Only stock that reached this depot and has not already been returned can be sent back.
+                      </p>
+                    </div>
+                  </div>
+                  {stockReturnActive && (
+                    !depoName ? (
+                      <p className="text-sm text-amber-800">Select the depot that is returning the stock under "Dispatch From (Depo)" first.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Original Transfer <span className="text-red-500">*</span></Label>
+                          <Select value={refInvoiceNo} onValueChange={handleTransferSelect}>
+                            <SelectTrigger className="h-10">
+                              <SelectValue placeholder={isLoadingTransfers ? "Loading transfers..." : returnableTransfers.length ? "Select the transfer" : "No returnable transfers at this depot"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {returnableTransfers.map((t: any) => (
+                                <SelectItem key={t.order_no} value={t.order_no}>
+                                  {t.order_no} · from {t.source_depot || "—"} · {t.date ? new Date(t.date).toLocaleDateString("en-IN") : "—"} · returnable {t.returnable_qty}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Return Reason <span className="text-red-500">*</span></Label>
+                          <Select value={returnReason} onValueChange={setReturnReason}>
+                            <SelectTrigger className="h-10"><SelectValue placeholder="Select reason" /></SelectTrigger>
+                            <SelectContent>
+                              {(returnOptions?.stockReturnReasons || []).map((r: string) => (
+                                <SelectItem key={r} value={r}>{r}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )
+                  )}
+                  {stockReturnActive && returnLines.length > 0 && (
+                    <div className="overflow-x-auto rounded-md border bg-white">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 text-slate-600">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Product</th>
+                            <th className="px-3 py-2 text-right">Received</th>
+                            <th className="px-3 py-2 text-right">Already returned</th>
+                            <th className="px-3 py-2 text-right">Returnable</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {returnLines.map((l: any) => (
+                            <tr key={l.sku_id} className="border-t">
+                              <td className="px-3 py-2 font-medium">{l.sku_name}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{l.received_qty}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{l.already_returned_qty}</td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{l.returnable_qty}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>

@@ -82,6 +82,15 @@ export default function ReturnPage() {
   })
   const history: any[] = historyData?.returns || []
 
+  const { data: stockReturnsData, isLoading: isStockReturnsLoading } = useQuery({
+    queryKey: ["stock-returns"],
+    queryFn: async () => {
+      const res = await returnApi.getStockReturns()
+      return res.success ? (res.data?.stock_returns || []) : []
+    },
+  })
+  const stockReturns: any[] = stockReturnsData || []
+
   const selected = useMemo(() => pending.find((r) => r.gate.id === selectedId), [pending, selectedId])
 
   const openDialog = () => {
@@ -214,7 +223,7 @@ export default function ReturnPage() {
               variant="outline"
               size="sm"
               className="mt-2 w-fit"
-              onClick={() => router.push("/order-punch/create?category=Stock%20Transfer&remarks=Stock%20return")}
+              onClick={() => router.push("/order-punch/create?category=Stock%20Transfer&stockReturn=1")}
             >
               <ArrowLeftRight className="mr-2 h-4 w-4" />
               New Stock Return
@@ -293,6 +302,56 @@ export default function ReturnPage() {
 
       {/* Credit Note dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+
+        {/* Stock Returns (Cases I / II) */}
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">Stock Returns</h2>
+            <p className="text-xs text-slate-500">Depot-to-Banari / depot-to-depot returns, raised as a Stock Transfer against the original transfer.</p>
+          </div>
+          <Card className="gap-0 overflow-hidden border-none py-0 shadow-sm">
+            <div className="max-h-[360px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+                  <TableRow className="bg-slate-50">
+                    {["DO Date", "Return DO", "Original Transfer", "From Depot", "Returned To", "Products", "Qty", "Reason", "Status"].map((h) => (
+                      <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isStockReturnsLoading ? (
+                    <TableRow><TableCell colSpan={9} className="py-8 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
+                  ) : stockReturns.length === 0 ? (
+                    <TableRow><TableCell colSpan={9} className="py-8 text-center text-slate-500">No stock returns yet.</TableCell></TableRow>
+                  ) : (
+                    stockReturns.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="text-center text-xs">{fmtDate(s.party_so_date || s.created_at)}</TableCell>
+                        <TableCell className="text-center text-xs font-bold text-slate-700">{s.order_no}</TableCell>
+                        <TableCell className="text-center text-xs">{s.original_order_no}</TableCell>
+                        <TableCell className="text-center text-xs">{s.from_depot || "—"}</TableCell>
+                        <TableCell className="text-center text-xs">{s.to_depot || s.to_customer || "—"}</TableCell>
+                        <TableCell className="max-w-[220px] truncate text-center text-xs" title={s.products || ""}>{s.products || "—"}</TableCell>
+                        <TableCell className="text-center text-xs font-semibold tabular-nums">{Number(s.qty) || 0}</TableCell>
+                        <TableCell className="text-center text-xs">{s.return_reason || "—"}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge className={cn(
+                            s.status === "Received" && "bg-emerald-100 text-emerald-700",
+                            s.status === "In Transit" && "bg-blue-100 text-blue-700",
+                            s.status === "Dispatched" && "bg-sky-100 text-sky-700",
+                            s.status === "Planned" && "bg-amber-100 text-amber-700",
+                            s.status === "Awaiting Approval" && "bg-slate-100 text-slate-700",
+                          )}>{s.status}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </div>
         <DialogContent className="max-h-[95vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere] sm:!max-w-[95vw]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">

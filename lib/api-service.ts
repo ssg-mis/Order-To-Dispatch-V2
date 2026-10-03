@@ -995,6 +995,11 @@ export const returnApi = {
   getInvoiceLines: async (customerId: number | string, invoiceNo: string): Promise<ApiResponse> =>
     request(`/returns/invoices/${encodeURIComponent(invoiceNo)}/lines${buildQuery({ customer_id: customerId })}`),
 
+  // Stock Return (Cases I / II): transfers whose stock reached a depot and can still be returned
+  getReturnableTransfers: async (depotId: number | string): Promise<ApiResponse> =>
+    request(`/returns/stock/transfers${buildQuery({ depot_id: depotId })}`),
+  getStockReturns: async (): Promise<ApiResponse> => request(`/returns/stock/list`),
+
   // Stage 17 - Credit Note
   getPendingCreditNotes: async (params?: Record<string, any>): Promise<ApiResponse> =>
     request(`/returns/credit-notes/pending${buildQuery(params)}`),
