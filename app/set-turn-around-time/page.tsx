@@ -30,6 +30,7 @@ const STAGE_OPTIONS = [
   "Damage Adjustment",
   "Credit Note",
   "Unload Returned Stock",
+  "Issue Documents Against Returned Stock",
   "Gate In",
 ]
 

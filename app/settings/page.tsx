@@ -70,6 +70,7 @@ const PAGE_ACCESS_OPTIONS = [
   "Collection",
   "Return",
   "Unload Returned Stock",
+  "Issue Documents Against Returned Stock",
   "Gate In",
   "Variable Parameters",
   "Settings",

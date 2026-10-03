@@ -25,6 +25,7 @@ const URL_TO_PAGE: Record<string, string> = {
   '/return': 'Return',
   '/return-gate-pass': 'Return',
   '/unload-returned-stock': 'Unload Returned Stock',
+  '/issue-return-documents': 'Issue Documents Against Returned Stock',
   '/gate-in': 'Gate In',
   '/variable-parameters': 'Variable Parameters',
   '/settings': 'Settings',

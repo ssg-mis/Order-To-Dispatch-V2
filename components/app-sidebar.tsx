@@ -78,6 +78,7 @@ const modules = [
   { title: "Collection", icon: Receipt, url: "/collection" },
   { title: "Return", icon: Undo2, url: "/return" },
   { title: "Unload Returned Stock", icon: PackageOpen, url: "/unload-returned-stock" },
+  { title: "Issue Documents Against Returned Stock", icon: FileCheck, url: "/issue-return-documents" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },
   { title: "Production", icon: Factory, url: "/production" },
