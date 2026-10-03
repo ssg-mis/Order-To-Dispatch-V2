@@ -570,7 +570,7 @@ export default function CollectionPage() {
 
       {/* Add Receipt Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 break-words">
@@ -935,7 +935,7 @@ export default function CollectionPage() {
 
       {/* Receipts of one bill */}
       <Dialog open={!!receiptsFor} onOpenChange={(o) => !o && setReceiptsFor(null)}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-5xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 break-words">
@@ -1064,7 +1064,7 @@ export default function CollectionPage() {
 
       {/* Dispute raise / resolve */}
       <Dialog open={!!disputeFor} onOpenChange={(o) => !o && setDisputeFor(null)}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-2xl max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 break-words">

@@ -293,7 +293,7 @@ export default function ReturnPage() {
 
       {/* Credit Note dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-h-[95vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere] sm:max-w-4xl">
+        <DialogContent className="max-h-[95vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere] sm:!max-w-[95vw]">
           <div className="p-3 sm:p-6">
             <DialogHeader className="min-w-0">
               <DialogTitle className="break-words text-lg font-bold text-slate-900 sm:text-xl">
