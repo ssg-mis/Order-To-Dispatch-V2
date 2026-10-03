@@ -2015,7 +2015,7 @@ export default function DispatchMaterialPage() {
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
               <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">
-                {isProcessing ? "Processing..." : `Proceed to Actual Dispatch (${dialogSelectedProducts.length})`}
+                {isProcessing ? "Processing..." : `Proceed to Plan Vehicle (${dialogSelectedProducts.length})`}
               </Button>
             </div>
           </DialogFooter>
