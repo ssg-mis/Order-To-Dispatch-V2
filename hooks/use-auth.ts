@@ -23,6 +23,7 @@ const URL_TO_PAGE: Record<string, string> = {
   '/unloading': 'Unloading',
   '/damage-adjustment': 'Damage Adjustment',
   '/return': 'Return',
+  '/return-gate-pass': 'Return',
   '/unload-returned-stock': 'Unload Returned Stock',
   '/gate-in': 'Gate In',
   '/variable-parameters': 'Variable Parameters',

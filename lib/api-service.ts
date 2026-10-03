@@ -1000,6 +1000,12 @@ export const returnApi = {
     request(`/returns/stock/transfers${buildQuery({ depot_id: depotId })}`),
   getStockReturns: async (): Promise<ApiResponse> => request(`/returns/stock/list`),
 
+  // Main Gate "Stock Return" gate pass
+  createGatePass: async (data: any): Promise<ApiResponse> =>
+    request(`/returns/gate-pass`, { method: "POST", body: JSON.stringify(data) }),
+  getGatePasses: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/gate-pass${buildQuery(params)}`),
+
   // Stage 17 - Credit Note
   getPendingCreditNotes: async (params?: Record<string, any>): Promise<ApiResponse> =>
     request(`/returns/credit-notes/pending${buildQuery(params)}`),

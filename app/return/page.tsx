@@ -17,7 +17,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { orderApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeftRight, FileText, Loader2, Receipt, Undo2 } from "lucide-react"
+import { ArrowLeftRight, FileText, Loader2, Printer, Receipt, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const money = (v: any) =>
@@ -249,7 +249,11 @@ export default function ReturnPage() {
           </Card>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={() => router.push("/return-gate-pass")}>
+            <Printer className="mr-2 h-4 w-4" />
+            Stock Return Gate Pass
+          </Button>
           <Button onClick={openDialog} disabled={!selected || isReadOnly} className="bg-blue-600 hover:bg-blue-700">
             <Receipt className="mr-2 h-4 w-4" />
             Issue Credit Note
