@@ -313,7 +313,7 @@ export default function UnloadReturnedStockPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-slate-500">
             <Boxes className="mr-1.5 inline h-4 w-4 align-text-bottom" />
-            Good quantity is added to inventory at the depot you choose. Damaged quantity is held for reprocessing or scrap.
+            Good quantity is deducted from Sales at the depot you choose (Inventory tab). Damaged quantity is held for reprocessing or scrap.
           </p>
           <Button onClick={openDialog} disabled={!selected || isReadOnly} className="bg-blue-600 hover:bg-blue-700">
             <PackageOpen className="mr-2 h-4 w-4" />
