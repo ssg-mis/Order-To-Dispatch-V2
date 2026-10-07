@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
@@ -53,6 +54,13 @@ interface WorkflowStageShellProps {
   /** Label for the date-range filter. When set (e.g. "DO Date"), inputs read "<label> From"/"<label> To". */
   dateLabel?: string
   groupBySiblingDo?: boolean
+  /**
+   * Stage key. When set, the active Pending/History tab is remembered permanently (per user) and
+   * the filters below (search, status, dates, party, Sauda no.) survive a refresh for the session
+   * - see usePersistedFilters. Restored values are pushed to the page via onTabChange/onFilterChange
+   * on mount so its server queries use them.
+   */
+  persistKey?: string
 }
 
 export const FIELD_GROUPS: Record<string, number> = {
@@ -215,25 +223,49 @@ export function WorkflowStageShell({
   showSaudaFilter = false,
   dateLabel,
   groupBySiblingDo = false,
+  persistKey,
 }: WorkflowStageShellProps) {
-  const [filters, setFilters] = React.useState({
-    search: "",
-    status: "",
-    startDate: "",
-    endDate: "",
-    partyName: "",
-    manualSaudaNo: ""
-  })
+  const [view, patchView] = usePersistedFilters<{
+    tab: "pending" | "history"
+    search: string
+    status: string
+    startDate: string
+    endDate: string
+    partyName: string
+    manualSaudaNo: string
+  }>(
+    persistKey ? `${persistKey}:shell` : null,
+    { tab: "pending", search: "", status: "", startDate: "", endDate: "", partyName: "", manualSaudaNo: "" },
+    { permanentKeys: ["tab"] }
+  )
+  const { tab, ...filters } = view
 
   const [partySearchOpen, setPartySearchOpen] = React.useState(false)
 
   const updateFilter = (key: keyof typeof filters, value: string) => {
     const newFilters = { ...filters, [key]: value }
-    setFilters(newFilters)
+    patchView({ [key]: value })
     if (onFilterChange) {
       onFilterChange(newFilters)
     }
   }
+
+  // Push restored (persisted) state up to the page once, so its server queries match what the
+  // shell shows. Tab changes (incl. the server-hydrated tab) are forwarded as they happen.
+  const notifiedTabRef = React.useRef<"pending" | "history">("pending")
+  React.useEffect(() => {
+    if (tab !== notifiedTabRef.current) {
+      notifiedTabRef.current = tab
+      onTabChange?.(tab)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+  React.useEffect(() => {
+    if (persistKey && Object.values(filters).some((v) => v)) onFilterChange?.(filters)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const activeFilterCount = Object.values(filters).filter((v) => v && v !== "all").length
 
   return (
     <SidebarInset>
@@ -253,9 +285,9 @@ export function WorkflowStageShell({
         </div>
 
         <Tabs
-          defaultValue="pending"
+          value={tab}
           className="w-full"
-          onValueChange={(val) => onTabChange?.(val as "pending" | "history")}
+          onValueChange={(val) => patchView({ tab: val as "pending" | "history" })}
         >
           <TabsList className="grid w-full max-w-[400px] grid-cols-2 mb-2 bg-muted/50 p-1 rounded-lg h-9">
             <TabsTrigger value="pending" className="rounded-md text-xs py-1">
@@ -429,16 +461,21 @@ export function WorkflowStageShell({
               </div>
 
               <div className="flex items-center gap-2 h-9">
-                <Button variant="outline" size="icon" className="bg-transparent h-9 w-9">
+                <Button variant="outline" size="icon" className={cn("bg-transparent h-9 w-9", activeFilterCount > 0 && "border-blue-300 text-blue-600")}>
                   <Filter className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="icon" className="bg-transparent h-9 w-9" onClick={() => {
+                <Button variant="outline" size="icon" className="bg-transparent h-9 w-9" title="Reset filters" onClick={() => {
                   const reset = { search: "", status: "", startDate: "", endDate: "", partyName: "", manualSaudaNo: "" };
-                  setFilters(reset);
+                  patchView(reset);
                   if (onFilterChange) onFilterChange(reset);
                 }}>
                   <RotateCcw className="h-4 w-4" />
                 </Button>
+                {activeFilterCount > 0 && (
+                  <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-2 py-0.5 whitespace-nowrap">
+                    {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active
+                  </span>
+                )}
               </div>
             </div>
           </div>

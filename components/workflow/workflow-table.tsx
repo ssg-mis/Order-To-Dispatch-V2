@@ -17,6 +17,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronLeft, ChevronRight, ChevronsUpDown, Search } from "lucide-react"
 
+/**
+ * Optional per-column metadata (set via `meta` on a ColumnDef):
+ *  - type: "number" | "date" | "text"  (number/date are right aligned, text left)
+ *  - total: show a sum in the totals row (numeric columns only)
+ *  - decimals: fixed decimals for the total (default 4)
+ *  - search: set false to hide the per-column search box
+ */
+type WorkflowColMeta = { type?: "number" | "date" | "text"; total?: boolean; decimals?: number; search?: boolean }
+const metaOf = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta || {}) as WorkflowColMeta
+const isRightCol = (m: WorkflowColMeta) => m.type === "number" || m.type === "date"
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
@@ -36,6 +47,7 @@ export function WorkflowTable<TData, TValue>({ columns, data, searchKey }: DataT
     getSortedRowModel: getSortedRowModel(),
     onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
+    defaultColumn: { filterFn: "includesString" },
     state: {
       sorting,
       columnFilters,
@@ -59,15 +71,52 @@ export function WorkflowTable<TData, TValue>({ columns, data, searchKey }: DataT
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <Table>
           <TableHeader className="bg-muted/30">
+            {/* 1) per-column search row */}
+            <TableRow>
+              {table.getVisibleLeafColumns().map((col) => {
+                const m = metaOf(col)
+                return (
+                  <TableHead key={`search-${col.id}`} className={`align-top pt-2.5 pb-1 px-4 ${isRightCol(m) ? "text-right" : ""}`}>
+                    {col.getCanFilter() && m.search !== false && m.type !== "date" ? (
+                      <Input
+                        placeholder="Search..."
+                        value={(col.getFilterValue() as string) ?? ""}
+                        onChange={(e) => col.setFilterValue(e.target.value)}
+                        className={`h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 border-slate-200/70 rounded-md ${isRightCol(m) ? "text-right" : "text-left"}`}
+                      />
+                    ) : null}
+                  </TableHead>
+                )
+              })}
+            </TableRow>
+            {/* 2) totals row (only when a column declares meta.total) */}
+            {table.getVisibleLeafColumns().some((c) => metaOf(c).total) && table.getFilteredRowModel().rows.length > 0 && (
+              <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                {table.getVisibleLeafColumns().map((col, i) => {
+                  const m = metaOf(col)
+                  const rows = table.getFilteredRowModel().rows
+                  return (
+                    <TableCell key={`total-${col.id}`} className={`px-4 ${isRightCol(m) ? "text-right font-mono tabular-nums" : ""}`}>
+                      {i === 0
+                        ? `Total (${rows.length})`
+                        : m.total
+                          ? rows.reduce((sum, r) => sum + (Number(r.getValue(col.id)) || 0), 0).toFixed(m.decimals ?? 4)
+                          : ""}
+                    </TableCell>
+                  )
+                })}
+              </TableRow>
+            )}
+            {/* 3) heading row */}
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
+                  <TableHead key={header.id} className={`px-4 ${isRightCol(metaOf(header.column)) ? "text-right" : ""}`}>
                     {header.isPlaceholder ? null : (
                       <div
-                        className={
+                        className={`${isRightCol(metaOf(header.column)) ? "justify-end " : ""}${
                           header.column.getCanSort() ? "flex items-center gap-2 cursor-pointer select-none" : ""
-                        }
+                        }`}
                         onClick={header.column.getToggleSortingHandler()}
                       >
                         {flexRender(header.column.columnDef.header, header.getContext())}
@@ -84,7 +133,7 @@ export function WorkflowTable<TData, TValue>({ columns, data, searchKey }: DataT
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                    <TableCell key={cell.id} className={`px-4 ${isRightCol(metaOf(cell.column)) ? "text-right font-mono tabular-nums" : ""}`}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
                 </TableRow>
               ))

@@ -1,24 +1,33 @@
 "use client"
 
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { ColumnFilterPopover } from "@/components/ui/column-filter-popover"
-import { ChevronLeft, ChevronRight, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { approvalApi } from "@/lib/api-service"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
-import { usePersistedSort } from "@/hooks/use-persisted-sort"
-import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader,
+  StageToolbar,
+  StageFilterSelect,
+  StageColumnsMenu,
+  StageDivider,
+  StageActiveChips,
+  StageHeadCell,
+  StageTotalsRow,
+  type StageTotalTone,
+} from "@/components/stage-list"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum, fmtDate, fmtDateTime } from "@/lib/table-format"
 import { ApprovalDetailDialog } from "@/components/approval-of-order/approval-detail-dialog"
 
 const STAGE_KEY = "approval-of-order"
@@ -32,7 +41,7 @@ const PAGE_COLUMNS = [
   { id: "customer_name", label: "Customer Name", type: "text" as const },
   { id: "total_qty_box", label: "Total Qty (Box)", type: "number" as const },
   { id: "total_qty_kg", label: "Total Qty (KGS)", type: "number" as const },
-  { id: "total_order_amount", label: "Total Order Amount", type: "number" as const },
+  { id: "total_order_amount", label: "Total Order Amount (₹)", type: "number" as const },
   { id: "dispatch_from", label: "Dispatch from", type: "text" as const },
   { id: "status", label: "Status", type: "text" as const, historyOnly: true },
   { id: "remarks", label: "Remarks", type: "text" as const },
@@ -42,31 +51,24 @@ const PAGE_COLUMNS = [
   { id: "actual_datetime", label: "Action Date", type: "date" as const, historyOnly: true },
 ]
 const TOTAL_COLUMN_IDS = new Set(["total_qty_box", "total_qty_kg", "total_order_amount"])
+const STAGE_COLS: StageColDef<any>[] = PAGE_COLUMNS.map((c) => ({
+  id: c.id,
+  label: c.label,
+  type: c.type,
+  accessor: (r: any) => r[c.id],
+  total: TOTAL_COLUMN_IDS.has(c.id),
+}))
+const TOTAL_TONES: Record<string, StageTotalTone> = { total_qty_box: "emerald", total_qty_kg: "blue", total_order_amount: "purple" }
+const RIGHT_ALIGN_COLS = new Set(["total_qty_box", "total_qty_kg", "total_order_amount", "party_so_date", "order_datetime", "actual_datetime"])
+const NUMBER_ALIGN: Record<string, "right"> = Object.fromEntries([...RIGHT_ALIGN_COLS].map((id) => [id, "right" as const]))
+const DECIMALS: Record<string, number> = { total_qty_box: 0, total_qty_kg: 3, total_order_amount: 2 }
 
-const fmtDate = (v: string | null | undefined) => {
-  if (!v) return "—"
-  const d = new Date(v)
-  if (isNaN(d.getTime())) return String(v)
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
-}
-const fmtNumber = (v: number | null | undefined) => {
-  const n = Number(v || 0)
-  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 })
-}
-const fmtMoney = (v: number | null | undefined) => `₹${fmtNumber(v)}`
-
-const fmtDateTime = (v: string | null | undefined) => {
-  if (!v) return "—"
-  const d = new Date(v)
-  if (isNaN(d.getTime())) return String(v)
-  return d.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
-}
+const fmtNumber = (colId: string, v: unknown) => fmtNum(v ?? 0, DECIMALS[colId] ?? 4)
 
 function formatCell(colId: string, value: any) {
   if (colId === "order_datetime") return fmtDateTime(value)
   if (colId === "party_so_date" || colId === "actual_datetime") return fmtDate(value)
-  if (colId === "total_order_amount") return fmtMoney(value)
-  if (colId === "total_qty_box" || colId === "total_qty_kg") return fmtNumber(value)
+  if (colId === "total_order_amount" || colId === "total_qty_box" || colId === "total_qty_kg") return fmtNumber(colId, value)
   if (colId === "status") {
     if (!value) return "—";
     const status = String(value);
@@ -94,11 +96,23 @@ export default function ApprovalOfOrderPage() {
   const [historyPage, setHistoryPage] = useState(1)
   const limit = 20
   const [filterOptions, setFilterOptions] = useState<{ customerNames: string[] }>({ customerNames: [] })
+  // History status buttons are remembered permanently; quick search / customer / dispatch filters for the
+  // session. The Pending/History tab is owned and remembered by WorkflowStageShell (persistKey).
+  const [listView, patchListView, resetListView] = usePersistedFilters(STAGE_KEY, {
+    quickSearch: "",
+    customerSel: "ALL",
+    dispatchSel: "ALL",
+    statusSel: "ALL",
+  }, { permanentKeys: ["statusSel"] })
+  const { quickSearch, customerSel, dispatchSel, statusSel } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerSel = (v: string) => patchListView({ customerSel: v })
+  const setDispatchSel = (v: string) => patchListView({ dispatchSel: v })
+  const setStatusSel = (v: string) => patchListView({ statusSel: v })
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(STAGE_KEY, PAGE_COLUMNS.filter(c => !c.historyOnly).map((c) => c.id))
   const [columnOrder, setColumnOrder] = useColumnOrder(STAGE_KEY, PAGE_COLUMNS.map((c) => c.id))
-  const [sort, setSort] = usePersistedSort(STAGE_KEY, { field: "party_so_date", dir: "desc" })
 
   const availableCols = PAGE_COLUMNS.filter(c => activeTab === "history" || !c.historyOnly)
   
@@ -113,23 +127,6 @@ export default function ApprovalOfOrderPage() {
     },
     [columnOrder, orderedVisibleCols, setColumnOrder]
   )
-  const handleSort = (field: string) => {
-    if (sort?.field === field) {
-      if (sort.dir === "asc") setSort({ field, dir: "desc" })
-      else setSort(null)
-    } else {
-      setSort({ field, dir: "asc" })
-    }
-  }
-  const SortIcon = ({ field }: { field: string }) => {
-    if (sort?.field !== field) return <ArrowUpDown className="ml-1 inline h-3 w-3 text-slate-400" />
-    return sort.dir === "asc" ? <ArrowUp className="ml-1 inline h-3 w-3 text-blue-600" /> : <ArrowDown className="ml-1 inline h-3 w-3 text-blue-600" />
-  }
-
-  // Per-column Search + Filter
-  const [columnSearch, setColumnSearch] = useState<Record<string, string>>({})
-  const [columnFilterValues, setColumnFilterValues] = useState<Record<string, string[] | null>>({})
-
   useEffect(() => {
     const fetchFilters = async () => {
       try {
@@ -197,57 +194,44 @@ export default function ApprovalOfOrderPage() {
   const currentOrders: any[] = activeTab === "pending" ? (pendingResult?.orders || []) : (historyResult?.orders || [])
   const isLoading = activeTab === "pending" ? isPendingLoading : isHistoryLoading
 
-  // Distinct values per column
-  const distinctValuesByColumn = useMemo(() => {
-    const map: Record<string, string[]> = {}
-    for (const col of PAGE_COLUMNS) {
-      map[col.id] = Array.from(new Set(currentOrders.map((r) => String(r[col.id] ?? "")))).sort()
-    }
-    return map
-  }, [currentOrders])
+  const uniqueOf = (key: string) => Array.from(new Set(currentOrders.map((r) => r[key]).filter(Boolean).map(String))).sort()
+  const uniqueCustomers = useMemo(() => uniqueOf("customer_name"), [currentOrders])
+  const uniqueDispatch = useMemo(() => uniqueOf("dispatch_from"), [currentOrders])
 
-  const getSortValue = (row: any, field: string, type: string) => {
-    const v = row[field]
-    if (v === null || v === undefined || v === "") return type === "number" ? -Infinity : ""
-    if (type === "number") return Number(v) || 0
-    if (type === "date") return new Date(v).getTime() || 0
-    return String(v).toLowerCase()
+  const baseFilter = useCallback(
+    (r: any) => {
+      if (customerSel !== "ALL" && r.customer_name !== customerSel) return false
+      if (dispatchSel !== "ALL" && r.dispatch_from !== dispatchSel) return false
+      if (activeTab === "history" && statusSel !== "ALL" && r.status !== statusSel) return false
+      if (quickSearch.trim()) {
+        const q = quickSearch.toLowerCase().trim()
+        const hit = [r.order_no, r.manual_sauda_no, r.customer_name, r.broker_name].some((v) => v && String(v).toLowerCase().includes(q))
+        if (!hit) return false
+      }
+      return true
+    },
+    [customerSel, dispatchSel, statusSel, quickSearch, activeTab]
+  )
+
+  const table = useStageTable<any>({ rows: currentOrders, columns: STAGE_COLS, baseFilter, defaultSort: { field: "party_so_date", dir: "desc" }, persistKey: STAGE_KEY })
+  const displayRows = table.rows
+  // history-only column filters would silently hide rows on the other tab
+  const tabMountedRef = useRef(false)
+  useEffect(() => {
+    // skip the initial mount so persisted column filters are not wiped on load
+    if (!tabMountedRef.current) { tabMountedRef.current = true; return }
+    table.clearColumnFilters()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+  const totals = table.totals
+
+  const activeFiltersCount =
+    (quickSearch.trim() ? 1 : 0) + (customerSel !== "ALL" ? 1 : 0) + (dispatchSel !== "ALL" ? 1 : 0) + (activeTab === "history" && statusSel !== "ALL" ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    resetListView()
+    table.clearColumnFilters()
   }
-
-  const displayRows = useMemo(() => {
-    let out = currentOrders
-    for (const col of PAGE_COLUMNS) {
-      const search = columnSearch[col.id]
-      if (search && search.trim()) {
-        const needle = search.toLowerCase()
-        out = out.filter((r) => String(r[col.id] ?? "").toLowerCase().includes(needle))
-      }
-      const filterVals = columnFilterValues[col.id]
-      if (filterVals) {
-        out = out.filter((r) => filterVals.includes(String(r[col.id] ?? "")))
-      }
-    }
-    if (sort?.field) {
-      const col = PAGE_COLUMNS.find((c) => c.id === sort.field)
-      const type = col?.type || "text"
-      out = [...out].sort((a, b) => {
-        const av = getSortValue(a, sort.field, type)
-        const bv = getSortValue(b, sort.field, type)
-        if (typeof av === "number" && typeof bv === "number") return sort.dir === "asc" ? av - bv : bv - av
-        const as = String(av), bs = String(bv)
-        if (as < bs) return sort.dir === "asc" ? -1 : 1
-        if (as > bs) return sort.dir === "asc" ? 1 : -1
-        return 0
-      })
-    }
-    return out
-  }, [currentOrders, columnSearch, columnFilterValues, sort])
-
-  const totals = useMemo(() => {
-    const t: Record<string, number> = {}
-    for (const id of TOTAL_COLUMN_IDS) t[id] = displayRows.reduce((s, r) => s + (Number(r[id]) || 0), 0)
-    return t
-  }, [displayRows])
+  const stageColsFor = (cols: { id: string }[]) => cols.map((c) => STAGE_COLS.find((x) => x.id === c.id)!)
 
   const currentPage = activeTab === "pending" ? pendingPage : historyPage;
   const currentPagination = activeTab === "pending" ? pendingResult?.pagination : historyResult?.pagination;
@@ -255,29 +239,53 @@ export default function ApprovalOfOrderPage() {
 
   const tableContent = (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        {(isAdmin || isFeatureEnabled("can_toggle_columns")) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full bg-transparent sm:w-auto">
-                <Settings2 className="mr-2 h-4 w-4" />
-                Columns
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-              <ColumnToggleContent 
-                columns={availableCols.filter(c => !c.historyOnly)} 
-                visibleColumns={visibleColumns} 
-                setVisibleColumns={setVisibleColumns} 
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-
-      <Card className="overflow-hidden border-none shadow-sm md:max-h-150 md:overflow-auto">
-        <Table className="hidden md:table">
-          <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <StageListHeader
+          title={activeTab === "pending" ? "Approval List" : "Approval History"}
+          shown={displayRows.length}
+          total={currentOrders.length}
+          description={activeTab === "pending" ? "Orders awaiting approval, rejection or modification" : "Orders already actioned at this stage"}
+          searchValue={quickSearch}
+          onSearchChange={setQuickSearch}
+          searchPlaceholder="Search DO No., Customer, Sauda No..."
+        >
+          <StageToolbar
+            shown={displayRows.length}
+            total={currentOrders.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                {activeTab === "history" && (
+                  <>
+                    <StageFilterSelect value={statusSel} onChange={setStatusSel} allLabel="All Status" options={["Approved", "Rejected", "Required Modification"]} />
+                    <StageDivider />
+                  </>
+                )}
+                <StageFilterSelect value={customerSel} onChange={setCustomerSel} allLabel="All Customers" options={uniqueCustomers} />
+                <StageFilterSelect value={dispatchSel} onChange={setDispatchSel} allLabel="All Dispatch From" options={uniqueDispatch} />
+                <StageColumnsMenu
+                  columns={availableCols.filter((c) => !c.historyOnly)}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                />
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(activeTab === "history" && statusSel !== "ALL" ? [{ label: `Status: ${statusSel}`, onClear: () => setStatusSel("ALL") }] : []),
+              ...(customerSel !== "ALL" ? [{ label: `Customer: ${customerSel}`, onClear: () => setCustomerSel("ALL") }] : []),
+              ...(dispatchSel !== "ALL" ? [{ label: `Dispatch: ${dispatchSel}`, onClear: () => setDispatchSel("ALL") }] : []),
+              ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch}`, onClear: () => setQuickSearch("") }] : []),
+            ]}
+          />
+        </StageListHeader>
+        <CardContent className="p-0">
+        <div className="hidden overflow-x-auto rounded-b-xl md:block">
+        <Table>
+          <TableHeader className="bg-slate-50 border-b">
             <TableRow>
               <ColumnDragProvider
                 columnIds={orderedVisibleCols.map((c) => c.id)}
@@ -285,34 +293,32 @@ export default function ApprovalOfOrderPage() {
                 disabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
               >
                 {orderedVisibleCols.map((col) => (
-                  <SortableTableHead
+                  <StageHeadCell
                     key={col.id}
-                    id={col.id}
-                    className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                    onClick={() => handleSort(col.id)}
-                  >
-                    {col.label}
-                    <SortIcon field={col.id} />
-                    <ColumnFilterPopover
-                      columnLabel={col.label}
-                      values={distinctValuesByColumn[col.id] || []}
-                      searchValue={columnSearch[col.id] || ""}
-                      onSearchChange={(v) => setColumnSearch((prev) => ({ ...prev, [col.id]: v }))}
-                      selectedValues={columnFilterValues[col.id] ?? null}
-                      onSelectedValuesChange={(v) => setColumnFilterValues((prev) => ({ ...prev, [col.id]: v }))}
-                    />
-                  </SortableTableHead>
+                    col={STAGE_COLS.find((c) => c.id === col.id)!}
+                    table={table}
+                    width="min-w-[120px]"
+                    align={RIGHT_ALIGN_COLS.has(col.id) ? "right" : "left"}
+                  />
                 ))}
               </ColumnDragProvider>
             </TableRow>
           </TableHeader>
           <TableBody>
+            <StageTotalsRow
+              columns={stageColsFor(orderedVisibleCols)}
+              totals={totals}
+              count={displayRows.length}
+              format={(n, id) => fmtNumber(id, n)}
+              tones={TOTAL_TONES}
+              align={NUMBER_ALIGN}
+            />
             {isLoading && currentOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i} className="border-b border-slate-50 opacity-40">
                   {orderedVisibleCols.map((col) => (
-                    <TableCell key={col.id} className="py-4">
-                      <div className="mx-auto h-3 w-16 animate-pulse rounded-full bg-slate-200" />
+                    <TableCell key={col.id} className="px-4 py-4">
+                      <div className="h-3 w-16 animate-pulse rounded-full bg-slate-200" />
                     </TableCell>
                   ))}
                 </TableRow>
@@ -328,7 +334,9 @@ export default function ApprovalOfOrderPage() {
                     <TableCell
                       key={col.id}
                       className={cn(
-                        "whitespace-nowrap text-center text-xs",
+                        "whitespace-nowrap px-4 text-xs",
+                        TOTAL_COLUMN_IDS.has(col.id) && "text-right font-mono tabular-nums",
+                        !TOTAL_COLUMN_IDS.has(col.id) && RIGHT_ALIGN_COLS.has(col.id) && "text-right tabular-nums",
                         col.id === "order_no" ? "font-bold text-blue-700" : "text-slate-600"
                       )}
                       title={col.id === "remarks" ? row.remarks || undefined : undefined}
@@ -345,23 +353,22 @@ export default function ApprovalOfOrderPage() {
             ) : (
               <TableRow>
                 <TableCell colSpan={orderedVisibleCols.length || 1} className="py-8 text-center text-muted-foreground">
-                  No orders {activeTab === "pending" ? "pending approval" : "in history"}
+                  {currentOrders.length > 0 ? (
+                    <>
+                      <p className="font-medium text-slate-500">No matching records found for the current filters</p>
+                      <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                        Clear Filters
+                      </button>
+                    </>
+                  ) : (
+                    <>No orders {activeTab === "pending" ? "pending approval" : "in history"}</>
+                  )}
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
-          {displayRows.length > 0 && (
-            <TableFooter className="sticky bottom-0 z-10 bg-slate-50 shadow-[0_-1px_0_0_theme(colors.slate.200)]">
-              <TableRow className="hover:bg-transparent">
-                {orderedVisibleCols.map((col, idx) => (
-                  <TableCell key={col.id} className="whitespace-nowrap text-center text-xs font-black text-slate-700">
-                    {idx === 0 ? "Total" : TOTAL_COLUMN_IDS.has(col.id) ? formatCell(col.id, totals[col.id]) : ""}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableFooter>
-          )}
         </Table>
+        </div>
 
         <div className="space-y-3 p-3 md:hidden">
           {isLoading && currentOrders.length === 0 ? (
@@ -401,15 +408,15 @@ export default function ApprovalOfOrderPage() {
                 <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
                   <div className="rounded-md bg-slate-50 p-2">
                     <p className="text-[10px] font-black uppercase text-slate-400">Qty (Box)</p>
-                    <p className="mt-1 font-mono font-bold">{fmtNumber(row.total_qty_box)}</p>
+                    <p className="mt-1 font-mono font-bold">{fmtNumber("total_qty_box", row.total_qty_box)}</p>
                   </div>
                   <div className="rounded-md bg-slate-50 p-2">
                     <p className="text-[10px] font-black uppercase text-slate-400">Qty (KGS)</p>
-                    <p className="mt-1 font-mono font-bold">{fmtNumber(row.total_qty_kg)}</p>
+                    <p className="mt-1 font-mono font-bold">{fmtNumber("total_qty_kg", row.total_qty_kg)}</p>
                   </div>
                   <div className="rounded-md bg-slate-50 p-2">
-                    <p className="text-[10px] font-black uppercase text-slate-400">Total Amount</p>
-                    <p className="mt-1 font-mono font-bold">{fmtMoney(row.total_order_amount)}</p>
+                    <p className="text-[10px] font-black uppercase text-slate-400">Total Amount (₹)</p>
+                    <p className="mt-1 font-mono font-bold">{fmtNumber("total_order_amount", row.total_order_amount)}</p>
                   </div>
                   <div className="rounded-md bg-slate-50 p-2">
                     <p className="text-[10px] font-black uppercase text-slate-400">Broker</p>
@@ -424,9 +431,21 @@ export default function ApprovalOfOrderPage() {
               </div>
             ))
           ) : (
-            <div className="py-10 text-center text-muted-foreground">No orders {activeTab === "pending" ? "pending approval" : "in history"}</div>
+            <div className="py-10 text-center text-muted-foreground">
+              {currentOrders.length > 0 ? (
+                <>
+                  <p className="font-medium text-slate-500">No matching records found for the current filters</p>
+                  <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                    Clear Filters
+                  </button>
+                </>
+              ) : (
+                <>No orders {activeTab === "pending" ? "pending approval" : "in history"}</>
+              )}
+            </div>
           )}
         </div>
+        </CardContent>
       </Card>
 
       <div className="mt-4 flex w-full flex-col gap-3 rounded-2xl border border-blue-50 bg-white/50 p-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
@@ -461,6 +480,7 @@ export default function ApprovalOfOrderPage() {
 
   return (
     <WorkflowStageShell
+      persistKey={STAGE_KEY}
       title="Stage 3: Approval Of Order"
       description="Review each order and Approve, Reject, or request Modification, with full invoice-style detail."
       pendingCount={pendingResult?.pagination?.total || 0}

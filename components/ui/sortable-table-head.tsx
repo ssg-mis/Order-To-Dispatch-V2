@@ -12,10 +12,12 @@ interface SortableTableHeadProps {
   id: string
   className?: string
   onClick?: () => void
+  /** Make the inner wrapper span the full cell width (used by StageHeadCell so the totals band can fill the cell). */
+  fill?: boolean
   children: React.ReactNode
 }
 
-export function SortableTableHead({ id, className, onClick, children }: SortableTableHeadProps) {
+export function SortableTableHead({ id, className, onClick, fill, children }: SortableTableHeadProps) {
   const disabled = React.useContext(ColumnDragDisabledContext)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
 
@@ -38,7 +40,7 @@ export function SortableTableHead({ id, className, onClick, children }: Sortable
       onClick={onClick}
     >
       <div className={cn("flex items-center w-full", isRight ? "justify-end" : isCenter ? "justify-center" : "justify-start")}>
-        <div className="relative inline-flex items-center">
+        <div className={cn("relative items-center", fill ? "flex w-full" : "inline-flex")}>
           {!disabled && (
             <span
               {...attributes}

@@ -17,6 +17,7 @@ import { approvalApi, ledgerApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
+import { fmtNum } from "@/lib/table-format"
 
 type ApprovalAction = "approve" | "reject" | "modify"
 
@@ -37,7 +38,7 @@ const CHECK_ITEMS = [
 
 const fmtMoney = (v: number | null | undefined) => {
   const n = Number(v || 0)
-  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+  return n.toFixed(2)
 }
 const fmtDate = (v: string | null | undefined) => {
   if (!v) return "—"
@@ -230,7 +231,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                   <Field label="Contact Person" value={order?.customerContactPersonName} />
                   <Field label="WhatsApp No." value={order?.customerContactPersonWhatsappNo} />
                   <Field label="Payment Terms" value={order?.paymentTerms} />
-                  <Field label="Advance Amount" value={`₹${fmtMoney(order?.advanceAmount)}`} />
+                  <Field label="Advance Amount (₹)" value={fmtMoney(order?.advanceAmount)} />
                   <Field label="Broker" value={broker?.brokerName || "—"} />
                   <div>
                     <p className="text-xs text-muted-foreground">Dispatch From</p>
@@ -271,13 +272,25 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                 <div className="max-h-64 overflow-y-auto">
                   <Table>
                     <TableHeader className="sticky top-0 z-10 bg-slate-100/70 border-b">
+                      {items.length > 0 && (
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                          <TableCell className="px-4 font-black text-slate-900">Total ({items.length})</TableCell>
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4 text-right font-mono tabular-nums">
+                            {fmtNum(items.reduce((a: number, _it: any, i: number) => a + (Number(tax?.itemLines?.[i]?.taxableValue) || 0), 0), 2)}
+                          </TableCell>
+                        </TableRow>
+                      )}
                       <TableRow>
-                        <TableHead>Product / SKU</TableHead>
-                        <TableHead>Oil Type</TableHead>
-                        <TableHead>UOM</TableHead>
-                        <TableHead className="text-center">Qty</TableHead>
-                        <TableHead className="text-right">Rate</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="px-4">Product / SKU</TableHead>
+                        <TableHead className="px-4">Oil Type</TableHead>
+                        <TableHead className="px-4">UOM</TableHead>
+                        <TableHead className="px-4 text-right">Qty</TableHead>
+                        <TableHead className="px-4 text-right">Rate (₹)</TableHead>
+                        <TableHead className="px-4 text-right">Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -285,14 +298,14 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                         const line = tax?.itemLines?.[idx]
                         return (
                           <TableRow key={it.orderItem.id}>
-                            <TableCell className="font-medium">{it.sku?.skuName || it.orderItem?.oilType || "—"}</TableCell>
-                            <TableCell>{it.orderItem?.oilType || "—"}</TableCell>
-                            <TableCell>{it.orderItem?.uom || "—"}</TableCell>
-                            <TableCell className="text-center">
-                              <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{it.orderItem?.orderQuantity ?? "—"}</Badge>
+                            <TableCell className="px-4 font-medium">{it.sku?.skuName || it.orderItem?.oilType || "—"}</TableCell>
+                            <TableCell className="px-4">{it.orderItem?.oilType || "—"}</TableCell>
+                            <TableCell className="px-4">{it.orderItem?.uom || "—"}</TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums">
+                              {it.orderItem?.orderQuantity != null && it.orderItem?.orderQuantity !== "" ? fmtNum(Number(it.orderItem.orderQuantity), 3) : "—"}
                             </TableCell>
-                            <TableCell className="text-right">₹{fmtMoney(line?.rate)}</TableCell>
-                            <TableCell className="text-right font-bold">₹{fmtMoney(line?.taxableValue)}</TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums">{fmtMoney(line?.rate)}</TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-bold">{fmtMoney(line?.taxableValue)}</TableCell>
                           </TableRow>
                         )
                       })}
@@ -311,28 +324,26 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                 <Table>
                   <TableHeader className="bg-slate-100/70 border-b">
                     <TableRow>
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Taxable Value</TableHead>
-                      <TableHead className="text-center">GST %</TableHead>
-                      <TableHead className="w-8" />
+                      <TableHead className="px-4">Description</TableHead>
+                      <TableHead className="px-4 text-right">Taxable Value (₹)</TableHead>
+                      <TableHead className="px-4 text-right">GST (%)</TableHead>
+                      <TableHead className="w-8 px-4" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(tax?.itemLines || []).map((line: any, idx: number) => (
                       <TableRow key={`item-${idx}`}>
-                        <TableCell className="font-medium">{items[idx]?.sku?.skuName || items[idx]?.orderItem?.oilType || "—"}</TableCell>
-                        <TableCell className="text-right font-bold">₹{fmtMoney(line.taxableValue)}</TableCell>
-                        <TableCell className="text-center">
-                          {line.gstPercent ? (
-                            <Badge variant="outline" className="border-slate-200 text-slate-600 font-black px-2">{line.gstPercent}%</Badge>
-                          ) : "—"}
+                        <TableCell className="px-4 font-medium">{items[idx]?.sku?.skuName || items[idx]?.orderItem?.oilType || "—"}</TableCell>
+                        <TableCell className="px-4 text-right font-mono tabular-nums font-bold">{fmtMoney(line.taxableValue)}</TableCell>
+                        <TableCell className="px-4 text-right font-mono tabular-nums">
+                          {line.gstPercent ? fmtNum(Number(line.gstPercent), 2) : "—"}
                         </TableCell>
-                        <TableCell />
+                        <TableCell className="px-4" />
                       </TableRow>
                     ))}
                     {charges.map((c, idx) => (
                       <TableRow key={`charge-${idx}`} className="bg-slate-50/60">
-                        <TableCell>
+                        <TableCell className="px-4">
                           <Select
                             value={c.ledgerId ? String(c.ledgerId) : ""}
                             onValueChange={(v) => {
@@ -348,7 +359,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                             </SelectContent>
                           </Select>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="px-4 text-right">
                           <Input
                             type="number"
                             value={c.amount}
@@ -357,8 +368,8 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                             placeholder="0.00"
                           />
                         </TableCell>
-                        <TableCell className="text-center text-xs text-slate-400">—</TableCell>
-                        <TableCell>
+                        <TableCell className="px-4 text-right text-xs text-slate-400">—</TableCell>
+                        <TableCell className="px-4">
                           <button type="button" onClick={() => removeChargeRow(idx)} className="text-slate-400 hover:text-red-600">
                             <X className="h-3.5 w-3.5" />
                           </button>
@@ -366,7 +377,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                       </TableRow>
                     ))}
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={4} className="py-2">
+                      <TableCell colSpan={4} className="px-4 py-2">
                         <Button type="button" variant="outline" size="sm" onClick={addChargeRow} className="h-7 text-[11px]">
                           <Plus className="mr-1 h-3 w-3" /> Add Charge (e.g. Transporting Expenses)
                         </Button>
@@ -374,23 +385,23 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                     </TableRow>
                   </TableBody>
                   <TableFooter>
-                    <TotalFooterRow label="Total Taxable Value" value={previewTotals?.totalTaxableValue} />
+                    <TotalFooterRow label="Total Taxable Value (₹)" value={previewTotals?.totalTaxableValue} />
                     {/* CGST+SGST and IGST are mutually exclusive (intra-state vs inter-state) —
                         only the applicable one is rendered at all, never both. */}
                     {tax?.isInterState ? (
-                      <TotalFooterRow label="IGST" value={previewTotals?.igst} />
+                      <TotalFooterRow label="IGST (₹)" value={previewTotals?.igst} />
                     ) : (
                       <>
-                        <TotalFooterRow label="CGST" value={previewTotals?.cgst} />
-                        <TotalFooterRow label="SGST" value={previewTotals?.sgst} />
+                        <TotalFooterRow label="CGST (₹)" value={previewTotals?.cgst} />
+                        <TotalFooterRow label="SGST (₹)" value={previewTotals?.sgst} />
                       </>
                     )}
-                    <TotalFooterRow label="Rounding Off" value={previewTotals?.roundingOff} />
+                    <TotalFooterRow label="Rounding Off (₹)" value={previewTotals?.roundingOff} />
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={4} className="p-0">
                         <div className="flex items-center justify-between px-4 py-3 text-sm font-black text-slate-900 border-t border-slate-200">
-                          <span>Total Order Amount</span>
-                          <span>₹{fmtMoney(previewTotals?.grandTotal)}</span>
+                          <span>Total Order Amount (₹)</span>
+                          <span className="font-mono tabular-nums">{fmtMoney(previewTotals?.grandTotal)}</span>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -490,8 +501,8 @@ function Field({ label, value }: { label: string; value: any }) {
 function TotalFooterRow({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <TableRow className="hover:bg-transparent">
-      <TableCell colSpan={2} className="text-xs text-slate-600">{label}</TableCell>
-      <TableCell colSpan={2} className="text-right text-xs font-semibold text-slate-900">₹{fmtMoney(value)}</TableCell>
+      <TableCell colSpan={2} className="px-4 text-xs text-slate-600">{label}</TableCell>
+      <TableCell colSpan={2} className="px-4 text-right text-xs font-mono tabular-nums font-semibold text-slate-900">{fmtMoney(value)}</TableCell>
     </TableRow>
   )
 }

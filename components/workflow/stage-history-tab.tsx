@@ -10,9 +10,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useQuery } from "@tanstack/react-query"
 import { FIELD_GROUPS, STAGE_NAMES, FIELD_LABELS, fieldOrderPriority } from "./workflow-stage-shell"
-import { ISTDateTime } from "@/components/ui/ist-datetime"
+import { fmtDateTime, fmtNum } from "@/lib/table-format"
 import { isTimestamp } from "@/lib/date-utils"
 import { LOSS_CAUSES, BORNE_BY_LABEL, type BorneBy } from "@/lib/loss-causes"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { StageListHeader, StageToolbar, StageSegmented, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+
+const HISTORY_COLS: StageColDef<any>[] = [
+  { id: "date", label: "Date", type: "date", accessor: (r) => r.timestamp },
+  { id: "orderNo", label: "Order No.", type: "text", accessor: (r) => r.orderNo },
+  { id: "customerName", label: "Party Name", type: "text", accessor: (r) => r.customerName },
+  { id: "status", label: "Status", type: "text", accessor: (r) => r.status },
+  { id: "remarks", label: "Remarks", type: "text", accessor: (r) => r.remarks },
+]
+const HISTORY_COL_IDS = HISTORY_COLS.map((c) => c.id)
+const HISTORY_WIDTHS: Record<string, string> = { date: "w-[12%]", orderNo: "w-[18%]", customerName: "w-[18%]", status: "w-[12%]", remarks: "w-[25%]" }
+const noopReorder = () => {}
 
 interface StageHistoryTabProps {
   // Query configurations
@@ -72,10 +87,6 @@ export function StageHistoryTab({
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<any>(null)
   const [historySearch, setHistorySearch] = useState("")
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
-
-  // History table sorting state
-  const [historySortField, setHistorySortField] = useState<string>("date")
-  const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc")
 
   // Reset page when filters change
   React.useEffect(() => {
@@ -145,51 +156,29 @@ export function StageHistoryTab({
     }))
   }
 
-  const handleHistorySort = (field: string) => {
-    if (historySortField === field) {
-      setHistorySortDir((prev) => (prev === "asc" ? "desc" : "asc"))
-    } else {
-      setHistorySortField(field)
-      setHistorySortDir("asc")
-    }
+  // Status (layout) is remembered permanently; column searches/dates for the session; sort permanently.
+  const historyKey = `${queryKeyPrefix}-history`
+  const [hv, patchHv] = usePersistedFilters(historyKey, { status: "ALL" }, { permanentKeys: ["status"] })
+  const statusOptions = useMemo(
+    () => Array.from(new Set<string>((historyItems || []).map((r: any) => String(r.status || "")).filter(Boolean))).sort(),
+    [historyItems]
+  )
+  // A remembered status that isn't on this page of results must not hide everything.
+  const effectiveStatus = hv.status !== "ALL" && !statusOptions.includes(hv.status) && historyItems.length > 0 ? "ALL" : hv.status
+  const baseFilter = useCallback((r: any) => effectiveStatus === "ALL" || r.status === effectiveStatus, [effectiveStatus])
+  const table = useStageTable<any>({
+    rows: historyItems,
+    columns: HISTORY_COLS,
+    baseFilter,
+    defaultSort: { field: "date", dir: "desc" },
+    persistKey: historyKey,
+  })
+  const sortedHistoryData = table.rows
+  const activeHistoryFilters = (effectiveStatus !== "ALL" ? 1 : 0) + table.activeColumnFilterCount
+  const resetHistoryFilters = () => {
+    patchHv({ status: "ALL" })
+    table.clearColumnFilters()
   }
-
-  const HistorySortIcon = ({ field }: { field: string }) => {
-    if (historySortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return historySortDir === "asc" ? (
-      <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-    ) : (
-      <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-    )
-  }
-
-  // Sort history data
-  const sortedHistoryData = useMemo(() => {
-    if (!historyItems || historyItems.length === 0) return historyItems
-    return [...historyItems].sort((a, b) => {
-      let aVal: any = ""
-      let bVal: any = ""
-      if (historySortField === "date") {
-        aVal = new Date(a.timestamp || "").getTime() || 0
-        bVal = new Date(b.timestamp || "").getTime() || 0
-      } else if (historySortField === "orderNo") {
-        aVal = String(a.orderNo || "").toLowerCase()
-        bVal = String(b.orderNo || "").toLowerCase()
-      } else if (historySortField === "customerName") {
-        aVal = String(a.customerName || "").toLowerCase()
-        bVal = String(b.customerName || "").toLowerCase()
-      } else if (historySortField === "status") {
-        aVal = String(a.status || "").toLowerCase()
-        bVal = String(b.status || "").toLowerCase()
-      } else if (historySortField === "remarks") {
-        aVal = String(a.remarks || "").toLowerCase()
-        bVal = String(b.remarks || "").toLowerCase()
-      }
-      if (aVal < bVal) return historySortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return historySortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [historyItems, historySortField, historySortDir])
 
   // Group history data by base order number if enabled
   const groupedHistoryData = useMemo(() => {
@@ -297,7 +286,8 @@ export function StageHistoryTab({
         </a>
       )
     }
-    if (isTimestamp(value)) return <ISTDateTime value={value} />
+    if (isTimestamp(value)) return fmtDateTime(value)
+    if (typeof value === "number" && Number.isFinite(value) && !/(^|_)(id|no|number|phone|mobile|code)$/i.test(key || "")) return fmtNum(value, 2)
     return String(value)
   }
 
@@ -305,18 +295,38 @@ export function StageHistoryTab({
   const totalItems = data?.pagination?.total || 0
 
   return (
-    <Card className="border-none shadow-sm overflow-hidden">
+    <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+      <StageListHeader
+        title="Stage History"
+        shown={table.rows.length}
+        total={historyItems.length}
+        description="Completed records for this stage (current page of results)"
+      >
+        <StageToolbar
+          filters={
+            <StageSegmented
+              value={effectiveStatus}
+              onChange={(v) => patchHv({ status: v })}
+              options={[{ value: "ALL", label: "All" }, ...statusOptions.map((st) => ({ value: st, label: st }))]}
+            />
+          }
+          shown={table.rows.length}
+          total={historyItems.length}
+          activeCount={activeHistoryFilters}
+          onReset={resetHistoryFilters}
+        />
+      </StageListHeader>
       {isLoading ? (
         <div className="p-0 border-none shadow-none">
           <table className="w-full text-sm table-fixed">
             <thead className="bg-muted/30 border-b text-[10px] uppercase font-black text-slate-500 tracking-wider">
               <tr>
-                <th className="px-4 py-3 text-left w-[12%]">Date</th>
+                <th className="px-4 py-3 text-right w-[12%]">Date</th>
                 <th className="px-4 py-3 text-left w-[18%]">Order No.</th>
                 <th className="px-4 py-3 text-left w-[18%]">Party Name</th>
-                <th className="px-4 py-3 text-left text-center w-[12%]">Status</th>
+                <th className="px-4 py-3 text-left w-[12%]">Status</th>
                 <th className="px-4 py-3 text-left w-[25%]">Remarks</th>
-                <th className="px-4 py-3 text-center w-[15%]">Action</th>
+                <th className="px-4 py-3 text-left w-[15%]">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -325,9 +335,9 @@ export function StageHistoryTab({
                   <td className="px-4 py-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></td>
                   <td className="px-4 py-4"><div className="h-3 w-24 bg-blue-100 animate-pulse rounded-full" /></td>
                   <td className="px-4 py-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></td>
-                  <td className="px-4 py-4 flex justify-center"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded-full" /></td>
+                  <td className="px-4 py-4"><div className="h-4 w-16 bg-slate-200 animate-pulse rounded-full" /></td>
                   <td className="px-4 py-4"><div className="h-3 w-full bg-slate-100 animate-pulse rounded-full" /></td>
-                  <td className="px-4 py-4 flex justify-center"><div className="h-7 w-12 bg-slate-200 animate-pulse rounded-full" /></td>
+                  <td className="px-4 py-4 flex justify-start"><div className="h-7 w-12 bg-slate-200 animate-pulse rounded-full" /></td>
                 </tr>
               ))}
             </tbody>
@@ -337,17 +347,26 @@ export function StageHistoryTab({
         <div className="overflow-x-auto max-h-[600px] overflow-y-auto relative">
           {/* Desktop Table View */}
           <table className="w-full text-sm table-fixed hidden md:table">
-            <thead className="bg-white border-b text-[10px] uppercase font-black text-slate-500 tracking-wider sticky top-0 z-10 shadow-sm">
+            <thead className="bg-slate-50 border-b sticky top-0 z-10 shadow-sm">
               <tr>
-                <th className="px-4 py-3 text-left w-[12%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("date")}>Date<HistorySortIcon field="date" /></th>
-                <th className="px-4 py-3 text-left w-[18%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("orderNo")}>Order No.<HistorySortIcon field="orderNo" /></th>
-                <th className="px-4 py-3 text-left w-[18%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("customerName")}>Party Name<HistorySortIcon field="customerName" /></th>
-                <th className="px-4 py-3 text-center w-[12%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("status")}>Status<HistorySortIcon field="status" /></th>
-                <th className="px-4 py-3 text-left w-[25%] cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handleHistorySort("remarks")}>{remarksColName}<HistorySortIcon field="remarks" /></th>
-                <th className="px-4 py-3 text-center w-[15%]">Action</th>
+                <ColumnDragProvider columnIds={HISTORY_COL_IDS} onReorder={noopReorder} disabled>
+                  {HISTORY_COLS.map((col) => (
+                    <StageHeadCell key={col.id} col={col} table={table} width={HISTORY_WIDTHS[col.id]} />
+                  ))}
+                </ColumnDragProvider>
+                <th className="px-4 py-3 text-left w-[15%] align-bottom text-xs font-medium text-foreground">Action</th>
               </tr>
             </thead>
             <tbody>
+              <StageTotalsRow columns={HISTORY_COLS} totals={table.totals} count={table.rows.length} labelColumnId="orderNo" trailingCells={1} />
+              {table.rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                    <p className="font-medium text-slate-500">No matching records found</p>
+                    <button onClick={resetHistoryFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                  </TableCell>
+                </TableRow>
+              )}
               {groupedHistoryData.map((item: any) => {
                 if (item.isGroup && item.items.length > 1) {
                   const isExpanded = !!expandedGroups[item.baseOrderNo]
@@ -355,7 +374,7 @@ export function StageHistoryTab({
                     <React.Fragment key={item.baseOrderNo}>
                       {/* Main Group Row */}
                       <TableRow className="bg-slate-50/50 hover:bg-slate-100/50 border-b transition-colors font-semibold">
-                        <TableCell className="px-4 py-3 text-xs">{item.date}</TableCell>
+                        <TableCell className="px-4 py-3 text-xs text-right tabular-nums">{item.date}</TableCell>
                         <TableCell className="px-4 py-3 text-xs flex items-center gap-1.5 font-bold text-slate-800">
                           <span>{item.baseOrderNo}</span>
                           <Badge className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase">
@@ -367,7 +386,7 @@ export function StageHistoryTab({
                             {item.customerName}
                           </div>
                         </TableCell>
-                        <TableCell className="px-4 py-3 text-center">
+                        <TableCell className="px-4 py-3 text-left">
                           <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">
                             Grouped
                           </span>
@@ -375,7 +394,7 @@ export function StageHistoryTab({
                         <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
                           Multiple siblings grouped
                         </TableCell>
-                        <TableCell className="px-4 py-3 text-center">
+                        <TableCell className="px-4 py-3 text-left">
                           <Button
                             variant="outline"
                             size="sm"
@@ -399,17 +418,17 @@ export function StageHistoryTab({
                       {isExpanded &&
                         item.items.map((sibling: any, siblingIdx: number) => (
                           <TableRow key={sibling.id ?? sibling.dsrNumber ?? `${sibling.orderNo}-${siblingIdx}`} className="bg-white hover:bg-blue-50/10 border-b transition-colors">
-                            <TableCell className="px-4 py-2.5 text-xs text-slate-400 pl-8">{sibling.date || "-"}</TableCell>
-                            <TableCell className="px-4 py-2.5 font-bold text-blue-700 text-xs pl-8 flex items-center gap-1">
+                            <TableCell className="px-4 py-2.5 text-xs text-slate-400 text-right tabular-nums">{sibling.date || "-"}</TableCell>
+                            <TableCell className="px-4 py-2.5 font-bold text-blue-700 text-xs flex items-center gap-1">
                               <span className="text-slate-300 font-normal">↳</span>
                               {sibling.orderNo || "-"}
                             </TableCell>
-                            <TableCell className="px-4 py-2.5 text-[10px] text-slate-500 capitalize pl-8">
+                            <TableCell className="px-4 py-2.5 text-[10px] text-slate-500 capitalize">
                               <div className="break-words whitespace-normal leading-tight" title={sibling.customerName}>
                                 {sibling.customerName || "-"}
                               </div>
                             </TableCell>
-                            <TableCell className="px-4 py-2.5 text-center">
+                            <TableCell className="px-4 py-2.5 text-left">
                               <span
                                 className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${
                                   sibling.status === "Approved" || sibling.status === "Completed" || sibling.status === "Verified"
@@ -424,10 +443,10 @@ export function StageHistoryTab({
                                 {sibling.status || "Completed"}
                               </span>
                             </TableCell>
-                            <TableCell className="px-4 py-2.5 text-[10px] text-muted-foreground font-medium italic pl-8">
+                            <TableCell className="px-4 py-2.5 text-[10px] text-muted-foreground font-medium italic">
                               {sibling.remarks || "-"}
                             </TableCell>
-                            <TableCell className="px-4 py-2.5 text-center">
+                            <TableCell className="px-4 py-2.5 text-left">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -446,14 +465,14 @@ export function StageHistoryTab({
                   const rowItem = item.isGroup ? item.items[0] : item
                   return (
                     <TableRow key={rowItem.orderNo} className="border-b hover:bg-muted/20 transition-colors">
-                      <TableCell className="px-4 py-3 text-xs">{rowItem.date || "-"}</TableCell>
+                      <TableCell className="px-4 py-3 text-xs text-right tabular-nums">{rowItem.date || "-"}</TableCell>
                       <TableCell className="px-4 py-3 font-bold text-blue-700 text-xs">{rowItem.orderNo || "-"}</TableCell>
                       <TableCell className="px-4 py-3 text-[10px] font-semibold capitalize">
                         <div className="break-words whitespace-normal leading-tight" title={rowItem.customerName}>
                           {rowItem.customerName || "-"}
                         </div>
                       </TableCell>
-                      <TableCell className="px-4 py-3 text-center">
+                      <TableCell className="px-4 py-3 text-left">
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight ${
                             rowItem.status === "Approved" || rowItem.status === "Completed" || rowItem.status === "Verified"
@@ -471,7 +490,7 @@ export function StageHistoryTab({
                       <TableCell className="px-4 py-3 text-[10px] text-muted-foreground font-medium italic">
                         {rowItem.remarks || "-"}
                       </TableCell>
-                      <TableCell className="px-4 py-3 text-center">
+                      <TableCell className="px-4 py-3 text-left">
                         <Button
                           variant="outline"
                           size="sm"

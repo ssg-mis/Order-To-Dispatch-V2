@@ -1,0 +1,495 @@
+"use client"
+
+/**
+ * Shared stage-list UI - the exact look of Commitment Punch, reused by every stage:
+ *   1. Card header: title + "x of y" badge + description + quick search
+ *   2. Filter toolbar: segmented status buttons, selects, Columns menu, "Showing x of y", Reset
+ *   3. Table header: per-column Search box (or date-range Filter) ABOVE the heading, sortable
+ *   4. TOTAL row between the search box and the heading (portalled into the header cells)
+ *
+ * Use with `useStageTable` from `@/hooks/use-stage-table`.
+ */
+
+import * as React from "react"
+import { createPortal } from "react-dom"
+import { ArrowDown, ArrowUp, ArrowUpDown, Calendar as CalendarIcon, Search, Settings2, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { TableCell, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
+
+// ─── Card header (title, badge, description, quick search) + toolbar slot ───
+
+export function StageListHeader({
+  title,
+  shown,
+  total,
+  description,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder = "Search...",
+  actions,
+  children,
+}: {
+  title: string
+  shown: number
+  total: number
+  description?: string
+  searchValue?: string
+  onSearchChange?: (v: string) => void
+  searchPlaceholder?: string
+  /** Extra buttons next to the quick search (export etc). */
+  actions?: React.ReactNode
+  /** Put <StageToolbar/> (and <StageActiveChips/>) here. */
+  children?: React.ReactNode
+}) {
+  return (
+    <CardHeader className="p-4 sm:p-5 space-y-3 bg-white border-b border-slate-200/80">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">{title}</CardTitle>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+              {shown} of {total}
+            </span>
+          </div>
+          {description && <CardDescription className="text-xs text-slate-500 mt-0.5">{description}</CardDescription>}
+        </div>
+        <div className="flex items-center gap-2">
+          {actions}
+          {onSearchChange && (
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input
+                placeholder={searchPlaceholder}
+                className="pl-9 pr-8 text-xs h-8.5 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border-slate-200 rounded-lg transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
+                value={searchValue ?? ""}
+                onChange={(e) => onSearchChange(e.target.value)}
+              />
+              {searchValue && (
+                <button
+                  onClick={() => onSearchChange("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {children}
+    </CardHeader>
+  )
+}
+
+// ─── Filter toolbar ──────────────────────────────────────────────
+
+export function StageSegmented<V extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: V
+  onChange: (v: V) => void
+  options: { value: V; label: string }[]
+}) {
+  return (
+    <div className="flex items-center bg-white p-0.5 rounded-md border border-slate-200 shadow-2xs">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-pointer",
+            value === o.value ? "bg-blue-600 text-white shadow-xs font-bold" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function StageFilterSelect({
+  value,
+  onChange,
+  allLabel,
+  options,
+  className,
+}: {
+  value: string
+  onChange: (v: string) => void
+  /** e.g. "All Oils" - the "ALL" option. */
+  allLabel: string
+  options: string[]
+  className?: string
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className={cn("h-8 text-xs min-w-[115px] max-w-[190px] bg-white border-slate-200 shadow-2xs truncate", className)}>
+        <SelectValue placeholder={allLabel} />
+      </SelectTrigger>
+      <SelectContent className="max-h-64">
+        <SelectItem value="ALL">{allLabel}</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o} value={o} className="text-xs truncate">
+            {o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+export function StageColumnsMenu({
+  columns,
+  visibleColumns,
+  setVisibleColumns,
+  show = true,
+}: {
+  columns: { id: string; label: string }[]
+  visibleColumns: string[]
+  setVisibleColumns: (updater: (prev: string[]) => string[]) => void
+  /** Pass `isAdmin || isFeatureEnabled('can_toggle_columns')`. */
+  show?: boolean
+}) {
+  if (!show) return null
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="bg-transparent">
+          <Settings2 className="mr-2 h-4 w-4" />
+          Columns
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
+        <ColumnToggleContent columns={columns} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export function StageToolbar({
+  filters,
+  shown,
+  total,
+  activeCount,
+  onReset,
+}: {
+  /** Segmented control, <StageFilterSelect/>s, <StageColumnsMenu/> ... */
+  filters: React.ReactNode
+  shown: number
+  total: number
+  activeCount: number
+  onReset: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
+      <div className="flex flex-wrap items-center gap-2">{filters}</div>
+      <div className="flex items-center gap-2 ml-auto sm:ml-0">
+        <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
+          Showing <strong className="text-slate-800">{shown}</strong> of {total}
+        </span>
+        {activeCount > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2 rounded transition-colors gap-1 cursor-pointer"
+            onClick={onReset}
+          >
+            <X className="h-3 w-3" />
+            Reset ({activeCount})
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function StageDivider() {
+  return <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+}
+
+export function StageActiveChips({ chips }: { chips: { label: string; onClear: () => void }[] }) {
+  if (chips.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+      <span className="text-[11px] font-semibold text-slate-400 mr-1">Active:</span>
+      {chips.map((c) => (
+        <Badge key={c.label} variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
+          {c.label}
+          <button onClick={c.onClear} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+            <X className="h-2.5 w-2.5" />
+          </button>
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+// ─── Table header cell: [search box] above [heading + sort icon] ──────
+
+export function StageSortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
+  if (!active) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
+  return dir === "asc" ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" /> : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
+}
+
+/**
+ * Column alignment per the table standard: numeric + date columns RIGHT, everything else LEFT
+ * (centered cells are not used). `requested` is only honoured when it is "right".
+ */
+export function resolveStageAlign(col: { type?: string; total?: boolean }, requested?: "left" | "center" | "right"): "left" | "right" {
+  if (col.type === "number" || col.type === "date" || col.total) return "right"
+  return requested === "right" ? "right" : "left"
+}
+
+/**
+ * Drop-in replacement for the <SortableTableHead> header cell. Must be rendered inside
+ * <ColumnDragProvider>. `width` is a tailwind width class. Renders, top to bottom inside the one
+ * header cell: [search / date filter] -> [totals slot, filled by <StageTotalsRow/>] -> [heading + sort].
+ * `align` is accepted for backwards compatibility; alignment is derived from `col.type`
+ * (number/date/total -> right, otherwise left) unless "right" is passed.
+ */
+export function StageHeadCell<T>({
+  col,
+  table,
+  width,
+  align,
+}: {
+  col: StageColDef<T>
+  table: StageTableState
+  width?: string
+  align?: "left" | "center" | "right"
+}) {
+  const sortable = !col.noSort && !!col.accessor
+  const filterable = !col.noFilter && !!col.accessor
+  const range = table.dateRanges[col.id] || {}
+  const isRight = resolveStageAlign(col, align) === "right"
+
+  return (
+    <SortableTableHead
+      id={col.id}
+      fill
+      className={cn("whitespace-nowrap align-top py-0 px-4 group/header", width, isRight && "text-right")}
+    >
+      <div className="flex flex-col w-full">
+        <div onClick={(e) => e.stopPropagation()} className="w-full pt-2.5 pb-2 min-h-7 box-content">
+          {!filterable ? null : col.type === "date" ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+                  <span className="truncate font-medium">{range.from || range.to ? "Filtered" : "Filter..."}</span>
+                  <CalendarIcon className="h-3 w-3 opacity-60 ml-1 shrink-0" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-3" align="start">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                    <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Date Range</Label>
+                    {(range.from || range.to) && (
+                      <button onClick={() => table.setDateRange(col.id, {})} className="text-[10px] text-red-600 hover:underline font-semibold">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-medium text-slate-500">From</Label>
+                    <Input
+                      type="date"
+                      value={range.from || ""}
+                      onChange={(e) => table.setDateRange(col.id, { ...range, from: e.target.value })}
+                      className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-medium text-slate-500">To</Label>
+                    <Input
+                      type="date"
+                      value={range.to || ""}
+                      onChange={(e) => table.setDateRange(col.id, { ...range, to: e.target.value })}
+                      className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Input
+              placeholder="Search..."
+              value={table.columnFilters[col.id] || ""}
+              onChange={(e) => table.setColumnFilter(col.id, e.target.value)}
+              className={cn(
+                "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                isRight ? "text-right" : "text-left"
+              )}
+            />
+          )}
+        </div>
+        {/* Totals band: filled by <StageTotalsRow/> (portal). Hidden while empty. */}
+        <div data-stage-total-slot={col.id} className="w-full empty:hidden" />
+        <div
+          className={cn(
+            "flex items-center gap-1 select-none transition-colors w-full py-2.5",
+            sortable && "cursor-pointer hover:text-blue-600",
+            isRight ? "justify-end" : "justify-start"
+          )}
+          onClick={sortable ? () => table.toggleSort(col.id) : undefined}
+        >
+          <span>{col.label}</span>
+          {sortable && <StageSortIcon active={table.sortField === col.id} dir={table.sortDir} />}
+        </div>
+      </div>
+    </SortableTableHead>
+  )
+}
+
+// ─── TOTAL row ────────────────────────────────────────────────────────
+
+export type StageTotalTone = "default" | "blue" | "purple" | "amber" | "emerald" | "red"
+const TONE: Record<StageTotalTone, string> = {
+  default: "text-slate-900",
+  blue: "text-blue-700",
+  purple: "text-purple-700",
+  amber: "text-amber-700",
+  emerald: "text-emerald-700",
+  red: "text-red-700",
+}
+
+/** Plain numbers only: no currency symbol, no thousand separators (paste-safe for Excel/Tally). */
+const cleanTotal = (s: string) => s.replace(/[₹,]/g, "").trim()
+
+const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
+
+const BAND_CLASS =
+  "-mx-4 px-4 min-h-8 flex items-center bg-slate-100/90 border-y border-t-slate-200 border-b-2 border-b-slate-300 font-bold text-xs text-slate-800 whitespace-nowrap"
+
+/**
+ * Totals row. Pages render it as the first child of <TableBody>, but with the table standard the
+ * totals must sit between the search row and the heading row, so when the table uses <StageHeadCell/>
+ * the content is portalled into each header cell's totals slot (search -> totals -> heading) and the
+ * body row itself stays hidden. Without StageHeadCell slots it falls back to a normal body row.
+ * Nothing is rendered when there are no rows or no column has a total.
+ */
+export function StageTotalsRow<T>({
+  columns,
+  totals,
+  count,
+  format,
+  tones,
+  labelColumnId,
+  trailingCells = 0,
+  leadingCells = 0,
+  align,
+}: {
+  columns: StageColDef<T>[]
+  totals: Record<string, number>
+  count: number
+  /** Number formatter (default: fixed decimals from `col.decimals`, else 4). Any ₹ and thousand separators are stripped. */
+  format?: (n: number, colId: string) => string
+  /** Deprecated and ignored: units belong in the column heading, never in cells. */
+  unit?: string | ((colId: string) => string)
+  /** Colour per column id; default slate. */
+  tones?: Record<string, StageTotalTone>
+  /** Which column shows "Total (n)"; defaults to the first column. */
+  labelColumnId?: string
+  /** Empty cells to append for trailing action columns (fallback body row only). */
+  trailingCells?: number
+  /** Empty cells to prepend for leading selection columns (fallback body row only). */
+  leadingCells?: number
+  /** Deprecated: alignment is derived from column type (numbers/dates right, text left). */
+  align?: Record<string, "left" | "center" | "right">
+}) {
+  const sentinel = React.useRef<HTMLTableRowElement>(null)
+  const [state, setState] = React.useState<{ checked: boolean; slots: Record<string, HTMLElement> }>({ checked: false, slots: {} })
+
+  useIsoLayoutEffect(() => {
+    const tbl = sentinel.current?.closest("table")
+    if (!tbl) return
+    const slots: Record<string, HTMLElement> = {}
+    tbl.querySelectorAll<HTMLElement>("[data-stage-total-slot]").forEach((el) => {
+      if (el.closest("table") === tbl && el.dataset.stageTotalSlot) slots[el.dataset.stageTotalSlot] = el
+    })
+    const prev = state.slots
+    const pk = Object.keys(prev)
+    const nk = Object.keys(slots)
+    const same = state.checked && pk.length === nk.length && nk.every((k) => prev[k] === slots[k])
+    if (!same) setState({ checked: true, slots })
+  })
+
+  const hasTotals = columns.some((c) => c.total && totals[c.id] !== undefined)
+  if (count === 0 || !hasTotals) return null
+
+  const fmt = (n: number, id: string) => {
+    const col = columns.find((c) => c.id === id)
+    return cleanTotal(format ? format(n, id) : n.toFixed(col?.decimals ?? 4))
+  }
+  const slotIds = Object.keys(state.slots)
+  const useSlots = state.checked && slotIds.length > 0
+  const labelId = useSlots
+    ? labelColumnId && state.slots[labelColumnId]
+      ? labelColumnId
+      : columns.find((c) => state.slots[c.id])?.id
+    : labelColumnId ?? columns[0]?.id
+
+  const content = (col: StageColDef<T>) => {
+    if (col.id === labelId) return <span className="font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({count})</span>
+    if (col.total && totals[col.id] !== undefined)
+      return <span className={cn("font-mono font-black tabular-nums", TONE[tones?.[col.id] ?? "default"])}>{fmt(totals[col.id], col.id)}</span>
+    return null
+  }
+
+  if (!state.checked) return <tr hidden ref={sentinel} />
+
+  if (useSlots) {
+    return (
+      <>
+        <tr hidden ref={sentinel} />
+        {columns.map((col) => {
+          const el = state.slots[col.id]
+          if (!el) return null
+          const a = resolveStageAlign(col, align?.[col.id])
+          return createPortal(
+            <div className={cn(BAND_CLASS, a === "right" ? "justify-end text-right" : "justify-start text-left")}>{content(col)}</div>,
+            el,
+            col.id
+          )
+        })}
+      </>
+    )
+  }
+
+  // Fallback: no StageHeadCell slots in this table -> ordinary body row.
+  return (
+    <>
+      <tr hidden ref={sentinel} />
+      <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+        {Array.from({ length: leadingCells }).map((_, i) => (
+          <TableCell key={`total-lead-${i}`} className="px-2" />
+        ))}
+        {columns.map((col) => {
+          const a = resolveStageAlign(col, align?.[col.id])
+          return (
+            <TableCell key={`total-${col.id}`} className={cn("px-4", a === "right" ? "text-right" : "text-left")}>
+              {content(col)}
+            </TableCell>
+          )
+        })}
+        {Array.from({ length: trailingCells }).map((_, i) => (
+          <TableCell key={`total-trail-${i}`} className="px-2" />
+        ))}
+      </TableRow>
+    </>
+  )
+}

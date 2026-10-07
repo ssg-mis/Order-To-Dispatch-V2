@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2, Lock, Search } from "lucide-react"
 import { useInView } from "react-intersection-observer"
 
 import { cn } from "@/lib/utils"
@@ -39,6 +39,8 @@ interface AsyncComboboxProps {
   searchPlaceholder?: string
   emptyText?: string
   disabled?: boolean
+  /** Shown as a lock icon + tooltip when the field is disabled because the value is fixed (not merely unavailable). */
+  lockedHint?: string
   className?: string
   debounceItems?: number
 }
@@ -52,6 +54,7 @@ export function AsyncCombobox({
   searchPlaceholder = "Search...",
   emptyText = "No option found.",
   disabled = false,
+  lockedHint,
   className,
   debounceItems = 300,
 }: AsyncComboboxProps) {
@@ -134,7 +137,7 @@ export function AsyncCombobox({
     }
   }, [value, options])
 
-  return (
+  const popover = (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
@@ -151,7 +154,11 @@ export function AsyncCombobox({
           <span className="truncate">
             {selectedLabel || placeholder}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {disabled && lockedHint ? (
+            <Lock className="ml-2 h-3.5 w-3.5 shrink-0 text-slate-400" />
+          ) : (
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[320px] p-0 shadow-lg border-slate-200 rounded-xl" align="start">
@@ -225,5 +232,15 @@ export function AsyncCombobox({
         </Command>
       </PopoverContent>
     </Popover>
+  )
+
+  // Locked (fixed-by-design) fields get a not-allowed cursor and an explanatory tooltip; the
+  // wrapper is only added then, so every other combobox renders exactly as before.
+  return disabled && lockedHint ? (
+    <span className="block w-full cursor-not-allowed" title={lockedHint}>
+      {popover}
+    </span>
+  ) : (
+    popover
   )
 }
