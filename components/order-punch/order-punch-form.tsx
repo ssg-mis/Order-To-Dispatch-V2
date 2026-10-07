@@ -22,6 +22,7 @@ import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
 import { cn, fuzzyMatch } from "@/lib/utils"
+import { fmtNum } from "@/lib/table-format"
 import {
   Table,
   TableBody,
@@ -1841,21 +1842,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   {preApprovalProducts.length > 0 && (
                     <div className="overflow-hidden rounded-md border border-blue-100 bg-white">
                       <Table>
-                        <TableHeader className="bg-blue-50/50">
+                        <TableHeader className="bg-slate-50 border-b">
                           <TableRow>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">Oil Type</TableHead>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">15 KG Rate</TableHead>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">1 LTR Rate</TableHead>
-                            <TableHead className="w-[50px]"></TableHead>
+                            <TableHead className="px-4">Oil Type</TableHead>
+                            <TableHead className="px-4 text-right">15 KG Rate (₹)</TableHead>
+                            <TableHead className="px-4 text-right">1 LTR Rate (₹)</TableHead>
+                            <TableHead className="w-[50px] px-4"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {preApprovalProducts.map((p) => (
                             <TableRow key={p.id} className="hover:bg-blue-50/30">
-                              <TableCell className="font-medium py-2">{p.oilType}</TableCell>
-                              <TableCell className="font-semibold text-green-600 py-2">₹{p.ratePer15Kg || "—"}</TableCell>
-                              <TableCell className="font-semibold text-blue-600 py-2">₹{p.ratePerLtr || "—"}</TableCell>
-                              <TableCell className="py-2 text-right">
+                              <TableCell className="font-medium py-2 px-4">{p.oilType}</TableCell>
+                              <TableCell className="font-semibold text-green-600 py-2 px-4 text-right font-mono tabular-nums">{fmtNum(p.ratePer15Kg || null, 2)}</TableCell>
+                              <TableCell className="font-semibold text-blue-600 py-2 px-4 text-right font-mono tabular-nums">{fmtNum(p.ratePerLtr || null, 2)}</TableCell>
+                              <TableCell className="py-2 px-4 text-left">
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -1901,7 +1902,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                             <SelectContent>
                               {returnableTransfers.map((t: any) => (
                                 <SelectItem key={t.order_no} value={t.order_no}>
-                                  {t.order_no} · from {t.source_depot || "—"} · {t.date ? new Date(t.date).toLocaleDateString("en-IN") : "—"} · returnable {t.returnable_qty}
+                                  {t.order_no} · from {t.source_depot || "—"} · {t.date ? new Date(t.date).toLocaleDateString("en-GB") : "—"} · returnable {t.returnable_qty}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1925,20 +1926,26 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     <div className="overflow-x-auto rounded-md border bg-white">
                       <table className="w-full text-xs">
                         <thead className="bg-slate-50 text-slate-600">
+                          <tr className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-slate-800">
+                            <td className="px-4 py-2 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({returnLines.length})</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.received_qty) || 0), 0), 3)}</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.already_returned_qty) || 0), 0), 3)}</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.returnable_qty) || 0), 0), 3)}</td>
+                          </tr>
                           <tr>
-                            <th className="px-3 py-2 text-left">Product</th>
-                            <th className="px-3 py-2 text-right">Received</th>
-                            <th className="px-3 py-2 text-right">Already returned</th>
-                            <th className="px-3 py-2 text-right">Returnable</th>
+                            <th className="px-4 py-2 text-left">Product</th>
+                            <th className="px-4 py-2 text-right">Received</th>
+                            <th className="px-4 py-2 text-right">Already returned</th>
+                            <th className="px-4 py-2 text-right">Returnable</th>
                           </tr>
                         </thead>
                         <tbody>
                           {returnLines.map((l: any) => (
                             <tr key={l.sku_id} className="border-t">
-                              <td className="px-3 py-2 font-medium">{l.sku_name}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{l.received_qty}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{l.already_returned_qty}</td>
-                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{l.returnable_qty}</td>
+                              <td className="px-4 py-2 text-left font-medium">{l.sku_name}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.received_qty, 3)}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.already_returned_qty, 3)}</td>
+                              <td className="px-4 py-2 text-right font-semibold font-mono tabular-nums">{fmtNum(l.returnable_qty, 3)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1970,7 +1977,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           <SelectContent>
                             {returnInvoices.map((inv: any) => (
                               <SelectItem key={inv.invoice_no} value={inv.invoice_no}>
-                                {inv.invoice_no} · {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-IN") : "—"} · ₹{Number(inv.bill_amount || 0).toLocaleString("en-IN")} · returnable {inv.returnable_qty}
+                                {inv.invoice_no} · {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-GB") : "—"} · amount (₹) {fmtNum(inv.bill_amount || 0, 2)} · returnable {inv.returnable_qty}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1994,22 +2001,29 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     <div className="overflow-x-auto rounded-md border bg-white">
                       <table className="w-full text-xs">
                         <thead className="bg-slate-50 text-slate-600">
+                          <tr className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-slate-800">
+                            <td className="px-4 py-2 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({returnLines.length})</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.invoiced_qty) || 0), 0), 3)}</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.already_returned_qty) || 0), 0), 3)}</td>
+                            <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(returnLines.reduce((a: number, l: any) => a + (Number(l.returnable_qty) || 0), 0), 3)}</td>
+                            <td className="px-4 py-2"></td>
+                          </tr>
                           <tr>
-                            <th className="px-3 py-2 text-left">Product</th>
-                            <th className="px-3 py-2 text-right">Invoiced</th>
-                            <th className="px-3 py-2 text-right">Already returned</th>
-                            <th className="px-3 py-2 text-right">Returnable</th>
-                            <th className="px-3 py-2 text-right">Invoice rate</th>
+                            <th className="px-4 py-2 text-left">Product</th>
+                            <th className="px-4 py-2 text-right">Invoiced</th>
+                            <th className="px-4 py-2 text-right">Already returned</th>
+                            <th className="px-4 py-2 text-right">Returnable</th>
+                            <th className="px-4 py-2 text-right">Invoice rate (₹)</th>
                           </tr>
                         </thead>
                         <tbody>
                           {returnLines.map((l: any) => (
                             <tr key={l.sku_id} className="border-t">
-                              <td className="px-3 py-2 font-medium">{l.sku_name}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{l.invoiced_qty}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{l.already_returned_qty}</td>
-                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{l.returnable_qty}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{l.rate != null ? `₹${l.rate}` : "—"}</td>
+                              <td className="px-4 py-2 text-left font-medium">{l.sku_name}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.invoiced_qty, 3)}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.already_returned_qty, 3)}</td>
+                              <td className="px-4 py-2 text-right font-semibold font-mono tabular-nums">{fmtNum(l.returnable_qty, 3)}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.rate, 2)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -2178,21 +2192,21 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                     {products.length > 0 && (
                       <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg">
                         <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Weight</p>
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Weight (KG)</p>
                           <p className="text-sm font-bold text-blue-700">
-                            {products.reduce((sum, p) => sum + (parseFloat(p.skuWeight) || 0) * (parseFloat(p.orderQty) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                            {fmtNum(products.reduce((sum, p) => sum + (parseFloat(p.skuWeight) || 0) * (parseFloat(p.orderQty) || 0), 0), 3)}
                           </p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Qty</p>
                           <p className="text-sm font-bold text-blue-700">
-                            {products.reduce((sum, p) => sum + (parseFloat(p.orderQty) || 0), 0).toLocaleString()}
+                            {fmtNum(products.reduce((sum, p) => sum + (parseFloat(p.orderQty) || 0), 0), 3)}
                           </p>
                         </div>
                         <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount</p>
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount (₹)</p>
                           <p className="text-sm font-bold text-blue-700">
-                            ₹{totalTaxable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fmtNum(totalTaxable, 2)}
                           </p>
                         </div>
                       </div>
@@ -2248,36 +2262,36 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           {gstSupplyType === "INTRA" ? (
                             <>
                               <div className="flex justify-between items-center">
-                                <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
+                                <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%) (₹)</span>
                                 <span className="font-mono font-bold text-slate-700">
-                                  ₹{orderCgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {fmtNum(orderCgst, 2)}
                                 </span>
                               </div>
                               <div className="flex justify-between items-center">
-                                <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
+                                <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%) (₹)</span>
                                 <span className="font-mono font-bold text-slate-700">
-                                  ₹{orderSgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {fmtNum(orderSgst, 2)}
                                 </span>
                               </div>
                             </>
                           ) : (
                             <div className="flex justify-between items-center">
-                              <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
+                              <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
                               <span className="font-mono font-bold text-slate-700">
-                                ₹{orderIgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {fmtNum(orderIgst, 2)}
                               </span>
                             </div>
                           )}
                           <div className="flex justify-between items-center">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
+                            <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
                             <span className="font-mono font-bold text-slate-500">
-                              {`${orderRoundOff >= 0 ? "+" : "-"}₹${Math.abs(orderRoundOff).toFixed(2)}`}
+                              {`${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
                             </span>
                           </div>
                           <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
-                            <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
+                            <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value (₹)</span>
                             <span className="font-mono font-black text-blue-700 text-sm">
-                              ₹{orderRoundedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {fmtNum(orderRoundedTotal, 2)}
                             </span>
                           </div>
                         </div>

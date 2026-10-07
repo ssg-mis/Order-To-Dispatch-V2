@@ -135,22 +135,22 @@ export default function OrderPunchDetailPage() {
   )
 
   const renderItemCell = (row: any, colId: string) => {
-    const alignClass = NUMBER_ITEM_COLS.has(colId) ? "text-right font-mono" : ""
+    const alignClass = NUMBER_ITEM_COLS.has(colId) ? "text-right font-mono tabular-nums" : ""
     switch (colId) {
       case "sku_name":
-        return <TableCell key={colId} className="font-medium">{row.sku_name || "—"}</TableCell>
+        return <TableCell key={colId} className="px-4 font-medium">{row.sku_name || "—"}</TableCell>
       case "uom":
-        return <TableCell key={colId}>{row.uom || "—"}</TableCell>
+        return <TableCell key={colId} className="px-4">{row.uom || "—"}</TableCell>
       case "order_quantity":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.order_quantity)}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", alignClass)}>{formatNumber(row.order_quantity)}</TableCell>
       case "alternate_qty_kg":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.alternate_qty_kg)}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", alignClass)}>{formatNumber(row.alternate_qty_kg)}</TableCell>
       case "rate_of_material":
-        return <TableCell key={colId} className={alignClass}>{formatAmount(row.rate_of_material)}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", alignClass)}>{formatAmount(row.rate_of_material)}</TableCell>
       case "oil_type":
-        return <TableCell key={colId}>{row.oil_type || "—"}</TableCell>
+        return <TableCell key={colId} className="px-4">{row.oil_type || "—"}</TableCell>
       case "approval_status":
-        return <TableCell key={colId}>{row.approval_status ? stage3Badge(row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status) : <span className="text-slate-400">Pending</span>}</TableCell>
+        return <TableCell key={colId} className="px-4">{row.approval_status ? stage3Badge(row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status) : <span className="text-slate-400">Pending</span>}</TableCell>
       default:
         return null
     }
@@ -260,7 +260,7 @@ export default function OrderPunchDetailPage() {
                     disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
                   >
                     {orderedVisibleCols.map((col) => (
-                      <SortableTableHead key={col.id} id={col.id} className={cn("whitespace-nowrap", NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
+                      <SortableTableHead key={col.id} id={col.id} className={cn("whitespace-nowrap px-4", NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
                         <div
                           className={cn("flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 w-full", NUMBER_ITEM_COLS.has(col.id) ? "justify-end" : "justify-start")}
                           onClick={() => handleSort(col.id)}
@@ -272,11 +272,27 @@ export default function OrderPunchDetailPage() {
                     ))}
                   </ColumnDragProvider>
                 </TableRow>
+                {sortedItems.length > 0 && (
+                  <TableRow className="bg-slate-50/70">
+                    {orderedVisibleCols.map((col, idx) => (
+                      <TableCell
+                        key={`total-${col.id}`}
+                        className={cn("px-4 font-black text-slate-900", NUMBER_ITEM_COLS.has(col.id) ? "text-right font-mono tabular-nums" : "text-left")}
+                      >
+                        {col.id === "alternate_qty_kg"
+                          ? formatNumber(sortedItems.reduce((a: number, it: any) => a + (Number(it.alternate_qty_kg) || 0), 0))
+                          : idx === 0
+                          ? "Total"
+                          : ""}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                )}
               </TableHeader>
               <TableBody>
                 {sortedItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={orderedVisibleCols.length || 1} className="text-center py-10 text-muted-foreground">No line items</TableCell>
+                    <TableCell colSpan={orderedVisibleCols.length || 1} className="px-4 text-left py-10 text-muted-foreground">No line items</TableCell>
                   </TableRow>
                 ) : (
                   sortedItems.map((row: any) => (

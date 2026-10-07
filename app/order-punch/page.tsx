@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -14,24 +13,35 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { OrderPunchForm } from "@/components/order-punch/order-punch-form"
 import { OrderPunchDetailModal } from "@/components/order-punch/order-punch-detail-modal"
 import { ModifyOrderDialog } from "@/components/order-punch/modify-order-dialog"
-import { Plus, RefreshCw, Search, X, Settings2, Pencil, CheckCircle2 } from "lucide-react"
+import { Plus, RefreshCw, Pencil, CheckCircle2, Calendar as CalendarIconLucide } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { orderApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
-import { usePersistedSort } from "@/hooks/use-persisted-sort"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-import { SortableTableHead } from "@/components/ui/sortable-table-head"
-import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { cn } from "@/lib/utils"
-import { formatDate, formatDateTime, formatAmount, formatNumber } from "@/lib/order-punch-format"
+import { fmtNum, fmtDate, fmtDateTime } from "@/lib/table-format"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
+import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader,
+  StageToolbar,
+  StageFilterSelect,
+  StageColumnsMenu,
+  StageDivider,
+  StageActiveChips,
+  StageSortIcon,
+} from "@/components/stage-list"
 
 const STAGE_KEY = "order-punch"
 
@@ -44,7 +54,7 @@ const PAGE_COLUMNS: { id: string; label: string; type: ColType; width: string }[
   { id: "customer_name", label: "Customer Name", type: "text", width: "w-[220px]" },
   { id: "total_qty_box", label: "Total Qty (Box)", type: "number", width: "w-[130px]" },
   { id: "total_qty_kgs", label: "Total Qty (KGS)", type: "number", width: "w-[130px]" },
-  { id: "total_order_amount", label: "Total Order Amount", type: "number", width: "w-[160px]" },
+  { id: "total_order_amount", label: "Total Order Amount (₹)", type: "number", width: "w-[160px]" },
   { id: "depot_name", label: "Dispatch From", type: "text", width: "w-[130px]" },
   { id: "remarks", label: "Remarks", type: "text", width: "w-[200px]" },
   { id: "broker_name", label: "Broker", type: "text", width: "w-[130px]" },
@@ -55,17 +65,19 @@ const DEFAULT_COLUMN_IDS = PAGE_COLUMNS.map((c) => c.id)
 const NUMBER_COLS = new Set(["total_qty_box", "total_qty_kgs", "total_order_amount"])
 const PAGE_COL_WIDTH: Record<string, string> = Object.fromEntries(PAGE_COLUMNS.map((c) => [c.id, c.width]))
 
-function compareValues(a: any, b: any, type: ColType): number {
-  if (type === "date" || type === "datetime") {
-    const at = a ? new Date(a).getTime() : -Infinity
-    const bt = b ? new Date(b).getTime() : -Infinity
-    return at - bt
-  }
-  if (type === "number") {
-    return (Number(a) || 0) - (Number(b) || 0)
-  }
-  return String(a ?? "").localeCompare(String(b ?? ""), undefined, { sensitivity: "base" })
-}
+const STAGE_COLS: StageColDef<any>[] = PAGE_COLUMNS.map((c) => ({
+  id: c.id,
+  label: c.label,
+  type: c.type === "number" ? "number" : c.type === "text" ? "text" : "date",
+  accessor: (r: any) => r[c.id],
+  total: NUMBER_COLS.has(c.id),
+}))
+const TOTAL_TONES: Record<string, string> = { total_qty_box: "emerald", total_qty_kgs: "blue", total_order_amount: "purple" }
+const MODIFY_COL: StageColDef<any> = { id: "__modify", label: "Modify", type: "text", noFilter: true, noSort: true }
+const COL_CLASS: Record<string, string> = { ...PAGE_COL_WIDTH, __modify: "w-16" }
+const TOTAL_DECIMALS: Record<string, number> = { total_qty_box: 0, total_qty_kgs: 3, total_order_amount: 2 }
+// Numeric and date columns are right aligned; everything else left.
+const RIGHT_ALIGN_COLS = new Set(["total_qty_box", "total_qty_kgs", "total_order_amount", "do_date", "actual_datetime"])
 
 export default function OrderPunchListPage() {
   const { toast } = useToast()
@@ -74,10 +86,19 @@ export default function OrderPunchListPage() {
 
   const [rows, setRows] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [doDateFilter, setDoDateFilter] = useState("")
-  const [depotFilter, setDepotFilter] = useState("ALL")
-  const [customerFilter, setCustomerFilter] = useState("ALL")
+  // Session-scoped (survive refresh, cleared on a new session): search, DO date, customer and
+  // depot narrow data, so none are permanent (no layout keys here).
+  const [listView, patchListView] = usePersistedFilters(STAGE_KEY, {
+    searchQuery: "",
+    doDateFilter: "",
+    depotFilter: "ALL",
+    customerFilter: "ALL",
+  }, { permanentKeys: [] })
+  const { searchQuery, doDateFilter, depotFilter, customerFilter } = listView
+  const setSearchQuery = (v: string) => patchListView({ searchQuery: v })
+  const setDoDateFilter = (v: string) => patchListView({ doDateFilter: v })
+  const setDepotFilter = (v: string) => patchListView({ depotFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [modifyOrder, setModifyOrder] = useState<any>(null)
   const [loadingModifyId, setLoadingModifyId] = useState<number | null>(null)
@@ -112,33 +133,24 @@ export default function OrderPunchListPage() {
     return Array.from(set).sort()
   }, [rows])
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((r) => {
+  const baseFilter = useCallback(
+    (r: any) => {
       if (depotFilter !== "ALL" && r.depot_name !== depotFilter) return false
       if (customerFilter !== "ALL" && r.customer_name !== customerFilter) return false
+      if (searchQuery) {
+        const sq = searchQuery.toLowerCase()
+        const matches = (r.order_no && String(r.order_no).toLowerCase().includes(sq)) ||
+                        (r.manual_sauda_no && String(r.manual_sauda_no).toLowerCase().includes(sq)) ||
+                        (r.customer_name && String(r.customer_name).toLowerCase().includes(sq))
+        if (!matches) return false
+      }
       return true
-    })
-  }, [rows, depotFilter, customerFilter])
+    },
+    [depotFilter, customerFilter, searchQuery]
+  )
 
-  const [sort, setSort] = usePersistedSort(STAGE_KEY, { field: "do_date", dir: "desc" })
-  const handleSort = (field: string) => {
-    if (sort?.field === field) {
-      if (sort.dir === "asc") setSort({ field, dir: "desc" })
-      else setSort(null)
-    } else {
-      setSort({ field, dir: "asc" })
-    }
-  }
-
-  const sortedRows = useMemo(() => {
-    if (!sort) return filteredRows
-    const col = PAGE_COLUMNS.find((c) => c.id === sort.field)
-    const type: ColType = col?.type || "text"
-    return [...filteredRows].sort((a, b) => {
-      const cmp = compareValues(a[sort.field], b[sort.field], type)
-      return sort.dir === "asc" ? cmp : -cmp
-    })
-  }, [filteredRows, sort])
+  const table = useStageTable<any>({ rows, columns: STAGE_COLS, baseFilter, defaultSort: { field: "do_date", dir: "desc" }, persistKey: STAGE_KEY })
+  const sortedRows = table.rows
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(STAGE_KEY, DEFAULT_COLUMN_IDS)
   const [columnOrder, setColumnOrder] = useColumnOrder(STAGE_KEY, DEFAULT_COLUMN_IDS)
@@ -158,45 +170,42 @@ export default function OrderPunchListPage() {
   )
 
   const renderCell = (row: any, colId: string) => {
-    const isNumber = NUMBER_COLS.has(colId)
     const widthClass = PAGE_COL_WIDTH[colId] || ""
-    const alignClass = cn(widthClass, isNumber && "text-right font-mono")
+    const alignClass = cn("px-4", widthClass, RIGHT_ALIGN_COLS.has(colId) && "text-right whitespace-nowrap", NUMBER_COLS.has(colId) && "font-mono tabular-nums")
     switch (colId) {
       case "do_date":
-        return <TableCell key={colId} className={widthClass}>{formatDate(row.do_date)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtDate(row.do_date)}</TableCell>
       case "order_no":
-        return <TableCell key={colId} className={cn("font-mono font-semibold text-blue-700 whitespace-nowrap", widthClass)}>{row.order_no}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono font-semibold text-blue-700 whitespace-nowrap", alignClass)}>{row.order_no}</TableCell>
       case "manual_sauda_no":
-        return <TableCell key={colId} className={cn("truncate", widthClass)}>{row.manual_sauda_no || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.manual_sauda_no || "—"}</TableCell>
       case "customer_name":
-        return <TableCell key={colId} className={cn("font-medium truncate", widthClass)} title={row.customer_name || ""}>{row.customer_name || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-medium truncate", alignClass)} title={row.customer_name || ""}>{row.customer_name || "—"}</TableCell>
       case "total_qty_box":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.total_qty_box)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_qty_box, 0)}</TableCell>
       case "total_qty_kgs":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.total_qty_kgs)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_qty_kgs, 3)}</TableCell>
       case "total_order_amount":
-        return <TableCell key={colId} className={alignClass}>{formatAmount(row.total_order_amount)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_order_amount, 2)}</TableCell>
       case "depot_name":
-        return <TableCell key={colId} className={cn("truncate", widthClass)}>{row.depot_name || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.depot_name || "—"}</TableCell>
       case "remarks":
-        return <TableCell key={colId} className={cn("truncate", widthClass)} title={row.remarks || ""}>{row.remarks || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("truncate", alignClass)} title={row.remarks || ""}>{row.remarks || "—"}</TableCell>
       case "broker_name":
-        return <TableCell key={colId} className={cn("truncate", widthClass)}>{row.broker_name || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.broker_name || "—"}</TableCell>
       case "order_punch_by":
-        return <TableCell key={colId} className={cn("truncate", widthClass)}>{row.order_punch_by || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.order_punch_by || "—"}</TableCell>
       case "actual_datetime":
-        return <TableCell key={colId} className={cn("whitespace-nowrap", widthClass)}>{formatDateTime(row.actual_datetime)}</TableCell>
+        return <TableCell key={colId} className={cn("whitespace-nowrap", alignClass)}>{fmtDateTime(row.actual_datetime)}</TableCell>
       default:
         return null
     }
   }
 
-  const activeFiltersCount = (searchQuery ? 1 : 0) + (doDateFilter ? 1 : 0) + (depotFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0)
+  const activeFiltersCount = (searchQuery ? 1 : 0) + (doDateFilter ? 1 : 0) + (depotFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + table.activeColumnFilterCount
   const clearAllFilters = () => {
-    setSearchQuery("")
-    setDoDateFilter("")
-    setDepotFilter("ALL")
-    setCustomerFilter("ALL")
+    patchListView({ searchQuery: "", doDateFilter: "", depotFilter: "ALL", customerFilter: "ALL" })
+    table.clearColumnFilters()
   }
 
   return (
@@ -229,132 +238,69 @@ export default function OrderPunchListPage() {
 
       {/* ── DO List Table ── */}
       <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
-        <CardHeader className="p-4 sm:p-5 space-y-3 bg-white border-b border-slate-200/80">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">Order Punch List</CardTitle>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                  {sortedRows.length} of {rows.length}
-                </span>
-              </div>
-              <CardDescription className="text-xs text-slate-500 mt-0.5">
-                Orders disappear 48 hours after their Stage 3 Approval/Rejection decision.
-              </CardDescription>
-            </div>
-
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <Input
-                placeholder="Search DO No., Customer, Manual Sauda No..."
-                className="pl-9 pr-8 text-xs h-8.5 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border-slate-200 rounded-lg transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="date"
-                value={doDateFilter}
-                onChange={(e) => setDoDateFilter(e.target.value)}
-                className="h-8 text-xs w-[150px] bg-white border-slate-200 shadow-2xs"
-              />
-              <Select value={depotFilter} onValueChange={setDepotFilter}>
-                <SelectTrigger className="h-8 text-xs min-w-[130px] bg-white border-slate-200 shadow-2xs">
-                  <SelectValue placeholder="All Depots" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Depots</SelectItem>
-                  {uniqueDepots.map((d) => (
-                    <SelectItem key={d} value={d}>{d}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={customerFilter} onValueChange={setCustomerFilter}>
-                <SelectTrigger className="h-8 text-xs min-w-[150px] bg-white border-slate-200 shadow-2xs">
-                  <SelectValue placeholder="All Customers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Customers</SelectItem>
-                  {uniqueCustomers.map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {activeFiltersCount > 0 && (
-                <button onClick={clearAllFilters} className="text-blue-600 hover:underline font-semibold px-1">
-                  Clear filters ({activeFiltersCount})
-                </button>
-              )}
-            </div>
-
-            {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 bg-white">
-                    <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-                    Columns
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                  <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </CardHeader>
+        <StageListHeader
+          title="Order Punch List"
+          shown={sortedRows.length}
+          total={rows.length}
+          description="Orders disappear 48 hours after their Stage 3 Approval/Rejection decision."
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search DO No., Customer, Manual Sauda No..."
+        >
+          <StageToolbar
+            shown={sortedRows.length}
+            total={rows.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                <Input
+                  type="date"
+                  value={doDateFilter}
+                  onChange={(e) => setDoDateFilter(e.target.value)}
+                  className="h-8 text-xs w-[150px] bg-white border-slate-200 shadow-2xs"
+                />
+                <StageDivider />
+                <StageFilterSelect value={depotFilter} onChange={setDepotFilter} allLabel="All Depots" options={uniqueDepots} />
+                <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                <StageColumnsMenu
+                  columns={PAGE_COLUMNS}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                />
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(doDateFilter ? [{ label: `DO Date: ${doDateFilter}`, onClear: () => setDoDateFilter("") }] : []),
+              ...(depotFilter !== "ALL" ? [{ label: `Depot: ${depotFilter}`, onClear: () => setDepotFilter("ALL") }] : []),
+              ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+              ...(searchQuery ? [{ label: `Search: ${searchQuery}`, onClear: () => setSearchQuery("") }] : []),
+            ]}
+          />
+        </StageListHeader>
 
         <CardContent className="p-0">
           <div className="overflow-x-auto rounded-b-xl">
             <Table className="table-fixed">
-              <TableHeader className="bg-slate-50 border-b">
-                <TableRow>
-                  <ColumnDragProvider
-                    columnIds={orderedVisibleCols.map((c) => c.id)}
-                    onReorder={handleColumnReorder}
-                    disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
-                  >
-                    {orderedVisibleCols.map((col) => (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={cn("whitespace-nowrap", PAGE_COL_WIDTH[col.id], NUMBER_COLS.has(col.id) && "text-right")}
-                      >
-                        <div
-                          className={cn(
-                            "flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 transition-colors w-full",
-                            NUMBER_COLS.has(col.id) ? "justify-end" : "justify-start"
-                          )}
-                          onClick={() => handleSort(col.id)}
-                        >
-                          <span>{col.label}</span>
-                          {sort?.field === col.id ? (
-                            <span className="text-blue-600 text-[10px]">{sort.dir === "asc" ? "▲" : "▼"}</span>
-                          ) : null}
-                        </div>
-                      </SortableTableHead>
-                    ))}
-                  </ColumnDragProvider>
-                  <TableHead className="w-16 px-2 text-center">Modify</TableHead>
-                </TableRow>
-              </TableHeader>
+              <StageTableHeaderRows
+                columns={orderedVisibleCols.map((c) => STAGE_COLS.find((s) => s.id === c.id)!)}
+                trailingColumns={[MODIFY_COL]}
+                table={table}
+                decimals={TOTAL_DECIMALS}
+                tones={TOTAL_TONES}
+                colClassName={COL_CLASS}
+                onReorder={handleColumnReorder}
+                dragDisabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
+              />
               <TableBody>
                 {isLoading ? (
                   [...Array(4)].map((_, i) => (
                     <TableRow key={i} className="opacity-40">
                       {[...Array(orderedVisibleCols.length + 1)].map((__, j) => (
-                        <TableCell key={j}><div className="h-4 w-full bg-slate-200 animate-pulse rounded" /></TableCell>
+                        <TableCell key={j} className="px-4"><div className="h-4 w-full bg-slate-200 animate-pulse rounded" /></TableCell>
                       ))}
                     </TableRow>
                   ))
@@ -385,7 +331,7 @@ export default function OrderPunchListPage() {
                       onClick={() => setViewOrderId(row.id)}
                     >
                       {orderedVisibleCols.map((col) => renderCell(row, col.id))}
-                      <TableCell className="px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="px-4 text-left" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="icon"

@@ -1,6 +1,6 @@
 "use client"
 
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -50,7 +50,22 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader,
+  StageToolbar,
+  StageFilterSelect,
+  StageColumnsMenu,
+  StageDivider,
+  StageActiveChips,
+  StageSortIcon,
+  type StageTotalTone,
+} from "@/components/stage-list"
+import { fmtNum } from "@/lib/table-format"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 
@@ -109,24 +124,24 @@ export default function PreApprovalPage() {
     { id: "endDate", label: "End Date" },
     { id: "deliveryDate", label: "Delivery Date" },
     { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr." },
+    { id: "ratePer15Kg", label: "Rate Per 15 kg (₹)" },
+    { id: "ratePerLtr", label: "Rate Per Ltr. (₹)" },
     { id: "productName", label: "Product Name" },
     { id: "uom", label: "UOM" },
     { id: "orderQty", label: "Order Qty" },
     { id: "altUom", label: "Alt UOM" },
     { id: "altQty", label: "Alt Qty (Kg)" },
-    { id: "rateOfMaterial", label: "Rate of Material" },
+    { id: "rateOfMaterial", label: "Rate of Material (₹)" },
     { id: "skuName", label: "SKU Name" },
     { id: "approvalQty", label: "Approval Qty" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
+    { id: "totalWithGst", label: "Total Amount with GST (₹)" },
     { id: "transportType", label: "Type of Transporting" },
     { id: "contactPerson", label: "Customer Contact Person Name" },
     { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
     { id: "address", label: "Customer Address" },
     { id: "paymentTerms", label: "Payment Terms" },
     { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
+    { id: "advanceAmount", label: "Advance Amount (₹)" },
     { id: "isBroker", label: "Is this order Through Broker" },
     { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
     { id: "uploadSo", label: "Upload DO." },
@@ -1443,47 +1458,105 @@ export default function PreApprovalPage() {
     return Object.values(grouped)
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Stage list table state (column search / date filter / sort / totals) ──
+  // Session-scoped (survives refresh, cleared on a new session). Tab is remembered by the shell (persistKey).
+  const [listView, patchListView, resetListView] = usePersistedFilters("pre-approval", {
+    quickSearch: "",
+    customerSel: "ALL",
+    purposeSel: "ALL",
+    orderTypeSel: "ALL",
+  })
+  const { quickSearch, customerSel, purposeSel, orderTypeSel } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerSel = (v: string) => patchListView({ customerSel: v })
+  const setPurposeSel = (v: string) => patchListView({ purposeSel: v })
+  const setOrderTypeSel = (v: string) => patchListView({ orderTypeSel: v })
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
+  // Display row (formatted) per grouped order - computed once per data change
+  const builtRows = useMemo(() => {
+    const m = new Map<any, ReturnType<typeof buildPendingDisplayRow>>()
+    displayRows.forEach((r: any) => m.set(r, buildPendingDisplayRow(r)))
+    return m
+  }, [displayRows])
+
+  const PRE_NUMBER_COLS = ["orderQty", "altQty", "approvalQty", "totalWithGst"]
+  const PRE_TOTAL_COLS = ["totalWithGst"]
+  const PRE_DECIMALS: Record<string, number> = { orderQty: 3, altQty: 3, approvalQty: 3, totalWithGst: 2, ratePer15Kg: 2, ratePerLtr: 2, advanceAmount: 2, rateOfMaterial: 2 }
+  // Numeric, rate and date columns are right aligned; everything else left.
+  const PRE_RIGHT_COLS = [...PRE_NUMBER_COLS, "ratePer15Kg", "ratePerLtr", "advanceAmount", "rateOfMaterial", "partySoDate", "startDate", "endDate", "deliveryDate"]
+  const preFmtCell = (id: string, v: any) => {
+    const d = PRE_DECIMALS[id]
+    if (d === undefined || v === null || v === undefined || v === "" || v === "—") return v
+    return Number.isFinite(Number(v)) ? fmtNum(v, d) : v
   }
+  const PRE_DATE_RAW: Record<string, string> = { partySoDate: "soDate", startDate: "startDate", endDate: "endDate", deliveryDate: "deliveryDate" }
+  const PRE_TONES: Record<string, StageTotalTone> = { orderQty: "blue", approvalQty: "emerald", totalWithGst: "purple" }
 
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
+  const stageCols = useMemo<StageColDef<any>[]>(
+    () =>
+      PAGE_COLUMNS.map((c) => {
+        const isNum = PRE_NUMBER_COLS.includes(c.id)
+        const rawDate = PRE_DATE_RAW[c.id]
+        return {
+          id: c.id,
+          label: c.label,
+          type: rawDate ? "date" : isNum ? "number" : "text",
+          accessor: (r: any) => {
+            if (rawDate) return r[rawDate]
+            const v = (builtRows.get(r) as any)?.[c.id]
+            if (isNum) {
+              const n = parseFloat(String(v ?? ""))
+              return isNaN(n) ? null : n
+            }
+            return v
+          },
+          noFilter: c.id === "uploadSo",
+          total: PRE_TOTAL_COLS.includes(c.id),
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [builtRows]
+  )
+
+  const baseFilter = useCallback(
+    (r: any) => {
+      const b: any = builtRows.get(r)
+      if (!b) return true
+      if (customerSel !== "ALL" && b.customerName !== customerSel) return false
+      if (purposeSel !== "ALL" && b.deliveryPurpose !== purposeSel) return false
+      if (orderTypeSel !== "ALL" && b.orderType !== orderTypeSel) return false
+      if (quickSearch.trim()) {
+        const q = quickSearch.toLowerCase().trim()
+        const hit = [b.orderNo, b.customerName, b.oilType, b.brokerName].some((v) => v && String(v).toLowerCase().includes(q))
+        if (!hit) return false
+      }
+      return true
+    },
+    [builtRows, customerSel, purposeSel, orderTypeSel, quickSearch]
+  )
+
+  const stageTable = useStageTable<any>({ rows: displayRows, columns: stageCols, baseFilter, persistKey: "pre-approval" })
+  const sortedDisplayRows = stageTable.rows
+
+  const preUniqueOf = (key: string) =>
+    Array.from(new Set(Array.from(builtRows.values()).map((b: any) => b[key]).filter((v: any) => v && v !== "—").map(String))).sort()
+  const uniqueCustomerOptions = useMemo(() => preUniqueOf("customerName"), [builtRows])
+  const uniquePurposeOptions = useMemo(() => preUniqueOf("deliveryPurpose"), [builtRows])
+  const uniqueOrderTypeOptions = useMemo(() => preUniqueOf("orderType"), [builtRows])
+
+  const activeFiltersCount =
+    (quickSearch.trim() ? 1 : 0) + (customerSel !== "ALL" ? 1 : 0) + (purposeSel !== "ALL" ? 1 : 0) + (orderTypeSel !== "ALL" ? 1 : 0) + stageTable.activeColumnFilterCount
+  const clearAllFilters = () => {
+    resetListView()
+    stageTable.clearColumnFilters()
   }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aRow = buildPendingDisplayRow(a)
-      const bRow = buildPendingDisplayRow(b)
-      const aVal = String(aRow[pendingSortField as keyof typeof aRow] ?? "").toLowerCase()
-      const bVal = String(bRow[pendingSortField as keyof typeof bRow] ?? "").toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
-
-
 
   const toggleSelectAll = () => {
-    if (selectedRows.length === displayRows.length) {
-      setSelectedRows([])
+    const visibleKeys = sortedDisplayRows.map((r: any) => r._rowKey)
+    if (visibleKeys.length > 0 && visibleKeys.every((k: string) => selectedRows.includes(k))) {
+      setSelectedRows(prev => prev.filter(k => !visibleKeys.includes(k)))
     } else {
-      setSelectedRows(displayRows.map(r => r._rowKey))
+      setSelectedRows(prev => Array.from(new Set([...prev, ...visibleKeys])))
     }
   }
 
@@ -1558,6 +1631,7 @@ export default function PreApprovalPage() {
       orderQty: (parseFloat(firstProduct?.order_quantity || firstProduct?.orderQty || "0") - parseFloat(firstProduct?.remaining_dispatch_qty || firstProduct?.remainingDispatchQty || "0")) || "—",
       altUom: firstProduct?.altUom || "",
       altQty: firstProduct?.altQty || "",
+      approvalQty: firstProduct?.approvalQty || "—",
       totalWithGst: rawOrder.totalWithGst || "—",
       transportType: rawOrder.transportType || "—",
       contactPerson: rawOrder.contactPerson || "—",
@@ -1730,6 +1804,7 @@ export default function PreApprovalPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="pre-approval"
       title="Stage 2: Pre-Approval"
       description="Review and set rates for item requirements."
       pendingCount={displayRows.length}
@@ -1882,8 +1957,8 @@ export default function PreApprovalPage() {
                                       <p className="text-sm font-bold text-slate-900 leading-tight capitalize">{orderDetails.paymentTerms || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
-                                      <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0}</p>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount (₹)</p>
+                                      <p className="text-base font-black text-blue-700 leading-tight">{fmtNum(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Payment</p>
@@ -1932,22 +2007,22 @@ export default function PreApprovalPage() {
                                 <div className="border border-blue-100 rounded-2xl overflow-hidden shadow-sm bg-blue-50/30">
                                   <div className="hidden sm:block">
                                     <Table>
-                                      <TableHeader className="bg-blue-600">
-                                        <TableRow className="hover:bg-transparent border-blue-600">
-                                          <TableHead className="h-8 text-[10px] uppercase font-black text-white tracking-widest pl-4">Base Rate Summary</TableHead>
-                                          <TableHead className="h-8 text-[10px] uppercase font-black text-white tracking-widest">Rate / 15KG</TableHead>
-                                          <TableHead className="h-8 text-[10px] uppercase font-black text-white tracking-widest">Rate / 1 LTR</TableHead>
+                                      <TableHeader className="bg-slate-50 border-b">
+                                        <TableRow>
+                                          <TableHead className="px-4">Base Rate Summary</TableHead>
+                                          <TableHead className="px-4 text-right">Rate / 15KG (₹)</TableHead>
+                                          <TableHead className="px-4 text-right">Rate / 1 LTR (₹)</TableHead>
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
                                         {Object.entries(orderDetails.oilWiseRates).map(([oilType, rates]: [string, any]) => (
                                           <TableRow key={oilType} className="hover:bg-blue-100/20 border-blue-100 last:border-0">
                                             <TableCell className="py-2.5 px-4 text-xs font-black text-blue-900 uppercase tracking-tight">{oilType}</TableCell>
-                                            <TableCell className="py-2.5 px-4 text-xs font-black text-blue-600">
-                                              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-md">₹{rates.ratePer15Kg || "—"}</span>
+                                            <TableCell className="py-2.5 px-4 text-xs font-black text-blue-600 text-right font-mono tabular-nums">
+                                              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-md">{preFmtCell("ratePer15Kg", rates.ratePer15Kg || "—")}</span>
                                             </TableCell>
-                                            <TableCell className="py-2.5 px-4 text-xs font-black text-blue-600">
-                                              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-md">₹{rates.ratePerLtr || "—"}</span>
+                                            <TableCell className="py-2.5 px-4 text-xs font-black text-blue-600 text-right font-mono tabular-nums">
+                                              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-md">{preFmtCell("ratePerLtr", rates.ratePerLtr || "—")}</span>
                                             </TableCell>
                                           </TableRow>
                                         ))}
@@ -1961,12 +2036,12 @@ export default function PreApprovalPage() {
                                         <p className="text-xs font-black uppercase tracking-tight text-blue-900 break-words">{oilType}</p>
                                         <div className="mt-2 grid grid-cols-2 gap-2">
                                           <div className="rounded-md bg-blue-50 p-2">
-                                            <p className="text-[9px] font-black uppercase text-blue-400">Rate / 15KG</p>
-                                            <p className="mt-1 text-xs font-black text-blue-700">₹{rates.ratePer15Kg || "—"}</p>
+                                            <p className="text-[9px] font-black uppercase text-blue-400">Rate / 15KG (₹)</p>
+                                            <p className="mt-1 text-xs font-black text-blue-700 font-mono">{preFmtCell("ratePer15Kg", rates.ratePer15Kg || "—")}</p>
                                           </div>
                                           <div className="rounded-md bg-blue-50 p-2">
-                                            <p className="text-[9px] font-black uppercase text-blue-400">Rate / 1 LTR</p>
-                                            <p className="mt-1 text-xs font-black text-blue-700">₹{rates.ratePerLtr || "—"}</p>
+                                            <p className="text-[9px] font-black uppercase text-blue-400">Rate / 1 LTR (₹)</p>
+                                            <p className="mt-1 text-xs font-black text-blue-700 font-mono">{preFmtCell("ratePerLtr", rates.ratePerLtr || "—")}</p>
                                           </div>
                                         </div>
                                       </div>
@@ -2016,16 +2091,24 @@ export default function PreApprovalPage() {
                                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
                                     <div className="hidden overflow-x-auto md:block">
                                       <Table>
-                                        <TableHeader>
-                                          <TableRow className="bg-slate-50 border-b">
-                                            <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">Select</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Info</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Order Qty</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Select SKU</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rate (Mat.)</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Appr. Qty</TableHead>
-                                            <TableHead className="min-w-[140px] text-[10px] uppercase font-black text-slate-500 tracking-wider">Final Rate</TableHead>
-                                            <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Remarks</TableHead>
+                                        <TableHeader className="bg-slate-50 border-b">
+                                          {/* Totals row (above headings) */}
+                                          <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                                            <TableCell colSpan={2} className="px-4 py-2 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({sectionProducts.length})</TableCell>
+                                            <TableCell className="px-4 py-2"></TableCell>
+                                            <TableCell colSpan={2} className="px-4 py-2"></TableCell>
+                                            <TableCell className="px-4 py-2"></TableCell>
+                                            <TableCell colSpan={2} className="px-4 py-2"></TableCell>
+                                          </TableRow>
+                                          <TableRow>
+                                            <TableHead className="w-12 px-4">Select</TableHead>
+                                            <TableHead className="px-4">Product Info</TableHead>
+                                            <TableHead className="px-4 text-right">Order Qty</TableHead>
+                                            <TableHead className="px-4">Select SKU</TableHead>
+                                            <TableHead className="px-4 text-right">Rate (Mat.) (₹)</TableHead>
+                                            <TableHead className="px-4 text-right">Appr. Qty</TableHead>
+                                            <TableHead className="min-w-[140px] px-4 text-right">Final Rate (₹)</TableHead>
+                                            <TableHead className="px-4">Remarks</TableHead>
                                           </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -2050,13 +2133,13 @@ export default function PreApprovalPage() {
                                                   hasError ? "bg-red-50" : ""
                                                 )}
                                               >
-                                                <TableCell className="text-center p-3">
+                                                <TableCell className="px-4 py-3">
                                                   <Checkbox
                                                     checked={isSelected}
                                                     onCheckedChange={() => toggleSelectProductRow(rowKey, product)}
                                                   />
                                                 </TableCell>
-                                                <TableCell className="p-3">
+                                                <TableCell className="px-4 py-3">
                                                   <div className="flex flex-col">
                                                     {!isNew ? (
                                                       <>
@@ -2101,15 +2184,15 @@ export default function PreApprovalPage() {
                                                     )}
                                                   </div>
                                                 </TableCell>
-                                                <TableCell className="p-3">
-                                                  <div className="flex flex-col gap-1">
+                                                <TableCell className="px-4 py-3 text-right">
+                                                  <div className="flex flex-col items-end gap-1">
                                                     {!isNew ? (
                                                       <>
-                                                        <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2">{calculatedOrderQty}</Badge>
+                                                        <Badge variant="outline" className="border-blue-200 text-blue-700 font-black px-2 font-mono tabular-nums">{fmtNum(calculatedOrderQty, 3)}</Badge>
                                                         {/* Show remaining qty only for non-Stock Transfer */}
                                                         {(product?.order_category || "").toUpperCase() !== "STOCK TRANSFER" && product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
                                                           <span className="text-[9px] text-amber-600 font-bold">
-                                                            Remaining: {maxQty - parseFloat(product.approvalQty)}
+                                                            Remaining: {fmtNum(maxQty - parseFloat(product.approvalQty), 3)}
                                                           </span>
                                                         )}
                                                       </>
@@ -2138,7 +2221,7 @@ export default function PreApprovalPage() {
                                                     )}
                                                   </div>
                                                 </TableCell>
-                                                <TableCell className="p-2 min-w-45">
+                                                <TableCell className="px-4 py-2 min-w-45">
                                                   <AsyncCombobox
                                                     value={productRates[rowKey]?.skuName || ""}
                                                     onValueChange={(value: string) => handleSkuSelection(value, rowKey, product, orderDetails)}
@@ -2165,12 +2248,12 @@ export default function PreApprovalPage() {
                                                     className="h-9 w-full bg-white text-xs font-bold"
                                                   />
                                                 </TableCell>
-                                                <TableCell className="p-2">
+                                                <TableCell className="px-4 py-2">
                                                   <div className="relative">
                                                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black">₹</span>
                                                     <Input
                                                       type="number"
-                                                      className="h-9 text-xs bg-white pl-5 font-bold border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                                                      className="h-9 text-xs bg-white pl-5 text-right font-mono tabular-nums font-bold border-slate-200 focus:border-blue-500 focus:ring-blue-500"
                                                       value={isNew
                                                         ? (productRates[rowKey]?.rateOfMaterial || "")
                                                         : (productRates[rowKey]?.skuName ? (productRates[rowKey]?.rateOfMaterial || product.rateOfMaterial || "") : "")}
@@ -2187,12 +2270,12 @@ export default function PreApprovalPage() {
                                                     />
                                                   </div>
                                                 </TableCell>
-                                                <TableCell className="p-2 align-top">
+                                                <TableCell className="px-4 py-2 align-top">
                                                   <Input
                                                     type="number"
                                                     placeholder="Qty"
                                                     className={cn(
-                                                      "h-9 text-xs bg-white font-bold border-slate-200 focus:border-blue-500 focus:ring-blue-500",
+                                                      "h-9 text-xs bg-white text-right font-mono tabular-nums font-bold border-slate-200 focus:border-blue-500 focus:ring-blue-500",
                                                       hasError && "border-red-500 ring-1 ring-red-500"
                                                     )}
                                                     value={productRates[rowKey]?.approvalQty || ""}
@@ -2206,13 +2289,13 @@ export default function PreApprovalPage() {
                                                     </p>
                                                   )}
                                                 </TableCell>
-                                                <TableCell className="p-2 min-w-[140px] align-top">
+                                                <TableCell className="px-4 py-2 min-w-[140px] align-top">
                                                   <div className="relative">
                                                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400 text-xs font-black">₹</span>
                                                     <Input
                                                       type="number"
                                                       className={cn(
-                                                        "h-9 text-[10px] bg-white border-slate-200 font-medium pl-6",
+                                                        "h-9 text-[10px] bg-white border-slate-200 font-medium pl-6 text-right font-mono tabular-nums",
                                                         rateValidationErrors[rowKey] ? "border-red-400 focus-visible:ring-red-400" : ""
                                                       )}
                                                       value={productRates[rowKey]?.rate || ""}
@@ -2333,7 +2416,7 @@ export default function PreApprovalPage() {
                                                     return (
                                                       <>
                                                         <p className="text-[8px] text-slate-400 mt-1 text-center font-bold">
-                                                          Range: ₹{dynamicCost.landingCost} - ₹{maxRate.toFixed(2)}
+                                                          Range: {fmtNum(dynamicCost.landingCost, 2)} - {fmtNum(maxRate, 2)}
                                                         </p>
                                                         {warningElement}
                                                       </>
@@ -2359,33 +2442,6 @@ export default function PreApprovalPage() {
                                             )
                                           })}
                                         </TableBody>
-                                        <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
-                                          <TableRow>
-                                            <TableCell colSpan={2} className="p-3 text-right">
-                                              <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Totals:</span>
-                                            </TableCell>
-                                            <TableCell className="p-3">
-                                              <Badge variant="secondary" className="bg-blue-100 text-blue-800 font-black px-2 shadow-sm border-blue-200">
-                                                {[...orderDetails._products, ...(dialogNewProducts[baseDo] || [])].reduce((sum: number, p: any) => {
-                                                  // Only count original products, not new SKUs
-                                                  if (p._isNew) return sum;
-                                                  const _r = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _q = parseFloat(p.order_quantity || p.orderQty || "0") || 0; const calculatedQty = _r > 0 ? Math.min(_r, _q) : _q;
-                                                  return sum + calculatedQty;
-                                                }, 0)}
-                                              </Badge>
-                                            </TableCell>
-                                            <TableCell colSpan={2}></TableCell>
-                                            <TableCell className="p-3 text-center">
-                                              <Badge variant="secondary" className="bg-green-100 text-green-800 font-black px-2 shadow-sm border-green-200">
-                                                {[...orderDetails._products, ...(dialogNewProducts[baseDo] || [])].reduce((sum: number, p: any) => {
-                                                  const rowKey = p._rowKey;
-                                                  return sum + (parseFloat(productRates[rowKey]?.approvalQty) || 0);
-                                                }, 0)}
-                                              </Badge>
-                                            </TableCell>
-                                            <TableCell colSpan={2}></TableCell>
-                                          </TableRow>
-                                        </tfoot>
                                       </Table>
                                     </div>
                                     <div className="space-y-3 p-3 md:hidden">
@@ -2468,9 +2524,9 @@ export default function PreApprovalPage() {
                                                 <p className="text-[10px] font-black uppercase text-slate-400">Order Qty</p>
                                                 {!isNew ? (
                                                   <>
-                                                    <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{calculatedOrderQty}</Badge>
+                                                    <Badge variant="outline" className="mt-1 border-blue-200 text-blue-700 font-black px-2">{fmtNum(calculatedOrderQty, 3)}</Badge>
                                                     {(product?.order_category || "").toUpperCase() !== "STOCK TRANSFER" && product.approvalQty && parseFloat(product.approvalQty) > 0 && parseFloat(product.approvalQty) < maxQty && (
-                                                      <p className="mt-1 text-[9px] text-amber-600 font-bold">Remaining: {maxQty - parseFloat(product.approvalQty)}</p>
+                                                      <p className="mt-1 text-[9px] text-amber-600 font-bold">Remaining: {fmtNum(maxQty - parseFloat(product.approvalQty), 3)}</p>
                                                     )}
                                                   </>
                                                 ) : (
@@ -2580,7 +2636,7 @@ export default function PreApprovalPage() {
                                                   <p className="text-[9px] text-red-600 font-black uppercase tracking-tighter">{rateValidationErrors[rowKey]}</p>
                                                 )}
                                                 {dynamicCost && !dynamicCost.noVarCalc && maxRate && (
-                                                  <p className="text-[9px] text-slate-400 font-bold break-words">Range: ₹{dynamicCost.landingCost} - ₹{maxRate}</p>
+                                                  <p className="text-[9px] text-slate-400 font-bold break-words">Range: {fmtNum(dynamicCost.landingCost, 2)} - {fmtNum(maxRate, 2)}</p>
                                                 )}
                                                 {dynamicCost?.noVarCalc && (
                                                   <p className="rounded-sm border border-red-200 bg-red-50 p-1 text-[10px] font-bold text-red-700">
@@ -2609,27 +2665,6 @@ export default function PreApprovalPage() {
                                           </div>
                                         )
                                       })}
-                                      <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3">
-                                        <div>
-                                          <p className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Total Order Qty</p>
-                                          <Badge variant="secondary" className="mt-1 bg-blue-100 text-blue-800 font-black px-2 shadow-sm border-blue-200">
-                                            {sectionProducts.reduce((sum: number, p: any) => {
-                                              if (p._isNew) return sum
-                                              const _sqr = parseFloat(p.remaining_dispatch_qty || p.remainingDispatchQty || "0") || 0; const _sqq = parseFloat(p.order_quantity || p.orderQty || "0") || 0; const calculatedQty = _sqr > 0 ? Math.min(_sqr, _sqq) : _sqq
-                                              return sum + calculatedQty
-                                            }, 0)}
-                                          </Badge>
-                                        </div>
-                                        <div>
-                                          <p className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Total Approval Qty</p>
-                                          <Badge variant="secondary" className="mt-1 bg-green-100 text-green-800 font-black px-2 shadow-sm border-green-200">
-                                            {sectionProducts.reduce((sum: number, p: any) => {
-                                              const rowKey = p._rowKey
-                                              return sum + (parseFloat(productRates[rowKey]?.approvalQty) || 0)
-                                            }, 0)}
-                                          </Badge>
-                                        </div>
-                                      </div>
                                     </div>
                                   </div>
                                 )
@@ -2698,52 +2733,76 @@ export default function PreApprovalPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full bg-transparent sm:w-auto">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
 
         <div className="flex gap-6 items-start">
           <div className="flex-1 space-y-4 overflow-hidden">
-            <Card className="border-none shadow-sm overflow-hidden md:max-h-150 md:overflow-auto">
-              <Table className="hidden md:table">
-                <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                  <TableRow>
-                    <TableHead className="w-12 text-center">
-                      <Checkbox
-                        checked={displayRows.length > 0 && selectedRows.length === displayRows.length}
-                        onCheckedChange={toggleSelectAll}
+            <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+              <StageListHeader
+                title="Pre-Approval List"
+                shown={sortedDisplayRows.length}
+                total={displayRows.length}
+                description="Orders awaiting rate and approval qty confirmation"
+                searchValue={quickSearch}
+                onSearchChange={setQuickSearch}
+                searchPlaceholder="Search DO No., Customer, Oil..."
+              >
+                <StageToolbar
+                  shown={sortedDisplayRows.length}
+                  total={displayRows.length}
+                  activeCount={activeFiltersCount}
+                  onReset={clearAllFilters}
+                  filters={
+                    <>
+                      <StageFilterSelect value={customerSel} onChange={setCustomerSel} allLabel="All Customers" options={uniqueCustomerOptions} />
+                      <StageFilterSelect value={purposeSel} onChange={setPurposeSel} allLabel="All Purposes" options={uniquePurposeOptions} />
+                      <StageFilterSelect value={orderTypeSel} onChange={setOrderTypeSel} allLabel="All Order Types" options={uniqueOrderTypeOptions} />
+                      <StageDivider />
+                      <StageColumnsMenu
+                        columns={PAGE_COLUMNS}
+                        visibleColumns={visibleColumns}
+                        setVisibleColumns={setVisibleColumns}
+                        show={isAdmin || isFeatureEnabled("can_toggle_columns")}
                       />
-                    </TableHead>
-                    <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                      {orderedVisibleCols.map((col) => (
-                        <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                          {col.label}<PendingSortIcon field={col.id} />
-                        </SortableTableHead>
-                      ))}
-                    </ColumnDragProvider>
-                  </TableRow>
-                </TableHeader>
+                    </>
+                  }
+                />
+                <StageActiveChips
+                  chips={[
+                    ...(customerSel !== "ALL" ? [{ label: `Customer: ${customerSel}`, onClear: () => setCustomerSel("ALL") }] : []),
+                    ...(purposeSel !== "ALL" ? [{ label: `Purpose: ${purposeSel}`, onClear: () => setPurposeSel("ALL") }] : []),
+                    ...(orderTypeSel !== "ALL" ? [{ label: `Order Type: ${orderTypeSel}`, onClear: () => setOrderTypeSel("ALL") }] : []),
+                    ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch}`, onClear: () => setQuickSearch("") }] : []),
+                  ]}
+                />
+              </StageListHeader>
+              <CardContent className="p-0">
+              <div className="hidden overflow-x-auto rounded-b-xl md:block">
+              <Table>
+                <StageTableHeaderRows
+                  columns={orderedVisibleCols.map((c) => stageCols.find((s) => s.id === c.id)!)}
+                  table={stageTable}
+                  leading={
+                    <Checkbox
+                      checked={sortedDisplayRows.length > 0 && sortedDisplayRows.every((r: any) => selectedRows.includes(r._rowKey))}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  }
+                  decimals={PRE_DECIMALS}
+                  tones={PRE_TONES}
+                  rightIds={PRE_RIGHT_COLS}
+                  onReorder={handleColumnReorder}
+                  dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+                />
                 <TableBody>
                   {isPendingLoading && pendingOrders.length === 0 ? (
                     [...Array(5)].map((_, i) => (
                       <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                        <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                        <TableCell className="px-4 py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                         {orderedVisibleCols.map(col => (
-                          <TableCell key={col.id} className="py-4">
+                          <TableCell key={col.id} className="px-4 py-4">
                             <div className={cn(
-                              "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
+                              "h-3 bg-slate-200 animate-pulse rounded-full",
                               col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-20" : "w-16"
                             )} />
                           </TableCell>
@@ -2752,16 +2811,25 @@ export default function PreApprovalPage() {
                     ))
                   ) : displayRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
                         {isPendingLoading ? "Fetching more..." : "No Data pending for Pre Approval"}
                       </TableCell>
                     </TableRow>
-                  ) : sortedDisplayRows.map((rawOrder, i) => {
-                    const row = buildPendingDisplayRow(rawOrder)
+                  ) : sortedDisplayRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                        <p className="font-medium text-slate-500">No matching records found for the current filters</p>
+                        <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                          Clear Filters
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  ) : sortedDisplayRows.map((rawOrder: any, i: number) => {
+                    const row = builtRows.get(rawOrder) || buildPendingDisplayRow(rawOrder)
 
                     return (
-                      <TableRow key={rawOrder._rowKey} className={selectedRows.includes(rawOrder._rowKey) ? "bg-blue-50/50" : ""}>
-                        <TableCell className="text-center">
+                      <TableRow key={rawOrder._rowKey} className={selectedRows.includes(rawOrder._rowKey) ? "bg-blue-50/50" : "hover:bg-slate-50 transition-colors"}>
+                        <TableCell className="px-4">
                           <Checkbox
                             checked={selectedRows.includes(rawOrder._rowKey)}
                             onCheckedChange={() => toggleSelectRow(rawOrder._rowKey)}
@@ -2769,12 +2837,14 @@ export default function PreApprovalPage() {
                         </TableCell>
                         {orderedVisibleCols.map((col) => (
                           <TableCell key={col.id} className={cn(
-                            "whitespace-nowrap text-center text-xs",
+                            "whitespace-nowrap text-xs px-4",
+                            PRE_RIGHT_COLS.includes(col.id) && "text-right",
+                            (PRE_NUMBER_COLS.includes(col.id) || ["ratePer15Kg", "ratePerLtr", "advanceAmount", "rateOfMaterial"].includes(col.id)) && "font-mono tabular-nums",
                             col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                           )}>
                             {col.id === "productName" ? (
                               <span className="font-medium text-slate-700">{row.productName}</span>
-                            ) : row[col.id as keyof typeof row]}
+                            ) : preFmtCell(col.id, (row as any)[col.id])}
                           </TableCell>
                         ))}
                       </TableRow>
@@ -2782,6 +2852,7 @@ export default function PreApprovalPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
 
               <div className="space-y-3 p-3 md:hidden">
                 {isPendingLoading && pendingOrders.length === 0 ? (
@@ -2793,11 +2864,18 @@ export default function PreApprovalPage() {
                       </div>
                     </div>
                   ))
-                ) : displayRows.length === 0 ? (
+                ) : sortedDisplayRows.length === 0 ? (
                   <div className="py-10 text-center text-muted-foreground">
-                    {isPendingLoading ? "Fetching more..." : "No Data pending for Pre Approval"}
+                    {isPendingLoading ? "Fetching more..." : displayRows.length > 0 ? (
+                      <>
+                        <p className="font-medium text-slate-500">No matching records found for the current filters</p>
+                        <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                          Clear Filters
+                        </button>
+                      </>
+                    ) : "No Data pending for Pre Approval"}
                   </div>
-                ) : displayRows.map((rawOrder) => {
+                ) : sortedDisplayRows.map((rawOrder: any) => {
                   const row = buildPendingDisplayRow(rawOrder)
                   const selected = selectedRows.includes(rawOrder._rowKey)
                   return (
@@ -2837,12 +2915,12 @@ export default function PreApprovalPage() {
                           <p className="mt-1 font-semibold">{row.transportType}</p>
                         </div>
                         <div className="rounded-md bg-slate-50 p-2">
-                          <p className="text-[10px] font-black uppercase text-slate-400">Rate / 15kg</p>
-                          <p className="mt-1 font-mono font-bold">₹{row.ratePer15Kg}</p>
+                          <p className="text-[10px] font-black uppercase text-slate-400">Rate / 15kg (₹)</p>
+                          <p className="mt-1 font-mono font-bold">{preFmtCell("ratePer15Kg", row.ratePer15Kg)}</p>
                         </div>
                         <div className="rounded-md bg-slate-50 p-2">
-                          <p className="text-[10px] font-black uppercase text-slate-400">Rate / Ltr</p>
-                          <p className="mt-1 font-mono font-bold">₹{row.ratePerLtr}</p>
+                          <p className="text-[10px] font-black uppercase text-slate-400">Rate / Ltr (₹)</p>
+                          <p className="mt-1 font-mono font-bold">{preFmtCell("ratePerLtr", row.ratePerLtr)}</p>
                         </div>
                       </div>
                       {(row.orderPunchRemarks !== "—" || row.revertDispatchRemarks !== "—" || row.revertPlanningRemarks !== "—") && (
@@ -2862,7 +2940,7 @@ export default function PreApprovalPage() {
                   )
                 })}
               </div>
-
+              </CardContent>
             </Card>
           </div>
 
@@ -2970,6 +3048,12 @@ export default function PreApprovalPage() {
                             </div>
                             <div className="flex-1 overflow-y-auto px-2 py-2 max-h-120 scrollbar-auto border-t border-blue-100/30">
                               <Table>
+                                <TableHeader className="bg-transparent">
+                                  <TableRow className="border-none hover:bg-transparent">
+                                    <TableHead className="px-4">SKU</TableHead>
+                                    <TableHead className="text-right px-4">Calculated Rate (₹)</TableHead>
+                                  </TableRow>
+                                </TableHeader>
                                 <TableBody>
                                   {prices
                                     .filter(item => {
@@ -2980,15 +3064,14 @@ export default function PreApprovalPage() {
                                     })
                                     .map((item, idx) => (
                                       <TableRow key={idx} className="hover:bg-blue-100/50 transition-colors border-none group">
-                                        <TableCell className="font-semibold text-slate-800 py-3 text-sm rounded-l-2xl pl-6">
+                                        <TableCell className="font-semibold text-slate-800 py-3 text-sm rounded-l-2xl px-4">
                                           <div className="flex items-center gap-3">
                                             <span className="text-[10px] font-black text-blue-300 w-4 group-hover:text-blue-500 transition-colors">{(idx + 1).toString().padStart(2, '0')}</span>
                                             {item.sku}
                                           </div>
                                         </TableCell>
-                                        <TableCell className="text-right font-black text-blue-700 text-lg py-3 pr-6 rounded-r-2xl">
-                                          <span className="text-xs text-blue-300 mr-1 opacity-50 font-normal">₹</span>
-                                          {item.calculatedRate}
+                                        <TableCell className="text-right font-black text-blue-700 text-lg py-3 px-4 rounded-r-2xl font-mono tabular-nums">
+                                          {fmtNum(item.calculatedRate, 2)}
                                         </TableCell>
                                       </TableRow>
                                     ))}
@@ -3017,6 +3100,12 @@ export default function PreApprovalPage() {
                             </div>
                             <div className="flex-1 overflow-y-auto px-2 py-2 max-h-120 scrollbar-auto border-t border-green-100/30">
                               <Table>
+                                <TableHeader className="bg-transparent">
+                                  <TableRow className="border-none hover:bg-transparent">
+                                    <TableHead className="px-4">SKU</TableHead>
+                                    <TableHead className="text-right px-4">Calculated Rate (₹)</TableHead>
+                                  </TableRow>
+                                </TableHeader>
                                 <TableBody>
                                   {prices
                                     .filter(item => {
@@ -3027,15 +3116,14 @@ export default function PreApprovalPage() {
                                     })
                                     .map((item, idx) => (
                                       <TableRow key={idx} className="hover:bg-green-100/50 transition-colors border-none group">
-                                        <TableCell className="font-semibold text-slate-800 py-3 text-sm rounded-l-2xl pl-6">
+                                        <TableCell className="font-semibold text-slate-800 py-3 text-sm rounded-l-2xl px-4">
                                           <div className="flex items-center gap-3">
                                             <span className="text-[10px] font-black text-green-300 w-4 group-hover:text-green-500 transition-colors">{(idx + 1).toString().padStart(2, '0')}</span>
                                             {item.sku}
                                           </div>
                                         </TableCell>
-                                        <TableCell className="text-right font-black text-green-700 text-lg py-3 pr-6 rounded-r-2xl">
-                                          <span className="text-xs text-green-300 mr-1 opacity-50 font-normal">₹</span>
-                                          {item.calculatedRate}
+                                        <TableCell className="text-right font-black text-green-700 text-lg py-3 px-4 rounded-r-2xl font-mono tabular-nums">
+                                          {fmtNum(item.calculatedRate, 2)}
                                         </TableCell>
                                       </TableRow>
                                     ))}

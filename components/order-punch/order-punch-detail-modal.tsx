@@ -27,7 +27,9 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { ModifyOrderDialog } from "@/components/order-punch/modify-order-dialog"
 import { cn } from "@/lib/utils"
-import { formatDate, formatDateTime, formatAmount, formatNumber } from "@/lib/order-punch-format"
+import { formatDate, formatDateTime } from "@/lib/order-punch-format"
+import { fmtNum } from "@/lib/table-format"
+import { Input } from "@/components/ui/input"
 
 const STAGE_KEY = "order-punch-detail-items"
 
@@ -38,12 +40,15 @@ const ITEM_COLUMNS: { id: string; label: string; type: ColType; width?: string }
   { id: "uom", label: "UOM", type: "text", width: "w-[90px]" },
   { id: "order_quantity", label: "Order Qty", type: "number", width: "w-[110px]" },
   { id: "alternate_qty_kg", label: "Qty (KG)", type: "number", width: "w-[110px]" },
-  { id: "rate_of_material", label: "Rate", type: "number", width: "w-[120px]" },
+  { id: "rate_of_material", label: "Rate (₹)", type: "number", width: "w-[120px]" },
   { id: "oil_type", label: "Oil Type", type: "text", width: "w-[110px]" },
   { id: "approval_status", label: "Approval Status", type: "text", width: "w-[150px]" },
 ]
 const DEFAULT_ITEM_COLUMN_IDS = ITEM_COLUMNS.map((c) => c.id)
 const NUMBER_ITEM_COLS = new Set(["order_quantity", "alternate_qty_kg", "rate_of_material"])
+// Only the KG quantity is summed (order qty is in mixed UOMs, rate is not summable).
+const TOTAL_ITEM_COLS = ["alternate_qty_kg"]
+const DECIMALS: Record<string, number> = { order_quantity: 3, alternate_qty_kg: 3, rate_of_material: 2 }
 const ITEM_COL_WIDTH: Record<string, string> = Object.fromEntries(ITEM_COLUMNS.map((c) => [c.id, c.width || ""]))
 
 function compareValues(a: any, b: any, type: ColType): number {
@@ -101,15 +106,34 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
     if (sort?.field === field) setSort({ field, dir: sort.dir === "asc" ? "desc" : "asc" })
     else setSort({ field, dir: "asc" })
   }
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+  const filteredItems = useMemo(() => {
+    const active = Object.entries(columnFilters).filter(([, v]) => v && v.trim())
+    if (active.length === 0) return items
+    return items.filter((row) =>
+      active.every(([id, v]) => {
+        const raw = id === "approval_status"
+          ? (row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status || "Pending")
+          : row[id]
+        const hay = NUMBER_ITEM_COLS.has(id) ? fmtNum(raw, DECIMALS[id] ?? 3) : String(raw ?? "")
+        return hay.toLowerCase().includes(v.toLowerCase().trim())
+      })
+    )
+  }, [items, columnFilters])
+  const itemTotals = useMemo(() => {
+    const t: Record<string, number> = {}
+    TOTAL_ITEM_COLS.forEach((id) => { t[id] = filteredItems.reduce((sum, r) => sum + (Number(r[id]) || 0), 0) })
+    return t
+  }, [filteredItems])
   const sortedItems = useMemo(() => {
-    if (!sort) return items
+    if (!sort) return filteredItems
     const col = ITEM_COLUMNS.find((c) => c.id === sort.field)
     const type: ColType = col?.type || "text"
-    return [...items].sort((a, b) => {
+    return [...filteredItems].sort((a, b) => {
       const cmp = compareValues(a[sort.field], b[sort.field], type)
       return sort.dir === "asc" ? cmp : -cmp
     })
-  }, [items, sort])
+  }, [filteredItems, sort])
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(STAGE_KEY, DEFAULT_ITEM_COLUMN_IDS)
   const [columnOrder, setColumnOrder] = useColumnOrder(STAGE_KEY, DEFAULT_ITEM_COLUMN_IDS)
@@ -130,22 +154,22 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
 
   const renderItemCell = (row: any, colId: string) => {
     const widthClass = ITEM_COL_WIDTH[colId] || ""
-    const alignClass = cn(widthClass, NUMBER_ITEM_COLS.has(colId) && "text-right font-mono")
+    const alignClass = cn("px-4", widthClass, NUMBER_ITEM_COLS.has(colId) && "text-right font-mono tabular-nums whitespace-nowrap")
     switch (colId) {
       case "sku_name":
-        return <TableCell key={colId} className={cn("font-medium whitespace-normal break-words", widthClass)}>{row.sku_name || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-medium whitespace-normal break-words px-4", widthClass)}>{row.sku_name || "—"}</TableCell>
       case "uom":
-        return <TableCell key={colId} className={widthClass}>{row.uom || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", widthClass)}>{row.uom || "—"}</TableCell>
       case "order_quantity":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.order_quantity)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.order_quantity, DECIMALS.order_quantity)}</TableCell>
       case "alternate_qty_kg":
-        return <TableCell key={colId} className={alignClass}>{formatNumber(row.alternate_qty_kg)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.alternate_qty_kg, DECIMALS.alternate_qty_kg)}</TableCell>
       case "rate_of_material":
-        return <TableCell key={colId} className={alignClass}>{formatAmount(row.rate_of_material)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.rate_of_material, DECIMALS.rate_of_material)}</TableCell>
       case "oil_type":
-        return <TableCell key={colId} className={widthClass}>{row.oil_type || "—"}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", widthClass)}>{row.oil_type || "—"}</TableCell>
       case "approval_status":
-        return <TableCell key={colId} className={widthClass}>{row.approval_status ? stage3Badge(row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status) : <span className="text-slate-400">Pending</span>}</TableCell>
+        return <TableCell key={colId} className={cn("px-4", widthClass)}>{row.approval_status ? stage3Badge(row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status) : <span className="text-slate-400">Pending</span>}</TableCell>
       default:
         return null
     }
@@ -254,7 +278,36 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table className="table-fixed">
-              <TableHeader className="bg-slate-100/70 border-b">
+              <TableHeader className="bg-slate-50 border-b">
+                <TableRow>
+                  {orderedVisibleCols.map((col) => (
+                    <TableHead key={`search-${col.id}`} className={cn("whitespace-nowrap align-top pt-2.5 pb-1 px-4", ITEM_COL_WIDTH[col.id], NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
+                      <Input
+                        placeholder="Search..."
+                        value={columnFilters[col.id] || ""}
+                        onChange={(e) => setColumnFilters((p) => ({ ...p, [col.id]: e.target.value }))}
+                        className={cn(
+                          "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                          NUMBER_ITEM_COLS.has(col.id) ? "text-right" : "text-left"
+                        )}
+                      />
+                    </TableHead>
+                  ))}
+                </TableRow>
+                {sortedItems.length > 0 && (
+                  <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+                    {orderedVisibleCols.map((col, idx) => {
+                      const alignClass = cn("px-4", NUMBER_ITEM_COLS.has(col.id) && "text-right tabular-nums")
+                      if (idx === 0) {
+                        return <TableCell key={`total-${col.id}`} className={cn("font-black text-slate-900 uppercase tracking-wider text-[11px]", alignClass)}>Total ({sortedItems.length})</TableCell>
+                      }
+                      if (TOTAL_ITEM_COLS.includes(col.id)) {
+                        return <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>{fmtNum(itemTotals[col.id], DECIMALS[col.id] ?? 3)}</TableCell>
+                      }
+                      return <TableCell key={`total-${col.id}`} className={cn("text-slate-400 font-normal", alignClass)}></TableCell>
+                    })}
+                  </TableRow>
+                )}
                 <TableRow>
                   <ColumnDragProvider
                     columnIds={orderedVisibleCols.map((c) => c.id)}
@@ -262,7 +315,7 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
                     disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
                   >
                     {orderedVisibleCols.map((col) => (
-                      <SortableTableHead key={col.id} id={col.id} className={cn("whitespace-nowrap", ITEM_COL_WIDTH[col.id], NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
+                      <SortableTableHead key={col.id} id={col.id} className={cn("whitespace-nowrap px-4", ITEM_COL_WIDTH[col.id], NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
                         <div
                           className={cn("flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 w-full", NUMBER_ITEM_COLS.has(col.id) ? "justify-end" : "justify-start")}
                           onClick={() => handleSort(col.id)}

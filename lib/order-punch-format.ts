@@ -1,23 +1,20 @@
 /** Shared display formatting for the Order Punch list and detail screens. */
+import { fmtDate, fmtDateTime, fmtNum } from "@/lib/table-format"
 
 export function formatDate(v: any): string {
-  if (!v) return "—"
-  const d = new Date(v)
-  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-IN")
+  return fmtDate(v)
 }
 
 export function formatDateTime(v: any): string {
-  if (!v) return "—"
-  const d = new Date(v)
-  return isNaN(d.getTime()) ? "—" : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+  return fmtDateTime(v)
 }
 
+/** Plain fixed 2 decimals, no currency symbol or separators (put the unit in the label). */
 export function formatAmount(v: any): string {
-  const n = Number(v || 0)
-  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return fmtNum(v ?? 0, 2)
 }
 
+/** Plain fixed 3 decimals, no separators. */
 export function formatNumber(v: any): string {
-  const n = Number(v || 0)
-  return n.toLocaleString("en-IN", { maximumFractionDigits: 3 })
+  return fmtNum(v ?? 0, 3)
 }

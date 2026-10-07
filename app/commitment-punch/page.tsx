@@ -27,15 +27,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon, ArrowUpDown, ArrowUp, ArrowDown, Search, Info, Calendar as CalendarIconLucide, X, Pencil, ClipboardList, AlertTriangle, Filter } from "lucide-react"
+import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon, ArrowUpDown, ArrowUp, ArrowDown, Search, Info, Calendar as CalendarIconLucide, X, Pencil, ClipboardList, AlertTriangle, Filter, Settings2, Lock } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi, oilTagApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -124,7 +127,7 @@ const PAGE_COLUMNS = [
   { id: "party_name", label: "Customer Name" },
   { id: "dispatch_from", label: "Dispatch from" },
   { id: "oil_type", label: "Oil Type" },
-  { id: "rate", label: "Rate" },
+  { id: "rate", label: "Rate (PMT)" },
   { id: "quantity", label: "Qty (MT)" },
   { id: "processed_qty", label: "PO Raised (MT)" },
   { id: "delivery_qty", label: "Delivered Qty (MT)" },
@@ -137,6 +140,9 @@ type ColId = typeof PAGE_COLUMNS[number]["id"]
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════
 
+// Plain fixed-decimal number (no thousands separators) so values paste cleanly into Excel
+const fmtNum = (v: unknown, d = 4) => Number(v ?? 0).toFixed(d)
+
 export default function CommitmentPunchPage() {
   const { toast } = useToast()
   const { user, isAdmin, isFeatureEnabled } = useAuth()
@@ -145,10 +151,29 @@ export default function CommitmentPunchPage() {
   const [pendingList, setPendingList] = useState<PendingCommitment[]>([])
   const [isLoadingPending, setIsLoadingPending] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [searchQuery, setSearchQuery] = useState("")
-  const [commitmentDateFilter, setCommitmentDateFilter] = useState("")
-  const [poDateFilter, setPoDateFilter] = useState("")
-  const [doDateFilter, setDoDateFilter] = useState("")
+  // Status + sort are remembered permanently (per user); oil/customer/searches/dates survive a
+  // refresh but reset on a new session - see usePersistedFilters. Refresh button only reloads data.
+  const [listView, patchListView] = usePersistedFilters("commitment-punch", {
+    searchQuery: "",
+    commitmentDateFilter: "",
+    dateFromFilter: "",
+    dateToFilter: "",
+    selectedOilFilter: "ALL",
+    selectedCustomerFilter: "ALL",
+    selectedStatusFilter: "PENDING" as "ALL" | "PENDING" | "COMPLETED",
+    columnFilters: {} as Record<string, string>,
+    pendingSortField: "",
+    pendingSortDir: "asc" as "asc" | "desc",
+  }, { permanentKeys: ["selectedStatusFilter", "pendingSortField", "pendingSortDir"] })
+  const { searchQuery, commitmentDateFilter, dateFromFilter, dateToFilter, selectedOilFilter, selectedCustomerFilter, selectedStatusFilter, columnFilters, pendingSortField, pendingSortDir } = listView
+  const setSearchQuery = (v: string) => patchListView({ searchQuery: v })
+  const setCommitmentDateFilter = (v: string) => patchListView({ commitmentDateFilter: v })
+  const setDateFromFilter = (v: string) => patchListView({ dateFromFilter: v })
+  const setDateToFilter = (v: string) => patchListView({ dateToFilter: v })
+  const setSelectedOilFilter = (v: string) => patchListView({ selectedOilFilter: v })
+  const setSelectedCustomerFilter = (v: string) => patchListView({ selectedCustomerFilter: v })
+  const setSelectedStatusFilter = (v: "ALL" | "PENDING" | "COMPLETED") => patchListView({ selectedStatusFilter: v })
+  const setColumnFilters = (v: Record<string, string>) => patchListView({ columnFilters: v })
 
   // ── Add Commitment dialog ───────────────────────────────────
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -209,6 +234,8 @@ export default function CommitmentPunchPage() {
   const [detailsData, setDetailsData] = useState<any>(null)
   const [isLoadingDetails, setIsLoadingDetails] = useState(false)
   const [detailsType, setDetailsType] = useState<"raised" | "delivered" | "pending">("raised")
+  const [detailsColumnFilters, setDetailsColumnFilters] = useState<Record<string, string>>({})
+  const [detailsHiddenCols, setDetailsHiddenCols] = useState<Record<string, boolean>>({})
 
   // ── Add Commitment form state ───────────────────────────────
   const [commitmentDate, setCommitmentDate] = useState(new Date().toISOString().split("T")[0])
@@ -238,14 +265,72 @@ export default function CommitmentPunchPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // ── Load pending commitments ────────────────────────────────
+  const uniqueDetailsCustomers = useMemo(() => {
+    if (!detailsData?.details) return []
+    const set = new Set<string>()
+    detailsData.details.forEach((r: any) => {
+      const cust = r.customer_name || detailsData.commitment?.customer?.customer_name || detailsRow?.party_name
+      if (cust) set.add(cust)
+    })
+    return Array.from(set).sort()
+  }, [detailsData, detailsRow])
+
+  const uniqueDetailsOilTypes = useMemo(() => {
+    if (!detailsData?.details) return []
+    const set = new Set<string>()
+    detailsData.details.forEach((r: any) => {
+      const oil = r.oil_type || detailsRow?.oil_type
+      if (oil) set.add(oil)
+    })
+    return Array.from(set).sort()
+  }, [detailsData, detailsRow])
+
+  const filteredDetailsData = useMemo(() => {
+    if (!detailsData?.details) return []
+    return detailsData.details.filter((d: any) => {
+      const filters = Object.entries(detailsColumnFilters).filter(([_, v]) => v.trim() !== '')
+      if (filters.length === 0) return true
+      
+      return filters.every(([col, searchStr]) => {
+        if (col.endsWith("_from")) {
+          const baseCol = col.replace("_from", "")
+          const val = d[baseCol]
+          if (!val) return false
+          const rowDate = new Date(val)
+          const filterDate = new Date(searchStr)
+          rowDate.setHours(0,0,0,0)
+          filterDate.setHours(0,0,0,0)
+          return rowDate >= filterDate
+        }
+        if (col.endsWith("_to")) {
+          const baseCol = col.replace("_to", "")
+          const val = d[baseCol]
+          if (!val) return false
+          const rowDate = new Date(val)
+          const filterDate = new Date(searchStr)
+          rowDate.setHours(0,0,0,0)
+          filterDate.setHours(0,0,0,0)
+          return rowDate <= filterDate
+        }
+        
+        let val = d[col]
+        if (col === "customer_name" && !val) val = detailsData.commitment?.customer?.customer_name || detailsRow?.party_name
+        if (col === "manual_sauda_no" && !val) val = d.manual_sauda_no || detailsRow?.commitment_no
+        if (col === "oil_type" && !val) val = d.oil_type || detailsRow?.oil_type
+        if (col === "raised_at" || col === "do_date" || col === "invoice_date" || col === "po_date") {
+           val = val ? new Date(val).toLocaleDateString("en-GB") : ""
+        }
+        return String(val || "").toLowerCase().includes(searchStr.toLowerCase())
+      })
+    })
+  }, [detailsData, detailsColumnFilters, detailsRow])
+
   const loadPending = useCallback(async () => {
     setIsLoadingPending(true)
     try {
       const res = await commitmentPunchApi.getPending({
         search: searchQuery || undefined,
         commitment_date: commitmentDateFilter || undefined,
-        po_date: poDateFilter || undefined,
-        do_date: doDateFilter || undefined,
       })
       if (res.success) {
         setPendingList(res.data?.commitments || [])
@@ -255,7 +340,7 @@ export default function CommitmentPunchPage() {
     } finally {
       setIsLoadingPending(false)
     }
-  }, [searchQuery, commitmentDateFilter, poDateFilter, doDateFilter, toast])
+  }, [searchQuery, commitmentDateFilter, toast])
 
   useEffect(() => { loadPending() }, [loadPending])
 
@@ -560,7 +645,8 @@ export default function CommitmentPunchPage() {
         setRemarks(d.remarks || "")
       }
     } catch { /* non-critical: form still opens with list data */ }
-    // Keep rows as-is (oil details aren’t editable in update)
+    // Oil / qty / rate are fixed after creation (the update API ignores them): show the real values, locked.
+    setRows([{ id: "edit-row", oil_type: row.oil_type || "", quantity: row.quantity != null ? String(row.quantity) : "", unit: "Metric Ton", rate: row.rate != null ? String(row.rate) : "" }])
     setIsAddOpen(true)
   }
 
@@ -987,16 +1073,10 @@ export default function CommitmentPunchPage() {
 
 
   // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
   const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
+    patchListView(prev => prev.pendingSortField === field
+      ? { pendingSortDir: prev.pendingSortDir === "asc" ? "desc" : "asc" }
+      : { pendingSortField: field, pendingSortDir: "asc" })
   }
 
   const PendingSortIcon = ({ field }: { field: string }) => {
@@ -1007,13 +1087,8 @@ export default function CommitmentPunchPage() {
   }
 
   // ── Top Filter States ─────────────────────────────────────────
-  const [selectedOilFilter, setSelectedOilFilter] = useState<string>("ALL")
-  const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>("ALL")
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<"ALL" | "PENDING" | "COMPLETED">("ALL")
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
-
   const handleColumnFilterChange = (colId: string, val: string) => {
-    setColumnFilters(prev => ({ ...prev, [colId]: val }))
+    patchListView(prev => ({ columnFilters: { ...prev.columnFilters, [colId]: val } }))
   }
 
   // Extract unique oil types and customers dynamically from loaded pendingList
@@ -1036,22 +1111,24 @@ export default function CommitmentPunchPage() {
     if (selectedCustomerFilter && selectedCustomerFilter !== "ALL") count++
     if (selectedStatusFilter !== "ALL") count++
     if (commitmentDateFilter) count++
-    if (poDateFilter) count++
-    if (doDateFilter) count++
     if (searchQuery) count++
     count += Object.values(columnFilters).filter(v => v && v.trim()).length
     return count
-  }, [selectedOilFilter, selectedCustomerFilter, selectedStatusFilter, commitmentDateFilter, poDateFilter, doDateFilter, searchQuery, columnFilters])
+  }, [selectedOilFilter, selectedCustomerFilter, selectedStatusFilter, commitmentDateFilter, searchQuery, columnFilters])
 
   const clearAllFilters = () => {
-    setSelectedOilFilter("ALL")
-    setSelectedCustomerFilter("ALL")
-    setSelectedStatusFilter("ALL")
-    setCommitmentDateFilter("")
-    setPoDateFilter("")
-    setDoDateFilter("")
-    setSearchQuery("")
-    setColumnFilters({})
+    patchListView({
+      selectedOilFilter: "ALL",
+      selectedCustomerFilter: "ALL",
+      selectedStatusFilter: "ALL",
+      commitmentDateFilter: "",
+      dateFromFilter: "",
+      dateToFilter: "",
+      searchQuery: "",
+      columnFilters: {},
+      pendingSortField: "",
+      pendingSortDir: "asc",
+    })
   }
 
   // Filter pendingList by top filter buttons & per-column search inputs
@@ -1076,14 +1153,31 @@ export default function CommitmentPunchPage() {
       } else if (selectedStatusFilter === "COMPLETED") {
         if (Number(row.po_pending_qty || 0) > 0) return false
       }
-      // 4. Per-column filters
+      // 4. Date Range Filter
+      if (dateFromFilter) {
+        if (!row.commitment_date) return false
+        const d = new Date(row.commitment_date)
+        if (!isNaN(d.getTime())) {
+          const rowDate = d.toISOString().split('T')[0]
+          if (rowDate < dateFromFilter) return false
+        }
+      }
+      if (dateToFilter) {
+        if (!row.commitment_date) return false
+        const d = new Date(row.commitment_date)
+        if (!isNaN(d.getTime())) {
+          const rowDate = d.toISOString().split('T')[0]
+          if (rowDate > dateToFilter) return false
+        }
+      }
+      // 5. Per-column filters
       return Object.entries(columnFilters).every(([colId, filterVal]) => {
         if (!filterVal || !filterVal.trim()) return true
         const search = filterVal.toLowerCase().trim()
         let cellVal = ""
         switch (colId) {
           case "commitment_no": cellVal = String(row.commitment_no ?? ""); break
-          case "commitment_date": cellVal = row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : ""; break
+          case "commitment_date": cellVal = row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-GB") : ""; break
           case "party_name": cellVal = String(row.party_name ?? ""); break
           case "dispatch_from": cellVal = String(row.depot_name || "Banari"); break
           case "oil_type": cellVal = String(row.oil_type ?? ""); break
@@ -1098,7 +1192,7 @@ export default function CommitmentPunchPage() {
         return cellVal.toLowerCase().includes(search)
       })
     })
-  }, [pendingList, columnFilters, selectedOilFilter, selectedCustomerFilter, selectedStatusFilter])
+  }, [pendingList, columnFilters, selectedOilFilter, selectedCustomerFilter, selectedStatusFilter, dateFromFilter, dateToFilter])
 
   // Sorts filteredPendingList by selected sort field
   const sortedPendingList = useMemo(() => {
@@ -1127,7 +1221,7 @@ export default function CommitmentPunchPage() {
     )
   }, [sortedPendingList])
 
-  const [visibleColumns] = usePersistedColumns("commitment-punch", PAGE_COLUMNS.map(c => c.id))
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("commitment-punch", PAGE_COLUMNS.map(c => c.id))
   const [columnOrder, setColumnOrder] = useColumnOrder("commitment-punch", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = useMemo(() =>
     columnOrder
@@ -1149,16 +1243,16 @@ export default function CommitmentPunchPage() {
     rate: "rate",
     quantity: "qty",
   }
-  const RIGHT_ALIGN_COLS: ColId[] = []
-  const CENTER_ALIGN_COLS: ColId[] = ["oil_type", "dispatch_from"]
+  const RIGHT_ALIGN_COLS: ColId[] = ["commitment_date", "rate", "quantity", "processed_qty", "delivery_qty", "po_pending_qty", "remaining_qty"]
+  const CENTER_ALIGN_COLS: ColId[] = []
   const COL_WIDTHS: Record<ColId, string> = {
     commitment_no: "min-w-[140px] w-[140px]",
-    commitment_date: "min-w-[100px] w-[100px]",
+    commitment_date: "min-w-[115px] w-[115px]",
     party_name: "min-w-[240px]",
     dispatch_from: "min-w-[120px] w-[120px]",
     oil_type: "min-w-[110px] w-[110px]",
-    rate: "min-w-[115px] w-[115px]",
-    quantity: "min-w-[100px] w-[100px]",
+    rate: "min-w-[135px] w-[135px]",
+    quantity: "min-w-[120px] w-[120px]",
     processed_qty: "min-w-[120px] w-[120px]",
     delivery_qty: "min-w-[130px] w-[130px]",
     po_pending_qty: "min-w-[145px] w-[145px]",
@@ -1168,13 +1262,14 @@ export default function CommitmentPunchPage() {
   const renderCell = (row: PendingCommitment, colId: ColId) => {
     const widthClass = COL_WIDTHS[colId] || ""
     const isCenter = CENTER_ALIGN_COLS.includes(colId)
-    const alignClass = isCenter ? "text-center" : "pl-[30px]"
+    const isRight = RIGHT_ALIGN_COLS.includes(colId)
+    const alignClass = isCenter ? "text-center" : isRight ? "text-right px-4 tabular-nums" : "px-4"
 
     switch (colId) {
       case "commitment_no":
         return <TableCell key={colId} className={cn("font-mono font-semibold text-blue-700", alignClass, widthClass)}>{row.commitment_no}</TableCell>
       case "commitment_date":
-        return <TableCell key={colId} className={cn(alignClass, widthClass)}>{row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}</TableCell>
+        return <TableCell key={colId} className={cn(alignClass, widthClass)}>{row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-GB") : "—"}</TableCell>
       case "party_name":
         return <TableCell key={colId} className={cn("font-medium", alignClass, widthClass)}>{row.party_name}</TableCell>
       case "dispatch_from":
@@ -1182,15 +1277,15 @@ export default function CommitmentPunchPage() {
       case "oil_type":
         return <TableCell key={colId} className={cn(alignClass, widthClass)}><Badge variant="outline" className="text-xs">{row.oil_type || "—"}</Badge></TableCell>
       case "rate":
-        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>₹{row.rate ?? "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.rate != null ? fmtNum(row.rate) : "—"}</TableCell>
       case "quantity":
-        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.quantity ?? "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.quantity != null ? fmtNum(row.quantity) : "—"}</TableCell>
       case "processed_qty":
         return (
           <TableCell key={colId} className={cn("font-mono text-blue-600 font-semibold", alignClass, widthClass)}>
             {Number(row.processed_qty || 0) > 0 ? (
               <button onClick={(e) => openDetails(row, e, "raised")} className="text-blue-600 underline hover:text-blue-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
-                {Number(row.processed_qty || 0).toFixed(4)}
+                {fmtNum(row.processed_qty || 0)}
               </button>
             ) : (
               <span className="text-slate-400">0.0000</span>
@@ -1202,7 +1297,7 @@ export default function CommitmentPunchPage() {
           <TableCell key={colId} className={cn("font-mono text-purple-600 font-semibold", alignClass, widthClass)}>
             {Number(row.delivery_qty || 0) > 0 ? (
               <button onClick={(e) => openDetails(row, e, "delivered")} className="text-purple-600 underline hover:text-purple-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
-                {Number(row.delivery_qty || 0).toFixed(4)}
+                {fmtNum(row.delivery_qty || 0)}
               </button>
             ) : (
               <span className="text-slate-400">0.0000</span>
@@ -1214,7 +1309,7 @@ export default function CommitmentPunchPage() {
           <TableCell key={colId} className={cn("font-mono text-amber-600 font-semibold", alignClass, widthClass)}>
             {Number(row.po_pending_qty || 0) > 0 ? (
               <button onClick={(e) => openDetails(row, e, "pending")} className="text-amber-600 underline hover:text-amber-800 font-semibold font-mono cursor-pointer bg-transparent border-none p-0">
-                {Number(row.po_pending_qty || 0).toFixed(4)}
+                {fmtNum(row.po_pending_qty || 0)}
               </button>
             ) : (
               <span className="text-slate-400">0.0000</span>
@@ -1222,7 +1317,7 @@ export default function CommitmentPunchPage() {
           </TableCell>
         )
       case "remaining_qty":
-        return <TableCell key={colId} className={cn("font-mono text-emerald-600 font-bold", alignClass, widthClass)}>{Number(row.remaining_qty ?? row.quantity).toFixed(4)}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono text-emerald-600 font-bold", alignClass, widthClass)}>{fmtNum(row.remaining_qty ?? row.quantity)}</TableCell>
       default:
         return null
     }
@@ -1300,7 +1395,7 @@ export default function CommitmentPunchPage() {
             <div className="flex flex-wrap items-center gap-2">
               {/* Status Segmented Control */}
               <div className="flex items-center bg-white p-0.5 rounded-md border border-slate-200 shadow-2xs">
-                {(["ALL", "PENDING", "COMPLETED"] as const).map((st) => (
+                {(["PENDING", "COMPLETED", "ALL"] as const).map((st) => (
                   <button
                     key={st}
                     type="button"
@@ -1339,156 +1434,26 @@ export default function CommitmentPunchPage() {
                 </SelectTrigger>
                 <SelectContent className="max-h-64">
                   <SelectItem value="ALL">All Customers</SelectItem>
-                  {uniqueCustomers.map(cust => (
+                  {uniqueCustomers.map((cust: string) => (
                     <SelectItem key={cust} value={cust} className="text-xs truncate">{cust}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
-              {/* Date Filter Popover (Replaces 3 colliding raw date inputs) */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "h-8 text-xs gap-1.5 bg-white border-slate-200 shadow-2xs cursor-pointer",
-                      (commitmentDateFilter || poDateFilter || doDateFilter) && "border-blue-500 bg-blue-50/60 text-blue-700 font-semibold"
-                    )}
-                  >
-                    <CalendarIconLucide className="h-3.5 w-3.5 text-slate-500" />
-                    <span>
-                      {commitmentDateFilter
-                        ? `Comm: ${commitmentDateFilter}`
-                        : poDateFilter
-                        ? `PO: ${poDateFilter}`
-                        : doDateFilter
-                        ? `DO: ${doDateFilter}`
-                        : "Filter Date"}
-                    </span>
-                    {(commitmentDateFilter || poDateFilter || doDateFilter) && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-blue-600 ml-0.5" />
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-3 text-xs space-y-3" align="start">
-                  <div className="flex items-center justify-between border-b pb-1.5">
-                    <span className="font-bold text-slate-800">Filter by Date</span>
-                    {(commitmentDateFilter || poDateFilter || doDateFilter) && (
-                      <button
-                        onClick={() => { setCommitmentDateFilter(""); setPoDateFilter(""); setDoDateFilter("") }}
-                        className="text-[10px] text-red-600 hover:underline font-semibold cursor-pointer"
-                      >
-                        Clear Date
-                      </button>
-                    )}
-                  </div>
-                  <div className="space-y-2.5">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-600">Commitment Date</label>
-                      <Input
-                        type="date"
-                        className="h-7 text-xs bg-slate-50 border-slate-200"
-                        value={commitmentDateFilter}
-                        onChange={(e) => setCommitmentDateFilter(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-600">PO Date (Raised)</label>
-                      <Input
-                        type="date"
-                        className="h-7 text-xs bg-slate-50 border-slate-200"
-                        value={poDateFilter}
-                        onChange={(e) => setPoDateFilter(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-600">DO Date (Dispatched)</label>
-                      <Input
-                        type="date"
-                        className="h-7 text-xs bg-slate-50 border-slate-200"
-                        value={doDateFilter}
-                        onChange={(e) => setDoDateFilter(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
-
-              {/* Column Filter Popover (Clean, simple, no complexity) */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "h-8 text-xs gap-1.5 bg-white border-slate-200 shadow-2xs cursor-pointer",
-                      Object.values(columnFilters).some(v => !!v?.trim())
-                        ? "border-blue-500 bg-blue-50/60 text-blue-700 font-semibold"
-                        : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    <Filter className="h-3.5 w-3.5" />
-                    <span>Filter Column</span>
-                    {Object.values(columnFilters).filter(v => !!v?.trim()).length > 0 && (
-                      <span className="ml-0.5 px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-bold">
-                        {Object.values(columnFilters).filter(v => !!v?.trim()).length}
-                      </span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-3 text-xs space-y-3" align="start">
-                  <div className="flex items-center justify-between border-b pb-2">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                      <Filter className="h-3.5 w-3.5 text-blue-600" />
-                      <span>Filter by Column</span>
-                    </div>
-                    {Object.values(columnFilters).some(v => !!v?.trim()) && (
-                      <button
-                        onClick={() => setColumnFilters({})}
-                        className="text-[11px] text-red-600 hover:underline font-semibold cursor-pointer"
-                      >
-                        Clear All
-                      </button>
-                    )}
-                  </div>
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {[
-                      { id: "commitment_no", label: "Commitment No." },
-                      { id: "rate", label: "Rate (₹)" },
-                      { id: "quantity", label: "Quantity (MT)" },
-                      { id: "dispatch_from", label: "Dispatch Depot" },
-                      { id: "processed_qty", label: "PO Raised (MT)" },
-                      { id: "delivery_qty", label: "Delivery Qty (MT)" },
-                      { id: "po_pending_qty", label: "PO Pending Qty (MT)" },
-                      { id: "remaining_qty", label: "Remaining Qty (MT)" },
-                    ].map(col => (
-                      <div key={col.id} className="space-y-1 bg-white p-2 rounded border border-slate-150 shadow-2xs">
-                        <div className="flex justify-between items-center text-[11px] font-medium text-slate-700">
-                          <span>{col.label}</span>
-                          {columnFilters[col.id] && (
-                            <button
-                              onClick={() => handleColumnFilterChange(col.id, "")}
-                              className="text-[10px] text-red-600 hover:underline cursor-pointer"
-                            >
-                              Clear
-                            </button>
-                          )}
-                        </div>
-                        <Input
-                          type="text"
-                          placeholder={`Filter ${col.label}...`}
-                          value={columnFilters[col.id] || ""}
-                          onChange={(e) => handleColumnFilterChange(col.id, e.target.value)}
-                          className="h-7 text-xs bg-slate-50 focus:bg-white border-slate-200"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              {/* Show / hide table columns - same control as the other stages */}
+              {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="bg-transparent">
+                      <Settings2 className="mr-2 h-4 w-4" />
+                      Columns
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
+                    <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
 
             {/* Right side: Count & Reset Action */}
@@ -1552,36 +1517,24 @@ export default function CommitmentPunchPage() {
                 </Badge>
               )}
 
-              {poDateFilter && (
+
+              {dateFromFilter && (
                 <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  PO Date: {poDateFilter}
-                  <button onClick={() => setPoDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                  From: {dateFromFilter}
+                  <button onClick={() => setDateFromFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
                     <X className="h-2.5 w-2.5" />
                   </button>
                 </Badge>
               )}
 
-              {doDateFilter && (
+              {dateToFilter && (
                 <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  DO Date: {doDateFilter}
-                  <button onClick={() => setDoDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
+                  To: {dateToFilter}
+                  <button onClick={() => setDateToFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
                     <X className="h-2.5 w-2.5" />
                   </button>
                 </Badge>
               )}
-
-              {Object.entries(columnFilters).map(([colId, val]) => {
-                if (!val || !val.trim()) return null
-                const col = PAGE_COLUMNS.find(c => c.id === colId)
-                return (
-                  <Badge key={colId} variant="secondary" className="gap-1 text-[10px] font-medium bg-slate-100 text-slate-700 border-slate-200 pl-2 pr-1 py-0.5">
-                    {col?.label || colId}: {val}
-                    <button onClick={() => handleColumnFilterChange(colId, "")} className="hover:text-slate-900 cursor-pointer p-0.5 rounded-full hover:bg-slate-200">
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </Badge>
-                )
-              })}
             </div>
           )}
         </CardHeader>
@@ -1589,6 +1542,124 @@ export default function CommitmentPunchPage() {
           <div className="hidden overflow-x-auto rounded-b-xl md:block">
             <Table>
               <TableHeader className="bg-slate-50 border-b">
+                <TableRow>
+                  {orderedVisibleCols.map(col => {
+                    const isRight = RIGHT_ALIGN_COLS.includes(col.id)
+                    const isCenter = CENTER_ALIGN_COLS.includes(col.id)
+                    return (
+                      <TableHead key={`search-${col.id}`} className={`whitespace-nowrap align-top pt-2.5 pb-1 px-4 ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}>
+                            <div onClick={(e) => e.stopPropagation()} className="w-full mb-0.5">
+                              {col.id === "commitment_date" ? (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+                                      <span className="truncate font-medium">{dateFromFilter || dateToFilter ? "Filtered" : "Filter..."}</span>
+                                      <CalendarIconLucide className="h-3 w-3 opacity-60 ml-1 shrink-0" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-48 p-3" align="start">
+                                    <div className="flex flex-col gap-3">
+                                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                                        <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Date Range</Label>
+                                        {(dateFromFilter || dateToFilter) && (
+                                          <button
+                                            onClick={() => { setDateFromFilter(""); setDateToFilter("") }}
+                                            className="text-[10px] text-red-600 hover:underline font-semibold"
+                                          >
+                                            Clear
+                                          </button>
+                                        )}
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        <Label className="text-[10px] font-medium text-slate-500">From</Label>
+                                        <Input
+                                          type="date"
+                                          value={dateFromFilter}
+                                          onChange={(e) => setDateFromFilter(e.target.value)}
+                                          className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400"
+                                        />
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        <Label className="text-[10px] font-medium text-slate-500">To</Label>
+                                        <Input
+                                          type="date"
+                                          value={dateToFilter}
+                                          onChange={(e) => setDateToFilter(e.target.value)}
+                                          className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400"
+                                        />
+                                      </div>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              ) : (
+                                <Input
+                                  placeholder="Search..."
+                                  value={columnFilters[col.id] || ""}
+                                  onChange={(e) => handleColumnFilterChange(col.id, e.target.value)}
+                                  className={cn(
+                                    "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                                    isCenter ? "text-center" : isRight ? "text-right" : "text-left"
+                                  )}
+                                />
+                              )}
+                            </div>
+                      </TableHead>
+                    )
+                  })}
+                  <TableHead className="w-10 px-2 pt-2.5 pb-1"></TableHead>
+                </TableRow>
+                {/* ── Per-Column Totals ── */}
+                {sortedPendingList.length > 0 && (
+                  <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+                    {orderedVisibleCols.map(col => {
+                      const isCenter = CENTER_ALIGN_COLS.includes(col.id)
+                      const isRight = RIGHT_ALIGN_COLS.includes(col.id)
+                      const alignClass = isCenter ? "text-center" : isRight ? "text-right px-4 tabular-nums" : "px-4"
+
+                      switch (col.id) {
+                        case "commitment_no":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-black text-slate-900 uppercase tracking-wider text-[11px]", alignClass)}>
+                              Total ({sortedPendingList.length})
+                            </TableCell>
+                          )
+                        case "quantity":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-slate-900", alignClass)}>
+                              {fmtNum(columnTotals.quantity)}
+                            </TableCell>
+                          )
+                        case "processed_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>
+                              {fmtNum(columnTotals.processed_qty)}
+                            </TableCell>
+                          )
+                        case "delivery_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-purple-700", alignClass)}>
+                              {fmtNum(columnTotals.delivery_qty)}
+                            </TableCell>
+                          )
+                        case "po_pending_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-amber-700", alignClass)}>
+                              {fmtNum(columnTotals.po_pending_qty)}
+                            </TableCell>
+                          )
+                        case "remaining_qty":
+                          return (
+                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-emerald-700", alignClass)}>
+                              {fmtNum(columnTotals.remaining_qty)}
+                            </TableCell>
+                          )
+                        default:
+                          return <TableCell key={`total-${col.id}`} className={cn("text-slate-400 font-normal", alignClass)}></TableCell>
+                      }
+                    })}
+                    <TableCell className="px-2"></TableCell>
+                  </TableRow>
+                )}
                 <TableRow>
                   <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                     {orderedVisibleCols.map(col => {
@@ -1600,17 +1671,20 @@ export default function CommitmentPunchPage() {
                         <SortableTableHead
                           key={col.id}
                           id={col.id}
-                          className={`whitespace-nowrap ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}
+                          className={`whitespace-nowrap align-top py-2.5 px-4 group/header ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}
                         >
-                          <div
-                            className={cn(
-                              "flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 transition-colors w-full",
-                              isCenter ? "justify-center" : isRight ? "justify-end" : "justify-start"
-                            )}
-                            onClick={sf ? () => handlePendingSort(sf) : undefined}
-                          >
-                            <span>{col.label}</span>
-                            {sf && <PendingSortIcon field={sf} />}
+                          <div className="flex flex-col gap-1.5 w-full">
+                            {/* Column Heading */}
+                            <div
+                              className={cn(
+                                "flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 transition-colors w-full",
+                                isCenter ? "justify-center" : isRight ? "justify-end" : "justify-start"
+                              )}
+                              onClick={sf ? () => handlePendingSort(sf) : undefined}
+                            >
+                              <span>{col.label}</span>
+                              {sf && <PendingSortIcon field={sf} />}
+                            </div>
                           </div>
                         </SortableTableHead>
                       )
@@ -1673,59 +1747,6 @@ export default function CommitmentPunchPage() {
                   ))
                 )}
               </TableBody>
-              {/* ── Per-Column Totals Footer ── */}
-              {sortedPendingList.length > 0 && (
-                <tfoot className="bg-slate-100/90 border-t-2 border-slate-300 font-bold text-xs text-slate-800">
-                  <TableRow className="hover:bg-slate-100/90">
-                    {orderedVisibleCols.map(col => {
-                      const isCenter = CENTER_ALIGN_COLS.includes(col.id)
-                      const alignClass = isCenter ? "text-center" : "pl-[30px]"
-
-                      switch (col.id) {
-                        case "commitment_no":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-black text-slate-900 uppercase tracking-wider text-[11px]", alignClass)}>
-                              Total ({sortedPendingList.length})
-                            </TableCell>
-                          )
-                        case "quantity":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-slate-900", alignClass)}>
-                              {columnTotals.quantity.toFixed(4)} MT
-                            </TableCell>
-                          )
-                        case "processed_qty":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>
-                              {columnTotals.processed_qty.toFixed(4)} MT
-                            </TableCell>
-                          )
-                        case "delivery_qty":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-purple-700", alignClass)}>
-                              {columnTotals.delivery_qty.toFixed(4)} MT
-                            </TableCell>
-                          )
-                        case "po_pending_qty":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-amber-700", alignClass)}>
-                              {columnTotals.po_pending_qty.toFixed(4)} MT
-                            </TableCell>
-                          )
-                        case "remaining_qty":
-                          return (
-                            <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-emerald-700", alignClass)}>
-                              {columnTotals.remaining_qty.toFixed(4)} MT
-                            </TableCell>
-                          )
-                        default:
-                          return <TableCell key={`total-${col.id}`} className={cn("text-slate-400 font-normal", alignClass)}></TableCell>
-                      }
-                    })}
-                    <TableCell className="px-2"></TableCell>
-                  </TableRow>
-                </tfoot>
-              )}
             </Table>
           </div>
 
@@ -1760,7 +1781,7 @@ export default function CommitmentPunchPage() {
                     <div className="min-w-0">
                       <p className="font-mono text-sm font-bold text-blue-700 break-words">{row.commitment_no}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-IN") : "—"}
+                        {row.commitment_date ? new Date(row.commitment_date).toLocaleDateString("en-GB") : "—"}
                       </p>
                     </div>
                     <Button
@@ -1789,41 +1810,41 @@ export default function CommitmentPunchPage() {
                       <Badge variant="outline" className="mt-1 text-[10px]">{row.oil_type || "—"}</Badge>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-bold uppercase text-slate-400">Rate</p>
-                      <p className="mt-1 font-mono font-semibold">₹{row.rate ?? "—"}</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Rate (PMT)</p>
+                      <p className="mt-1 font-mono font-semibold">{row.rate != null ? fmtNum(row.rate) : "—"}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Qty (MT)</p>
-                      <p className="mt-1 font-mono font-semibold">{row.quantity ?? "—"}</p>
+                      <p className="mt-1 font-mono font-semibold">{row.quantity != null ? fmtNum(row.quantity) : "—"}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-bold uppercase text-slate-400">PO Raised</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400">PO Raised (MT)</p>
                       {Number(row.processed_qty || 0) > 0 ? (
                         <button
                           onClick={(e) => openDetails(row, e, "raised")}
                           className="mt-1 text-blue-600 underline hover:text-blue-800 font-semibold font-mono bg-transparent border-none p-0"
                         >
-                          {Number(row.processed_qty || 0).toFixed(4)}
+                          {fmtNum(row.processed_qty || 0)}
                         </button>
                       ) : (
                         <p className="mt-1 font-mono text-slate-400">0.0000</p>
                       )}
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-bold uppercase text-slate-400">Delivered Qty</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Delivered Qty (MT)</p>
                       {Number(row.delivery_qty || 0) > 0 ? (
                         <button onClick={(e) => openDetails(row, e, "delivered")} className="mt-1 text-purple-600 underline hover:text-purple-800 font-semibold font-mono bg-transparent border-none p-0">
-                          {Number(row.delivery_qty || 0).toFixed(4)}
+                          {fmtNum(row.delivery_qty || 0)}
                         </button>
                       ) : (
                         <p className="mt-1 font-mono text-slate-400">0.0000</p>
                       )}
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-[10px] font-bold uppercase text-slate-400">PO Pending</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400">PO Pending (MT)</p>
                       {Number(row.po_pending_qty || 0) > 0 ? (
                         <button onClick={(e) => openDetails(row, e, "pending")} className="mt-1 text-amber-600 underline hover:text-amber-800 font-semibold font-mono bg-transparent border-none p-0">
-                          {Number(row.po_pending_qty || 0).toFixed(4)}
+                          {fmtNum(row.po_pending_qty || 0)}
                         </button>
                       ) : (
                         <p className="mt-1 font-mono text-slate-400">0.0000</p>
@@ -1832,7 +1853,7 @@ export default function CommitmentPunchPage() {
                   </div>
                   <div className="mt-3 rounded-md bg-emerald-50 p-2">
                     <p className="text-[10px] font-bold uppercase text-emerald-700">Commitment Pending (MT)</p>
-                    <p className="mt-1 font-mono text-base font-bold text-emerald-700">{Number(row.remaining_qty ?? row.quantity).toFixed(4)}</p>
+                    <p className="mt-1 font-mono text-base font-bold text-emerald-700">{fmtNum(row.remaining_qty ?? row.quantity)}</p>
                   </div>
                 </div>
               ))
@@ -1857,7 +1878,7 @@ export default function CommitmentPunchPage() {
             </DialogTitle>
             <DialogDescription>
               {isEditMode
-                ? "Update planned values for this commitment. Oil type and quantity cannot be changed after creation."
+                ? "Update planned values for this commitment. Customer, oil type and quantity cannot be changed after creation."
                 : "Enter commitment details. A unique Commitment No. will be auto-generated."
               }
             </DialogDescription>
@@ -1894,6 +1915,8 @@ export default function CommitmentPunchPage() {
                   }}
                   placeholder="Select customer"
                   searchPlaceholder="Search customer..."
+                  disabled={isEditMode}
+                  lockedHint="Customer is fixed by the commitment and cannot be changed."
                 />
               </div>
               <div className="space-y-2">
@@ -2036,10 +2059,15 @@ export default function CommitmentPunchPage() {
             {/* Product rows */}
             <div className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Label className="text-base font-semibold">Oil / Product Details</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addRow} className="w-full gap-1 sm:w-auto">
-                  <Plus className="h-3 w-3" /> Add Row
-                </Button>
+                <Label className="text-base font-semibold flex items-center gap-1.5">
+                  Oil / Product Details
+                  {isEditMode && <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500" title="Oil type, quantity and rate are fixed after creation."><Lock className="h-3.5 w-3.5" /> Fixed after creation</span>}
+                </Label>
+                {!isEditMode && (
+                  <Button type="button" variant="outline" size="sm" onClick={addRow} className="w-full gap-1 sm:w-auto">
+                    <Plus className="h-3 w-3" /> Add Row
+                  </Button>
+                )}
               </div>
 
               <div className="hidden rounded-lg border overflow-hidden sm:block">
@@ -2059,7 +2087,7 @@ export default function CommitmentPunchPage() {
                       <tr key={row.id} className="border-b last:border-0">
                         <td className="text-center py-2 px-2 text-xs font-bold text-slate-400">{String.fromCharCode(65 + idx)}</td>
                         <td className="py-1.5 px-2">
-                          <Select value={row.oil_type} onValueChange={v => updateRow(row.id, "oil_type", v)}>
+                          <Select value={row.oil_type} onValueChange={v => updateRow(row.id, "oil_type", v)} disabled={isEditMode}>
                             <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select oil" /></SelectTrigger>
                             <SelectContent>
                               {OIL_TYPES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -2067,13 +2095,13 @@ export default function CommitmentPunchPage() {
                           </Select>
                         </td>
                         <td className="py-1.5 px-2">
-                          <Input type="number" min="0" step="0.0001" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} placeholder="0.0000" className="h-8 text-sm" />
+                          <Input type="number" min="0" step="0.0001" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} placeholder="0.0000" className="h-8 text-sm" disabled={isEditMode} />
                         </td>
                         <td className="py-1.5 px-2">
                           <Input type="text" disabled value={row.unit} placeholder="e.g. Ltr" className="h-8 text-sm" />
                         </td>
                         <td className="py-1.5 px-2">
-                          <Input type="number" min="0" step="0.01" value={row.rate} onChange={e => updateRow(row.id, "rate", e.target.value)} placeholder="₹ 0.00" className="h-8 text-sm" />
+                          <Input type="number" min="0" step="0.01" value={row.rate} onChange={e => updateRow(row.id, "rate", e.target.value)} placeholder="₹ 0.00" className="h-8 text-sm" disabled={isEditMode} />
                         </td>
                         <td className="py-1.5 px-2 text-center">
                           <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => removeRow(row.id)} disabled={rows.length === 1}>
@@ -2097,7 +2125,7 @@ export default function CommitmentPunchPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>Oil Type *</Label>
-                      <Select value={row.oil_type} onValueChange={v => updateRow(row.id, "oil_type", v)}>
+                      <Select value={row.oil_type} onValueChange={v => updateRow(row.id, "oil_type", v)} disabled={isEditMode}>
                         <SelectTrigger className="h-9"><SelectValue placeholder="Select oil" /></SelectTrigger>
                         <SelectContent>
                           {OIL_TYPES.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -2107,7 +2135,7 @@ export default function CommitmentPunchPage() {
                     <div className="grid grid-cols-1 gap-3">
                       <div className="space-y-2">
                         <Label>Quantity *</Label>
-                        <Input type="number" min="0" step="0.0001" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} placeholder="0.0000" />
+                        <Input type="number" min="0" step="0.0001" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} placeholder="0.0000" disabled={isEditMode} />
                       </div>
                       <div className="space-y-2">
                         <Label>Unit</Label>
@@ -2115,7 +2143,7 @@ export default function CommitmentPunchPage() {
                       </div>
                       <div className="space-y-2">
                         <Label>Rate (PMT) *</Label>
-                        <Input type="number" min="0" step="0.01" value={row.rate} onChange={e => updateRow(row.id, "rate", e.target.value)} placeholder="₹ 0.00" />
+                        <Input type="number" min="0" step="0.01" value={row.rate} onChange={e => updateRow(row.id, "rate", e.target.value)} placeholder="₹ 0.00" disabled={isEditMode} />
                       </div>
                     </div>
                   </div>
@@ -2192,7 +2220,7 @@ export default function CommitmentPunchPage() {
                     <p className="font-semibold text-slate-800 mt-1.5">{c.oil_type || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total Qty</p>
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Total Qty (MT)</p>
                     <p className="font-semibold text-slate-800 mt-1.5">{c.quantity ?? "—"} {c.unit || ""}</p>
                   </div>
                   <div>
@@ -2327,21 +2355,16 @@ export default function CommitmentPunchPage() {
 
               {/* Customer Name Override at PO raise */}
               <div className="space-y-3 col-span-full">
-                <Label>
-                  Customer Name
-                  {processSelectedCommitment && processCustomerName && processSelectedCommitment.party_name &&
-                    processCustomerName.toLowerCase() !== processSelectedCommitment.party_name.toLowerCase() && (
-                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
-                        <AlertTriangle className="h-3 w-3" /> Different from planned
-                      </span>
-                    )}
-                </Label>
+                <Label>Customer Name</Label>
+                {/* Locked: the customer is fixed by the commitment and cannot be changed while processing it. */}
                 <AsyncCombobox
                   fetchOptions={fetchCustomerOptions}
                   value={processCustomerName}
                   onValueChange={setProcessCustomerName}
                   placeholder="Select Customer (filtered by commitment required)"
                   searchPlaceholder="Search Customer Name, City, State, GST, Mobile..."
+                  disabled
+                  lockedHint="Customer is fixed by the commitment and cannot be changed."
                 />
               </div>
 
@@ -3028,7 +3051,7 @@ export default function CommitmentPunchPage() {
               </span>
               {detailsRow?.commitment_date && (
                 <span className="text-xs font-medium text-slate-500">
-                  {new Date(detailsRow.commitment_date).toLocaleDateString("en-IN")}
+                  {new Date(detailsRow.commitment_date).toLocaleDateString("en-GB")}
                 </span>
               )}
             </div>
@@ -3040,7 +3063,7 @@ export default function CommitmentPunchPage() {
           {/* ── Compact Metadata & Metric Summary Strip ── */}
           <div className="flex flex-wrap items-center gap-x-5 sm:gap-x-7 gap-y-2 p-2.5 px-3.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-xs w-fit max-w-full">
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
               <p className="text-xs font-bold text-slate-800 mt-0.5" title={detailsRow?.party_name}>
                 {detailsRow?.party_name || "—"}
               </p>
@@ -3049,7 +3072,7 @@ export default function CommitmentPunchPage() {
             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
 
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Oil Type</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Oil Type</p>
               <div className="mt-0.5">
                 <Badge variant="outline" className="text-[11px] font-semibold bg-white border-slate-200 text-slate-700 py-0 h-5">
                   {detailsRow?.oil_type || "—"}
@@ -3060,38 +3083,154 @@ export default function CommitmentPunchPage() {
             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
 
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Qty</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Qty</p>
               <p className="font-mono text-xs font-bold text-slate-900 mt-0.5">
-                {Number(detailsData?.commitment?.commitment?.quantity ?? detailsRow?.quantity ?? 0).toFixed(4)} MT
+                {fmtNum(detailsData?.commitment?.commitment?.quantity ?? detailsRow?.quantity ?? 0)}
               </p>
             </div>
 
             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
 
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
-                {detailsType === "raised" ? "PO Raised" : detailsType === "delivered" ? "Delivered" : "PO Pending"}
+              <p className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
+                {detailsType === "raised" ? "PO Raised (MT)" : detailsType === "delivered" ? "Delivered (MT)" : "PO Pending (MT)"}
               </p>
               <p className="font-mono text-xs font-bold text-blue-700 mt-0.5">
-                {isLoadingDetails ? "..." : Number(
+                {isLoadingDetails ? "..." : fmtNum(
                   detailsType === "raised" ? detailsData?.total_processed_mt :
                   detailsType === "delivered" ? detailsData?.total_delivered_mt :
                   detailsData?.total_pending_mt || 0
-                ).toFixed(4)} MT
+                )}
               </p>
             </div>
 
             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
 
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Pending Qty</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Qty (MT)</p>
               <p className="font-mono text-xs font-bold text-amber-800 mt-0.5">
-                {Number(detailsRow?.remaining_qty || 0).toFixed(4)} MT
+                {fmtNum(detailsRow?.remaining_qty || 0)}
               </p>
             </div>
           </div>
 
+          
           <div className="space-y-4 mt-1">
+            {/* View Selector Tabs (Main Table Style) */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center p-0.5 bg-white border border-slate-200 rounded-md shadow-2xs">
+                  {[
+                    { id: "pending", label: "PO Pending" },
+                    { id: "raised", label: "PO Raised" },
+                    { id: "delivered", label: "Delivered" },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setDetailsType(tab.id as any);
+                        setDetailsColumnFilters({});
+                      }}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded transition-all whitespace-nowrap outline-none",
+                        detailsType === tab.id
+                          ? "bg-blue-600 text-white shadow-xs font-bold"
+                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                      )}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+
+                {/* Oil Type Filter */}
+                <Select value={detailsColumnFilters["oil_type"] || "ALL"} onValueChange={val => setDetailsColumnFilters(prev => ({...prev, "oil_type": val === "ALL" ? "" : val}))}>
+                  <SelectTrigger className="h-8 text-xs min-w-[115px] bg-white border-slate-200 shadow-2xs">
+                    <SelectValue placeholder="All Oils" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Oils</SelectItem>
+                    {uniqueDetailsOilTypes.map(oil => (
+                      <SelectItem key={oil} value={oil}>{oil}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={detailsColumnFilters["customer_name"] || "ALL"} onValueChange={val => setDetailsColumnFilters(prev => ({...prev, "customer_name": val === "ALL" ? "" : val}))}>
+                  <SelectTrigger className="h-8 text-xs min-w-[140px] max-w-[180px] bg-white border-slate-200 shadow-2xs truncate">
+                    <SelectValue placeholder="All Customers" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    <SelectItem value="ALL">All Customers</SelectItem>
+                    {uniqueDetailsCustomers.map(cust => (
+                      <SelectItem key={cust} value={cust} className="text-xs truncate">{cust}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 text-xs bg-white border-slate-200 shadow-2xs gap-1.5" type="button">
+                      <Settings2 className="h-3.5 w-3.5 text-slate-500" />
+                      <span>Columns</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[200px] max-h-[300px] overflow-y-auto">
+                    <div className="p-2 font-semibold text-xs text-slate-500 uppercase tracking-wider mb-1">
+                      Toggle Columns
+                    </div>
+                    {(() => {
+                       let cols = [];
+                       if (detailsType === "delivered") {
+                         cols = [
+                           { id: "invoice_no", label: "Invoice No." }, { id: "invoice_date", label: "Invoice Date" },
+                           { id: "order_no", label: "DO No." }, { id: "do_date", label: "DO Date" },
+                           { id: "manual_sauda_no", label: "Manual Sauda No." }, { id: "po_no", label: "PO No." },
+                           { id: "po_date", label: "PO Date" }, { id: "customer_name", label: "Customer Name" },
+                           { id: "sku", label: "Item Name" }, { id: "sku_quantity", label: "Qty (Box)" },
+                           { id: "delivered_mt", label: "Qty (MT)" }, { id: "invoice_amount", label: "Invoice Amount" }
+                         ];
+                       } else if (detailsType === "pending") {
+                         cols = [
+                           { id: "po_no", label: "PO No." }, { id: "po_date", label: "PO Date" },
+                           { id: "order_no", label: "DO No." }, { id: "do_date", label: "DO Date" },
+                           { id: "manual_sauda_no", label: "Manual Sauda No." }, { id: "customer_name", label: "Customer Name" },
+                           { id: "sku", label: "Item Name" }, { id: "sku_quantity", label: "Total (Box)" },
+                           { id: "delivered_box", label: "Deliv (Box)" }, { id: "pending_box", label: "Pend (Box)" },
+                           { id: "sku_weight_mt", label: "Total (MT)" }, { id: "delivered_mt", label: "Deliv (MT)" },
+                           { id: "pending_mt", label: "Pend (MT)" }
+                         ];
+                       } else {
+                         cols = [
+                           { id: "raised_at", label: "Raised On" }, { id: "order_no", label: "DO No." },
+                           { id: "po_no", label: "PO No." }, { id: "po_date", label: "PO Date" },
+                           { id: "sku", label: "SKU" }, { id: "sku_quantity", label: "Qty (Box)" },
+                           { id: "sku_weight_mt", label: "Weight (MT)" }, { id: "sku_rate", label: "Rate" },
+                           { id: "order_category", label: "Category" }, { id: "order_type", label: "Order Type" },
+                           { id: "actual_depot_name", label: "Depo" }, { id: "payment_terms", label: "Payment Terms" },
+                           { id: "remarks", label: "Remarks" }
+                         ];
+                       }
+                       return cols.map(c => (
+                         <div key={c.id} className="flex items-center space-x-2 px-2 py-1.5 hover:bg-slate-50 cursor-pointer rounded-md" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDetailsHiddenCols(prev => ({...prev, [c.id]: !prev[c.id]}))
+                              }}>
+                           <Checkbox checked={!detailsHiddenCols[c.id]} />
+                           <label className="text-sm font-medium leading-none cursor-pointer">{c.label}</label>
+                         </div>
+                       ))
+                    })()}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+
 
 
             {/* Orders Breakdown Table */}
@@ -3107,244 +3246,253 @@ export default function CommitmentPunchPage() {
 
                 {/* Desktop Table */}
                 <div className="hidden rounded-lg border border-slate-200 overflow-x-auto sm:block">
-                  <table className="w-full text-sm border-collapse">
-                    <thead className="bg-slate-100/90 border-b border-slate-200">
-                      {detailsType === "delivered" ? (
-                        <tr>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Invoice No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Invoice Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">DO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Manual Sauda No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[110px]">PO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[180px]">Customer Name</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Item Name</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[90px]">Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Qty (MT)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Invoice Amount</th>
-                        </tr>
-                      ) : detailsType === "pending" ? (
-                        <tr>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[110px]">PO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">DO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Manual Sauda No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[180px]">Customer Name</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">Item Name</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Total Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Delivered Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Pending Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Total Qty (MT)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Delivered Qty (MT)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-amber-700 uppercase tracking-wider whitespace-nowrap min-w-[120px]">Pending Qty (MT)</th>
-                        </tr>
-                      ) : (
-                        <tr>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap w-8">#</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Raised On</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[130px]">DO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap min-w-[110px]">PO No.</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">PO Date</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[160px]">SKU</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[90px]">Qty (Box)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-800 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Weight (MT)</th>
-                          <th className="py-3 px-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Rate</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[100px]">Category</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Order Type</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[110px]">Depo</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[130px]">Payment Terms</th>
-                          <th className="py-3 px-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap min-w-[140px]">Remarks</th>
-                        </tr>
+                  
+
+
+{(() => {
+  type DCol = { id: string; label: string; w: string; right?: boolean; date?: boolean; dec?: number }
+  const DETAIL_COLS: Record<string, DCol[]> = {
+    delivered: [
+      { id: "invoice_no", label: "Invoice No.", w: "min-w-[130px]" },
+      { id: "invoice_date", label: "Invoice Date", w: "min-w-[120px]", right: true, date: true },
+      { id: "order_no", label: "DO No.", w: "min-w-[140px]" },
+      { id: "do_date", label: "DO Date", w: "min-w-[115px]", right: true, date: true },
+      { id: "manual_sauda_no", label: "Manual Sauda No.", w: "min-w-[150px]" },
+      { id: "po_no", label: "PO No.", w: "min-w-[120px]" },
+      { id: "po_date", label: "PO Date", w: "min-w-[115px]", right: true, date: true },
+      { id: "customer_name", label: "Customer Name", w: "min-w-[200px]" },
+      { id: "sku", label: "Item Name", w: "min-w-[170px]" },
+      { id: "sku_quantity", label: "Qty (Box)", w: "min-w-[110px]", right: true, dec: 0 },
+      { id: "delivered_mt", label: "Qty (MT)", w: "min-w-[120px]", right: true, dec: 4 },
+      { id: "invoice_amount", label: "Invoice Amount", w: "min-w-[140px]", right: true, dec: 2 },
+    ],
+    pending: [
+      { id: "po_no", label: "PO No.", w: "min-w-[120px]" },
+      { id: "po_date", label: "PO Date", w: "min-w-[115px]", right: true, date: true },
+      { id: "order_no", label: "DO No.", w: "min-w-[140px]" },
+      { id: "do_date", label: "DO Date", w: "min-w-[115px]", right: true, date: true },
+      { id: "manual_sauda_no", label: "Manual Sauda No.", w: "min-w-[150px]" },
+      { id: "customer_name", label: "Customer Name", w: "min-w-[200px]" },
+      { id: "sku", label: "Item Name", w: "min-w-[170px]" },
+      { id: "sku_quantity", label: "Total (Box)", w: "min-w-[115px]", right: true, dec: 0 },
+      { id: "delivered_box", label: "Deliv (Box)", w: "min-w-[115px]", right: true, dec: 0 },
+      { id: "pending_box", label: "Pend (Box)", w: "min-w-[115px]", right: true, dec: 0 },
+      { id: "sku_weight_mt", label: "Total (MT)", w: "min-w-[120px]", right: true, dec: 4 },
+      { id: "delivered_mt", label: "Deliv (MT)", w: "min-w-[120px]", right: true, dec: 4 },
+      { id: "pending_mt", label: "Pend (MT)", w: "min-w-[120px]", right: true, dec: 4 },
+    ],
+    raised: [
+      { id: "raised_at", label: "Raised On", w: "min-w-[115px]", right: true, date: true },
+      { id: "order_no", label: "DO No.", w: "min-w-[140px]" },
+      { id: "po_no", label: "PO No.", w: "min-w-[120px]" },
+      { id: "po_date", label: "PO Date", w: "min-w-[115px]", right: true, date: true },
+      { id: "sku", label: "SKU", w: "min-w-[170px]" },
+      { id: "sku_quantity", label: "Qty (Box)", w: "min-w-[110px]", right: true, dec: 0 },
+      { id: "sku_weight_mt", label: "Weight (MT)", w: "min-w-[125px]", right: true, dec: 4 },
+      { id: "sku_rate", label: "Rate (PMT)", w: "min-w-[135px]", right: true, dec: 4 },
+      { id: "order_category", label: "Category", w: "min-w-[110px]" },
+      { id: "order_type", label: "Order Type", w: "min-w-[120px]" },
+      { id: "actual_depot_name", label: "Depo", w: "min-w-[120px]" },
+      { id: "payment_terms", label: "Payment Terms", w: "min-w-[140px]" },
+      { id: "remarks", label: "Remarks", w: "min-w-[150px]" },
+    ],
+  }
+  const TOTAL_COLS = ["sku_quantity", "delivered_box", "pending_box", "sku_weight_mt", "delivered_mt", "pending_mt", "invoice_amount"]
+  const cols = (DETAIL_COLS[detailsType] || []).filter(c => !detailsHiddenCols[c.id])
+  const detailsActiveFiltersCount = Object.values(detailsColumnFilters).filter(v => v.trim()).length
+  const fmtDate = (v: any) => (v ? new Date(v).toLocaleDateString("en-GB") : "—")
+  const numTxt = (v: any, dec: number, empty = "—") => (v == null || v === "" ? empty : Number(v).toFixed(dec))
+  const alignCls = (c: DCol) => (c.right ? "text-right px-4 tabular-nums" : "px-4")
+  const hoverCls = detailsType === "delivered" ? "hover:bg-purple-50/30" : detailsType === "pending" ? "hover:bg-amber-50/30" : "hover:bg-blue-50/30"
+
+  const numColor = (id: string) =>
+    id === "delivered_mt" || id === "delivered_box" ? (detailsType === "delivered" ? "text-purple-700" : "text-emerald-700")
+    : id === "pending_mt" || id === "pending_box" ? "text-amber-700"
+    : id === "sku_weight_mt" && detailsType === "raised" ? "text-blue-700"
+    : id === "invoice_amount" ? "text-emerald-700"
+    : "text-slate-800"
+
+  const totalFor = (c: DCol) => {
+    const sum = filteredDetailsData.reduce((s: number, d: any) => s + (Number(d[c.id]) || 0), 0)
+    return numTxt(sum, c.dec ?? 0)
+  }
+
+  const renderDetailCell = (d: any, c: DCol) => {
+    const custName = d.customer_name || detailsData.commitment?.customer?.customer_name || detailsRow?.party_name || "—"
+    const base = cn(alignCls(c), c.w)
+    switch (c.id) {
+      case "invoice_no":
+        return <TableCell key={c.id} className={cn("font-mono font-semibold", base)}>
+          {d.invoice_copy ? <a href={d.invoice_copy} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">{d.invoice_no || "View Invoice"}</a> : (d.invoice_no || "—")}
+        </TableCell>
+      case "order_no":
+        return <TableCell key={c.id} className={cn("font-mono font-semibold", base)}>
+          {detailsType === "delivered" && Array.isArray(d.invoice_do_nos) && d.invoice_do_nos.length > 1 ? (
+            <div className="flex flex-col gap-0.5">
+              {d.invoice_do_nos.map((no: string) => (
+                <Link key={no} href={`/approval-of-order?search=${no}`} className="text-emerald-700 hover:underline">{no}</Link>
+              ))}
+            </div>
+          ) : d.order_no ? <Link href={`/approval-of-order?search=${d.order_no}`} className="text-emerald-700 hover:underline">{d.order_no}</Link> : <span className="text-slate-300">—</span>}
+        </TableCell>
+      case "po_no":
+        return <TableCell key={c.id} className={cn("font-mono font-semibold", base)}>
+          {d.po_upload_copy ? <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{d.po_no || "View PO"}</a> : (d.po_no || "—")}
+        </TableCell>
+      case "do_date":
+        return <TableCell key={c.id} className={base}>{d.do_date ? fmtDate(d.do_date) : fmtDate(d.raised_at)}</TableCell>
+      case "invoice_date":
+      case "po_date":
+      case "raised_at":
+        return <TableCell key={c.id} className={base}>{fmtDate(d[c.id])}</TableCell>
+      case "manual_sauda_no":
+        return <TableCell key={c.id} className={cn("font-mono", base)}>{d.manual_sauda_no || detailsRow?.commitment_no || "—"}</TableCell>
+      case "customer_name":
+        return <TableCell key={c.id} className={cn("font-medium", base)}>{custName}</TableCell>
+      case "payment_terms":
+        return <TableCell key={c.id} className={base}>{formatPaymentTerms(d.payment_terms)}</TableCell>
+      case "remarks":
+        return <TableCell key={c.id} className={cn("max-w-[200px] truncate text-slate-500", base)} title={d.remarks}>{d.remarks || "—"}</TableCell>
+      case "sku_quantity":
+      case "delivered_box":
+      case "pending_box":
+      case "sku_weight_mt":
+      case "delivered_mt":
+      case "pending_mt":
+      case "invoice_amount":
+      case "sku_rate": {
+        const empty = ["delivered_box", "pending_box", "delivered_mt", "pending_mt"].includes(c.id) ? numTxt(0, c.dec ?? 0) : "—"
+        return <TableCell key={c.id} className={cn("font-mono font-semibold", numColor(c.id), base)}>{numTxt(d[c.id], c.dec ?? 0, empty)}</TableCell>
+      }
+      default:
+        return <TableCell key={c.id} className={base}>{d[c.id] || "—"}</TableCell>
+    }
+  }
+
+  return (
+    <>
+      {detailsActiveFiltersCount > 0 && (
+        <div className="flex items-center gap-2 mb-3 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-100/50 px-2.5 py-1 rounded-md">
+            <Filter className="w-3.5 h-3.5" />
+            <span>{detailsActiveFiltersCount} Active Filter{detailsActiveFiltersCount !== 1 ? 's' : ''}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs px-2.5 text-slate-500 hover:text-red-600 hover:bg-red-50 ml-auto"
+            onClick={() => setDetailsColumnFilters({})}
+          >
+            Clear All Filters
+          </Button>
+        </div>
+      )}
+
+      <Table>
+        <TableHeader className="bg-slate-50 border-b">
+          {/* 1. Search / filter inputs */}
+          <TableRow>
+            {cols.map(c => (
+              <TableHead key={`search-${c.id}`} className={cn("whitespace-nowrap align-top pt-2.5 pb-1", alignCls(c), c.w)}>
+                <div className="w-full mb-0.5">
+                  {c.date ? (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+                          <span className="truncate font-medium">{detailsColumnFilters[`${c.id}_from`] || detailsColumnFilters[`${c.id}_to`] ? "Filtered" : "Filter..."}</span>
+                          <CalendarIconLucide className="h-3 w-3 opacity-60 ml-1 shrink-0" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-48 p-3" align="start">
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                            <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Date Range</Label>
+                            {(detailsColumnFilters[`${c.id}_from`] || detailsColumnFilters[`${c.id}_to`]) && (
+                              <button
+                                onClick={() => setDetailsColumnFilters(prev => { const next = { ...prev }; delete next[`${c.id}_from`]; delete next[`${c.id}_to`]; return next })}
+                                className="text-[10px] text-red-600 hover:underline font-semibold"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] font-medium text-slate-500">From</Label>
+                            <Input type="date" value={detailsColumnFilters[`${c.id}_from`] || ""} onChange={e => setDetailsColumnFilters(prev => ({ ...prev, [`${c.id}_from`]: e.target.value }))} className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] font-medium text-slate-500">To</Label>
+                            <Input type="date" value={detailsColumnFilters[`${c.id}_to`] || ""} onChange={e => setDetailsColumnFilters(prev => ({ ...prev, [`${c.id}_to`]: e.target.value }))} className="h-8 text-xs bg-slate-50 border-slate-200 shadow-none focus-visible:ring-blue-400" />
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <Input
+                      placeholder="Search..."
+                      value={detailsColumnFilters[c.id] || ""}
+                      onChange={(e) => setDetailsColumnFilters(prev => ({ ...prev, [c.id]: e.target.value }))}
+                      className={cn(
+                        "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                        c.right ? "text-right" : "text-left"
                       )}
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 bg-white">
-                      {detailsData.details.map((d: any, idx: number) => {
-                        const custName = d.customer_name || detailsData.commitment?.customer?.customer_name || detailsRow?.party_name || "—"
-                        const doDateFormatted = d.do_date ? new Date(d.do_date).toLocaleDateString("en-IN") : (d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—")
-                        const saudaNo = d.manual_sauda_no || detailsRow?.commitment_no || "—"
+                    />
+                  )}
+                </div>
+              </TableHead>
+            ))}
+          </TableRow>
 
-                        if (detailsType === "delivered") {
-                          return (
-                            <tr key={d.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
-                              <td className="py-2.5 px-3 whitespace-nowrap">
-                                {d.invoice_copy ? (
-                                  <a href={d.invoice_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-                                    {d.invoice_no || "View Invoice"}
-                                  </a>
-                                ) : (
-                                  <span className="font-mono text-xs text-slate-700">{d.invoice_no || "—"}</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-IN") : "—"}</td>
-                              <td className="py-2.5 px-3 whitespace-nowrap">
-                                {Array.isArray(d.invoice_do_nos) && d.invoice_do_nos.length > 1 ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    {d.invoice_do_nos.map((no: string) => (
-                                      <Link key={no} href={`/approval-of-order?search=${no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
-                                        {no}
-                                      </Link>
-                                    ))}
-                                  </div>
-                                ) : d.order_no ? (
-                                  <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
-                                    {d.order_no}
-                                  </Link>
-                                ) : <span className="text-slate-400">—</span>}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{doDateFormatted}</td>
-                              <td className="py-2.5 px-3 text-xs font-mono text-slate-700 whitespace-nowrap">{saudaNo}</td>
-                              <td className="py-2.5 px-3 whitespace-nowrap">
-                                {d.po_upload_copy ? (
-                                  <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-                                    {d.po_no || "View PO"}
-                                  </a>
-                                ) : (
-                                  <span className="font-mono text-xs text-slate-700">{d.po_no || "—"}</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
-                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{custName}</td>
-                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{d.sku || "—"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
-                              <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900">
-                                {d.delivered_mt != null ? Number(d.delivered_mt).toFixed(4) : "—"}
-                              </td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap font-semibold">{d.invoice_amount ? `₹${Number(d.invoice_amount).toLocaleString("en-IN")}` : "—"}</td>
-                            </tr>
-                          )
-                        }
+          {/* 2. Totals */}
+          {filteredDetailsData.length > 0 && (
+            <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+              {cols.map((c, i) => (
+                <TableCell
+                  key={`total-${c.id}`}
+                  className={cn(
+                    i === 0 ? "font-black text-slate-900 uppercase tracking-wider text-[11px]" : "font-mono font-black",
+                    TOTAL_COLS.includes(c.id) ? numColor(c.id) : "",
+                    alignCls(c)
+                  )}
+                >
+                  {i === 0 ? `Total (${filteredDetailsData.length})` : TOTAL_COLS.includes(c.id) ? totalFor(c) : ""}
+                </TableCell>
+              ))}
+            </TableRow>
+          )}
 
-                        if (detailsType === "pending") {
-                          return (
-                            <tr key={d.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
-                              <td className="py-2.5 px-3 whitespace-nowrap">
-                                {d.po_upload_copy ? (
-                                  <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-                                    {d.po_no || "View PO"}
-                                  </a>
-                                ) : (
-                                  <span className="font-mono text-xs text-slate-700">{d.po_no || "—"}</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
-                              <td className="py-2.5 px-3 whitespace-nowrap">
-                                {d.order_no ? (
-                                  <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline">
-                                    {d.order_no}
-                                  </Link>
-                                ) : <span className="text-slate-400">—</span>}
-                              </td>
-                              <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{doDateFormatted}</td>
-                              <td className="py-2.5 px-3 text-xs font-mono text-slate-700 whitespace-nowrap">{saudaNo}</td>
-                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{custName}</td>
-                              <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{d.sku || "—"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-600 text-right whitespace-nowrap">{d.delivered_box != null ? Number(d.delivered_box).toLocaleString("en-IN") : "0"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs font-bold text-amber-700 text-right whitespace-nowrap">{d.pending_box != null ? Number(d.pending_box).toLocaleString("en-IN") : "0"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_weight_mt != null ? Number(d.sku_weight_mt).toFixed(4) : "—"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-slate-600 text-right whitespace-nowrap">{d.delivered_mt != null ? Number(d.delivered_mt).toFixed(4) : "0.0000"}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs font-bold text-amber-700 text-right whitespace-nowrap">{d.pending_mt != null ? Number(d.pending_mt).toFixed(4) : "0.0000"}</td>
-                            </tr>
-                          )
-                        }
+          {/* 3. Column headings */}
+          <TableRow>
+            {cols.map(c => (
+              <TableHead key={c.id} className={cn("whitespace-nowrap align-top py-2.5", alignCls(c), c.w)}>
+                <div className={cn("flex items-center gap-1 w-full", c.right ? "justify-end" : "justify-start")}>
+                  <span>{c.label}</span>
+                </div>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
 
-                        const mt = d.sku_weight_mt
-                        return (
-                          <tr key={d.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="py-2.5 px-3 text-xs text-slate-400 font-bold whitespace-nowrap">{idx + 1}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.raised_at ? new Date(d.raised_at).toLocaleDateString("en-IN") : "—"}</td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
-                              {d.order_no ? (
-                                <Link
-                                  href={`/approval-of-order?search=${d.order_no}`}
-                                  className="font-mono text-xs font-bold text-slate-800 hover:text-blue-600 hover:underline"
-                                >
-                                  {d.order_no}
-                                </Link>
-                              ) : (
-                                <span className="text-slate-400">—</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
-                              {d.po_upload_copy ? (
-                                <a href={d.po_upload_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-                                  {d.po_no || "View PO"}
-                                </a>
-                              ) : (
-                                <span className="font-mono text-xs text-slate-700">{d.po_no || "—"}</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-800 font-medium whitespace-nowrap">{d.sku || "—"}</td>
-                            <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap">{d.sku_quantity != null ? Number(d.sku_quantity).toLocaleString("en-IN") : "—"}</td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-xs font-bold text-slate-900 min-w-[110px]">
-                              {mt != null ? Number(mt).toFixed(4) : "—"}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-xs text-slate-800 text-right whitespace-nowrap font-semibold">{d.sku_rate ? `₹${Number(d.sku_rate).toLocaleString("en-IN")}` : "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.order_category || "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.order_type || "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{d.actual_depot_name || "—"}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-600 whitespace-nowrap">{formatPaymentTerms(d.payment_terms)}</td>
-                            <td className="py-2.5 px-3 text-xs text-slate-500 font-normal italic whitespace-nowrap max-w-[160px] truncate" title={d.remarks}>{d.remarks || "—"}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                    <tfoot className="bg-slate-50 border-t-2 border-slate-300">
-                      {detailsType === "raised" && (() => {
-                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
-                        const totalMt = Number(detailsData.total_processed_mt || 0)
-                        return (
-                          <tr className="text-xs font-bold">
-                            <td colSpan={6} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total PO Raised:</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-900 whitespace-nowrap">{totalMt.toFixed(4)} MT</td>
-                            <td colSpan={6} />
-                          </tr>
-                        )
-                      })()}
+        <TableBody>
+          {filteredDetailsData.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={Math.max(cols.length, 1)} className="py-12 text-center text-slate-400 font-medium bg-slate-50/50">No results found for your search filters</TableCell>
+            </TableRow>
+          ) : (
+            filteredDetailsData.map((d: any) => (
+              <TableRow key={d.id} className={cn("transition-colors", hoverCls)}>
+                {cols.map(c => renderDetailCell(d, c))}
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </>
+  )
+})()}
 
-                      {detailsType === "delivered" && (() => {
-                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
-                        const totalMt = Number(detailsData.total_delivered_mt || 0)
-                        const totalInvoice = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.invoice_amount) || 0), 0)
-                        return (
-                          <tr className="text-xs font-bold">
-                            <td colSpan={10} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total Delivered:</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-900 whitespace-nowrap">{totalMt.toFixed(4)} MT</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-emerald-700 whitespace-nowrap">₹{totalInvoice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                        )
-                      })()}
 
-                      {detailsType === "pending" && (() => {
-                        const totalBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_quantity) || 0), 0)
-                        const totalDeliveredBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.delivered_box) || 0), 0)
-                        const totalPendingBox = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.pending_box) || 0), 0)
-                        const totalMt = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.sku_weight_mt) || 0), 0)
-                        const totalDeliveredMt = detailsData.details.reduce((sum: number, d: any) => sum + (Number(d.delivered_mt) || 0), 0)
-                        const totalPendingMt = Number(detailsData.total_pending_mt || 0)
-                        return (
-                          <tr className="text-xs font-bold">
-                            <td colSpan={8} className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">Total PO Pending:</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalBox.toLocaleString("en-IN")}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 whitespace-nowrap">{totalDeliveredBox.toLocaleString("en-IN")}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-amber-700 whitespace-nowrap">{totalPendingBox.toLocaleString("en-IN")}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-800 whitespace-nowrap">{totalMt.toFixed(4)}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 whitespace-nowrap">{totalDeliveredMt.toFixed(4)}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-amber-700 whitespace-nowrap">{totalPendingMt.toFixed(4)} MT</td>
-                          </tr>
-                        )
-                      })()}
-                    </tfoot>
-                  </table>
+
                 </div>
 
                 {/* Mobile Cards */}
@@ -3359,7 +3507,7 @@ export default function CommitmentPunchPage() {
                           <div>
                             {detailsType === "delivered" ? (
                               <>
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600">Invoice No.</p>
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-purple-600">Invoice No.</p>
                                 {d.invoice_copy ? (
                                   <a href={d.invoice_copy} target="_blank" rel="noopener noreferrer" className="font-mono text-sm font-bold text-purple-800 underline">
                                     {d.invoice_no || "View Invoice"}
@@ -3370,7 +3518,7 @@ export default function CommitmentPunchPage() {
                               </>
                             ) : (
                               <>
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">DO No.</p>
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">DO No.</p>
                                 {d.order_no ? (
                                   <Link href={`/approval-of-order?search=${d.order_no}`} className="font-mono text-sm font-bold text-emerald-800">
                                     {d.order_no}
@@ -3382,8 +3530,8 @@ export default function CommitmentPunchPage() {
                             )}
                           </div>
                           <div className="text-right">
-                            <p className={cn("text-[10px] font-bold uppercase tracking-wider", detailsType === "raised" ? "text-blue-500" : detailsType === "delivered" ? "text-purple-500" : "text-amber-500")}>{mtLabel}</p>
-                            <p className={cn("font-mono font-bold text-sm", mtColor)}>{mt != null ? Number(mt).toFixed(4) : "—"}</p>
+                            <p className={cn("text-[11px] font-bold uppercase tracking-wider", detailsType === "raised" ? "text-blue-500" : detailsType === "delivered" ? "text-purple-500" : "text-amber-500")}>{mtLabel}</p>
+                            <p className={cn("font-mono font-bold text-sm", mtColor)}>{mt != null ? fmtNum(mt) : "—"}</p>
                           </div>
                         </div>
 
@@ -3392,7 +3540,7 @@ export default function CommitmentPunchPage() {
                             <>
                               <div>
                                 <p className="text-[10px] font-bold uppercase text-slate-400">Invoice Date</p>
-                                <p className="font-semibold text-slate-800">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-IN") : "—"}</p>
+                                <p className="font-semibold text-slate-800">{d.invoice_date ? new Date(d.invoice_date).toLocaleDateString("en-GB") : "—"}</p>
                               </div>
                               <div>
                                 <p className="text-[10px] font-bold uppercase text-slate-400">DO No.</p>
@@ -3400,7 +3548,7 @@ export default function CommitmentPunchPage() {
                               </div>
                               <div>
                                 <p className="text-[10px] font-bold uppercase text-slate-400">DO Date</p>
-                                <p className="font-semibold text-slate-800">{d.do_date ? new Date(d.do_date).toLocaleDateString("en-IN") : "—"}</p>
+                                <p className="font-semibold text-slate-800">{d.do_date ? new Date(d.do_date).toLocaleDateString("en-GB") : "—"}</p>
                               </div>
                               <div>
                                 <p className="text-[10px] font-bold uppercase text-slate-400">Manual Sauda No.</p>
@@ -3420,16 +3568,16 @@ export default function CommitmentPunchPage() {
                           </div>
                           <div>
                             <p className="text-[10px] font-bold uppercase text-slate-400">PO Date</p>
-                            <p className="font-semibold text-slate-800">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-IN") : "—"}</p>
+                            <p className="font-semibold text-slate-800">{d.po_date ? new Date(d.po_date).toLocaleDateString("en-GB") : "—"}</p>
                           </div>
                           <div>
                             <p className="text-[10px] font-bold uppercase text-slate-400">Qty (Box)</p>
-                            <p className="font-mono font-semibold text-slate-800">{d.sku_quantity ?? "—"}</p>
+                            <p className="font-mono font-semibold text-slate-800">{d.sku_quantity != null ? fmtNum(d.sku_quantity, 0) : "—"}</p>
                           </div>
                           {detailsType === "delivered" && (
                             <div>
                               <p className="text-[10px] font-bold uppercase text-slate-400">Invoice Amount</p>
-                              <p className="font-mono font-bold text-slate-800">{d.invoice_amount ? `₹${d.invoice_amount}` : "—"}</p>
+                              <p className="font-mono font-bold text-slate-800">{d.invoice_amount != null ? fmtNum(d.invoice_amount, 2) : "—"}</p>
                             </div>
                           )}
                         </div>
