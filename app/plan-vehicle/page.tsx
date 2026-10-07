@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -14,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Truck, Weight, Printer, Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { Truck, Weight, Printer, Download, ChevronLeft, ChevronRight, Calendar as CalendarIconLucide } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { planVehicleApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
@@ -24,6 +24,19 @@ import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+import { useColumnOrder } from "@/hooks/use-column-order"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
+  StageActiveChips, StageSortIcon, type StageTotalTone,
+} from "@/components/stage-list"
+import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { fmtNum } from "@/lib/table-format"
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "—";
@@ -125,10 +138,45 @@ function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
   })
 }
 
+const PAGE_COLUMNS = [
+  { id: "partySoDate",     label: "DO Date" },
+  { id: "orderNo",         label: "DO Number" },
+  { id: "processId",       label: "Manual Sauda No." },
+  { id: "customerName",    label: "Customer Name" },
+  { id: "depoName",        label: "Depot" },
+  { id: "qtyToDispatch",   label: "Qty to Dispatch" },
+  { id: "deliveryFrom",    label: "Delivery From" },
+  { id: "status",          label: "Status" },
+] as const
+type PlanColId = typeof PAGE_COLUMNS[number]["id"]
+
+// partySoDate is pre-formatted dd/mm/yyyy on grouped rows; convert to ISO for the date-range filter.
+function planRowIsoDate(row: any): string | null {
+  const raw = row.party_so_date ?? row.partySoDate
+  if (!raw || raw === "—") return null
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(raw))
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`
+  return String(raw)
+}
+
+const PLAN_TABLE_COLUMNS: StageColDef<any>[] = [
+  { id: "partySoDate", label: "DO Date", type: "date", accessor: planRowIsoDate },
+  { id: "orderNo", label: "DO Number", accessor: (r) => r.orderNo || "" },
+  { id: "processId", label: "Manual Sauda No.", accessor: (r) => (r.processId && r.processId !== "—" ? r.processId : "") },
+  { id: "customerName", label: "Customer Name", accessor: (r) => r.customerName || "" },
+  { id: "depoName", label: "Depot", accessor: (r) => (r.depoName && r.depoName !== "—" ? r.depoName : "") },
+  { id: "qtyToDispatch", label: "Qty to Dispatch", type: "number", accessor: (r) => Number(r.qtyToDispatch) || 0 },
+  { id: "deliveryFrom", label: "Delivery From", accessor: (r) => r._allProducts?.[0]?.deliveryFrom || "" },
+  { id: "status", label: "Status", accessor: () => "Ready to Plan" },
+]
+const PLAN_TOTAL_TONES: Record<string, StageTotalTone> = { qtyToDispatch: "blue" }
+const PLAN_RIGHT_COLS = new Set<string>(["partySoDate", "qtyToDispatch"])
+const PLAN_MIN_W: Record<string, string> = { partySoDate: "min-w-[120px]", qtyToDispatch: "min-w-[150px]" }
+
 export default function PlanVehiclePage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const { isReadOnly, user } = useAuth()
+  const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
   const limit = 20
@@ -142,7 +190,19 @@ export default function PlanVehiclePage() {
     manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
-  const [selectedDepoTab, setSelectedDepoTab] = useState("")
+  // List view (depot tab / quick search / customer & delivery-from selects): the depot tab is remembered permanently, the
+  // rest is session-scoped. Stale depot values are re-validated against availableDepots below.
+  const [listView, patchListView] = usePersistedFilters("plan-vehicle", {
+    selectedDepoTab: "",
+    quickSearch: "",
+    customerFilter: "ALL",
+    deliveryFromFilter: "ALL",
+  }, { permanentKeys: ["selectedDepoTab"] })
+  const { selectedDepoTab, quickSearch, customerFilter, deliveryFromFilter } = listView
+  const setSelectedDepoTab = (v: string) => patchListView({ selectedDepoTab: v })
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setDeliveryFromFilter = (v: string) => patchListView({ deliveryFromFilter: v })
   const [isProcessing, setIsProcessing] = useState(false)
   const [skus, setSkus] = useState<any[]>([])
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
@@ -554,6 +614,47 @@ export default function PlanVehiclePage() {
     return groupOrdersByBaseDo(filteredPendingOrders, selectedDepoTab)
   }, [filteredPendingOrders, selectedDepoTab])
 
+  // ── Shared stage-list table state (column search / sort / totals over the loaded page rows) ──
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("plan-vehicle", PAGE_COLUMNS.map(c => c.id))
+  const [columnOrder, setColumnOrder] = useColumnOrder("plan-vehicle", PAGE_COLUMNS.map(c => c.id))
+  const orderedVisibleCols = useMemo(() =>
+    columnOrder
+      .map(id => PAGE_COLUMNS.find(c => c.id === id))
+      .filter((c): c is typeof PAGE_COLUMNS[number] => !!c && visibleColumns.includes(c.id as PlanColId)),
+    [columnOrder, visibleColumns]
+  )
+  const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
+    const hiddenCols = columnOrder.filter(id => !visibleColumns.includes(id as PlanColId))
+    setColumnOrder([...newVisibleOrder, ...hiddenCols])
+  }, [columnOrder, visibleColumns, setColumnOrder])
+
+  const uniqueCustomers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => r.customerName).filter(Boolean))).sort() as string[], [displayRows])
+  const uniqueDeliveryFrom = useMemo(() => Array.from(new Set(displayRows.map((r: any) => r._allProducts?.[0]?.deliveryFrom).filter(Boolean))).sort() as string[], [displayRows])
+
+  const baseFilter = useCallback((row: any) => {
+    if (customerFilter !== "ALL" && row.customerName !== customerFilter) return false
+    if (deliveryFromFilter !== "ALL" && row._allProducts?.[0]?.deliveryFrom !== deliveryFromFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [row.orderNo, row.processId, row.customerName, row.depoName, row._allProducts?.[0]?.deliveryFrom].filter(Boolean).join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  }, [customerFilter, deliveryFromFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: PLAN_TABLE_COLUMNS, baseFilter, persistKey: "plan-vehicle" })
+  const tableRows = table.rows
+  const activeFiltersCount =
+    (customerFilter !== "ALL" ? 1 : 0) + (deliveryFromFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ customerFilter: "ALL", deliveryFromFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const totalsColumns = useMemo<StageColDef<any>[]>(
+    () => [{ id: "__sel", label: "" }, ...orderedVisibleCols.map(c => PLAN_TABLE_COLUMNS.find(t => t.id === c.id)!)],
+    [orderedVisibleCols]
+  )
+
   // Accumulates every group ever rendered, keyed by _rowKey — kept only as a
   // fallback; fetchCompleteGroupsForKeys below is the primary source of truth.
   const selectedGroupsCacheRef = useRef<Record<string, any>>({})
@@ -596,7 +697,7 @@ export default function PlanVehiclePage() {
   }, [user?.depo_access])
 
   const toggleSelectAll = () => {
-    const currentPageKeys = displayRows.map((row) => row._rowKey)
+    const currentPageKeys = tableRows.map((row: any) => row._rowKey)
     const allCurrentSelected = currentPageKeys.length > 0 && currentPageKeys.every((k) => selectedOrders.includes(k))
     if (allCurrentSelected) {
       setSelectedOrders(selectedOrders.filter((k) => !currentPageKeys.includes(k)))
@@ -1106,6 +1207,7 @@ export default function PlanVehiclePage() {
 
   return (
     <WorkflowStageShell
+      persistKey="plan-vehicle"
       title="Stage 5: Plan Vehicle"
       description="Consolidate DOs, assign a vehicle/transporter, and generate the gate pass."
       pendingCount={displayRows.length}
@@ -1174,73 +1276,130 @@ export default function PlanVehiclePage() {
           </div>
         )}
 
-        <Card className="border-none shadow-sm overflow-auto max-h-150">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && displayRows.every((row) => selectedOrders.includes(row._rowKey))}
-                    onCheckedChange={toggleSelectAll}
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Vehicle Planning List"
+            shown={tableRows.length}
+            total={displayRows.length}
+            description="Orders ready to be consolidated and assigned a vehicle"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Depot..."
+          >
+            <StageToolbar
+              shown={tableRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllFilters}
+              filters={
+                <>
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                  <StageFilterSelect value={deliveryFromFilter} onChange={setDeliveryFromFilter} allLabel="All Delivery From" options={uniqueDeliveryFrom} />
+                  <StageDivider />
+                  <StageColumnsMenu
+                    columns={[...PAGE_COLUMNS]}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
                   />
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-center">DO Date</TableHead>
-                <TableHead className="whitespace-nowrap text-center">DO Number</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Manual Sauda No.</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Customer Name</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Depot</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Qty to Dispatch</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Delivery From</TableHead>
-                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
-              </TableRow>
-            </TableHeader>
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(deliveryFromFilter !== "ALL" ? [{ label: `Delivery From: ${deliveryFromFilter}`, onClear: () => setDeliveryFromFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="overflow-x-auto">
+          <Table>
+            <StageTableHeaderRows
+              columns={orderedVisibleCols.map(c => PLAN_TABLE_COLUMNS.find(t => t.id === c.id)!)}
+              table={table}
+              leading={
+                <Checkbox
+                  checked={tableRows.length > 0 && tableRows.every((row: any) => selectedOrders.includes(row._rowKey))}
+                  onCheckedChange={toggleSelectAll}
+                />
+              }
+              alwaysShowTotals
+              onReorder={handleColumnReorder}
+              dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+            />
             <TableBody>
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    {[...Array(8)].map((__, j) => (
+                    <TableCell className="text-left px-4 py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
+                    {[...Array(orderedVisibleCols.length)].map((__, j) => (
                       <TableCell key={j} className="py-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                     ))}
                   </TableRow>
                 ))
-              ) : displayRows.length > 0 ? (
-                displayRows.map((row) => {
+              ) : tableRows.length > 0 ? (
+                tableRows.map((row: any) => {
                   const rowKey = row._rowKey;
                   const firstProd = row._allProducts?.[0] || {};
                   return (
                     <TableRow key={rowKey} className={selectedOrders.includes(rowKey) ? "bg-blue-50/50" : ""}>
-                      <TableCell className="text-center">
+                      <TableCell className="text-left px-4">
                         <Checkbox
                           checked={selectedOrders.includes(rowKey)}
                           onCheckedChange={() => toggleSelectOrder(rowKey)}
                         />
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">{row.partySoDate || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-blue-700 font-bold">{row.orderNo || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">{row.processId || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">{row.customerName || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">{row.depoName || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">
-                        {row.qtyToDispatch}
-                        {row._productCount > 1 && <span className="ml-1 text-[10px] text-slate-400">({row._productCount} items)</span>}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs text-slate-600">{firstProd.deliveryFrom || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-center text-xs">
-                        <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Ready to Plan</Badge>
-                      </TableCell>
+                      {orderedVisibleCols.map(col => {
+                        switch (col.id) {
+                          case "partySoDate":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right tabular-nums">{row.partySoDate || "—"}</TableCell>
+                          case "orderNo":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-blue-700 font-bold">{row.orderNo || "—"}</TableCell>
+                          case "processId":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{row.processId || "—"}</TableCell>
+                          case "customerName":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{row.customerName || "—"}</TableCell>
+                          case "depoName":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{row.depoName || "—"}</TableCell>
+                          case "qtyToDispatch":
+                            return (
+                              <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">
+                                {row._productCount > 1 && <span className="mr-2 text-[10px] text-slate-400 font-sans">({row._productCount} items)</span>}
+                                {fmtNum(row.qtyToDispatch)}
+                              </TableCell>
+                            )
+                          case "deliveryFrom":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{firstProd.deliveryFrom || "—"}</TableCell>
+                          case "status":
+                            return (
+                              <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs">
+                                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Ready to Plan</Badge>
+                              </TableCell>
+                            )
+                        }
+                      })}
                     </TableRow>
                   )
                 })
+              ) : displayRows.length > 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                    <p className="font-medium text-slate-500">No matching records found</p>
+                    <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                  </TableCell>
+                </TableRow>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
                     No orders pending vehicle planning
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </div>
 
           <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50/50 rounded-b-2xl">
             <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -1272,6 +1431,7 @@ export default function PlanVehiclePage() {
               </Button>
             </div>
           </div>
+          </CardContent>
         </Card>
       </div>
 
@@ -1314,16 +1474,17 @@ export default function PlanVehiclePage() {
                   <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm bg-white">
                     <Table>
                       <TableHeader className="bg-slate-50">
-                        <TableRow className="bg-purple-50 border-b-2 border-purple-200">
-                          <TableCell colSpan={3} className="text-right font-black text-xs uppercase text-purple-900 tracking-wider">Totals:</TableCell>
-                          <TableCell className="text-center font-black text-sm text-purple-700">
-                            {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)}
-                          </TableCell>
-                          <TableCell />
-                          <TableCell className="text-center font-black text-sm text-purple-700">{totalPackingWeightFromSku.toFixed(4)} kg</TableCell>
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                          <TableCell className="w-12 px-3" />
+                          <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({dialogSelectedProducts.length})</TableCell>
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-purple-700">{fmtNum(totalPackingWeightFromSku)}</TableCell>
                         </TableRow>
                         <TableRow>
-                          <TableHead className="w-12 text-center">
+                          <TableHead className="w-12 text-left px-4">
                             <Checkbox
                               checked={dialogSelectedProducts.length > 0 && dialogSelectedProducts.length === selectedGroups.reduce((s, g) => s + g._allProducts.length, 0)}
                               onCheckedChange={(checked) => {
@@ -1335,11 +1496,12 @@ export default function PlanVehiclePage() {
                               }}
                             />
                           </TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500">Customer / DO</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500">Product Name</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 text-center">Planned Qty</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500">Delivery From</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 text-center">Planned Gross Wt (KG)</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap">Customer / DO</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap">Product Name</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap text-right min-w-[120px]">Planned Qty</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap">UOM</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap">Delivery From</TableHead>
+                          <TableHead className="px-4 whitespace-nowrap text-right min-w-[170px]">Planned Gross Wt (KG)</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1347,25 +1509,24 @@ export default function PlanVehiclePage() {
                           const rowKey = prod._rowKey;
                           return (
                             <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
-                              <TableCell className="text-center">
+                              <TableCell className="text-left px-4">
                                 <Checkbox
                                   checked={dialogSelectedProducts.includes(rowKey)}
                                   onCheckedChange={() => toggleSelectDialogProduct(rowKey)}
                                 />
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="px-4">
                                 <div className="flex flex-col">
                                   <span className="text-[9px] font-black text-blue-600 uppercase leading-none mb-1">{prod.customerName}</span>
                                   <span className="text-[10px] font-bold text-slate-700">{prod.orderNo || "—"}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="font-bold text-[11px] text-slate-900">{prod.productName || "—"}</TableCell>
-                              <TableCell className="text-[11px] font-black text-center text-blue-700">
-                                {prod.qtyToDispatch} <span className="ml-1 text-[9px] text-slate-400 font-bold uppercase">{prod.uom}</span>
-                              </TableCell>
-                              <TableCell className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">{prod.deliveryFrom}</TableCell>
-                              <TableCell className="text-center">
-                                <span className="font-black text-sm text-purple-700">{calculateGrossWeight(prod.productName, prod.qtyToDispatch).toFixed(4)} kg</span>
+                              <TableCell className="px-4 font-bold text-[11px] text-slate-900">{prod.productName || "—"}</TableCell>
+                              <TableCell className="px-4 text-[11px] font-black text-right font-mono tabular-nums text-blue-700">{fmtNum(prod.qtyToDispatch)}</TableCell>
+                              <TableCell className="px-4 text-[10px] font-bold uppercase text-slate-500">{prod.uom || "—"}</TableCell>
+                              <TableCell className="px-4 text-[10px] font-black uppercase text-slate-400 tracking-tighter">{prod.deliveryFrom}</TableCell>
+                              <TableCell className="px-4 text-right">
+                                <span className="font-black text-sm text-purple-700 font-mono tabular-nums">{fmtNum(calculateGrossWeight(prod.productName, prod.qtyToDispatch))}</span>
                               </TableCell>
                             </TableRow>
                           )

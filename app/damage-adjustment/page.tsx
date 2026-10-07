@@ -2,9 +2,14 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageSortIcon } from "@/components/stage-list"
+import { stageColumnChips } from "@/components/stage-list-extras"
+import { StageTableHeaderRows, bodyCellClass } from "@/components/stage-table-header-rows"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -22,7 +27,7 @@ import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { DamageSettlement, LossOverview, SectionHeading, EMPTY_SETTLEMENT_DOCS, computeSettlement, settlementComplete, type SettlementDocs } from "@/components/damage-settlement"
 import { Package, Scale, Truck } from "lucide-react"
-import { Upload, CheckCircle, Settings2, FileText, IndianRupee, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown } from "lucide-react"
+import { Upload, CheckCircle, FileText, IndianRupee, ExternalLink, ChevronUp, ChevronDown } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
@@ -33,9 +38,9 @@ import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { fmtNum, fmtDate } from "@/lib/table-format"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
-import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
@@ -94,7 +99,19 @@ export default function DamageAdjustmentPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
+  // Damage status buttons are remembered permanently; quick search / customer filter only for the session.
+  // The Pending/History tab is owned and remembered by WorkflowStageShell (persistKey).
+  // Refresh/reload only reloads data - never clears it. Reset (resetAllFilters) is the only way to clear.
+  const [listView, patchListView] = usePersistedFilters("damage-adjustment", {
+    quickSearch: "",
+    customerFilter: "ALL",
+    damageFilter: "ALL" as "ALL" | "DAMAGED" | "NONE",
+  }, { permanentKeys: ["damageFilter"] })
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
+  const { quickSearch, customerFilter, damageFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setDamageFilter = (v: "ALL" | "DAMAGED" | "NONE") => patchListView({ damageFilter: v })
   const { ref: pendingEndRef, inView: pendingInView } = useInView()
 
   const [filterValues, setFilterValues] = useState({
@@ -231,9 +248,9 @@ export default function DamageAdjustmentPage() {
           // Order Details from JOIN
           deliveryPurpose: order.order_type_delivery_purpose || "—",
           orderType: order.order_type || "—",
-          startDate: order.start_date ? new Date(order.start_date).toLocaleDateString("en-IN") : "—",
-          endDate: order.end_date ? new Date(order.end_date).toLocaleDateString("en-IN") : "—",
-          deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-IN") : "—",
+          startDate: order.start_date ? new Date(order.start_date).toLocaleDateString("en-GB") : "—",
+          endDate: order.end_date ? new Date(order.end_date).toLocaleDateString("en-GB") : "—",
+          deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-GB") : "—",
           transportType: order.type_of_transporting || "—",
           contactPerson: order.customer_contact_person_name || "—",
           contactWhatsapp: order.customer_contact_person_whatsapp_no || "—",
@@ -243,11 +260,11 @@ export default function DamageAdjustmentPage() {
           brokerName: order.broker_name || "—",
           advanceAmount: order.advance_amount || 0,
           paymentTerms: order.payment_terms || "—",
-          partySoDate: order.party_so_date ? new Date(order.party_so_date).toLocaleDateString("en-IN") : "—",
+          partySoDate: order.party_so_date ? new Date(order.party_so_date).toLocaleDateString("en-GB") : "—",
           partyCredit: order.party_credit_status || "—",
 
           // Additional Details for Header (as requested)
-          invoiceDate: order.invoice_date ? new Date(order.invoice_date).toLocaleDateString("en-IN") : "—",
+          invoiceDate: order.invoice_date ? new Date(order.invoice_date).toLocaleDateString("en-GB") : "—",
           biltyNo: order.bilty_no || "—",
           rstNo: order.rst_no || "—",
           weightmentSlip: order.weightment_slip_copy || null,
@@ -313,6 +330,8 @@ export default function DamageAdjustmentPage() {
     return Object.values(grouped).map(g => ({
       ...g,
       partySoDate: formatDate(g._allProducts[0]?.party_so_date),
+      _doDate: g._allProducts[0]?.party_so_date,
+      _damagedCount: g._allProducts.filter((p: any) => p.damageStatus === "Damaged").length,
       processid: g._allProducts[0]?.processid || "—",
       processId: g._allProducts[0]?.processid || "—", // Keep processId for safety
       orderNo: g.doNumber,
@@ -322,75 +341,14 @@ export default function DamageAdjustmentPage() {
     }))
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
+  const DMG_NUMERIC_DYN_COLS = new Set(["orderQty", "altQty", "rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "qtyToDispatch", "actual_approval_qty", "gross_weight", "tare_weight", "net_weight", "actual_qty", "actual_qty_dispatch", "extra_weight", "bill_amount", "damage_qty"])
+  const DMG_DATE_DYN_COLS = new Set(["deliveryDate", "dispatch_date_confirmed", "invoice_date"])
+  const DMG_DYN_LABEL_OVERRIDES: Record<string, string> = {
+    rate: "Rate (₹)", ratePerLtr: "Rate Per Ltr (₹)", ratePer15Kg: "Rate Per 15 kg (₹)", rateOfMaterial: "Rate Of Material (₹)",
+    totalWithGst: "Total Amount With Gst (₹)", advanceAmount: "Advance Amount (₹)", bill_amount: "Bill Amount (₹)",
   }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
+  const DMG_NUM_DECIMALS: Record<string, number> = { rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2, products: 0, damageInfo: 0 }
   const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (group: any, field: string) => {
-    if (field === "status") {
-      return "Pending Adjustment"
-    }
-    if (field === "products") {
-      return group._productCount || 0
-    }
-    if (field === "orderNo") {
-      return group.doNumber || ""
-    }
-    if (field === "processid") {
-      return group.processId || ""
-    }
-    
-    let val;
-    if (FIXED_COLUMN_IDS.includes(field)) {
-      val = group[field]
-    } else {
-      val = getDynamicColumnValue(group, field)
-    }
-
-    if (val === undefined || val === null || val === "—" || val === "") return ""
-    
-    if (typeof val === "number") return val
-    if (["rate", "qty", "amount", "total", "ratePerLtr", "ratePer15Kg", "orderQty", "altQty", "totalWithGst", "advanceAmount"].some(k => field.toLowerCase().includes(k))) {
-      const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""))
-      return isNaN(num) ? -Infinity : num
-    }
-    return String(val).toLowerCase()
-  }
-
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField)
-      const bVal = getSortValue(b, pendingSortField)
-      if (typeof aVal === "number" && typeof bVal === "number") {
-        return pendingSortDir === "asc" ? aVal - bVal : bVal - aVal
-      }
-      const aStr = String(aVal)
-      const bStr = String(bVal)
-      if (aStr < bStr) return pendingSortDir === "asc" ? -1 : 1
-      if (aStr > bStr) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
 
   const dynamicColumns = visibleColumns.filter((colId) => !FIXED_COLUMN_IDS.includes(colId) && ALL_COLUMNS.some((c) => c.id === colId))
 
@@ -410,7 +368,71 @@ export default function DamageAdjustmentPage() {
     return "—"
   }
 
+  // Raw (unformatted) date for a toggle column; the grouped row holds pre-formatted dd/mm/yyyy strings.
+  function getDynamicDateValue(group: any, colId: string) {
+    const first = group?._allProducts?.[0] || {}
+    const v = colId === "deliveryDate" ? first.delivery_date : first[colId]
+    return v === undefined || v === null || v === "" ? null : v
+  }
 
+  // ── Stage list table: per-column search / date filter / sort / totals ──
+  const stageColumns = useMemo<StageColDef<any>[]>(() => {
+    const core: StageColDef<any>[] = [
+      { id: "partySoDate", label: "DO Date", type: "date", accessor: (r) => r._doDate },
+      { id: "orderNo", label: "DO Number", accessor: (r) => r.doNumber },
+      { id: "processid", label: "Manual Sauda No.", accessor: (r) => r.processId },
+      { id: "customerName", label: "Customer Name", accessor: (r) => r.customerName },
+      { id: "invoiceNo", label: "Invoice No.", accessor: (r) => r.invoiceNo },
+      { id: "vehicleNo", label: "Vehicle No.", accessor: (r) => r.vehicleNo },
+      { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: (r) => r.orderPunchRemarks },
+      { id: "status", label: "Status", accessor: () => "Pending Adjustment" },
+      { id: "products", label: "Items", type: "number", total: true, accessor: (r) => r._productCount },
+    ]
+    core.push({ id: "damageInfo", label: "Damaged Items", type: "number", total: true, accessor: (r) => r._damagedCount || 0 })
+    const dyn: StageColDef<any>[] = ALL_COLUMNS
+      .filter((c) => !FIXED_COLUMN_IDS.includes(c.id))
+      .map((c): StageColDef<any> =>
+        DMG_NUMERIC_DYN_COLS.has(c.id)
+          ? { id: c.id, label: DMG_DYN_LABEL_OVERRIDES[c.id] || c.label, type: "number", accessor: (r: any) => Number(getDynamicColumnValue(r, c.id)) || 0 }
+          : DMG_DATE_DYN_COLS.has(c.id)
+            ? { id: c.id, label: c.label, type: "date", accessor: (r: any) => getDynamicDateValue(r, c.id) }
+            : { id: c.id, label: c.label, accessor: (r: any) => String(getDynamicColumnValue(r, c.id)) }
+      )
+    return [...core, ...dyn]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const damageStageCol = useMemo(() => stageColumns.find((c) => c.id === "damageInfo"), [stageColumns])
+  const visibleStageCols = useMemo(
+    () => [...orderedVisibleStd, ...dynamicColumns].map((id) => stageColumns.find((c) => c.id === id)).filter((c): c is StageColDef<any> => !!c),
+    [orderedVisibleStd, dynamicColumns, stageColumns]
+  )
+
+  const customerOptions = useMemo(
+    () => Array.from(new Set(displayRows.map((r: any) => r.customerName).filter((n: string) => n && n !== "—"))).sort() as string[],
+    [displayRows]
+  )
+  const baseFilter = useCallback((r: any) => {
+    if (customerFilter !== "ALL" && r.customerName !== customerFilter) return false
+    if (damageFilter === "DAMAGED" && !(r._damagedCount > 0)) return false
+    if (damageFilter === "NONE" && r._damagedCount > 0) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q && !stageColumns.some((c) => String(c.accessor?.(r) ?? "").toLowerCase().includes(q))) return false
+    return true
+  }, [customerFilter, damageFilter, quickSearch, stageColumns])
+  const table = useStageTable({ rows: displayRows, columns: stageColumns, baseFilter, persistKey: "damage-adjustment" })
+  const sortedDisplayRows = table.rows
+  const activeFiltersCount =
+    table.activeColumnFilterCount + (customerFilter !== "ALL" ? 1 : 0) + (damageFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0)
+  const resetAllFilters = () => {
+    patchListView({ customerFilter: "ALL", damageFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const filterChips = [
+    ...(damageFilter !== "ALL" ? [{ label: `Damage: ${damageFilter === "DAMAGED" ? "With Damage" : "No Damage"}`, onClear: () => setDamageFilter("ALL") }] : []),
+    ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+    ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+    ...stageColumnChips(table, stageColumns),
+  ]
 
   const toggleSelectItem = (itemKey: string) => {
     setSelectedItems(prev =>
@@ -421,10 +443,11 @@ export default function DamageAdjustmentPage() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length) {
+    const visibleKeys = table.rows.map(r => r._rowKey)
+    if (visibleKeys.length > 0 && visibleKeys.every(k => selectedItems.includes(k))) {
       setSelectedItems([])
     } else {
-      setSelectedItems(displayRows.map(r => r._rowKey))
+      setSelectedItems(visibleKeys)
     }
   }
 
@@ -547,6 +570,7 @@ export default function DamageAdjustmentPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="damage-adjustment"
       partyNames={customerNames}
       title="Stage 15: Damage Adjustment"
       description="Process credit notes and adjustments for damaged goods."
@@ -596,24 +620,134 @@ export default function DamageAdjustmentPage() {
             <CheckCircle className="mr-2 h-4 w-4" />
             Process Adjustment ({selectedItems.length})
           </Button>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full sm:w-auto bg-transparent">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
 
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Damage Adjustments"
+            shown={table.rows.length}
+            total={displayRows.length}
+            description="Invoices with approved loss awaiting credit / debit note settlement"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Invoice..."
+          >
+            <StageToolbar
+              shown={table.rows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={resetAllFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={damageFilter}
+                    onChange={setDamageFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "DAMAGED", label: "With Damage" },
+                      { value: "NONE", label: "No Damage" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerOptions} className="min-w-[130px]" />
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips chips={filterChips} />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto rounded-b-xl md:block">
+          <Table>
+            <StageTableHeaderRows
+              columns={visibleStageCols}
+              trailingColumns={damageStageCol ? [damageStageCol] : []}
+              table={table}
+              leading={<Checkbox checked={table.rows.length > 0 && table.rows.every(r => selectedItems.includes(r._rowKey))} onCheckedChange={toggleSelectAll} />}
+              decimals={DMG_NUM_DECIMALS}
+              onReorder={handleColumnReorder}
+              dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+            />
+            <TableBody>
+              {isPendingLoading && pendingOrders.length === 0 ? (
+                [...Array(5)].map((_, i) => (
+                  <TableRow key={i} className="opacity-40 border-b border-slate-50">
+                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                    {orderedVisibleStd.map(id => (
+                      <TableCell key={id} className="text-center py-4">
+                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-32" : id === "orderNo" || id === "invoiceNo" || id === "vehicleNo" ? "w-24" : "w-20")} />
+                      </TableCell>
+                    ))}
+                    {dynamicColumns.map((colId) => (
+                      <TableCell key={colId} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                    ))}
+                    <TableCell className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                  </TableRow>
+                ))
+              ) : sortedDisplayRows.length > 0 ? (
+                sortedDisplayRows.map((group) => (
+                  <TableRow key={group._rowKey} className={selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""}>
+                    <TableCell className="px-4 text-left">
+                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
+                    </TableCell>
+                    {orderedVisibleStd.map(id => {
+                      const sc = stageColumns.find(c => c.id === id)
+                      if (id === "partySoDate") return <TableCell key={id} className={bodyCellClass(sc, "font-medium whitespace-nowrap")}>{group.partySoDate}</TableCell>
+                      if (id === "orderNo") return <TableCell key={id} className={bodyCellClass(sc, "font-medium")}>{group.doNumber}</TableCell>
+                      if (id === "processid") return <TableCell key={id} className={bodyCellClass(sc, "font-medium")}>{group.processId}</TableCell>
+                      if (id === "customerName") return <TableCell key={id} className={bodyCellClass(sc)}>{group.customerName}</TableCell>
+                      if (id === "invoiceNo") return (
+                        <TableCell key={id} className={bodyCellClass(sc, "font-medium")}>
+                          {group._allProducts?.[0]?.invoice_copy ? (
+                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
+                          ) : group.invoiceNo}
+                        </TableCell>
+                      )
+                      if (id === "vehicleNo") return <TableCell key={id} className={bodyCellClass(sc)}><span className="font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
+                      if (id === "orderPunchRemarks") return <TableCell key={id} className={bodyCellClass(sc)}><span className="text-slate-600 font-medium">{group.orderPunchRemarks}</span></TableCell>
+                      if (id === "status") return <TableCell key={id} className={bodyCellClass(sc)}><Badge className="bg-red-100 text-red-700">Pending Adjustment</Badge></TableCell>
+                      if (id === "products") return (
+                        <TableCell key={id} className={bodyCellClass(sc)}>
+                          {fmtNum(group._productCount, 0)}
+                        </TableCell>
+                      )
+                      return null
+                    })}
+                    {dynamicColumns.map((colId) => (
+                      <TableCell key={colId} className={bodyCellClass(stageColumns.find(c => c.id === colId), "font-medium text-slate-700")}>
+                        {DMG_NUMERIC_DYN_COLS.has(colId)
+                          ? fmtNum(getDynamicColumnValue(group, colId), DMG_NUM_DECIMALS[colId] ?? 4)
+                          : DMG_DATE_DYN_COLS.has(colId)
+                            ? fmtDate(getDynamicDateValue(group, colId))
+                            : String(getDynamicColumnValue(group, colId))}
+                      </TableCell>
+                    ))}
+                    <TableCell className={bodyCellClass(damageStageCol, "text-red-600 font-medium")}>
+                      {fmtNum(group._damagedCount, 0)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={2 + visibleStageCols.length}
+                    className="text-center py-8 text-muted-foreground"
+                  >
+                    {displayRows.length === 0 ? "No pending damage adjustments" : "No matching records found for the filters"}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          </div>
+
         {/* Mobile Card View */}
-        <div className="md:hidden space-y-3">
+        <div className="md:hidden space-y-3 p-3">
           {isPendingLoading && pendingOrders.length === 0 ? (
             [...Array(4)].map((_, i) => (
               <Card key={i} className="p-4 rounded-2xl border border-slate-100 bg-white shadow-sm">
@@ -630,8 +764,8 @@ export default function DamageAdjustmentPage() {
                 </div>
               </Card>
             ))
-          ) : displayRows.length > 0 ? (
-            displayRows.map((group) => (
+          ) : table.rows.length > 0 ? (
+            table.rows.map((group) => (
               <Card key={group._rowKey} className={cn("p-4 rounded-2xl border bg-white shadow-sm", selectedItems.includes(group._rowKey) ? "border-blue-200 bg-blue-50/40" : "border-slate-100")}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
@@ -701,7 +835,7 @@ export default function DamageAdjustmentPage() {
                 )}
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge variant="secondary">{group._productCount} items</Badge>
+                  <Badge variant="secondary">Items: {group._productCount}</Badge>
                   <Badge className="bg-red-100 text-red-700">{group._allProducts.filter((p: any) => p.damageStatus === "Damaged").length} damaged</Badge>
                   {visibleColumns.includes("status") && (
                     <Badge className="bg-red-100 text-red-700">Pending Adjustment</Badge>
@@ -718,7 +852,12 @@ export default function DamageAdjustmentPage() {
             ))
           ) : (
             <Card className="p-10 text-center rounded-2xl border border-slate-100 bg-white text-muted-foreground">
-              No pending damage adjustments
+              {displayRows.length === 0 ? "No pending damage adjustments" : "No matching records found for the filters"}
+              {displayRows.length > 0 && (
+                <div className="mt-3">
+                  <Button variant="outline" size="sm" onClick={resetAllFilters}>Clear Filters</Button>
+                </div>
+              )}
             </Card>
           )}
           <div ref={pendingEndRef} className="py-2 flex justify-center">
@@ -731,111 +870,7 @@ export default function DamageAdjustmentPage() {
           </div>
         </div>
 
-        {/* Main Table (Grouped) */}
-        <Card className="hidden md:block border-none shadow-sm overflow-hidden py-0 gap-0">
-          <div className="max-h-[600px] overflow-auto">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow className="bg-slate-50">
-                <TableHead className="w-10 text-center">
-                  <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
-                </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleStd, ...dynamicColumns]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleStd.map(id => {
-                    const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                    if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                    if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number<PendingSortIcon field="orderNo" /></SortableTableHead>
-                    if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
-                    if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
-                    if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No.<PendingSortIcon field="invoiceNo" /></SortableTableHead>
-                    if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
-                    if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                    if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
-                    return null
-                  })}
-                  {dynamicColumns.map((colId) => {
-                    const col = ALL_COLUMNS.find((c) => c.id === colId)
-                    if (!col) return null
-                    return (
-                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
-                        {col.label}<PendingSortIcon field={colId} />
-                      </SortableTableHead>
-                    )
-                  })}
-                </ColumnDragProvider>
-                <TableHead className="whitespace-nowrap text-center">Damage Info</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPendingLoading && pendingOrders.length === 0 ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    {orderedVisibleStd.map(id => (
-                      <TableCell key={id} className="text-center py-4">
-                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-32" : id === "orderNo" || id === "invoiceNo" || id === "vehicleNo" ? "w-24" : "w-20")} />
-                      </TableCell>
-                    ))}
-                    {dynamicColumns.map((colId) => (
-                      <TableCell key={colId} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    ))}
-                    <TableCell className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                  </TableRow>
-                ))
-              ) : displayRows.length > 0 ? (
-                sortedDisplayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""}>
-                    <TableCell className="text-center">
-                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
-                    {orderedVisibleStd.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs font-medium">{group.partySoDate}</TableCell>
-                      if (id === "orderNo") return <TableCell key={id} className="text-center text-xs font-medium">{group.doNumber}</TableCell>
-                      if (id === "processid") return <TableCell key={id} className="text-center text-xs font-medium">{group.processId}</TableCell>
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs">{group.customerName}</TableCell>
-                      if (id === "invoiceNo") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
-                          {group._allProducts?.[0]?.invoice_copy ? (
-                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
-                          ) : group.invoiceNo}
-                        </TableCell>
-                      )
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs font-bold text-slate-700">{group.vehicleNo}</span></TableCell>
-                      if (id === "orderPunchRemarks") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600 font-medium">{group.orderPunchRemarks}</span></TableCell>
-                      if (id === "status") return <TableCell key={id} className="text-center"><Badge className="bg-red-100 text-red-700">Pending Adjustment</Badge></TableCell>
-                      if (id === "products") return (
-                        <TableCell key={id} className="text-center">
-                          <Badge variant="secondary">{group._productCount} items</Badge>
-                        </TableCell>
-                      )
-                      return null
-                    })}
-                    {dynamicColumns.map((colId) => (
-                      <TableCell key={colId} className="text-center text-xs font-medium text-slate-700">
-                        {String(getDynamicColumnValue(group, colId))}
-                      </TableCell>
-                    ))}
-                    <TableCell className="text-center">
-                      <div className="text-xs text-red-600 font-medium">
-                        {group._allProducts.filter((p: any) => p.damageStatus === "Damaged").length} damaged items
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={2 + orderedVisibleStd.length + dynamicColumns.length}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    No pending damage adjustments
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-          </div>
+          </CardContent>
         </Card>
           <div ref={pendingEndRef} className="hidden md:flex justify-center">
             {isFetchingNextPending && (
@@ -907,7 +942,7 @@ export default function DamageAdjustmentPage() {
                             { label: "DO Date", value: selectedGroup.partySoDate, color: "text-blue-600" },
                             { label: "Transport Type", value: selectedGroup.transportType },
                             { label: "Contact Person", value: `${selectedGroup.contactPerson} — (${selectedGroup.contactWhatsapp})` },
-                            { label: "Broker / Advance", value: `${(selectedGroup.isOrderThrough === "Direct" || (selectedGroup.isOrderThrough === "—" && !selectedGroup.isBroker)) ? "No" : selectedGroup.brokerName} / ₹${selectedGroup.advanceAmount}`, color: "text-blue-600" },
+                            { label: "Broker / Advance (₹)", value: `${(selectedGroup.isOrderThrough === "Direct" || (selectedGroup.isOrderThrough === "—" && !selectedGroup.isBroker)) ? "No" : selectedGroup.brokerName} / ${fmtNum(selectedGroup.advanceAmount, 2)}`, color: "text-blue-600" },
                             { label: "Credit Status", value: selectedGroup.partyCredit, color: selectedGroup.partyCredit === "Good" ? "text-green-700" : "text-red-600" },
                             { label: "Customer Address", value: selectedGroup.customerAddress },
                             { label: "Invoice No / Date", value: `${selectedGroup.invoiceNo} / ${selectedGroup.invoiceDate}`, color: "text-blue-600" },
@@ -924,7 +959,7 @@ export default function DamageAdjustmentPage() {
                             { label: "Driver Name", value: selectedGroup.driverName },
                             { label: "Driver Contact", value: selectedGroup.driverContact },
                             { label: "License No", value: selectedGroup.driverLicense },
-                            { label: "DL Valid Upto", value: selectedGroup.dlValidUpto ? new Date(selectedGroup.dlValidUpto).toLocaleDateString("en-IN") : "—" },
+                            { label: "DL Valid Upto", value: selectedGroup.dlValidUpto ? new Date(selectedGroup.dlValidUpto).toLocaleDateString("en-GB") : "—" },
                             { label: "RST No", value: `#${selectedGroup.rstNo}`, color: "text-blue-600" },
                             { label: "Gross / Tare / Net", value: `${selectedGroup.grossWeight} / ${selectedGroup.tareWeight} / ${selectedGroup.netWeight}`, color: "text-[#3b82f6]" },
                             { label: "Weight Diff", value: selectedGroup.weightDiff, color: "text-orange-500" },
@@ -1001,11 +1036,11 @@ export default function DamageAdjustmentPage() {
                             <div className="grid grid-cols-2 gap-3 text-xs">
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Inv Qty</p>
-                                  <p className="mt-1 font-mono font-semibold text-slate-900">{product.actualQty || "0"}</p>
+                                  <p className="mt-1 font-mono font-semibold text-slate-900">{fmtNum(product.actualQty || 0, 4)}</p>
                               </div>
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Damage Qty</p>
-                                <p className="mt-1 font-mono font-semibold text-slate-900">{product.damageQty || 0}</p>
+                                <p className="mt-1 font-mono font-semibold text-slate-900">{fmtNum(product.damageQty || 0, 4)}</p>
                               </div>
                               <div className="rounded-md bg-slate-50 p-2 col-span-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Status</p>
@@ -1018,37 +1053,28 @@ export default function DamageAdjustmentPage() {
                         );
                       })}
 
-                      <div className="rounded-xl border bg-slate-50 p-3 text-xs space-y-2">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Inv Qty</p>
-                            <p className="mt-1 font-semibold text-slate-900">
-                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Damaged Qty</p>
-                            <p className="mt-1 font-semibold text-slate-900">
-                              {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
                     </div>
 
                     <Table className="hidden md:table">
-                      <TableHeader className="bg-slate-50">
+                      <TableHeader className="bg-slate-50 border-b">
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                          <TableCell className="w-10 px-4" />
+                          <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total selected ({selectedProducts.length})</TableCell>
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                          <TableCell className="px-4" />
+                        </TableRow>
                         <TableRow>
-                          <TableHead className="w-10 text-center">
+                          <TableHead className="w-10 px-4 text-left">
                             <Checkbox
                               checked={selectedProducts.length === selectedGroup._allProducts.length && selectedGroup._allProducts.length > 0}
                               onCheckedChange={(checked) => setSelectedProducts(checked ? selectedGroup._allProducts.map((p: any) => p._rowKey) : [])}
                             />
                           </TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead className="text-center">Invoice Qty</TableHead>
-                          <TableHead className="text-center">Damage Qty</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
+                          <TableHead className="px-4 text-left whitespace-nowrap">Product</TableHead>
+                          <TableHead className="px-4 text-right whitespace-nowrap min-w-[120px]">Invoice Qty</TableHead>
+                          <TableHead className="px-4 text-right whitespace-nowrap min-w-[120px]">Damage Qty</TableHead>
+                          <TableHead className="px-4 text-left whitespace-nowrap">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1056,7 +1082,7 @@ export default function DamageAdjustmentPage() {
                           const selected = selectedProducts.includes(product._rowKey);
                           return (
                             <TableRow key={product._rowKey} className={cn(selected && "bg-blue-50/40")}>
-                              <TableCell className="text-center">
+                              <TableCell className="px-4 text-left">
                                 <Checkbox
                                   checked={selected}
                                   onCheckedChange={(checked) => {
@@ -1068,13 +1094,13 @@ export default function DamageAdjustmentPage() {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="px-4 text-left">
                                 <p className="text-sm font-medium text-slate-900">{product.productName}</p>
                                 <p className="text-xs text-slate-500">{product.specificOrderNo}</p>
                               </TableCell>
-                              <TableCell className="text-center text-sm">{product.actualQty || "0"}</TableCell>
-                              <TableCell className="text-center text-sm font-medium text-slate-900">{product.damageQty || 0}</TableCell>
-                              <TableCell className="text-center">
+                              <TableCell className="px-4 text-right text-sm font-mono tabular-nums">{fmtNum(product.actualQty || 0, 4)}</TableCell>
+                              <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium text-slate-900">{fmtNum(product.damageQty || 0, 4)}</TableCell>
+                              <TableCell className="px-4 text-left">
                                 <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700 text-[11px] font-medium capitalize">
                                   {(product.damageStatus || "Pending").toLowerCase()}
                                 </Badge>
@@ -1083,19 +1109,6 @@ export default function DamageAdjustmentPage() {
                           );
                         })}
                       </TableBody>
-                      <TableFooter className="bg-slate-50">
-                        <TableRow>
-                          <TableCell />
-                          <TableCell className="text-sm font-semibold text-slate-900">Total selected</TableCell>
-                          <TableCell className="text-center text-sm font-semibold text-slate-900">
-                            {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                          </TableCell>
-                          <TableCell className="text-center text-sm font-semibold text-slate-900">
-                            {selectedGroup._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.damageQty) || 0), 0)}
-                          </TableCell>
-                          <TableCell />
-                        </TableRow>
-                      </TableFooter>
                     </Table>
                   </Card>
                 </div>
@@ -1106,7 +1119,6 @@ export default function DamageAdjustmentPage() {
                   const st = computeSettlement(sel)
                   const sum = (k: string) => sel.reduce((t: number, p: any) => t + (Number(p[k]) || 0), 0)
                   const company = sum("lossCompany"), transporter = sum("lossTransporter"), customer = sum("lossCustomer")
-                  const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   const isTransfer = sel.length > 0 && sel.every((p: any) => String(p.orderCategory ?? "").toLowerCase().trim() === "stock transfer")
                   return (
                     <div className="space-y-6">

@@ -25,10 +25,10 @@ import { userApi } from "@/lib/api-service"
 let _globalQueryClient: QueryClient | null = null;
 
 export type SortConfig = { field: string; dir: "asc" | "desc" }
-export type StagePrefs = { visible?: string[]; order?: string[]; sort?: SortConfig | null }
+export type StagePrefs = { visible?: string[]; order?: string[]; sort?: SortConfig | null; filters?: Record<string, any> | null }
 export type ColumnPrefsMap = Record<string, StagePrefs>
-type PrefField = "visible" | "order" | "sort"
-type PrefValue = string[] | SortConfig | null
+type PrefField = "visible" | "order" | "sort" | "filters"
+type PrefValue = string[] | SortConfig | Record<string, any> | null
 
 /**
  * Loads the current user's column-prefs map. Shared (deduped) across hooks via

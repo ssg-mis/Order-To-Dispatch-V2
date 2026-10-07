@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FileUploadField } from "@/components/file-upload-field"
 import { cn } from "@/lib/utils"
+import { fmtNum } from "@/lib/table-format"
 import { AlertTriangle, FileText, IndianRupee, Landmark, Package, Undo2, Truck, type LucideIcon } from "lucide-react"
 
 export type SettlementDocs = {
@@ -93,7 +94,7 @@ export function settlementComplete(st: Settlement, docs: SettlementDocs) {
   return true
 }
 
-const inr = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const inr = (n: number) => fmtNum(n, 2)
 
 const ACCENTS = {
   blue: "bg-blue-50 text-blue-600",
@@ -176,13 +177,13 @@ export function LossOverview({ invoiceQty, damageQty, company, transporter, cust
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat icon={Package} accent="blue" label="Invoice quantity" value={invoiceQty} />
-        <Stat icon={AlertTriangle} accent="red" label="Damaged / short quantity" value={damageQty} />
-        <Stat icon={IndianRupee} accent="amber" label="Total loss value" value={inr(total)} />
+        <Stat icon={Package} accent="blue" label="Invoice quantity" value={<span className="font-mono tabular-nums">{fmtNum(invoiceQty, 4)}</span>} />
+        <Stat icon={AlertTriangle} accent="red" label="Damaged / short quantity" value={<span className="font-mono tabular-nums">{fmtNum(damageQty, 4)}</span>} />
+        <Stat icon={IndianRupee} accent="amber" label="Total loss value (₹)" value={<span className="font-mono tabular-nums">{inr(total)}</span>} />
       </div>
       <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
         <div className="border-b bg-slate-50 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Who bears the loss</p>
+          <p className="text-sm font-semibold text-slate-900">Who bears the loss (₹)</p>
           <p className="text-xs text-slate-500">As decided in the Unloading report</p>
         </div>
         <div className="divide-y">
@@ -192,7 +193,7 @@ export function LossOverview({ invoiceQty, damageQty, company, transporter, cust
                 <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", r.dot)} />
                 <span className="text-sm font-medium text-slate-900">{r.label}</span>
               </div>
-              <p className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-900 sm:justify-start">
+              <p className="flex items-center justify-end gap-2 font-mono tabular-nums text-sm font-semibold text-slate-900 sm:justify-start">
                 {inr(r.value)}
                 {showPct && r.value > 0 && (
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
@@ -268,7 +269,7 @@ export function DamageSettlement({
       )}
 
       {settlement.creditNoteTaxable > 0 && (
-        <Section icon={FileText} accent="blue" title="Credit Note to Customer" summary={<>Taxable {inr(settlement.creditNoteTaxable)}</>}>
+        <Section icon={FileText} accent="blue" title="Credit Note to Customer" summary={<>Taxable (₹) <span className="font-mono tabular-nums">{inr(settlement.creditNoteTaxable)}</span></>}>
           <p className="text-xs text-slate-500">
             Loss not caused by the customer (Company + Transporter share) is credited against the original invoice.
           </p>
@@ -299,15 +300,15 @@ export function DamageSettlement({
             )}
           </div>
           <div className="grid grid-cols-3 gap-3 rounded-md border bg-slate-50 px-4 py-2 text-sm">
-            <div><p className="text-xs text-slate-500">Taxable</p><p className="font-medium text-slate-900">{inr(settlement.creditNoteTaxable)}</p></div>
-            <div><p className="text-xs text-slate-500">GST</p><p className="font-medium text-slate-900">{inr(gstAmount)}</p></div>
-            <div><p className="text-xs text-slate-500">Credit Note Total</p><p className="font-semibold text-slate-900">{inr(round2(settlement.creditNoteTaxable + gstAmount))}</p></div>
+            <div><p className="text-xs text-slate-500">Taxable (₹)</p><p className="font-mono tabular-nums font-medium text-slate-900">{inr(settlement.creditNoteTaxable)}</p></div>
+            <div><p className="text-xs text-slate-500">GST (₹)</p><p className="font-mono tabular-nums font-medium text-slate-900">{inr(gstAmount)}</p></div>
+            <div><p className="text-xs text-slate-500">Credit Note Total (₹)</p><p className="font-mono tabular-nums font-semibold text-slate-900">{inr(round2(settlement.creditNoteTaxable + gstAmount))}</p></div>
           </div>
         </Section>
       )}
 
       {settlement.reverseQty > 0 && (
-        <Section icon={Undo2} accent="violet" title="Reverse Stock Transfer" summary={<>Qty {settlement.reverseQty}</>}>
+        <Section icon={Undo2} accent="violet" title="Reverse Stock Transfer" summary={<>Qty (units) <span className="font-mono tabular-nums">{fmtNum(settlement.reverseQty, 4)}</span></>}>
           <p className="text-xs text-slate-500">
             A stock transfer has no customer invoice, so no credit note. Reverse the lost quantity out of the destination depot.
             Stock-in is already reduced by the approved loss.
@@ -322,7 +323,7 @@ export function DamageSettlement({
       )}
 
       {settlement.debitNote > 0 && (
-        <Section icon={Truck} accent="amber" title="Debit Note to Transporter" summary={<>Amount {inr(settlement.debitNote)}</>}>
+        <Section icon={Truck} accent="amber" title="Debit Note to Transporter" summary={<>Amount (₹) <span className="font-mono tabular-nums">{inr(settlement.debitNote)}</span></>}>
           <p className="text-xs text-slate-500">
             Claim for the Transporter's share of the loss (compensation for goods lost or damaged, so no GST){transporterName && transporterName !== "—" ? <> from <b>{transporterName}</b></> : null}.
           </p>
@@ -333,15 +334,15 @@ export function DamageSettlement({
             copy={docs.debitNoteCopy} onCopy={(f) => onChange({ debitNoteCopy: f })} uploading={isUploading}
           />
           <div className="grid grid-cols-3 gap-3 rounded-md border bg-slate-50 px-4 py-2 text-sm">
-            <div><p className="text-xs text-slate-500">Goods value (claim)</p><p className="font-medium text-slate-900">{inr(settlement.debitNote)}</p></div>
+            <div><p className="text-xs text-slate-500">Goods value (claim) (₹)</p><p className="font-mono tabular-nums font-medium text-slate-900">{inr(settlement.debitNote)}</p></div>
             <div><p className="text-xs text-slate-500">GST</p><p className="font-medium text-slate-500">Not applicable</p></div>
-            <div><p className="text-xs text-slate-500">Debit Note Total</p><p className="font-semibold text-slate-900">{inr(settlement.debitNote)}</p></div>
+            <div><p className="text-xs text-slate-500">Debit Note Total (₹)</p><p className="font-mono tabular-nums font-semibold text-slate-900">{inr(settlement.debitNote)}</p></div>
           </div>
         </Section>
       )}
 
       {settlement.companyLoss > 0 && (
-        <Section icon={Landmark} accent="slate" title="Company Loss (P&L)" summary={<>Amount {inr(settlement.companyLoss)}</>}>
+        <Section icon={Landmark} accent="slate" title="Company Loss (P&L)" summary={<>Amount (₹) <span className="font-mono tabular-nums">{inr(settlement.companyLoss)}</span></>}>
           <p className="text-sm text-slate-600">
             Booked automatically on completion under <b>{COMPANY_LOSS_HEAD}</b>, separate from other expenses.
             {isStockTransfer && settlement.customerShare === 0 ? " Includes the depot's share, as the depot belongs to the company." : null}
@@ -351,7 +352,7 @@ export function DamageSettlement({
 
       {!isStockTransfer && settlement.customerShare > 0 && (
         <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
-          Customer bears <b>{inr(settlement.customerShare)}</b> (loss caused by the customer). No document is raised for it.
+          Customer bears (₹) <b className="font-mono tabular-nums">{inr(settlement.customerShare)}</b> (loss caused by the customer). No document is raised for it.
         </div>
       )}
 

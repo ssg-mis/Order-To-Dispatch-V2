@@ -1012,6 +1012,8 @@ export const returnApi = {
     request(`/returns/credit-notes/pending${buildQuery(params)}`),
   getCreditNoteHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
     request(`/returns/credit-notes/history${buildQuery(params)}`),
+  getCreditNoteInvoiceOptions: async (id: number | string): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/${id}/invoice-options`),
   submitCreditNote: async (id: number | string, data: any): Promise<ApiResponse> =>
     request(`/returns/credit-notes/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
 
@@ -1022,6 +1024,38 @@ export const returnApi = {
     request(`/returns/unloading/history${buildQuery(params)}`),
   submitUnloading: async (id: number | string, data: any): Promise<ApiResponse> =>
     request(`/returns/unloading/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
+};
+
+// Stage 20 - Transport Bills
+export const transportBillApi = {
+  getPending: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/transport-bills/pending${buildQuery(params)}`),
+  getHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/transport-bills/history${buildQuery(params)}`),
+  getAccess: async (): Promise<ApiResponse> => request(`/transport-bills/access`),
+  getDetail: async (id: number | string): Promise<ApiResponse> => request(`/transport-bills/${id}`),
+  saveActuals: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/actuals`, { method: "POST", body: JSON.stringify(data) }),
+  approve: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/approve`, { method: "POST", body: JSON.stringify(data) }),
+  recordVoucher: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/voucher`, { method: "POST", body: JSON.stringify(data) }),
+};
+
+// Stage 21 - Diesel Bills
+export const dieselBillApi = {
+  getPending: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/diesel-bills/pending${buildQuery(params)}`),
+  getHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/diesel-bills/history${buildQuery(params)}`),
+  getAccess: async (): Promise<ApiResponse> => request(`/diesel-bills/access`),
+  getDetail: async (id: number | string): Promise<ApiResponse> => request(`/diesel-bills/${id}`),
+  save: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/${id}/save`, { method: "POST", body: JSON.stringify(data) }),
+  approve: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/${id}/approve`, { method: "POST", body: JSON.stringify(data) }),
+  createLedger: async (data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/ledger`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const damageAdjustmentApi = {
@@ -1138,7 +1172,7 @@ export const userApi = {
   saveColumnPrefs: async (
     id: number,
     stageKey: string,
-    partial: { visible?: string[]; order?: string[]; sort?: { field: string; dir: 'asc' | 'desc' } | null },
+    partial: { visible?: string[]; order?: string[]; sort?: { field: string; dir: 'asc' | 'desc' } | null; filters?: Record<string, any> | null },
     opts?: { keepalive?: boolean }
   ): Promise<ApiResponse> => {
     return request(`/users/${id}/column-prefs`, {
@@ -2145,6 +2179,8 @@ export default {
   gateOut: gateOutApi,
   unloading: unloadingApi,
   returns: returnApi,
+  transportBills: transportBillApi,
+  dieselBills: dieselBillApi,
   skuDetails: skuDetailsApi,
   skuSellingPrice: skuSellingPriceApi,
   common: commonApi,

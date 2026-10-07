@@ -4,6 +4,10 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
+import { CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -33,6 +37,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum } from "@/lib/table-format"
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "—";
@@ -207,7 +212,21 @@ export default function ActualDispatchPage() {
     manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
-  const [selectedDepoTab, setSelectedDepoTab] = useState("")
+  // Pending/History tab, depot tab and status buttons are remembered permanently; quick search / customer / oil
+  // filters only for the session (usePersistedFilters). Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("actual-dispatch", {
+    selectedDepoTab: "",
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "GATE_IN" | "READY" | "DRAFT",
+    customerFilter: "ALL",
+    oilFilter: "ALL",
+  }, { permanentKeys: ["selectedDepoTab", "statusFilter"] })
+  const { selectedDepoTab, quickSearch, statusFilter, customerFilter, oilFilter } = listView
+  const setSelectedDepoTab = (v: string) => patchListView({ selectedDepoTab: v })
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "GATE_IN" | "READY" | "DRAFT") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setOilFilter = (v: string) => patchListView({ oilFilter: v })
   const [isProcessing, setIsProcessing] = useState(false)
   const [skus, setSkus] = useState<any[]>([])
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
@@ -392,10 +411,10 @@ export default function ActualDispatchPage() {
     { id: "deliveryDate", label: "Delivery Date" },
     { id: "customerName", label: "Customer Name" },
     { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr." },
-    { id: "rateOfMaterial", label: "Rate of Material" },
-    { id: "rate", label: "Rate" },
+    { id: "ratePer15Kg", label: "Rate Per 15 kg (₹)" },
+    { id: "ratePerLtr", label: "Rate Per Ltr. (₹)" },
+    { id: "rateOfMaterial", label: "Rate of Material (₹)" },
+    { id: "rate", label: "Rate (₹)" },
     { id: "productName", label: "Product Name" },
     { id: "uom", label: "UOM" },
     { id: "orderQty", label: "Order Qty" },
@@ -405,14 +424,14 @@ export default function ActualDispatchPage() {
     { id: "approvalQty", label: "Approval Qty" },
     { id: "qtyToDispatch", label: "Qty to Dispatch" },
     { id: "deliveryFrom", label: "Delivery From" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
+    { id: "totalWithGst", label: "Total Amount with GST (₹)" },
     { id: "transportType", label: "Type of Transporting" },
     { id: "contactPerson", label: "Customer Contact Person Name" },
     { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
     { id: "address", label: "Customer Address" },
     { id: "paymentTerms", label: "Payment Terms" },
     { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
+    { id: "advanceAmount", label: "Advance Amount (₹)" },
     { id: "isBroker", label: "Is this order Through Broker" },
     { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
     { id: "uploadSo", label: "Upload DO" },
@@ -753,26 +772,6 @@ export default function ActualDispatchPage() {
     return byKey
   }, [user?.depo_access])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
   // Product-level columns (Product Name, Oil Type, Rate, UOM, etc.) only exist on
   // individual line items inside _allProducts — the flattened group row never carries
   // them — so any renderer reading row[colId] directly for these gets blank. Read from
@@ -800,32 +799,85 @@ export default function ActualDispatchPage() {
     return "—"
   }
 
-  const getSortValue = (row: any, colId: string): string => {
-    if (colId === "status") {
-      return row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In"
-    }
-    if (colId === "qtyToDispatch") {
-      return String(row.qtyToDispatch || 0)
-    }
-    return getColumnDisplayValue(row, colId)
+  // ── Stage table (column search / date range / sort / totals) ──
+
+  const rowStatusText = (row: any) => (row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In")
+
+  const NUMERIC_COLS = ["qtyToDispatch", "orderQty", "approvalQty", "altQty", "totalWithGst"]
+  const DATE_COLS = ["partySoDate", "startDate", "endDate", "deliveryDate"]
+  const parseAmount = (v: any) => parseFloat(String(v ?? "0").replace(/[^0-9.-]+/g, "")) || 0
+
+  const RATE_COLS = ["ratePer15Kg", "ratePerLtr", "rateOfMaterial", "rate", "advanceAmount"]
+  const RIGHT_COLS = [...NUMERIC_COLS, ...DATE_COLS, ...RATE_COLS]
+  const colWidth = (id: string) => (RIGHT_COLS.includes(id) ? "min-w-[125px]" : undefined)
+  // Display formatting for table cells + mobile cards (plain numbers, dd/mm/yyyy dates, no units).
+  const formatCellValue = (row: any, colId: string): string => {
+    const v = getColumnDisplayValue(row, colId)
+    if (v === "—") return v
+    if (colId === "partySoDate") return v
+    if (DATE_COLS.includes(colId)) return formatDate(v)
+    if (NUMERIC_COLS.includes(colId)) return fmtNum(parseAmount(v), colId === "totalWithGst" ? 2 : 4)
+    if (RATE_COLS.includes(colId)) return Number.isFinite(Number(v)) ? fmtNum(v, 2) : v
+    return v
   }
 
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
+  const tableCols = useMemo<StageColDef<any>[]>(() => {
+    return orderedVisibleCols.map((col): StageColDef<any> => {
+      if (col.id === "status") return { id: col.id, label: col.label, accessor: (r: any) => rowStatusText(r) }
+      if (NUMERIC_COLS.includes(col.id)) {
+        return { id: col.id, label: col.label, type: "number", total: !["qtyToDispatch", "orderQty", "approvalQty"].includes(col.id), accessor: (r: any) => parseAmount(getColumnDisplayValue(r, col.id)) }
+      }
+      if (DATE_COLS.includes(col.id)) {
+        return {
+          id: col.id,
+          label: col.label,
+          type: "date",
+          accessor: (r: any) => (col.id === "partySoDate" ? r._allProducts?.[0]?.party_so_date || r._allProducts?.[0]?.partySoDate : r[col.id]),
+        }
+      }
+      return { id: col.id, label: col.label, accessor: (r: any) => getColumnDisplayValue(r, col.id) }
     })
-  }, [displayRows, pendingSortField, pendingSortDir])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedVisibleCols.map(c => c.id).join("|")])
 
+  const baseFilter = useCallback((row: any) => {
+    if (statusFilter === "DRAFT" && !row.has_draft) return false
+    if (statusFilter === "READY" && (row.has_draft || !row.has_gate_in)) return false
+    if (statusFilter === "GATE_IN" && (row.has_draft || row.has_gate_in)) return false
+    if (customerFilter !== "ALL" && row.customerName !== customerFilter) return false
+    if (oilFilter !== "ALL" && getColumnDisplayValue(row, "oilType") !== oilFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [row.orderNo, row.processId, row.customerName, getColumnDisplayValue(row, "productName"), row.orderPunchRemarks].join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, customerFilter, oilFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: tableCols, baseFilter, persistKey: "actual-dispatch" })
+  const sortedDisplayRows = table.rows
+  const uniqueCustomerNames = useMemo(
+    () => Array.from(new Set(displayRows.map((r: any) => String(r.customerName || "")).filter(Boolean))).sort() as string[],
+    [displayRows]
+  )
+  const uniqueOilTypes = useMemo(
+    () => Array.from(new Set(displayRows.map((r: any) => getColumnDisplayValue(r, "oilType")).filter((v: string) => v && v !== "—"))).sort() as string[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (oilFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllTableFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", oilFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const statusLabel = (s: string) => (s === "GATE_IN" ? "Ready for Gate In" : s === "READY" ? "Ready for Dispatch" : "Draft Saved")
 
 
   const toggleSelectAll = () => {
-    const currentPageKeys = displayRows.map((row) => row._rowKey)
+    const currentPageKeys = sortedDisplayRows.map((row) => row._rowKey)
     const allCurrentSelected = currentPageKeys.length > 0 && currentPageKeys.every((k) => selectedOrders.includes(k))
     if (allCurrentSelected) {
       // Only drop this page's keys — leave selections made on other pages/searches intact
@@ -1659,6 +1711,7 @@ export default function ActualDispatchPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="actual-dispatch"
       title="Stage 7: Actual Dispatch"
       description="Confirm actual dispatch details before vehicle assignment."
       pendingCount={displayRows.length}
@@ -1707,19 +1760,6 @@ export default function ActualDispatchPage() {
           >
             Confirm Dispatch ({selectedOrders.length})
           </Button>
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent h-9 text-xs">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-62.5" collisionPadding={16}>
-                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
 
         {availableDepots.length > 0 && (
@@ -1740,48 +1780,109 @@ export default function ActualDispatchPage() {
           </div>
         )}
 
-        <Card className="border-none shadow-sm overflow-auto max-h-150">
-          {/* Desktop Table View */}
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && displayRows.every((row) => selectedOrders.includes(row._rowKey))}
-                    onCheckedChange={toggleSelectAll}
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Pending Dispatches"
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            description="Confirm actual dispatch details before vehicle assignment"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Product..."
+          >
+            <StageToolbar
+              shown={sortedDisplayRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllTableFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "GATE_IN", label: "Gate In" },
+                      { value: "READY", label: "Ready" },
+                      { value: "DRAFT", label: "Draft" },
+                    ]}
                   />
+                  <StageDivider />
+                  <StageFilterSelect value={oilFilter} onChange={setOilFilter} allLabel="All Oils" options={uniqueOilTypes} />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
+                  <StageColumnsMenu
+                    columns={PAGE_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusLabel(statusFilter)}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(oilFilter !== "ALL" ? [{ label: `Oil: ${oilFilter}`, onClear: () => setOilFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          {/* Desktop Table View */}
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
+              <TableRow>
+                <TableHead className="w-12 text-left align-top py-2.5 px-4">
+                  <div className="mt-8 flex justify-start">
+                    <Checkbox
+                      checked={sortedDisplayRows.length > 0 && sortedDisplayRows.every((row) => selectedOrders.includes(row._rowKey))}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </div>
                 </TableHead>
                 <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map((col) => (
-                    <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                      {col.label}<PendingSortIcon field={col.id} />
-                    </SortableTableHead>
+                  {tableCols.map((col) => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={RIGHT_COLS.includes(col.id) ? "right" : "left"} width={colWidth(col.id)} />
                   ))}
                 </ColumnDragProvider>
 
               </TableRow>
             </TableHeader>
             <TableBody>
+              {sortedDisplayRows.length > 0 && (
+                <StageTotalsRow
+                  columns={[{ id: "__select", label: "" }, ...tableCols]}
+                  totals={table.totals}
+                  count={sortedDisplayRows.length}
+                  labelColumnId={tableCols[0]?.id}
+                  unit=""
+                  format={(n, id) => n.toFixed(id === "totalWithGst" ? 2 : 4)}
+                  tones={{ qtyToDispatch: "blue", orderQty: "purple", approvalQty: "emerald", altQty: "amber", totalWithGst: "default" }}
+                  align={Object.fromEntries([["__select", "center" as const], ...tableCols.map(c => [c.id, (RIGHT_COLS.includes(c.id) ? "right" : "left") as "right" | "left"])])}
+                />
+              )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {orderedVisibleCols.map(col => (
                       <TableCell key={col.id} className="py-4">
                         <div className={cn(
-                          "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
+                          "h-3 bg-slate-200 animate-pulse rounded-full",
                           col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-24" : "w-16"
                         )} />
                       </TableCell>
                     ))}
                   </TableRow>
                 ))
-              ) : displayRows.length > 0 ? (
+              ) : sortedDisplayRows.length > 0 ? (
                 sortedDisplayRows.map((row) => {
                   const rowKey = row._rowKey;
                   return (
                     <TableRow key={rowKey} className={selectedOrders.includes(rowKey) ? "bg-blue-50/50" : ""}>
-                      <TableCell className="text-center">
+                      <TableCell className="px-4 text-left">
                         <Checkbox
                           checked={selectedOrders.includes(rowKey)}
                           onCheckedChange={() => toggleSelectOrder(rowKey)}
@@ -1789,11 +1890,14 @@ export default function ActualDispatchPage() {
                       </TableCell>
                       {orderedVisibleCols.map((col) => (
                         <TableCell key={col.id} className={cn(
-                          "whitespace-nowrap text-center text-xs",
+                          "whitespace-nowrap text-xs px-4",
+                          RIGHT_COLS.includes(col.id) ? "text-right tabular-nums" : "text-left",
+                          [...NUMERIC_COLS, ...RATE_COLS].includes(col.id) && "font-mono",
+                          colWidth(col.id),
                           col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                         )}>
                           {col.id === "status" ? (
-                            <div className="flex justify-center flex-col items-center gap-1">
+                            <div className="flex flex-col items-start gap-1">
                               {row.has_draft ? (
                                 <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">Draft Saved</Badge>
                               ) : row.has_gate_in ? (
@@ -1806,12 +1910,9 @@ export default function ActualDispatchPage() {
                               )}
                             </div>
                           ) : col.id === "qtyToDispatch" ? (
-                            <div className="flex flex-col items-center">
-                              <span>{row.qtyToDispatch}</span>
-                              {row._productCount > 1 && <span className="text-[10px] text-slate-500">(Total)</span>}
-                            </div>
+                            <span title={row._productCount > 1 ? "Total across products" : undefined}>{fmtNum(parseAmount(row.qtyToDispatch))}</span>
                           ) : (
-                            getColumnDisplayValue(row, col.id)
+                            formatCellValue(row, col.id)
                           )}
                         </TableCell>
                       ))}
@@ -1820,42 +1921,22 @@ export default function ActualDispatchPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
-                    No orders pending for actual dispatch
+                  <TableCell colSpan={tableCols.length + 1} className="text-center py-8 text-muted-foreground">
+                    {displayRows.length > 0 ? "No matching records found for the applied filters" : "No orders pending for actual dispatch"}
+                    {displayRows.length > 0 && (
+                      <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
-            {displayRows.length > 0 && (
-              <TableFooter className="bg-slate-50 sticky bottom-0 z-10 border-t-2 border-slate-200">
-                <TableRow className="hover:bg-slate-50">
-                  <TableCell />
-                  {orderedVisibleCols.map((col, index) => {
-                    if (index === 0) {
-                      return <TableCell key={col.id} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</TableCell>
-                    }
-                    if (['qtyToDispatch', 'orderQty', 'approvalQty', 'altQty'].includes(col.id)) {
-                      const sum = sortedDisplayRows.reduce((acc, row) => acc + (parseFloat(row[col.id]) || 0), 0);
-                      return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum}</TableCell>
-                    }
-                    if (col.id === 'totalWithGst') {
-                      const sum = sortedDisplayRows.reduce((acc, row) => {
-                        const val = String(row[col.id] || "0").replace(/[^0-9.-]+/g, "");
-                        return acc + (parseFloat(val) || 0);
-                      }, 0);
-                      return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
-                    }
-                    return <TableCell key={col.id} />
-                  })}
-                </TableRow>
-              </TableFooter>
-            )}
           </Table>
+          </div>
 
           {/* Mobile Card View */}
           <div className="md:hidden grid grid-cols-1 gap-4 p-4">
-            {displayRows.length > 0 ? (
-              displayRows.map((row) => {
+            {sortedDisplayRows.length > 0 ? (
+              sortedDisplayRows.map((row) => {
                 const rowKey = row._rowKey;
                 return (
                   <Card key={rowKey} className={cn(
@@ -1892,9 +1973,9 @@ export default function ActualDispatchPage() {
                           <p className="text-sm font-bold text-slate-800 capitalize leading-tight">{row.customerName || "—"}</p>
                         </div>
                         <div className="text-right space-y-1">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty</p>
-                          <p className="text-sm font-black text-blue-600">
-                            {row.qtyToDispatch}
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty to Dispatch</p>
+                          <p className="text-sm font-black text-blue-600 font-mono tabular-nums">
+                            {fmtNum(parseAmount(row.qtyToDispatch))}
                             {row._productCount > 1 && <span className="ml-1 text-[10px] text-slate-500">(Total {row._productCount})</span>}
                           </p>
                         </div>
@@ -1905,7 +1986,7 @@ export default function ActualDispatchPage() {
                         {orderedVisibleCols.filter(col =>
                           !['orderNo', 'partySoDate', 'status', 'customerName', 'qtyToDispatch'].includes(col.id)
                         ).map(col => {
-                          let val = getColumnDisplayValue(row, col.id);
+                          let val = formatCellValue(row, col.id);
                           if (col.id === 'revertSecurityRemarks') val = row.revertSecurityRemarks || row.revert_security_remarks || "—";
                           if (col.id === 'orderPunchRemarks') val = row.orderPunchRemarks || row.order_punch_remarks || "—";
 
@@ -1923,7 +2004,10 @@ export default function ActualDispatchPage() {
               })
             ) : (
               <div className="text-center py-12 text-slate-400 font-bold uppercase tracking-widest text-xs italic">
-                No pending items available
+                {displayRows.length > 0 ? "No matching records found" : "No pending items available"}
+                {displayRows.length > 0 && (
+                  <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-2 font-semibold normal-case not-italic tracking-normal">Clear Filters</button>
+                )}
               </div>
             )}
           </div>
@@ -1964,9 +2048,7 @@ export default function ActualDispatchPage() {
               </Button>
             </div>
           </div>
-
-
-
+          </CardContent>
         </Card>
       </div>
 
@@ -2272,31 +2354,26 @@ export default function ActualDispatchPage() {
                   <div className="border border-slate-200 rounded-xl sm:rounded-3xl overflow-hidden shadow-sm bg-white">
                     {/* Desktop Table View */}
                     <Table className="hidden xl:table">
-                      <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
-                        <TableRow className="bg-slate-50 border-b border-slate-200">
-                          <TableHead colSpan={3} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">
-                            Totals:
-                          </TableHead>
-                          <TableHead className="text-center text-xs font-bold text-blue-700">
-                            {selectedGroups.flatMap(g => g._allProducts)
+                      <TableHeader className="bg-slate-50 sticky top-0 z-10 border-b">
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">
+                            Total ({dialogSelectedProducts.length})
+                          </TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                            {fmtNum(selectedGroups.flatMap(g => g._allProducts)
                               .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-                              .reduce((sum: number, p: any) => sum + (parseFloat(p.qtyToDispatch) || 0), 0)}
-                          </TableHead>
-                          <TableHead></TableHead>
-                          <TableHead className="text-center text-xs font-bold text-blue-700">
-                            {selectedGroups.flatMap(g => g._allProducts)
-                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-                              .reduce((sum: number, p: any) => sum + (parseFloat(confirmDetails[p._rowKey]?.qty) || 0), 0)}
-                          </TableHead>
-                          <TableHead className="text-center text-xs font-bold text-blue-700">
-                            {selectedGroups.flatMap(g => g._allProducts)
-                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0).toFixed(2)}
-                          </TableHead>
-                          <TableHead></TableHead>
+                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0))}
+                          </TableCell>
+                          <TableCell className="px-4"></TableCell>
                         </TableRow>
-                        <TableRow className="bg-slate-50 border-t-0 shadow-sm">
-                          <TableHead className="w-12.5 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                        <TableRow className="bg-slate-50">
+                          <TableHead className="w-12.5 text-left px-4">
                             <Checkbox
                               checked={dialogSelectedProducts.length > 0 && dialogSelectedProducts.length === selectedGroups.reduce((s, g) => s + g._allProducts.length, 0)}
                               onCheckedChange={(checked) => {
@@ -2309,13 +2386,14 @@ export default function ActualDispatchPage() {
                               }}
                             />
                           </TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">CUSTOMER / DO</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">PRODUCT NAME</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">PLANNED QTY</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">DELIVERY FROM</TableHead>
-                          <TableHead className="w-45 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">ACTUAL QTY DISPATCHED</TableHead>
-                          <TableHead className="w-30 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">GROSS WEIGHT (KG)</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">STATUS</TableHead>
+                          <TableHead className="px-4 text-left">Customer / DO</TableHead>
+                          <TableHead className="px-4 text-left">Product Name</TableHead>
+                          <TableHead className="px-4 text-right min-w-[120px]">Planned Qty</TableHead>
+                          <TableHead className="px-4 text-left">UOM</TableHead>
+                          <TableHead className="px-4 text-left">Delivery From</TableHead>
+                          <TableHead className="w-45 px-4 text-right min-w-[160px]">Actual Qty Dispatched</TableHead>
+                          <TableHead className="w-30 px-4 text-right min-w-[130px]">Gross Weight (kg)</TableHead>
+                          <TableHead className="px-4 text-left">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2323,28 +2401,28 @@ export default function ActualDispatchPage() {
                           const rowKey = prod._rowKey;
                           return (
                             <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
-                              <TableCell className="text-center p-3">
+                              <TableCell className="text-left px-4 py-3">
                                 <Checkbox
                                   checked={dialogSelectedProducts.includes(rowKey)}
                                   onCheckedChange={() => toggleSelectDialogProduct(rowKey)}
                                 />
                               </TableCell>
-                              <TableCell className="p-3">
+                              <TableCell className="px-4 py-3 text-left">
                                 <div className="flex flex-col">
                                   <span className="text-[9px] font-black text-blue-600 uppercase leading-none mb-1">{prod.customerName}</span>
                                   <span className="text-[10px] font-bold text-slate-700">{prod.orderNo || "—"}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="font-bold text-[11px] p-3 text-slate-900">{prod.productName || "—"}</TableCell>
-                              <TableCell className="text-[11px] font-black p-3 text-center text-blue-700">
-                                {prod.qtyToDispatch}
-                                <span className="ml-1 text-[9px] text-slate-400 font-bold uppercase">{prod.uom}</span>
+                              <TableCell className="font-bold text-[11px] px-4 py-3 text-left text-slate-900">{prod.productName || "—"}</TableCell>
+                              <TableCell className="text-[11px] font-black px-4 py-3 text-right font-mono tabular-nums text-blue-700 min-w-[120px]">
+                                {fmtNum(prod.qtyToDispatch)}
                               </TableCell>
-                              <TableCell className="text-[10px] font-black p-3 uppercase text-slate-400 tracking-tighter">{prod.deliveryFrom}</TableCell>
-                              <TableCell className="p-3">
+                              <TableCell className="text-[10px] font-bold px-4 py-3 text-left uppercase text-slate-500">{prod.uom || "—"}</TableCell>
+                              <TableCell className="text-[10px] font-black px-4 py-3 uppercase text-slate-400 tracking-tighter text-left">{prod.deliveryFrom}</TableCell>
+                              <TableCell className="px-4 py-3 min-w-[160px]">
                                 <Input
                                   type="number"
-                                  className="h-10 text-xs font-black border-2 border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm"
+                                  className="h-10 text-right font-mono tabular-nums text-xs font-black border-2 border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm"
                                   placeholder="Actual Qty"
                                   value={confirmDetails[rowKey]?.qty || ""}
                                   onChange={(e) => {
@@ -2376,48 +2454,17 @@ export default function ActualDispatchPage() {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell className="p-3 text-center">
-                                <div className="font-black text-sm text-purple-700">
-                                  {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(4)} kg
+                              <TableCell className="px-4 py-3 text-right min-w-[130px]">
+                                <div className="font-mono tabular-nums font-black text-sm text-purple-700">
+                                  {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(4)}
                                 </div>
                               </TableCell>
-                              <TableCell className="p-3 text-center">
+                              <TableCell className="px-4 py-3 text-left">
                                 <Badge variant="outline" className="text-[9px] bg-orange-50 text-orange-700 border-orange-200 uppercase font-black px-2 py-0.5">Pending</Badge>
                               </TableCell>
                             </TableRow>
                           )
                         })}
-                        {/* Total Weight Row */}
-                        <TableRow className="bg-purple-50 border-t-2 border-purple-200">
-                          <TableCell colSpan={3} className="text-right p-4 font-black text-xs uppercase text-purple-900 tracking-wider">
-                            TOTALS:
-                          </TableCell>
-                          <TableCell className="p-4 text-center">
-                            <div className="font-black text-sm text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)}
-                            </div>
-                          </TableCell>
-                          <TableCell />
-                          <TableCell className="p-4 text-center">
-                            <div className="font-black text-sm text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-4 text-center">
-                            <div className="flex flex-col items-center">
-                              <span className="text-[9px] font-black text-purple-400 uppercase tracking-tighter mb-1">TOTAL ITEMS GROSS WT.</span>
-                              <div className="font-black text-lg text-purple-700">
-                                {selectedGroups.flatMap(g => g._allProducts)
-                                  .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
-                                  .reduce((total, prod) => {
-                                    const rowKey = prod._rowKey
-                                    return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                  }, 0).toFixed(4)} kg
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell colSpan={1} />
-                        </TableRow>
                       </TableBody>
                     </Table>
 
@@ -2447,8 +2494,8 @@ export default function ActualDispatchPage() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-1">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Planned Qty</p>
-                                <p className="text-sm font-black text-blue-700">{prod.qtyToDispatch} <span className="text-[9px] font-bold uppercase">{prod.uom}</span></p>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Planned Qty ({prod.uom || "UOM"})</p>
+                                <p className="text-sm font-black text-blue-700 font-mono tabular-nums">{fmtNum(prod.qtyToDispatch)}</p>
                               </div>
                               <div className="space-y-1">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Delivery From</p>
@@ -2489,8 +2536,8 @@ export default function ActualDispatchPage() {
 
                             <div className="grid grid-cols-1 gap-2 pt-2">
                               <div className="bg-purple-50 p-2 rounded-lg">
-                                <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-center">Weight</p>
-                                <p className="text-[10px] font-black text-purple-700 text-center">{weight.toFixed(4)} kg</p>
+                                <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-left">Weight (kg)</p>
+                                <p className="text-[10px] font-black text-purple-700 text-left font-mono tabular-nums">{weight.toFixed(4)}</p>
                               </div>
                             </div>
                           </div>
@@ -2499,23 +2546,17 @@ export default function ActualDispatchPage() {
 
                       {/* Mobile Totals Summary */}
                       <div className="p-4 bg-purple-50 border-t-2 border-purple-200 space-y-4">
-                        <p className="text-xs font-black text-purple-900 uppercase tracking-widest text-center">Consolidated Totals</p>
+                        <p className="text-xs font-black text-purple-900 uppercase tracking-widest text-left">Consolidated Totals</p>
                         <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3">
                           <div className="bg-white/60 p-3 rounded-2xl border border-purple-100">
-                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Qty</p>
-                            <p className="text-base font-black text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}
-                            </p>
-                          </div>
-                          <div className="bg-white/60 p-3 rounded-2xl border border-purple-100">
-                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Weight</p>
-                            <p className="text-base font-black text-purple-700 leading-none">
+                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Weight (kg)</p>
+                            <p className="text-base font-black text-purple-700 leading-none font-mono tabular-nums">
                               {selectedGroups.flatMap(g => g._allProducts)
                                 .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
                                 .reduce((total, prod) => {
                                   const rowKey = prod._rowKey
                                   return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                }, 0).toFixed(4)} <span className="text-[10px]">kg</span>
+                                }, 0).toFixed(4)}
                             </p>
                           </div>
                         </div>

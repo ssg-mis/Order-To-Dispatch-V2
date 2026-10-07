@@ -1,7 +1,15 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
-import { Card } from "@/components/ui/card"
+import { useEffect, useState, useMemo, useCallback } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { useAuth } from "@/hooks/use-auth"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+import { useColumnOrder } from "@/hooks/use-column-order"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageTotalsRowLead, stageColumnChips } from "@/components/stage-list-extras"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -24,15 +32,62 @@ import { collectionApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 import { cn } from "@/lib/utils"
+import { fmtDate, fmtNum } from "@/lib/table-format"
 
 type View = "receivable" | "disputed" | "all"
 
-const money = (v: any) => `₹${(parseFloat(v || 0) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN") : "—")
+const money = (v: any) => fmtNum(parseFloat(v || 0) || 0, 2)
+const RIGHT_COLS = ["invoiceDate", "billAmount", "received", "tds", "cd", "creditNote", "pendingBalance", "receiptDate"]
+const colAlign = (id: string) => (RIGHT_COLS.includes(id) ? ("right" as const) : ("left" as const))
 const today = () => new Date().toISOString().split("T")[0]
 const pendingOf = (inv: any) =>
   (parseFloat(inv.bill_amount || 0) || 0) -
   ((parseFloat(inv.total_received || 0) || 0) + (parseFloat(inv.total_tds || 0) || 0) + (parseFloat(inv.total_cd || 0) || 0) + (parseFloat(inv.total_credit_note || 0) || 0))
+
+const num = (v: any) => parseFloat(v || 0) || 0
+
+const PEND_COLUMNS: StageColDef<any>[] = [
+  { id: "doNumber", label: "DO Number", accessor: (r) => r.so_no || r.d_sr_number || "" },
+  { id: "customerName", label: "Customer Name", accessor: (r) => r.party_name },
+  { id: "invoiceNo", label: "Invoice No", accessor: (r) => r.invoice_no },
+  { id: "invoiceDate", label: "Date", type: "date", accessor: (r) => r.invoice_date },
+  { id: "billAmount", label: "Bill Amount (₹)", type: "number", total: true, accessor: (r) => num(r.bill_amount) },
+  { id: "received", label: "Received (₹)", type: "number", total: true, accessor: (r) => num(r.total_received) },
+  { id: "tds", label: "TDS (₹)", type: "number", total: true, accessor: (r) => num(r.total_tds) },
+  { id: "cd", label: "CD (₹)", type: "number", total: true, accessor: (r) => num(r.total_cd) },
+  { id: "creditNote", label: "Credit Note (₹)", type: "number", total: true, accessor: (r) => num(r.total_credit_note) },
+  { id: "pendingBalance", label: "Pending Balance (₹)", type: "number", total: true, accessor: (r) => pendingOf(r) },
+  { id: "status", label: "Status", accessor: (r) => r.collection_status || "Pending" },
+]
+const PEND_COLUMN_IDS = PEND_COLUMNS.map((c) => c.id)
+
+const isRcptEvent = (r: any) => r.payment_mode === "Dispute Raised" || r.payment_mode === "Dispute Resolved"
+const RCPT_COLS: { id: string; label: string; right?: boolean; total?: boolean; field?: string; text: (r: any) => string }[] = [
+  { id: "date", label: "Date", right: true, text: (r) => fmtDate(r.receipt_date) },
+  { id: "entry", label: "Entry", text: (r) => r.payment_mode || "" },
+  { id: "received", label: "Received (₹)", right: true, total: true, field: "amount_received", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.amount_received, 2)) },
+  { id: "tds", label: "TDS (₹)", right: true, total: true, field: "tds_deducted", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.tds_deducted, 2)) },
+  { id: "cd", label: "CD (₹)", right: true, total: true, field: "cd_given", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.cd_given, 2)) },
+  { id: "ref", label: "UTR / Ref", text: (r) => r.reference_no || "" },
+  { id: "rule", label: "TDS Rule", text: (r) => r.tds_rule_name || "" },
+  { id: "remarks", label: "Remarks", text: (r) => r.remarks || "" },
+]
+
+const isDisputeRow = (e: any) => e.payment_mode === "Dispute Raised" || e.payment_mode === "Dispute Resolved"
+const HIST_COLUMNS: StageColDef<any>[] = [
+  { id: "receiptDate", label: "Receipt Date", type: "date", accessor: (e) => e.receipt_date },
+  { id: "invoiceNo", label: "Invoice No", accessor: (e) => e.invoice_no },
+  { id: "customerName", label: "Customer Name", accessor: (e) => e.party_name },
+  { id: "entry", label: "Entry", accessor: (e) => (isDisputeRow(e) ? e.payment_mode : "Receipt") },
+  { id: "received", label: "Received (₹)", type: "number", total: true, accessor: (e) => (isDisputeRow(e) ? 0 : num(e.amount_received)) },
+  { id: "tds", label: "TDS Receivable (₹)", type: "number", total: true, accessor: (e) => (isDisputeRow(e) ? 0 : num(e.tds_deducted)) },
+  { id: "cd", label: "CD (₹)", type: "number", total: true, accessor: (e) => (isDisputeRow(e) ? 0 : num(e.cd_given)) },
+  { id: "mode", label: "Mode", accessor: (e) => (isDisputeRow(e) ? "" : e.payment_mode) },
+  { id: "reference", label: "UTR / Ref", accessor: (e) => e.reference_no },
+  { id: "tdsRule", label: "TDS Rule", accessor: (e) => e.tds_rule_name },
+  { id: "remarks", label: "Remarks", accessor: (e) => e.remarks },
+  { id: "billStatus", label: "Bill Status", accessor: (e) => e.collection_status || "Pending" },
+]
 
 const emptyForm = () => ({
   receiptDate: today(),
@@ -76,9 +131,27 @@ function StatusBadge({ status }: { status?: string }) {
 export default function CollectionPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  // View mode / history entry type are remembered permanently; searches and status selects only for the session.
+  // The Pending/History tab is owned and remembered by WorkflowStageShell (persistKey).
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const [view, setView] = useState<View>("receivable")
-  const [historyEntry, setHistoryEntry] = useState<"all" | "receipts" | "disputes" | "cleared">("all")
+  const [pendView, patchPendView] = usePersistedFilters("collection", {
+    view: "receivable" as View,
+    pendingSearch: "",
+    pendingStatus: "ALL",
+  }, { permanentKeys: ["view"] })
+  const { view, pendingSearch, pendingStatus } = pendView
+  const setView = (v: View) => patchPendView({ view: v })
+  const setPendingSearch = (v: string) => patchPendView({ pendingSearch: v })
+  const setPendingStatus = (v: string) => patchPendView({ pendingStatus: v })
+  const [histView, patchHistView] = usePersistedFilters("collection-history", {
+    historyEntry: "all" as "all" | "receipts" | "disputes" | "cleared",
+    historySearch: "",
+    historyStatus: "ALL",
+  }, { permanentKeys: ["historyEntry"] })
+  const { historyEntry, historySearch, historyStatus } = histView
+  const setHistoryEntry = (v: "all" | "receipts" | "disputes" | "cleared") => patchHistView({ historyEntry: v })
+  const setHistorySearch = (v: string) => patchHistView({ historySearch: v })
+  const setHistoryStatus = (v: string) => patchHistView({ historyStatus: v })
   const { ref: pendingEndRef, inView: pendingInView } = useInView()
   const { ref: historyEndRef, inView: historyInView } = useInView()
 
@@ -105,6 +178,7 @@ export default function CollectionPage() {
 
   // Receipts view dialog
   const [receiptsFor, setReceiptsFor] = useState<any | null>(null)
+  const [rcptFilters, setRcptFilters] = useState<Record<string, string>>({})
 
   // Dispute dialog
   const [disputeFor, setDisputeFor] = useState<any | null>(null)
@@ -277,6 +351,16 @@ export default function CollectionPage() {
     },
   })
 
+  const rcptRows = useMemo(() => {
+    const rows: any[] = receiptsData?.receipts || []
+    return rows.filter((r) =>
+      RCPT_COLS.every((c) => {
+        const q = (rcptFilters[c.id] || "").trim().toLowerCase()
+        return !q || c.text(r).toLowerCase().includes(q)
+      })
+    )
+  }, [receiptsData, rcptFilters])
+
   // ---- Dispute ----
   const handleDispute = async () => {
     if (!disputeFor) return
@@ -310,8 +394,135 @@ export default function CollectionPage() {
 
   const COLS = 12
 
+  // ---- Stage list tables (per-column search / sort / totals) ----
+  const { isAdmin, isFeatureEnabled } = useAuth()
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("collection", PEND_COLUMN_IDS)
+  const [columnOrder, setColumnOrder] = useColumnOrder("collection", PEND_COLUMN_IDS)
+  const orderedVisibleCols = useMemo(
+    () => columnOrder.map((id) => PEND_COLUMNS.find((c) => c.id === id)).filter((c): c is StageColDef<any> => !!c && visibleColumns.includes(c.id)),
+    [columnOrder, visibleColumns]
+  )
+  const handleColumnReorder = useCallback(
+    (newVisibleOrder: string[]) => {
+      const hidden = columnOrder.filter((id) => !visibleColumns.includes(id))
+      setColumnOrder([...newVisibleOrder, ...hidden])
+    },
+    [columnOrder, visibleColumns, setColumnOrder]
+  )
+  const pendingBase = useCallback(
+    (r: any) => {
+      if (pendingStatus !== "ALL" && (r.collection_status || "Pending") !== pendingStatus) return false
+      const q = pendingSearch.trim().toLowerCase()
+      if (q && !PEND_COLUMNS.some((c) => String(c.accessor?.(r) ?? "").toLowerCase().includes(q))) return false
+      return true
+    },
+    [pendingStatus, pendingSearch]
+  )
+  const pendingTable = useStageTable({ rows: pendingInvoices, columns: PEND_COLUMNS, baseFilter: pendingBase, persistKey: "collection" })
+  const pendingActive = pendingTable.activeColumnFilterCount + (pendingStatus !== "ALL" ? 1 : 0) + (pendingSearch.trim() ? 1 : 0)
+  const pendingChips = [
+    ...(pendingStatus !== "ALL" ? [{ label: `Status: ${pendingStatus}`, onClear: () => setPendingStatus("ALL") }] : []),
+    ...(pendingSearch.trim() ? [{ label: `Search: ${pendingSearch.trim()}`, onClear: () => setPendingSearch("") }] : []),
+    ...stageColumnChips(pendingTable, PEND_COLUMNS),
+  ]
+
+  const historyBase = useCallback(
+    (r: any) => {
+      if (historyStatus !== "ALL" && (r.collection_status || "Pending") !== historyStatus) return false
+      const q = historySearch.trim().toLowerCase()
+      if (q && !HIST_COLUMNS.some((c) => String(c.accessor?.(r) ?? "").toLowerCase().includes(q))) return false
+      return true
+    },
+    [historyStatus, historySearch]
+  )
+  const historyTable = useStageTable({ rows: historyEntries, columns: HIST_COLUMNS, baseFilter: historyBase, persistKey: "collection-history" })
+  const historyActive = historyTable.activeColumnFilterCount + (historyStatus !== "ALL" ? 1 : 0) + (historySearch.trim() ? 1 : 0)
+  const historyChips = [
+    ...(historyStatus !== "ALL" ? [{ label: `Bill Status: ${historyStatus}`, onClear: () => setHistoryStatus("ALL") }] : []),
+    ...(historySearch.trim() ? [{ label: `Search: ${historySearch.trim()}`, onClear: () => setHistorySearch("") }] : []),
+    ...stageColumnChips(historyTable, HIST_COLUMNS),
+  ]
+
+  const renderPendCell = (inv: any, id: string) => {
+    const billAmount = parseFloat(inv.bill_amount || 0)
+    const received = parseFloat(inv.total_received || 0)
+    const tds = parseFloat(inv.total_tds || 0)
+    const cd = parseFloat(inv.total_cd || 0)
+    switch (id) {
+      case "doNumber":
+        return <TableCell key={id} className="text-left text-xs font-bold text-slate-700 px-4">{inv.so_no || inv.d_sr_number || "—"}</TableCell>
+      case "customerName":
+        return <TableCell key={id} className="text-left text-xs font-medium px-4">{inv.party_name || "—"}</TableCell>
+      case "invoiceNo":
+        return <TableCell key={id} className="text-left text-xs font-bold text-slate-700 px-4">{inv.invoice_no}</TableCell>
+      case "invoiceDate":
+        return <TableCell key={id} className="text-right text-xs px-4 font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtDate(inv.invoice_date)}</TableCell>
+      case "billAmount":
+        return <TableCell key={id} className="text-xs font-medium font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(billAmount, 2)}</TableCell>
+      case "received":
+        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(received, 2)}</TableCell>
+      case "tds":
+        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(tds, 2)}</TableCell>
+      case "cd":
+        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(cd, 2)}</TableCell>
+      case "creditNote":
+        return <TableCell key={id} className="text-xs text-violet-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum((parseFloat(inv.total_credit_note || 0) || 0), 2)}</TableCell>
+      case "pendingBalance":
+        return <TableCell key={id} className="text-xs font-bold text-red-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(pendingOf(inv), 2)}</TableCell>
+      case "status":
+        return <TableCell key={id} className="text-left px-4"><StatusBadge status={inv.collection_status} /></TableCell>
+      default:
+        return null
+    }
+  }
+
+  const renderHistCell = (e: any, id: string) => {
+    const isDisputeEvent = e.payment_mode === "Dispute Raised" || e.payment_mode === "Dispute Resolved"
+    switch (id) {
+      case "receiptDate":
+        return <TableCell key={id} className="text-right text-xs px-4 font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtDate(e.receipt_date)}</TableCell>
+      case "invoiceNo":
+        return <TableCell key={id} className="text-left text-xs font-bold text-slate-700 px-4">{e.invoice_no}</TableCell>
+      case "customerName":
+        return <TableCell key={id} className="text-left text-xs font-medium px-4">{e.party_name || "—"}</TableCell>
+      case "entry":
+        return (
+          <TableCell key={id} className="text-left text-xs px-4">
+            {isDisputeEvent ? (
+              <Badge className={e.payment_mode === "Dispute Raised" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}>{e.payment_mode}</Badge>
+            ) : (
+              <Badge className="bg-blue-100 text-blue-700">Receipt</Badge>
+            )}
+          </TableCell>
+        )
+      case "received":
+        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.amount_received, 2)}</TableCell>
+      case "tds":
+        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.tds_deducted, 2)}</TableCell>
+      case "cd":
+        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.cd_given, 2)}</TableCell>
+      case "mode":
+        return <TableCell key={id} className="text-left text-xs px-4">{isDisputeEvent ? "—" : e.payment_mode || "—"}</TableCell>
+      case "reference":
+        return <TableCell key={id} className="text-left text-xs px-4">{e.reference_no || "—"}</TableCell>
+      case "tdsRule":
+        return <TableCell key={id} className="text-left text-xs px-4">{e.tds_rule_name || "—"}</TableCell>
+      case "remarks":
+        return <TableCell key={id} className="text-left text-xs max-w-[220px] truncate px-4" title={e.remarks || ""}>{e.remarks || "—"}</TableCell>
+      case "billStatus":
+        return <TableCell key={id} className="text-left px-4"><StatusBadge status={e.collection_status} /></TableCell>
+      default:
+        return null
+    }
+  }
+
+  const STATUS_OPTIONS = ["Pending", "Partial", "Disputed", "Cleared"]
+  const allAlign = (cols: StageColDef<any>[]) => Object.fromEntries(cols.map((c) => [c.id, colAlign(c.id)]))
+
+
   return (
     <WorkflowStageShell
+      persistKey="collection"
       partyNames={[]}
       title="Stage 16: Collection"
       description="Daily receivables tracking, TDS master and cash discount."
@@ -328,36 +539,65 @@ export default function CollectionPage() {
       isHistoryLoading={isHistoryLoading}
       historyContent={
         <div className="space-y-3">
-        <div className="inline-flex rounded-lg bg-muted/50 p-1">
-          {([
-            ["all", "All Entries"],
-            ["receipts", "Receipts"],
-            ["disputes", "Disputes"],
-            ["cleared", "Cleared Bills"],
-          ] as [typeof historyEntry, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setHistoryEntry(key)}
-              className={cn(
-                "px-3 py-1 text-xs rounded-md font-medium transition-colors",
-                historyEntry === key ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <Card className="border-none shadow-sm overflow-hidden py-0 gap-0">
-          <div className="max-h-[600px] overflow-auto">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Collection History"
+            shown={historyTable.rows.length}
+            total={historyEntries.length}
+            description="Receipts, disputes and cleared bills"
+            searchValue={historySearch}
+            onSearchChange={setHistorySearch}
+            searchPlaceholder="Search Invoice, Customer, UTR..."
+          >
+            <StageToolbar
+              shown={historyTable.rows.length}
+              total={historyEntries.length}
+              activeCount={historyActive}
+              onReset={() => {
+                historyTable.clearColumnFilters()
+                patchHistView({ historyStatus: "ALL", historySearch: "" })
+              }}
+              filters={
+                <>
+                  <StageSegmented
+                    value={historyEntry}
+                    onChange={setHistoryEntry}
+                    options={[
+                      { value: "all", label: "All Entries" },
+                      { value: "receipts", label: "Receipts" },
+                      { value: "disputes", label: "Disputes" },
+                      { value: "cleared", label: "Cleared Bills" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={historyStatus} onChange={setHistoryStatus} allLabel="All Bill Status" options={STATUS_OPTIONS} />
+                </>
+              }
+            />
+            <StageActiveChips chips={historyChips} />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="overflow-x-auto rounded-b-xl">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  {["Receipt Date", "Invoice No", "Customer Name", "Entry", "Received", "TDS Receivable", "CD", "Mode", "UTR / Ref", "TDS Rule", "Remarks", "Bill Status"].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
+              <TableHeader className="bg-slate-50 border-b">
+                <TableRow>
+                  <ColumnDragProvider columnIds={HIST_COLUMNS.map((c) => c.id)} onReorder={() => {}} disabled>
+                    {HIST_COLUMNS.map((col) => (
+                      <StageHeadCell key={col.id} col={col} table={historyTable} align={colAlign(col.id)} />
+                    ))}
+                  </ColumnDragProvider>
                 </TableRow>
               </TableHeader>
               <TableBody>
+                <StageTotalsRow
+                  columns={HIST_COLUMNS}
+                  totals={historyTable.totals}
+                  count={historyTable.rows.length}
+                  unit=""
+                  format={(n) => fmtNum(n, 2)}
+                  tones={{ received: "emerald", tds: "amber", cd: "blue" }}
+                  align={allAlign(HIST_COLUMNS)}
+                />
                 {isHistoryLoading && historyEntries.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={COLS} className="text-center py-10 text-slate-500">
@@ -368,29 +608,16 @@ export default function CollectionPage() {
                   <TableRow>
                     <TableCell colSpan={COLS} className="text-center py-10 text-slate-500">No collection history found.</TableCell>
                   </TableRow>
+                ) : historyTable.rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={COLS} className="text-center py-10 text-slate-500">No matching records found for the filters.</TableCell>
+                  </TableRow>
                 ) : (
-                  historyEntries.map((e: any) => {
+                  historyTable.rows.map((e: any) => {
                     const isDisputeEvent = e.payment_mode === "Dispute Raised" || e.payment_mode === "Dispute Resolved"
                     return (
                       <TableRow key={e.id} className={isDisputeEvent ? "bg-red-50/40" : ""}>
-                        <TableCell className="text-center text-xs">{fmtDate(e.receipt_date)}</TableCell>
-                        <TableCell className="text-center text-xs font-bold text-slate-700">{e.invoice_no}</TableCell>
-                        <TableCell className="text-center text-xs font-medium">{e.party_name || "—"}</TableCell>
-                        <TableCell className="text-center text-xs">
-                          {isDisputeEvent ? (
-                            <Badge className={e.payment_mode === "Dispute Raised" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}>{e.payment_mode}</Badge>
-                          ) : (
-                            <Badge className="bg-blue-100 text-blue-700">Receipt</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center text-xs font-medium text-emerald-600">{isDisputeEvent ? "—" : money(e.amount_received)}</TableCell>
-                        <TableCell className="text-center text-xs text-orange-600">{isDisputeEvent ? "—" : money(e.tds_deducted)}</TableCell>
-                        <TableCell className="text-center text-xs text-blue-600">{isDisputeEvent ? "—" : money(e.cd_given)}</TableCell>
-                        <TableCell className="text-center text-xs">{isDisputeEvent ? "—" : e.payment_mode || "—"}</TableCell>
-                        <TableCell className="text-center text-xs">{e.reference_no || "—"}</TableCell>
-                        <TableCell className="text-center text-xs">{e.tds_rule_name || "—"}</TableCell>
-                        <TableCell className="text-xs max-w-[220px] truncate" title={e.remarks || ""}>{e.remarks || "—"}</TableCell>
-                        <TableCell className="text-center"><StatusBadge status={e.collection_status} /></TableCell>
+                        {HIST_COLUMNS.map((c) => renderHistCell(e, c.id))}
                       </TableRow>
                     )
                   })
@@ -406,6 +633,7 @@ export default function CollectionPage() {
               </div>
             )}
           </div>
+          </CardContent>
         </Card>
         </div>
       }
@@ -414,44 +642,26 @@ export default function CollectionPage() {
         {/* Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Receivable Outstanding</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Receivable Outstanding (₹)</p>
             <p className="text-lg font-bold text-red-600">{money(summary?.receivable.outstanding)}</p>
             <p className="text-[11px] text-slate-500">{summary?.receivable.count ?? 0} bills</p>
           </Card>
           <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Disputed Outstanding</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Disputed Outstanding (₹)</p>
             <p className="text-lg font-bold text-amber-600">{money(summary?.disputed.outstanding)}</p>
             <p className="text-[11px] text-slate-500">{summary?.disputed.count ?? 0} bills</p>
           </Card>
           <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">TDS Receivable (open bills)</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">TDS Receivable (open bills) (₹)</p>
             <p className="text-lg font-bold text-orange-600">{money(summary?.total_tds_receivable)}</p>
           </Card>
           <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cash Discount (open bills)</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cash Discount (open bills) (₹)</p>
             <p className="text-lg font-bold text-blue-600">{money(summary?.total_cd_given)}</p>
           </Card>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="inline-flex rounded-lg bg-muted/50 p-1">
-            {([
-              ["receivable", "Bills Receivable"],
-              ["disputed", "Disputed Bills"],
-              ["all", "All"],
-            ] as [View, string][]).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => { setView(key); setSelectedItems([]) }}
-                className={cn(
-                  "px-3 py-1 text-xs rounded-md font-medium transition-colors",
-                  view === key ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
           <div className="flex flex-wrap gap-2 justify-end">
             <Button
               variant="outline"
@@ -492,65 +702,99 @@ export default function CollectionPage() {
           </div>
         </div>
 
-        <Card className="border-none shadow-sm overflow-hidden py-0 gap-0">
-          <div className="max-h-[600px] overflow-auto">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Collections List"
+            shown={pendingTable.rows.length}
+            total={pendingInvoices.length}
+            description="Open invoices and receivables ready for collection"
+            searchValue={pendingSearch}
+            onSearchChange={setPendingSearch}
+            searchPlaceholder="Search Invoice, Customer, DO..."
+          >
+            <StageToolbar
+              shown={pendingTable.rows.length}
+              total={pendingInvoices.length}
+              activeCount={pendingActive}
+              onReset={() => {
+                pendingTable.clearColumnFilters()
+                patchPendView({ pendingStatus: "ALL", pendingSearch: "" })
+              }}
+              filters={
+                <>
+                  <StageSegmented
+                    value={view}
+                    onChange={(v: View) => { setView(v); setSelectedItems([]) }}
+                    options={[
+                      { value: "receivable", label: "Bills Receivable" },
+                      { value: "disputed", label: "Disputed Bills" },
+                      { value: "all", label: "All" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={pendingStatus} onChange={setPendingStatus} allLabel="All Status" options={STATUS_OPTIONS} />
+                  <StageColumnsMenu
+                    columns={PEND_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips chips={pendingChips} />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="overflow-x-auto rounded-b-xl">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  <TableHead className="w-10 text-center"></TableHead>
-                  <TableHead className="whitespace-nowrap text-center">DO Number</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Customer Name</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Invoice No</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Date</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Bill Amount</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Received</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">TDS</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">CD</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Credit Note</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Pending Balance</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Status</TableHead>
+              <TableHeader className="bg-slate-50 border-b">
+                <TableRow>
+                  <TableHead className="w-10 text-left align-top py-2.5 px-4"></TableHead>
+                  <ColumnDragProvider
+                    columnIds={orderedVisibleCols.map((c) => c.id)}
+                    onReorder={handleColumnReorder}
+                    disabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
+                  >
+                    {orderedVisibleCols.map((col) => (
+                      <StageHeadCell key={col.id} col={col} table={pendingTable} align={colAlign(col.id)} />
+                    ))}
+                  </ColumnDragProvider>
                 </TableRow>
               </TableHeader>
               <TableBody>
+                <StageTotalsRowLead
+                  columns={orderedVisibleCols}
+                  totals={pendingTable.totals}
+                  count={pendingTable.rows.length}
+                  leadingCells={1}
+                  unit=""
+                  format={(n) => fmtNum(n, 2)}
+                  tones={{ received: "emerald", tds: "amber", cd: "blue", creditNote: "purple", pendingBalance: "red" }}
+                  align={allAlign(orderedVisibleCols)}
+                />
                 {isPendingLoading && pendingInvoices.length === 0 ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                      {[...Array(12)].map((__, c) => (
+                      {[...Array(orderedVisibleCols.length + 1)].map((__, c) => (
                         <TableCell key={c} className="text-center py-4"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                       ))}
                     </TableRow>
                   ))
-                ) : pendingInvoices.length > 0 ? (
-                  pendingInvoices.map((inv: any) => {
-                    const billAmount = parseFloat(inv.bill_amount || 0)
-                    const received = parseFloat(inv.total_received || 0)
-                    const tds = parseFloat(inv.total_tds || 0)
-                    const cd = parseFloat(inv.total_cd || 0)
-                    const pendingBal = pendingOf(inv)
-
-                    return (
-                      <TableRow key={inv.id} className={cn(selectedItems.includes(inv.id) && "bg-blue-50/50", inv.collection_status === "Disputed" && "bg-red-50/30")}>
-                        <TableCell className="text-center">
-                          <Checkbox checked={selectedItems.includes(inv.id)} onCheckedChange={() => toggleSelectItem(inv.id)} />
-                        </TableCell>
-                        <TableCell className="text-center text-xs font-bold text-slate-700">{inv.so_no || inv.d_sr_number || "—"}</TableCell>
-                        <TableCell className="text-center text-xs font-medium">{inv.party_name || "—"}</TableCell>
-                        <TableCell className="text-center text-xs font-bold text-slate-700">{inv.invoice_no}</TableCell>
-                        <TableCell className="text-center text-xs">{fmtDate(inv.invoice_date)}</TableCell>
-                        <TableCell className="text-center text-xs font-medium">₹{billAmount.toFixed(2)}</TableCell>
-                        <TableCell className="text-center text-xs font-medium text-emerald-600">₹{received.toFixed(2)}</TableCell>
-                        <TableCell className="text-center text-xs text-orange-600">₹{tds.toFixed(2)}</TableCell>
-                        <TableCell className="text-center text-xs text-blue-600">₹{cd.toFixed(2)}</TableCell>
-                        <TableCell className="text-center text-xs text-violet-600">₹{(parseFloat(inv.total_credit_note || 0) || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-center text-xs font-bold text-red-600">₹{pendingBal.toFixed(2)}</TableCell>
-                        <TableCell className="text-center"><StatusBadge status={inv.collection_status} /></TableCell>
-                      </TableRow>
-                    )
-                  })
+                ) : pendingTable.rows.length > 0 ? (
+                  pendingTable.rows.map((inv: any) => (
+                    <TableRow key={inv.id} className={cn(selectedItems.includes(inv.id) && "bg-blue-50/50", inv.collection_status === "Disputed" && "bg-red-50/30")}>
+                      <TableCell className="px-4 text-left">
+                        <Checkbox checked={selectedItems.includes(inv.id)} onCheckedChange={() => toggleSelectItem(inv.id)} />
+                      </TableCell>
+                      {orderedVisibleCols.map((c) => renderPendCell(inv, c.id))}
+                    </TableRow>
+                  ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-10 text-slate-500">
-                      {view === "disputed" ? "No disputed bills." : "No pending collections found."}
+                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-10 text-slate-500">
+                      {pendingInvoices.length > 0
+                        ? "No matching records found for the filters."
+                        : view === "disputed" ? "No disputed bills." : "No pending collections found."}
                     </TableCell>
                   </TableRow>
                 )}
@@ -565,8 +809,10 @@ export default function CollectionPage() {
               </div>
             )}
           </div>
+          </CardContent>
         </Card>
       </div>
+
 
       {/* Add Receipt Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -601,7 +847,7 @@ export default function CollectionPage() {
                   <div className="px-3 sm:px-5 py-5 bg-slate-50 border-t border-slate-100">
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-4 sm:gap-6 bg-white border border-slate-100 rounded-2xl p-4 sm:p-6 shadow-sm">
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount (₹)</p>
                         <p className="text-sm font-semibold text-slate-900">{money(selectedInvoice.bill_amount)}</p>
                       </div>
                       <div>
@@ -609,23 +855,23 @@ export default function CollectionPage() {
                         <p className="text-sm font-semibold text-slate-900">{fmtDate(selectedInvoice.invoice_date)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Received</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Received (₹)</p>
                         <p className="text-sm font-semibold text-emerald-600">{money(selectedInvoice.total_received)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">TDS</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">TDS (₹)</p>
                         <p className="text-sm font-semibold text-orange-600">{money(selectedInvoice.total_tds)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">CD</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">CD (₹)</p>
                         <p className="text-sm font-semibold text-blue-600">{money(selectedInvoice.total_cd)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Note</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Note (₹)</p>
                         <p className="text-sm font-semibold text-violet-600">{money(selectedInvoice.total_credit_note)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance (₹)</p>
                         <p className="text-base font-bold text-red-600">{money(selectedPending)}</p>
                       </div>
                     </div>
@@ -721,7 +967,7 @@ export default function CollectionPage() {
                       />
                       {suggestion?.tds && (
                         <p className="text-[11px] text-slate-500">
-                          {isSuggesting ? "Calculating…" : <>As per TDS master: <span className="font-semibold text-slate-700">{money(suggestion.tds.suggested_tds)}</span></>}
+                          {isSuggesting ? "Calculating…" : <>As per TDS master (₹): <span className="font-semibold text-slate-700">{money(suggestion.tds.suggested_tds)}</span></>}
                           {touched.tds && (
                             <button
                               type="button"
@@ -753,7 +999,7 @@ export default function CollectionPage() {
                           {suggestion.cd.lines.length === 0 ? (
                             "No CD rule matches this item"
                           ) : (
-                            <>As per CD master: <span className="font-semibold text-slate-700">{money(suggestion.cd.suggested_cd)}</span></>
+                            <>As per CD master (₹): <span className="font-semibold text-slate-700">{money(suggestion.cd.suggested_cd)}</span></>
                           )}
                           {suggestion.cd.lines.length > 0 && touched.cd && (
                             <button
@@ -802,11 +1048,11 @@ export default function CollectionPage() {
                           {suggestion.tds ? (
                             <>
                               <CalcRow label="Rate of deduction" value={`${suggestion.tds.rate}%`} />
-                              <CalcRow label="Threshold limit" value={money(suggestion.tds.threshold_limit)} />
+                              <CalcRow label="Threshold limit (₹)" value={money(suggestion.tds.threshold_limit)} />
                               <CalcRow label="Rule effective from" value={fmtDate(suggestion.tds.wef_date)} />
                               <CalcRow label="Rate applies on" value={suggestion.tds.applicable_amount_type || "Total Invoice Amount"} />
                               {suggestion.tds.cumulative_before !== null && (
-                                <CalcRow label="Sales to customer this FY (before this bill)" value={money(suggestion.tds.cumulative_before)} />
+                                <CalcRow label="Sales to customer this FY (before this bill) (₹)" value={money(suggestion.tds.cumulative_before)} />
                               )}
                               {suggestion.tds.gst_source && suggestion.tds.gst_source !== "sku" && (
                                 <div className="mb-1 rounded-md border border-amber-200 bg-amber-50 p-3">
@@ -835,12 +1081,12 @@ export default function CollectionPage() {
                                 </div>
                               )}
                               {suggestion.tds.taxable_value !== null && suggestion.tds.taxable_value !== undefined && (
-                                <CalcRow label="Taxable value of this bill (excl. GST)" value={money(suggestion.tds.taxable_value)} />
+                                <CalcRow label="Taxable value of this bill (excl. GST) (₹)" value={money(suggestion.tds.taxable_value)} />
                               )}
-                              <CalcRow label="Amount TDS is charged on" value={money(suggestion.tds.base_amount)} />
-                              <CalcRow label="TDS on this bill" value={money(suggestion.tds.total_tds)} />
-                              <CalcRow label="Already deducted earlier" value={`− ${money(suggestion.tds.already_deducted)}`} />
-                              <CalcRow label="Suggested TDS now" value={money(suggestion.tds.suggested_tds)} strong />
+                              <CalcRow label="Amount TDS is charged on (₹)" value={money(suggestion.tds.base_amount)} />
+                              <CalcRow label="TDS on this bill (₹)" value={money(suggestion.tds.total_tds)} />
+                              <CalcRow label="Already deducted earlier (₹)" value={`− ${money(suggestion.tds.already_deducted)}`} />
+                              <CalcRow label="Suggested TDS now (₹)" value={money(suggestion.tds.suggested_tds)} strong />
                               {suggestion.tds.note && (
                                 <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">{suggestion.tds.note}</p>
                               )}
@@ -866,16 +1112,16 @@ export default function CollectionPage() {
                                 </span>
                               </div>
                               <p className="mt-1 text-xs text-slate-500">
-                                {l.qty} qty × {money(l.rate_per_main_uom)} = <span className="font-semibold text-slate-700">{money(l.eligible ? l.amount : 0)}</span>
+                                Qty: {fmtNum(l.qty, 4)} × Rate (₹): {money(l.rate_per_main_uom)} = Amount (₹): <span className="font-semibold text-slate-700">{money(l.eligible ? l.amount : 0)}</span>
                               </p>
                             </div>
                           ))}
-                          <CalcRow label="CD allowed per master" value={money(suggestion.cd.total_cd)} />
+                          <CalcRow label="CD allowed per master (₹)" value={money(suggestion.cd.total_cd)} />
                           {suggestion.cd.invoice_cd > 0 && (
-                            <CalcRow label="Already allowed on invoice (Make Invoice)" value={`− ${money(suggestion.cd.invoice_cd)}`} />
+                            <CalcRow label="Already allowed on invoice (Make Invoice) (₹)" value={`− ${money(suggestion.cd.invoice_cd)}`} />
                           )}
-                          <CalcRow label="Already given earlier" value={`− ${money(suggestion.cd.already_given)}`} />
-                          <CalcRow label="Suggested CD now" value={money(suggestion.cd.suggested_cd)} strong />
+                          <CalcRow label="Already given earlier (₹)" value={`− ${money(suggestion.cd.already_given)}`} />
+                          <CalcRow label="Suggested CD now (₹)" value={money(suggestion.cd.suggested_cd)} strong />
                           {suggestion.cd.note && (
                             <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">{suggestion.cd.note}</p>
                           )}
@@ -886,15 +1132,15 @@ export default function CollectionPage() {
 
                   <div className="flex flex-col gap-1 border-t pt-4 sm:flex-row sm:items-center sm:justify-between text-sm">
                     <span className="text-slate-600">
-                      Received + TDS + CD: <span className="font-bold text-slate-900">{money(entryTotal)}</span>
+                      Received + TDS + CD (₹): <span className="font-bold text-slate-900">{money(entryTotal)}</span>
                     </span>
                     {hasNegative ? (
                       <span className="font-semibold text-red-600">Amounts cannot be negative</span>
                     ) : overPayment ? (
-                      <span className="font-semibold text-red-600">Exceeds pending balance by {money(entryTotal - selectedPending)}</span>
+                      <span className="font-semibold text-red-600">Exceeds pending balance by (₹) {money(entryTotal - selectedPending)}</span>
                     ) : (
                       <span className="text-slate-600">
-                        Balance after this receipt: <span className="font-bold text-slate-900">{money(selectedPending - entryTotal)}</span>
+                        Balance after this receipt (₹): <span className="font-bold text-slate-900">{money(selectedPending - entryTotal)}</span>
                       </span>
                     )}
                   </div>
@@ -967,27 +1213,27 @@ export default function CollectionPage() {
                   ) : receiptsData ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 sm:gap-6 bg-white border border-slate-100 rounded-2xl p-4 sm:p-6 shadow-sm">
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount (₹)</p>
                         <p className="text-sm font-semibold text-slate-900">{money(receiptsData.bill_amount)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Received</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Received (₹)</p>
                         <p className="text-sm font-semibold text-emerald-600">{money(receiptsData.total_received)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">TDS</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">TDS (₹)</p>
                         <p className="text-sm font-semibold text-orange-600">{money(receiptsData.total_tds)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">CD</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">CD (₹)</p>
                         <p className="text-sm font-semibold text-blue-600">{money(receiptsData.total_cd)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Note</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Note (₹)</p>
                         <p className="text-sm font-semibold text-violet-600">{money(receiptsData.total_credit_note)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance (₹)</p>
                         <p className="text-base font-bold text-red-600">
                           {money(
                             (parseFloat(receiptsData.bill_amount || 0) || 0) -
@@ -1013,35 +1259,61 @@ export default function CollectionPage() {
                   </h3>
                   <div className="overflow-x-auto">
                     <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50">
-                          {["Date", "Entry", "Received", "TDS", "CD", "UTR / Ref", "TDS Rule", "Remarks"].map((h) => (
-                            <TableHead key={h} className="text-center whitespace-nowrap">{h}</TableHead>
+                      <TableHeader className="bg-slate-50 border-b">
+                        <TableRow>
+                          {RCPT_COLS.map((c) => (
+                            <TableHead key={`search-${c.id}`} className="whitespace-nowrap align-top pt-2.5 pb-1 px-4">
+                              <Input
+                                placeholder="Search..."
+                                value={rcptFilters[c.id] || ""}
+                                onChange={(e) => setRcptFilters((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                                className={cn(
+                                  "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                                  c.right ? "text-right" : "text-left"
+                                )}
+                              />
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                        {rcptRows.length > 0 && (
+                          <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                            {RCPT_COLS.map((c, i) => (
+                              <TableCell key={`total-${c.id}`} className={cn("px-4", i === 0 ? "text-left font-black text-slate-900 uppercase tracking-wider text-[11px]" : c.right ? "text-right font-mono tabular-nums font-black text-slate-900" : "text-left")}>
+                                {i === 0 ? `Total (${rcptRows.length})` : c.total ? fmtNum(rcptRows.reduce((t: number, r: any) => t + (isRcptEvent(r) ? 0 : num(r[c.field!])), 0), 2) : ""}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        )}
+                        <TableRow>
+                          {RCPT_COLS.map((c) => (
+                            <TableHead key={c.id} className={cn("whitespace-nowrap align-top py-2.5 px-4", c.right ? "text-right min-w-[110px]" : "text-left")}>{c.label}</TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {receiptsData.receipts.length === 0 ? (
                           <TableRow><TableCell colSpan={8} className="text-center py-8 text-slate-500">No receipts recorded yet.</TableCell></TableRow>
+                        ) : rcptRows.length === 0 ? (
+                          <TableRow><TableCell colSpan={8} className="text-center py-8 text-slate-500">No matching records found for the filters.</TableCell></TableRow>
                         ) : (
-                          receiptsData.receipts.map((r: any) => {
-                            const ev = r.payment_mode === "Dispute Raised" || r.payment_mode === "Dispute Resolved"
+                          rcptRows.map((r: any) => {
+                            const ev = isRcptEvent(r)
                             return (
                               <TableRow key={r.id} className={ev ? "bg-red-50/40" : ""}>
-                                <TableCell className="text-center text-xs">{fmtDate(r.receipt_date)}</TableCell>
-                                <TableCell className="text-center text-xs">
+                                <TableCell className="text-right text-xs px-4 font-mono tabular-nums whitespace-nowrap">{fmtDate(r.receipt_date)}</TableCell>
+                                <TableCell className="text-left text-xs px-4">
                                   {ev ? (
                                     <Badge className={r.payment_mode === "Dispute Raised" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}>{r.payment_mode}</Badge>
                                   ) : (
                                     r.payment_mode || "—"
                                   )}
                                 </TableCell>
-                                <TableCell className="text-center text-xs font-medium text-emerald-600">{ev ? "—" : money(r.amount_received)}</TableCell>
-                                <TableCell className="text-center text-xs text-orange-600">{ev ? "—" : money(r.tds_deducted)}</TableCell>
-                                <TableCell className="text-center text-xs text-blue-600">{ev ? "—" : money(r.cd_given)}</TableCell>
-                                <TableCell className="text-center text-xs">{r.reference_no || "—"}</TableCell>
-                                <TableCell className="text-center text-xs">{r.tds_rule_name || "—"}</TableCell>
-                                <TableCell className="text-xs">{r.remarks || "—"}</TableCell>
+                                <TableCell className="text-right text-xs font-medium text-emerald-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.amount_received, 2)}</TableCell>
+                                <TableCell className="text-right text-xs text-orange-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.tds_deducted, 2)}</TableCell>
+                                <TableCell className="text-right text-xs text-blue-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.cd_given, 2)}</TableCell>
+                                <TableCell className="text-left text-xs px-4">{r.reference_no || "—"}</TableCell>
+                                <TableCell className="text-left text-xs px-4">{r.tds_rule_name || "—"}</TableCell>
+                                <TableCell className="text-left text-xs px-4">{r.remarks || "—"}</TableCell>
                               </TableRow>
                             )
                           })
@@ -1089,11 +1361,11 @@ export default function CollectionPage() {
                         <p className="text-sm font-semibold text-slate-900">{disputeFor.invoice_no}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bill Amount (₹)</p>
                         <p className="text-sm font-semibold text-slate-900">{money(disputeFor.bill_amount)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pending Balance (₹)</p>
                         <p className="text-base font-bold text-red-600">{money(pendingOf(disputeFor))}</p>
                       </div>
                     </div>

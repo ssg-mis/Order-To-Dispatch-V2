@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { fmtNum } from "@/lib/table-format"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -357,7 +358,7 @@ export function UnloadingForm({
                           />
                         ) : (
                           <div className="h-9 flex items-center px-3 rounded-md border border-dashed border-slate-300 text-sm text-slate-500">
-                            {sfgOilKg ? `${sfgOilKg} kg (auto, full item)` : "Auto from SFG master"}
+                            {sfgOilKg ? <span className="font-mono tabular-nums">{fmtNum(sfgOilKg, 3)} (auto, full item)</span> : "Auto from SFG master"}
                           </div>
                         )}
                       </div>
@@ -376,9 +377,9 @@ export function UnloadingForm({
           <>
             <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm">
               <span className="font-semibold text-amber-800 flex items-center gap-2">
-                <Droplets className="h-4 w-4" /> Total oil weight lost
+                <Droplets className="h-4 w-4" /> Total oil weight lost (kg)
               </span>
-              <span className="font-black text-amber-900">{totalOilLost.toFixed(3)} kg</span>
+              <span className="font-black font-mono tabular-nums text-amber-900">{fmtNum(totalOilLost, 3)}</span>
             </div>
             <FileUploadField
               label={<>Upload Damage Photos <span className="text-red-500">*</span></>}

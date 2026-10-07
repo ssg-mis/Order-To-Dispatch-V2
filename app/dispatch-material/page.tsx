@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input"
 
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,46 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum, fmtDateTime } from "@/lib/table-format"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
+  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone,
+} from "@/components/stage-list"
+
+// Formatted display strings ("1,234.50", "₹1,234.50", "—") -> number.
+const parseDisplayNumber = (v: unknown): number => {
+  const n = parseFloat(String(v ?? "").replace(/[^0-9.-]+/g, ""))
+  return isNaN(n) ? 0 : n
+}
+// partySoDate is pre-formatted dd/mm/yyyy on grouped rows; convert to ISO for the date-range filter.
+const dmyToIso = (row: any): string | null => {
+  const raw = row.party_so_date ?? row.partySoDate
+  if (!raw || raw === "—") return null
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(raw))
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`
+  return String(raw)
+}
+const dashToEmpty = (v: unknown): string => (v === undefined || v === null || v === "—" ? "" : String(v))
+
+const DISPATCH_TABLE_COLUMNS: StageColDef<any>[] = [
+  { id: "partySoDate", label: "DO Date", type: "date", accessor: dmyToIso },
+  { id: "orderNo", label: "DO Number", accessor: (r) => dashToEmpty(r.orderNo) },
+  { id: "processId", label: "Manual Sauda No.", accessor: (r) => dashToEmpty(r.processId) },
+  { id: "customerName", label: "Customer Name", accessor: (r) => dashToEmpty(r.customerName) },
+  { id: "totalQtyBox", label: "Total Qty (Box)", type: "number", accessor: (r) => parseDisplayNumber(r.totalQtyBox), total: true },
+  { id: "totalQtyKgs", label: "Total Qty (KGS)", type: "number", accessor: (r) => parseDisplayNumber(r.totalQtyKgs), total: true },
+  { id: "totalOrderAmount", label: "Total Order Amount (₹)", type: "number", accessor: (r) => parseDisplayNumber(r.totalOrderAmount), total: true },
+  { id: "deliveryFrom", label: "Dispatch from", accessor: (r) => dashToEmpty(r.deliveryFrom) },
+  { id: "remarks", label: "Remarks", accessor: (r) => dashToEmpty(r.remarks) },
+  { id: "brokerName", label: "Broker", accessor: (r) => dashToEmpty(r.brokerName) },
+  { id: "punchBy", label: "Order Punch By", accessor: (r) => dashToEmpty(r.punchBy) },
+  { id: "actualDatetime", label: "Actual Datetime", type: "date", accessor: (r) => r.actual_3 || r.timestamp || null },
+]
+const DISPATCH_RIGHT_ALIGN = new Set(["partySoDate", "actualDatetime", "totalQtyBox", "totalQtyKgs", "totalOrderAmount"])
+const DISPATCH_NUM_DECIMALS: Record<string, number> = { totalQtyBox: 0, totalQtyKgs: 4, totalOrderAmount: 2 }
+const DISPATCH_TOTAL_TONES: Record<string, StageTotalTone> = { totalQtyBox: "blue", totalQtyKgs: "purple", totalOrderAmount: "emerald" }
 
 export default function DispatchMaterialPage() {
   const queryClient = useQueryClient()
@@ -52,7 +92,20 @@ export default function DispatchMaterialPage() {
     manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
-  const [selectedDepoTab, setSelectedDepoTab] = useState("")
+  // Depot tab is remembered permanently; quick search / customer-broker-punch selects only for the session. Stale depot values are re-validated against availableDepos below.
+  const [listView, patchListView] = usePersistedFilters("dispatch-material", {
+    selectedDepoTab: "",
+    quickSearch: "",
+    customerFilter: "ALL",
+    brokerFilter: "ALL",
+    punchByFilter: "ALL",
+  }, { permanentKeys: ["selectedDepoTab"] })
+  const { selectedDepoTab, quickSearch, customerFilter, brokerFilter, punchByFilter } = listView
+  const setSelectedDepoTab = (v: string) => patchListView({ selectedDepoTab: v })
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setBrokerFilter = (v: string) => patchListView({ brokerFilter: v })
+  const setPunchByFilter = (v: string) => patchListView({ punchByFilter: v })
   const [isProcessing, setIsProcessing] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -1069,12 +1122,12 @@ export default function DispatchMaterialPage() {
         remarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
         uploadSo: Object.values(group._ordersMap).map((o: any) => o.uploadSo).find(Boolean) || null,
         _productCount: group._allProducts.length,
-        totalQtyBox: totalQtyBox > 0 ? totalQtyBox.toLocaleString('en-IN') : "—",
-        totalQtyKgs: totalQtyKgs > 0 ? totalQtyKgs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—",
-        totalOrderAmount: totalOrderAmount > 0 ? "₹" + totalOrderAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—",
+        totalQtyBox: totalQtyBox > 0 ? fmtNum(totalQtyBox, 0) : "—",
+        totalQtyKgs: totalQtyKgs > 0 ? fmtNum(totalQtyKgs, 4) : "—",
+        totalOrderAmount: totalOrderAmount > 0 ? fmtNum(totalOrderAmount, 2) : "—",
         deliveryFrom: firstOrderDetails.depoName || "—",
         punchBy: firstOrderDetails.order_punch_user || "—",
-        actualDatetime: firstOrderDetails.actual_3 ? new Date(firstOrderDetails.actual_3).toLocaleString('en-IN') : (firstOrderDetails.timestamp ? new Date(firstOrderDetails.timestamp).toLocaleString('en-IN') : "—")
+        actualDatetime: firstOrderDetails.actual_3 ? fmtDateTime(firstOrderDetails.actual_3) : (firstOrderDetails.timestamp ? fmtDateTime(firstOrderDetails.timestamp) : "—")
       };
     }).filter(group => {
       if (group._productCount <= 0) return false;
@@ -1083,67 +1136,34 @@ export default function DispatchMaterialPage() {
     })
   }, [filteredPendingOrders, selectedDepoTab])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Shared stage-list table state (column search / date range / sort / totals over loaded rows) ──
+  const uniqueRowCustomers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.customerName)).filter(Boolean))).sort() as string[], [displayRows])
+  const uniqueBrokers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.brokerName)).filter(Boolean))).sort() as string[], [displayRows])
+  const uniquePunchBy = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.punchBy)).filter(Boolean))).sort() as string[], [displayRows])
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
+  const baseFilter = useCallback((row: any) => {
+    if (customerFilter !== "ALL" && dashToEmpty(row.customerName) !== customerFilter) return false
+    if (brokerFilter !== "ALL" && dashToEmpty(row.brokerName) !== brokerFilter) return false
+    if (punchByFilter !== "ALL" && dashToEmpty(row.punchBy) !== punchByFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [row.orderNo, row.processId, row.customerName, row.brokerName, row.deliveryFrom, row.remarks, row.punchBy].map(dashToEmpty).filter(Boolean).join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
     }
+    return true
+  }, [customerFilter, brokerFilter, punchByFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: DISPATCH_TABLE_COLUMNS, baseFilter, persistKey: "dispatch-material" })
+  const sortedDisplayRows = table.rows
+  const activeFiltersCount =
+    (customerFilter !== "ALL" ? 1 : 0) + (brokerFilter !== "ALL" ? 1 : 0) + (punchByFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ customerFilter: "ALL", brokerFilter: "ALL", punchByFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
   }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (row: any, colId: string): string => {
-    if (colId === "status") {
-      return "Pending"
-    }
-    if (colId === "productName") {
-      return String(row._allProducts?.[0]?.productName || "—")
-    }
-    const firstProd = row._allProducts?.[0] || {}
-    if (colId === "oilType") return String(firstProd.oilType || "—")
-    if (colId === "ratePer15Kg") return String(firstProd.ratePer15Kg || "—")
-    if (colId === "ratePerLtr") return String(firstProd.ratePerLtr || "—")
-    if (colId === "rateOfMaterial") return String(firstProd.rateOfMaterial || "—")
-    if (colId === "rate") return String(firstProd.rate || "—")
-    if (colId === "uom") return String(firstProd.uom || "—")
-    if (colId === "orderQty") return String(firstProd.orderQty || "—")
-    if (colId === "altUom") return String(firstProd.altUom || "—")
-    if (colId === "altQty") return String(firstProd.altQty || "—")
-    if (colId === "skuName") return String(firstProd.skuName || "—")
-    if (colId === "approvalQty") return String(firstProd.approvalQty || "—")
-    if (colId === "qtyToDispatch") return String(row.qtyToDispatch || 0)
-    if (colId === "deliveryFrom") return String(firstProd.deliveryFrom || "—")
-
-    const directVal = row[colId]
-    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
-
-    return "—"
-  }
-
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
-
-
+  const totalsColumns = orderedVisibleCols.map(c => DISPATCH_TABLE_COLUMNS.find(t => t.id === c.id)!)
+  const totalsAlign = Object.fromEntries(totalsColumns.map(c => [c.id, DISPATCH_RIGHT_ALIGN.has(c.id) ? "right" as const : "left" as const]))
 
   const customerNames = Array.from(new Set((pendingOrders as any[]).map(order =>
     (order.transfer === 'yes' && order.bill_company_name)
@@ -1176,6 +1196,7 @@ export default function DispatchMaterialPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="dispatch-material"
       partyNames={customerNames}
       title="Stage 4: Dispatch Planning"
       description="Prepare and Dispatch Plannings for delivery."
@@ -1206,22 +1227,6 @@ export default function DispatchMaterialPage() {
         />
       }
     >
-      <div className="flex flex-col justify-end gap-2 sm:flex-row">
-        {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full bg-transparent sm:w-auto">
-                <Settings2 className="mr-2 h-4 w-4" />
-                Columns
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-              <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-
       {activeDepots.length > 0 && (
         <div className="mt-4 mb-2">
           <Tabs value={selectedDepoTab} onValueChange={setSelectedDepoTab} className="w-full overflow-hidden">
@@ -1240,33 +1245,87 @@ export default function DispatchMaterialPage() {
         </div>
       )}
 
-      <Card className="border-none shadow-sm overflow-hidden md:max-h-[600px] md:overflow-auto">
-        <Table className="hidden md:table">
-          <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <StageListHeader
+          title="Dispatch Planning List"
+          shown={sortedDisplayRows.length}
+          total={displayRows.length}
+          description="Orders approved and waiting to be planned for dispatch"
+          searchValue={quickSearch}
+          onSearchChange={setQuickSearch}
+          searchPlaceholder="Search DO, Customer, Broker..."
+        >
+          <StageToolbar
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueRowCustomers} />
+                <StageFilterSelect value={brokerFilter} onChange={setBrokerFilter} allLabel="All Brokers" options={uniqueBrokers} />
+                <StageFilterSelect value={punchByFilter} onChange={setPunchByFilter} allLabel="All Punch By" options={uniquePunchBy} />
+                <StageDivider />
+                <StageColumnsMenu
+                  columns={PAGE_COLUMNS}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                />
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+              ...(brokerFilter !== "ALL" ? [{ label: `Broker: ${brokerFilter}`, onClear: () => setBrokerFilter("ALL") }] : []),
+              ...(punchByFilter !== "ALL" ? [{ label: `Punch By: ${punchByFilter}`, onClear: () => setPunchByFilter("ALL") }] : []),
+              ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+            ]}
+          />
+        </StageListHeader>
+        <CardContent className="p-0">
+        <div className="hidden overflow-x-auto md:block">
+        <Table>
+          <TableHeader className="bg-slate-50 border-b">
             <TableRow>
               <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                 {orderedVisibleCols.map((col) => (
-                  <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                    {col.label}<PendingSortIcon field={col.id} />
-                  </SortableTableHead>
+                  <StageHeadCell key={col.id} col={DISPATCH_TABLE_COLUMNS.find(c => c.id === col.id)!} table={table} align={DISPATCH_RIGHT_ALIGN.has(col.id) ? "right" : "left"} />
                 ))}
               </ColumnDragProvider>
             </TableRow>
           </TableHeader>
           <TableBody>
+            <StageTotalsRow
+              columns={totalsColumns}
+              totals={table.totals}
+              count={sortedDisplayRows.length}
+              format={(n, id) => fmtNum(n, DISPATCH_NUM_DECIMALS[id] ?? 4)}
+              unit=""
+              tones={DISPATCH_TOTAL_TONES}
+              align={totalsAlign}
+            />
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i} className="opacity-40 border-b border-slate-50">
                   {orderedVisibleCols.map(col => (
-                    <TableCell key={col.id} className="py-4">
+                    <TableCell key={col.id} className="px-4 py-4">
                       <div className={cn(
-                        "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
+                        "h-3 bg-slate-200 animate-pulse rounded-full",
                         col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-24" : "w-16"
                       )} />
                     </TableCell>
                   ))}
                 </TableRow>
               ))
+            ) : displayRows.length > 0 && sortedDisplayRows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={orderedVisibleCols.length || 1} className="text-center py-12 text-muted-foreground">
+                  <p className="font-medium text-slate-500">No matching records found</p>
+                  <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                </TableCell>
+              </TableRow>
             ) : displayRows.length > 0 ? (
               sortedDisplayRows.map((row: any) => {
                 const isSelected = selectedItems.some(i => i._rowKey === row._rowKey);
@@ -1284,18 +1343,19 @@ export default function DispatchMaterialPage() {
                   >
                     {orderedVisibleCols.map((col) => (
                       <TableCell key={col.id} className={cn(
-                        "whitespace-nowrap text-center text-xs",
+                        "whitespace-nowrap text-xs px-4",
+                        DISPATCH_RIGHT_ALIGN.has(col.id) ? "text-right font-mono tabular-nums" : "text-left",
                         col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                       )}>
                         {col.id === "status" ? (
-                          <div className="flex justify-center flex-col items-center gap-1">
+                          <div className="flex flex-col items-start gap-1">
                             <Badge className="bg-orange-100 text-orange-700">Pending</Badge>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500 font-medium">({row._productCount} Items)</span>
                             )}
                           </div>
                         ) : col.id === "productName" ? (
-                          <div className="flex flex-col items-center">
+                          <div className="flex flex-col items-start">
                             <span className="font-medium text-slate-700">{row._allProducts[0]?.productName}</span>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500">+ {row._productCount - 1} more types</span>
@@ -1311,40 +1371,14 @@ export default function DispatchMaterialPage() {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={orderedVisibleCols.length || 1} className="text-center py-8 text-muted-foreground">
                   No orders pending for dispatch
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
-          {displayRows.length > 0 && (
-            <TableFooter className="bg-slate-50 sticky bottom-0 z-10 border-t-2 border-slate-200">
-              <TableRow className="hover:bg-slate-50">
-                {orderedVisibleCols.map((col, index) => {
-                  if (index === 0) {
-                    return <TableCell key={col.id} className="text-right text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</TableCell>
-                  }
-                  if (col.id === 'totalQtyBox') {
-                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => acc + (parseFloat(row.totalQtyBox) || 0), 0);
-                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum}</TableCell>
-                  }
-                  if (col.id === 'totalQtyKgs') {
-                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => acc + (parseFloat(row.totalQtyKgs) || 0), 0);
-                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">{sum.toFixed(2)}</TableCell>
-                  }
-                  if (col.id === 'totalOrderAmount') {
-                    const sum = sortedDisplayRows.reduce((acc: number, row: any) => {
-                      const val = String(row.totalOrderAmount || "0").replace(/[^0-9.-]+/g, "");
-                      return acc + (parseFloat(val) || 0);
-                    }, 0);
-                    return <TableCell key={col.id} className="text-center text-xs font-bold text-slate-700">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
-                  }
-                  return <TableCell key={col.id} />
-                })}
-              </TableRow>
-            </TableFooter>
-          )}
         </Table>
+        </div>
         <div className="space-y-3 p-3 md:hidden">
           {isPendingLoading && pendingOrders.length === 0 ? (
             [...Array(5)].map((_, i) => (
@@ -1355,8 +1389,13 @@ export default function DispatchMaterialPage() {
                 </div>
               </div>
             ))
+          ) : displayRows.length > 0 && sortedDisplayRows.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground">
+              <p className="font-medium text-slate-500">No matching records found</p>
+              <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+            </div>
           ) : displayRows.length > 0 ? (
-            displayRows.map((row: any) => {
+            sortedDisplayRows.map((row: any) => {
               const display = buildDispatchDisplayRow(row)
               const isSelected = selectedItems.some(i => i._rowKey === row._rowKey)
               return (
@@ -1396,11 +1435,11 @@ export default function DispatchMaterialPage() {
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Approval Qty</p>
-                      <p className="mt-1 font-mono font-bold">{display.approvalQty}</p>
+                      <p className="mt-1 font-mono font-bold">{fmtNum(display.approvalQty, 4)}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Remaining</p>
-                      <p className="mt-1 font-mono font-bold">{display.remainingQty}</p>
+                      <p className="mt-1 font-mono font-bold">{fmtNum(display.remainingQty, 4)}</p>
                     </div>
                   </div>
 
@@ -1455,8 +1494,7 @@ export default function DispatchMaterialPage() {
             </Button>
           </div>
         </div>
-
-
+        </CardContent>
       </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -1642,46 +1680,24 @@ export default function DispatchMaterialPage() {
                         <Table className="hidden md:table relative" containerClassName="overflow-y-auto max-h-[400px]">
                           <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
 
-                            <TableRow className="bg-slate-50 hover:bg-slate-50 border-none">
-                              <TableHead colSpan={3} className="p-3 text-right">
-                                <span className="text-xs uppercase font-bold text-slate-500 tracking-wider">Totals:</span>
+                            <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                              <TableHead colSpan={3} className="px-4 text-left font-black text-slate-900">
+                                Total ({allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length})
                               </TableHead>
-                              <TableHead className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-sm font-semibold px-2 shadow-sm border-blue-200">
-                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}
-                                </Badge>
-                              </TableHead>
-                              <TableHead className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-slate-200 text-slate-700 text-sm font-semibold px-2 shadow-sm border-slate-300">
-                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    return sum + (parseFloat(maxLimit) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableHead>
-                              <TableHead className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-green-100 text-green-800 text-sm font-semibold px-2 shadow-sm border-green-200 w-full justify-center">
-                                  {allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
-                                    const rowKey = p._rowKey;
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                    return sum + (parseFloat(currentDispatchQty) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableHead>
-                              <TableHead className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-sm font-semibold px-2 shadow-sm border-amber-200 w-full justify-center">
-                                  ₹{allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4 text-right font-mono tabular-nums font-bold text-amber-700">
+                                {fmtNum(allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
                                     const rowKey = p._rowKey;
                                     const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
                                     const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
                                     return sum + (parseFloat(currentDispatchQty) || 0) * (parseFloat(p.rate) || 0);
-                                  }, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                                </Badge>
+                                  }, 0), 2)}
                               </TableHead>
                             </TableRow>
                             <TableRow className="bg-slate-50 hover:bg-slate-50">
-                              <TableHead className="w-12 text-center text-xs uppercase font-semibold text-slate-500 tracking-wider">
+                              <TableHead className="w-12 px-4 text-left">
                                 <Checkbox
                                   checked={allProducts.length > 0 && allProducts.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
                                   onCheckedChange={(checked) => {
@@ -1691,12 +1707,12 @@ export default function DispatchMaterialPage() {
                                   }}
                                 />
                               </TableHead>
-                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider">Item Name</TableHead>
-                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Rate</TableHead>
-                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Approved Qty</TableHead>
-                              <TableHead className="text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Remaining Qty</TableHead>
-                              <TableHead className="min-w-[120px] text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Plan Qty</TableHead>
-                              <TableHead className="min-w-[140px] text-xs uppercase font-semibold text-slate-500 tracking-wider text-center">Taxable Amount</TableHead>
+                              <TableHead className="px-4 text-left">Item Name</TableHead>
+                              <TableHead className="px-4 text-right">Rate (₹)</TableHead>
+                              <TableHead className="px-4 text-right">Approved Qty</TableHead>
+                              <TableHead className="px-4 text-right">Remaining Qty</TableHead>
+                              <TableHead className="min-w-[120px] px-4 text-right">Plan Qty</TableHead>
+                              <TableHead className="min-w-[140px] px-4 text-right">Taxable Amount (₹)</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1708,26 +1724,26 @@ export default function DispatchMaterialPage() {
 
                               return (
                                 <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
-                                  <TableCell className="text-center p-3">
+                                  <TableCell className="px-4 py-3 text-left">
                                     <Checkbox checked={dialogSelectedProducts.includes(rowKey)} onCheckedChange={() => toggleSelectDialogProduct(rowKey)} />
                                   </TableCell>
-                                  <TableCell className="p-3">
+                                  <TableCell className="px-4 py-3 text-left">
                                     <div className="font-semibold text-sm text-slate-800">{prod.productName || "—"}</div>
                                     <div className="text-xs text-slate-400 mt-0.5">{prod.orderNo || "—"}</div>
                                   </TableCell>
-                                  <TableCell className="text-sm font-medium text-slate-600 p-3 text-center">₹{prod.rate || "—"}</TableCell>
-                                  <TableCell className="text-sm font-semibold text-blue-600 p-3 text-center">{prod.approvalQty || "—"}</TableCell>
-                                  <TableCell className="text-sm font-medium text-slate-500 p-3 text-center">{maxLimit}</TableCell>
-                                  <TableCell className="p-3">
-                                    <Input type="number" className="h-8 text-sm font-semibold text-center" value={currentDispatchQty} onChange={(e) => {
+                                  <TableCell className="text-sm font-medium text-slate-600 px-4 py-3 text-right font-mono tabular-nums">{prod.rate ? fmtNum(prod.rate, 2) : "—"}</TableCell>
+                                  <TableCell className="text-sm font-semibold text-blue-600 px-4 py-3 text-right font-mono tabular-nums">{prod.approvalQty ? fmtNum(prod.approvalQty, 4) : "—"}</TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-500 px-4 py-3 text-right font-mono tabular-nums">{fmtNum(maxLimit, 4)}</TableCell>
+                                  <TableCell className="px-4 py-3">
+                                    <Input type="number" className="h-8 text-sm font-semibold text-right font-mono tabular-nums" value={currentDispatchQty} onChange={(e) => {
                                       let val = Number(e.target.value);
                                       const maxVal = Number(maxLimit);
                                       if (val > maxVal) val = maxVal;
                                       setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], qty: val.toString() } }));
                                     }} />
                                   </TableCell>
-                                  <TableCell className="text-sm font-bold text-amber-700 p-3 text-center bg-amber-50/30">
-                                    ₹{taxableAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                  <TableCell className="text-sm font-bold text-amber-700 px-4 py-3 text-right font-mono tabular-nums bg-amber-50/30">
+                                    {fmtNum(taxableAmt, 2)}
                                   </TableCell>
                                 </TableRow>
                               );
@@ -1735,12 +1751,12 @@ export default function DispatchMaterialPage() {
                             <TableRow className="bg-slate-50/50">
                               <TableCell colSpan={6} className="text-right py-2 pr-4">
                                 <span className="text-xs font-semibold text-slate-600">Transporting Expenses</span>
-                                <span className="text-[10px] font-medium text-slate-400 ml-2">(Max Allowable: ₹0.00)</span>
+                                <span className="text-[10px] font-medium text-slate-400 ml-2">(Max Allowable (₹): 0.00)</span>
                               </TableCell>
-                              <TableCell className="p-2">
-                                <Input 
-                                  type="number" 
-                                  className="h-8 text-sm font-semibold text-center bg-white" 
+                              <TableCell className="px-4 py-2">
+                                <Input
+                                  type="number"
+                                  className="h-8 text-sm font-semibold text-right font-mono tabular-nums bg-white"
                                   placeholder="Enter Amount"
                                   value={transportingExpenses[selectedItems[0]?._rowKey || 'default'] || ""} 
                                   onChange={(e) => setTransportingExpenses(prev => ({ ...prev, [selectedItems[0]?._rowKey || 'default']: e.target.value }))} 
@@ -1794,7 +1810,7 @@ export default function DispatchMaterialPage() {
                                         <span className="text-xs font-semibold text-slate-500 tracking-wider">GST Rate (%):</span>
                                         <Input 
                                           type="number" 
-                                          className="h-8 w-20 text-sm font-semibold text-center bg-white" 
+                                          className="h-8 w-20 text-sm font-semibold text-right font-mono tabular-nums bg-white" 
                                           placeholder="e.g. 5"
                                           value={gstRates[groupId] ?? "5"}
                                           onChange={(e) => setGstRates(prev => ({ ...prev, [groupId]: e.target.value }))}
@@ -1802,36 +1818,36 @@ export default function DispatchMaterialPage() {
                                       </div>
                                     </div>
                                   </TableCell>
-                                  <TableCell className="p-2" />
+                                  <TableCell className="px-4 py-2" />
                                 </TableRow>
                                 <TableRow>
-                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value:</span></TableCell>
-                                  <TableCell className="py-1.5 text-center text-sm font-bold text-slate-800">₹{totalTaxable.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-bold text-slate-800">{fmtNum(totalTaxable, 2)}</TableCell>
                                 </TableRow>
                                 {!isIgstSelected ? (
                                   <>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST ({gstRate / 2}%):</span></TableCell>
-                                      <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{cgst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST ({gstRate / 2}%) (₹):</span></TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(cgst, 2)}</TableCell>
                                     </TableRow>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST ({gstRate / 2}%):</span></TableCell>
-                                      <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{sgst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST ({gstRate / 2}%) (₹):</span></TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(sgst, 2)}</TableCell>
                                     </TableRow>
                                   </>
                                 ) : (
                                   <TableRow>
-                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST ({gstRate}%):</span></TableCell>
-                                    <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{igst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</TableCell>
+                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST ({gstRate}%) (₹):</span></TableCell>
+                                    <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(igst, 2)}</TableCell>
                                   </TableRow>
                                 )}
                                 <TableRow>
-                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off:</span></TableCell>
-                                  <TableCell className="py-1.5 text-center text-sm font-medium text-slate-600">₹{roundingOff.toFixed(2)}</TableCell>
+                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{roundingOff.toFixed(2)}</TableCell>
                                 </TableRow>
                                 <TableRow className="bg-blue-50/50">
-                                  <TableCell colSpan={6} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount:</span></TableCell>
-                                  <TableCell className="py-3 text-center text-base font-bold text-blue-700">₹{roundedTotal.toLocaleString('en-IN')}</TableCell>
+                                  <TableCell colSpan={6} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-3 text-right font-mono tabular-nums text-base font-bold text-blue-700">{fmtNum(roundedTotal, 2)}</TableCell>
                                 </TableRow>
                               </tfoot>
                             )
@@ -1871,23 +1887,23 @@ export default function DispatchMaterialPage() {
 
                                 <div className="grid grid-cols-2 gap-3 text-xs">
                                   <div className="rounded-md bg-slate-50 p-2">
-                                    <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                    <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
+                                    <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                                    <p className="mt-1 font-mono font-bold text-slate-700">{prod.rate ? fmtNum(prod.rate, 2) : "—"}</p>
                                   </div>
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Approval</p>
-                                    <p className="mt-1 font-mono font-bold text-blue-600">{prod.approvalQty || "—"}</p>
+                                    <p className="mt-1 font-mono font-bold text-blue-600">{prod.approvalQty ? fmtNum(prod.approvalQty, 4) : "—"}</p>
                                   </div>
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Remaining</p>
-                                    <p className="mt-1 font-mono font-bold text-slate-700">{maxLimit}</p>
+                                    <p className="mt-1 font-mono font-bold text-slate-700">{fmtNum(maxLimit, 4)}</p>
                                   </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 gap-3">
                                   <div className="space-y-2">
                                     <Label className="text-[10px] font-black uppercase text-slate-400">Qty to Dispatch</Label>
-                                    <Input type="number" className="h-9 text-xs font-bold" value={currentDispatchQty} onChange={(e) => {
+                                    <Input type="number" className="h-9 text-xs font-bold text-right font-mono tabular-nums" value={currentDispatchQty} onChange={(e) => {
                                       let val = Number(e.target.value);
                                       const maxVal = Number(maxLimit);
                                       if (val > maxVal) val = maxVal;
@@ -1950,29 +1966,6 @@ export default function DispatchMaterialPage() {
                               </div>
                             );
                           })}
-
-                          <div className="grid grid-cols-3 gap-2 rounded-lg border bg-slate-50 p-3 text-xs">
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Approval</p>
-                              <p className="mt-1 font-black text-blue-700">{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Dispatch</p>
-                              <p className="mt-1 font-black text-green-700">{allProducts.reduce((sum: number, p: any) => {
-                                const rowKey = p._rowKey;
-                                const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                return sum + (parseFloat(currentDispatchQty) || 0);
-                              }, 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Remaining</p>
-                              <p className="mt-1 font-black text-slate-700">{allProducts.reduce((sum: number, p: any) => {
-                                const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                return sum + (parseFloat(maxLimit) || 0);
-                              }, 0)}</p>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     </div>

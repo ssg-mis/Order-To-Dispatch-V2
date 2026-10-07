@@ -5,13 +5,12 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { returnApi } from "@/lib/api-service"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeftRight, Loader2, Printer, Undo2 } from "lucide-react"
+import { ArrowLeftRight, Printer, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN") : "—")
+import { fmtDate, fmtNum } from "@/lib/table-format"
 
 const statusClass = (s: string) =>
   cn(
@@ -22,6 +21,46 @@ const statusClass = (s: string) =>
     s?.startsWith("Awaiting Unloading") || s?.startsWith("Awaiting Documents") ? "bg-violet-100 text-violet-700" : "",
     s === "Awaiting Approval" ? "bg-slate-100 text-slate-700" : "",
   )
+
+
+const txt = (v: any) => (v === null || v === undefined || v === "" ? "—" : String(v))
+const qtyCol = (): StageDataCol<any> => ({
+  id: "qty", label: "Qty", type: "number", align: "right", cellClassName: "min-w-[110px]", accessor: (s) => Number(s.qty) || 0, tone: "blue",
+  render: (s) => <span className="font-mono tabular-nums">{fmtNum(Number(s.qty) || 0, 4)}</span>,
+})
+const statusCol = (): StageDataCol<any> => ({
+  id: "status", label: "Status", align: "left", accessor: (s) => s.status,
+  render: (s) => <Badge className={statusClass(s.status)}>{s.status}</Badge>,
+})
+const productsCol = (): StageDataCol<any> => ({
+  id: "products", label: "Products", align: "left", accessor: (s) => s.products,
+  render: (s) => <span className="block max-w-[220px] truncate" title={s.products || ""}>{txt(s.products)}</span>,
+})
+const dateCol = (): StageDataCol<any> => ({
+  id: "do_date", label: "DO Date", type: "date", align: "right", cellClassName: "min-w-[110px] font-mono tabular-nums", accessor: (s) => s.party_so_date || s.created_at,
+  render: (s) => fmtDate(s.party_so_date || s.created_at),
+})
+const doCol = (): StageDataCol<any> => ({
+  id: "order_no", label: "Return DO", align: "left", accessor: (s) => s.order_no,
+  render: (s) => <span className="font-bold text-slate-700">{s.order_no}</span>,
+})
+const reasonCol = (): StageDataCol<any> => ({ id: "reason", label: "Reason", align: "left", accessor: (s) => s.return_reason, render: (s) => txt(s.return_reason) })
+
+const SALES_COLUMNS: StageDataCol<any>[] = [
+  dateCol(), doCol(),
+  { id: "customer", label: "Customer", align: "left", accessor: (s) => s.customer_name, cellClassName: "font-medium", render: (s) => txt(s.customer_name) },
+  { id: "invoice", label: "Original Invoice", align: "left", accessor: (s) => s.invoice_no, render: (s) => txt(s.invoice_no) },
+  productsCol(), qtyCol(), reasonCol(), statusCol(),
+]
+
+const STOCK_COLUMNS: StageDataCol<any>[] = [
+  dateCol(), doCol(),
+  { id: "original", label: "Original Transfer", align: "left", accessor: (s) => s.original_order_no, render: (s) => s.original_order_no },
+  { id: "from_depot", label: "From Depot", align: "left", accessor: (s) => s.from_depot, render: (s) => txt(s.from_depot) },
+  { id: "returned_to", label: "Returned To", align: "left", accessor: (s) => s.to_depot || s.to_customer, render: (s) => txt(s.to_depot || s.to_customer) },
+  productsCol(), qtyCol(), reasonCol(), statusCol(),
+]
+const fmtQty = (n: number) => n.toFixed(4)
 
 // Stage 17 - Return: where a return is raised. The pipeline steps that follow live on their own pages
 // (Stage 18 Unload Returned Stock, Stage 19 Issue Documents Against Returned Stock).
@@ -88,87 +127,33 @@ export default function ReturnPage() {
       </div>
 
       {/* Sales returns */}
-      <div className="space-y-2">
-        <div>
-          <h2 className="text-sm font-bold text-slate-800">Sales Returns</h2>
-          <p className="text-xs text-slate-500">Customer returns and where each one is in the pipeline.</p>
-        </div>
-        <Card className="gap-0 overflow-hidden border-none py-0 shadow-sm">
-          <div className="max-h-[360px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  {["DO Date", "Return DO", "Customer", "Original Invoice", "Products", "Qty", "Reason", "Status"].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loadingSales ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
-                ) : salesReturns.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-slate-500">No sales returns yet.</TableCell></TableRow>
-                ) : (
-                  salesReturns.map((s: any) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="text-center text-xs">{fmtDate(s.party_so_date || s.created_at)}</TableCell>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{s.order_no}</TableCell>
-                      <TableCell className="text-center text-xs font-medium">{s.customer_name || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{s.invoice_no || "—"}</TableCell>
-                      <TableCell className="max-w-[220px] truncate text-center text-xs" title={s.products || ""}>{s.products || "—"}</TableCell>
-                      <TableCell className="text-center text-xs font-semibold tabular-nums">{Number(s.qty) || 0}</TableCell>
-                      <TableCell className="text-center text-xs">{s.return_reason || "—"}</TableCell>
-                      <TableCell className="text-center"><Badge className={statusClass(s.status)}>{s.status}</Badge></TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      </div>
+      <StageDataCard
+        storageKey="return-sales"
+        title="Sales Returns"
+        description="Customer returns and where each one is in the pipeline."
+        rows={salesReturns}
+        columns={SALES_COLUMNS}
+        rowKey={(s: any) => s.id}
+        loading={loadingSales}
+        emptyText="No sales returns yet."
+        statusOf={(s: any) => s.status}
+        format={fmtQty}
+      />
 
       {/* Stock returns */}
-      <div className="space-y-2">
-        <div>
-          <h2 className="text-sm font-bold text-slate-800">Stock Returns</h2>
-          <p className="text-xs text-slate-500">Depot-to-Banari / depot-to-depot returns, raised as a Stock Transfer against the original transfer.</p>
-        </div>
-        <Card className="gap-0 overflow-hidden border-none py-0 shadow-sm">
-          <div className="max-h-[360px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  {["DO Date", "Return DO", "Original Transfer", "From Depot", "Returned To", "Products", "Qty", "Reason", "Status"].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loadingStock ? (
-                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
-                ) : stockReturns.length === 0 ? (
-                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-slate-500">No stock returns yet.</TableCell></TableRow>
-                ) : (
-                  stockReturns.map((s: any) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="text-center text-xs">{fmtDate(s.party_so_date || s.created_at)}</TableCell>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{s.order_no}</TableCell>
-                      <TableCell className="text-center text-xs">{s.original_order_no}</TableCell>
-                      <TableCell className="text-center text-xs">{s.from_depot || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{s.to_depot || s.to_customer || "—"}</TableCell>
-                      <TableCell className="max-w-[220px] truncate text-center text-xs" title={s.products || ""}>{s.products || "—"}</TableCell>
-                      <TableCell className="text-center text-xs font-semibold tabular-nums">{Number(s.qty) || 0}</TableCell>
-                      <TableCell className="text-center text-xs">{s.return_reason || "—"}</TableCell>
-                      <TableCell className="text-center"><Badge className={statusClass(s.status)}>{s.status}</Badge></TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      </div>
+      <StageDataCard
+        storageKey="return-stock"
+        title="Stock Returns"
+        description="Depot-to-Banari / depot-to-depot returns, raised as a Stock Transfer against the original transfer."
+        rows={stockReturns}
+        columns={STOCK_COLUMNS}
+        rowKey={(s: any) => s.id}
+        loading={loadingStock}
+        emptyText="No stock returns yet."
+        statusOf={(s: any) => s.status}
+        selects={[{ id: "from", allLabel: "All From Depots", getValue: (s: any) => s.from_depot }]}
+        format={fmtQty}
+      />
     </div>
   )
 }

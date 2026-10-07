@@ -71,6 +71,8 @@ const PAGE_ACCESS_OPTIONS = [
   "Return",
   "Unload Returned Stock",
   "Issue Documents Against Returned Stock",
+  "Transport Bills",
+  "Diesel Bills",
   "Gate In",
   "Variable Parameters",
   "Settings",
@@ -1212,6 +1214,30 @@ export default function SettingsPage() {
                   />
                   <Label htmlFor="feature-can_reorder_columns" className="text-sm cursor-pointer font-normal">
                     Can reorder columns
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-can_approve_transport_bills"
+                    checked={!!formData.features.can_approve_transport_bills}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_approve_transport_bills: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_approve_transport_bills" className="text-sm cursor-pointer font-normal">
+                    Can approve Transport Bills
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-can_approve_diesel_bills"
+                    checked={!!formData.features.can_approve_diesel_bills}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_approve_diesel_bills: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_approve_diesel_bills" className="text-sm cursor-pointer font-normal">
+                    Can approve Diesel Bills
                   </Label>
                 </div>
                 <div className="flex items-center gap-2">

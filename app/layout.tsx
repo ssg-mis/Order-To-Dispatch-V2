@@ -95,6 +95,8 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/return-gate-pass": "Return",
         "/unload-returned-stock": "Unload Returned Stock",
         "/issue-return-documents": "Issue Documents Against Returned Stock",
+        "/transport-bills": "Transport Bills",
+        "/diesel-bills": "Diesel Bills",
         "/gate-in": "Gate In",
         "/variable-parameters": "Variable Parameters",
         "/settings": "Settings",

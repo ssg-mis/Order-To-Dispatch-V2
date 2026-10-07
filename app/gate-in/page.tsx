@@ -2,7 +2,7 @@
 
 import { useRef, useState, useMemo, useCallback, useEffect } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,13 +15,25 @@ import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
 import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer, Download } from "lucide-react"
+import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer, Download, Calendar as CalendarIconLucide } from "lucide-react"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
+  StageActiveChips, StageSortIcon, type StageTotalTone,
+} from "@/components/stage-list"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
+import { fmtNum } from "@/lib/table-format"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -169,16 +181,16 @@ const PAGE_COLUMNS = [
   { id: "endDate",               label: "End Date" },
   { id: "deliveryDate",          label: "Delivery Date" },
   { id: "oilType",               label: "Oil Type" },
-  { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
-  { id: "ratePerLtr",            label: "Rate Per Ltr." },
+  { id: "ratePer15Kg",           label: "Rate Per 15 kg (₹)" },
+  { id: "ratePerLtr",            label: "Rate Per Ltr. (₹)" },
   { id: "productName",           label: "Product Name" },
-  { id: "products",              label: "Products" },
+  { id: "products",              label: "Products (Items)" },
   { id: "uom",                   label: "UOM" },
   { id: "orderQty",              label: "Order Qty" },
   { id: "altUom",                label: "Alt UOM" },
   { id: "altQty",                label: "Alt Qty (Kg)" },
-  { id: "rateOfMaterial",        label: "Rate of Material" },
-  { id: "rate",                  label: "Rate" },
+  { id: "rateOfMaterial",        label: "Rate of Material (₹)" },
+  { id: "rate",                  label: "Rate (₹)" },
   { id: "skuName",               label: "SKU Name" },
   { id: "approvalQty",           label: "Approval Qty" },
   { id: "qtyToDispatch",         label: "Qty to Dispatch" },
@@ -186,14 +198,14 @@ const PAGE_COLUMNS = [
   { id: "processId",             label: "Manual Sauda No." },
   { id: "vehicle_no",            label: "Vehicle No." },
   { id: "driver_name",           label: "Driver Name" },
-  { id: "totalWithGst",          label: "Total Amount with GST" },
+  { id: "totalWithGst",          label: "Total Amount with GST (₹)" },
   { id: "transportType",         label: "Type of Transporting" },
   { id: "contactPerson",         label: "Customer Contact Person Name" },
   { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
   { id: "address",               label: "Customer Address" },
   { id: "paymentTerms",          label: "Payment Terms" },
   { id: "advanceTaken",          label: "Advance Payment to be Taken" },
-  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "advanceAmount",         label: "Advance Amount (₹)" },
   { id: "isBroker",              label: "Is this order Through Broker" },
   { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
   { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
@@ -245,6 +257,56 @@ const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
 }
 const DATE_COL_IDS = new Set<ColId>(["partySoDate", "startDate", "endDate", "deliveryDate"])
 const BOOL_COL_IDS = new Set<ColId>(["advanceTaken", "isBroker"])
+const NUMBER_COL_IDS = new Set<ColId>(["ratePer15Kg", "ratePerLtr", "rateOfMaterial", "rate", "orderQty", "altQty", "approvalQty", "qtyToDispatch", "totalWithGst", "advanceAmount"])
+const GATE_RIGHT_COLS = new Set<string>([...DATE_COL_IDS, ...NUMBER_COL_IDS, "saved_at", "products"])
+const GATE_DECIMALS: Record<string, number> = {
+  ratePer15Kg: 2, ratePerLtr: 2, rateOfMaterial: 2, rate: 2, totalWithGst: 2, advanceAmount: 2,
+  orderQty: 4, altQty: 4, approvalQty: 4, qtyToDispatch: 4, products: 0,
+}
+const gateMinW = (id: string) => (GATE_RIGHT_COLS.has(id) ? "min-w-[130px]" : "")
+const TOTAL_COL_TONES: Record<string, StageTotalTone> = {
+  altQty: "blue",
+  totalWithGst: "emerald", advanceAmount: "emerald",
+}
+
+// One table row = one vehicle/date group of gate-in records.
+interface GateGroup {
+  key: string
+  vehicleNumber: string
+  date: string
+  records: any[]
+  first: any
+  orderKeys: string[]
+}
+
+const gateAccessor = (colId: ColId) => (g: GateGroup): string | number | null => {
+  const first = g.first
+  switch (colId) {
+    case "orderNo": return g.orderKeys.join(", ")
+    case "vehicle_no": return first.draft_data?.vehicleNumber || ""
+    case "driver_name": return first.draft_data?.driverName || ""
+    case "saved_by": return first.username || ""
+    case "saved_at": return first.saved_at || null
+    case "products": return first.draft_data?.dialogSelectedProducts?.length || 0
+    default: {
+      const f = COL_FIELD_MAP[colId]
+      if (!f) return null
+      const v = first[f]
+      if (BOOL_COL_IDS.has(colId)) return v ? "Yes" : "No"
+      if (v === undefined || v === null) return null
+      if (NUMBER_COL_IDS.has(colId)) return parseFloat(v) || 0
+      return v
+    }
+  }
+}
+
+const GATE_TABLE_COLUMNS: StageColDef<GateGroup>[] = PAGE_COLUMNS.map(c => ({
+  id: c.id,
+  label: c.label,
+  type: DATE_COL_IDS.has(c.id) || c.id === "saved_at" ? "date" : (NUMBER_COL_IDS.has(c.id) || c.id === "products") ? "number" : "text",
+  accessor: gateAccessor(c.id),
+  total: TOTAL_COL_TONES[c.id] !== undefined,
+}))
 
 // ─── GST helpers ─────────────────────────────────────────────────────────────
 
@@ -317,30 +379,30 @@ function GateInGSTSummary({ records }: { records: any[] }) {
       </div>
       <div className="p-4 max-w-sm ml-auto space-y-2">
         <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
+          <span className="font-black uppercase text-slate-500 text-[10px]">Taxable Amount (₹)</span>
+          <span className="font-mono font-bold text-slate-700">{totalTaxable.toFixed(2)}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
+          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%) (₹)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `${cgst.toFixed(2)}` : "—"}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
+          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%) (₹)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `${sgst.toFixed(2)}` : "—"}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
+          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%) (₹)</span>
+          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `${igst.toFixed(2)}` : "—"}</span>
         </div>
         <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
+          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff > 0 ? `+${roundOff.toFixed(2)}` : roundOff < 0 ? `-${Math.abs(roundOff).toFixed(2)}` : `0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
-          <span className="font-black uppercase text-slate-800 text-[11px]">Estimated Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-black uppercase text-slate-800 text-[11px]">Estimated Invoice Amount (₹)</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal.toFixed(2)}</span>
         </div>
       </div>
     </div>
@@ -483,66 +545,69 @@ export default function GateInPage() {
 
   // ── Select helpers ─────────────────────────────────────────────────────────
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Pending table: one row per vehicle/date group, with shared column search / sort / totals ──
+  // Session-scoped (usePersistedFilters): survives refresh, cleared on a new session. Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("gate-in", {
+    quickSearch: "",
+    vehicleFilter: "ALL",
+    driverFilter: "ALL",
+    customerFilter: "ALL",
+  })
+  const { quickSearch, vehicleFilter, driverFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setVehicleFilter = (v: string) => patchListView({ vehicleFilter: v })
+  const setDriverFilter = (v: string) => patchListView({ driverFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts pendingRecords by any field key
-  const getSortValue = (record: any, colId: string): string => {
-    if (colId === "vehicle_no") {
-      return String(record.draft_data?.vehicleNumber || "—")
-    }
-    if (colId === "driver_name") {
-      return String(record.draft_data?.driverName || "—")
-    }
-    if (colId === "saved_at") {
-      return record.saved_at ? new Date(record.saved_at).toISOString() : ""
-    }
-    const directVal = record[colId]
-    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
-    return "—"
-  }
-
-  const sortedPendingRecords = useMemo(() => {
-    if (!pendingSortField || !pendingRecords || pendingRecords.length === 0) return pendingRecords
-    return [...pendingRecords].sort((a: any, b: any) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [pendingRecords, pendingSortField, pendingSortDir])
-
-  const groupedPendingRecords = useMemo(() => {
-    const groups = new Map<string, { vehicleNumber: string; date: string; records: any[] }>()
-    for (const record of sortedPendingRecords) {
+  const allGroups = useMemo<GateGroup[]>(() => {
+    const groups = new Map<string, GateGroup>()
+    for (const record of pendingRecords) {
       const vehicleNo = record.draft_data?.vehicleNumber || "—"
       const dateOnly = record.saved_at
         ? new Date(record.saved_at).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
         : "—"
       const key = `${vehicleNo}|${dateOnly}`
-      if (!groups.has(key)) groups.set(key, { vehicleNumber: vehicleNo, date: dateOnly, records: [] })
-      groups.get(key)!.records.push(record)
+      if (!groups.has(key)) groups.set(key, { key, vehicleNumber: vehicleNo, date: dateOnly, records: [], first: record, orderKeys: [] })
+      const g = groups.get(key)!
+      g.records.push(record)
+      g.orderKeys.push(record.order_key)
     }
     return Array.from(groups.values())
-  }, [sortedPendingRecords])
+  }, [pendingRecords])
+
+  const uniqueVehicles = useMemo(() => Array.from(new Set(allGroups.map(g => g.first.draft_data?.vehicleNumber).filter(Boolean))).sort() as string[], [allGroups])
+  const uniqueDrivers = useMemo(() => Array.from(new Set(allGroups.map(g => g.first.draft_data?.driverName).filter(Boolean))).sort() as string[], [allGroups])
+  const uniqueCustomers = useMemo(() => Array.from(new Set(allGroups.flatMap(g => g.records.map((r: any) => r.party_name)).filter(Boolean))).sort() as string[], [allGroups])
+
+  const baseFilter = useCallback((g: GateGroup) => {
+    if (vehicleFilter !== "ALL" && g.first.draft_data?.vehicleNumber !== vehicleFilter) return false
+    if (driverFilter !== "ALL" && g.first.draft_data?.driverName !== driverFilter) return false
+    if (customerFilter !== "ALL" && !g.records.some((r: any) => r.party_name === customerFilter)) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [
+        ...g.orderKeys,
+        g.first.draft_data?.vehicleNumber,
+        g.first.draft_data?.driverName,
+        g.first.username,
+        ...g.records.map((r: any) => r.party_name),
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  }, [vehicleFilter, driverFilter, customerFilter, quickSearch])
+
+  const table = useStageTable<GateGroup>({ rows: allGroups, columns: GATE_TABLE_COLUMNS, baseFilter, persistKey: "gate-in" })
+  const groupedPendingRecords = table.rows
+  const filteredRecords = useMemo(() => groupedPendingRecords.flatMap(g => g.records), [groupedPendingRecords])
+
+  const activeFiltersCount =
+    (vehicleFilter !== "ALL" ? 1 : 0) + (driverFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ vehicleFilter: "ALL", driverFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", ["partySoDate", "orderNo", "vehicle_no", "driver_name", "saved_by", "saved_at", "products"])
   const [columnOrder, setColumnOrder] = useColumnOrder("gate-in", PAGE_COLUMNS.map(c => c.id))
@@ -552,21 +617,19 @@ export default function GateInPage() {
       .filter((c): c is typeof PAGE_COLUMNS[number] => !!c && visibleColumns.includes(c.id as ColId)),
     [columnOrder, visibleColumns]
   )
+  const totalsColumns = useMemo<StageColDef<GateGroup>[]>(
+    () => [{ id: "__sel", label: "" }, ...orderedVisibleCols.map(c => GATE_TABLE_COLUMNS.find(t => t.id === c.id)!)],
+    [orderedVisibleCols]
+  )
   const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
     const hiddenCols = columnOrder.filter(id => !visibleColumns.includes(id as ColId))
     setColumnOrder([...newVisibleOrder, ...hiddenCols])
   }, [columnOrder, visibleColumns, setColumnOrder])
 
-  const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    vehicle_no:  "vehicle_no",
-    driver_name: "driver_name",
-    saved_by:    "saved_by",
-    saved_at:    "saved_at",
-  }
-
   const toggleSelectAll = () => {
-    if (selectedRows.length === pendingRecords.length) setSelectedRows([])
-    else setSelectedRows(pendingRecords.map((r: any) => r.order_key))
+    const keys = filteredRecords.map((r: any) => r.order_key)
+    if (keys.length > 0 && keys.every(k => selectedRows.includes(k))) setSelectedRows(prev => prev.filter(k => !keys.includes(k)))
+    else setSelectedRows(prev => [...new Set([...prev, ...keys])])
   }
 
   const toggleRow = (key: string) => {
@@ -844,6 +907,7 @@ const buildSlipParties = () => {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <WorkflowStageShell
+      persistKey="gate-in"
       title="Stage 6: Gate In"
       description="Record vehicle gate-in photos before Actual Dispatch confirmation."
       pendingCount={pendingRecords.length}
@@ -903,22 +967,155 @@ const buildSlipParties = () => {
             Gate In Selected ({selectedRows.length})
           </Button>
 
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="bg-transparent">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
-        {/* Pending cards for mobile */}
-        <div className="md:hidden space-y-3">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Gate In List"
+            shown={groupedPendingRecords.length}
+            total={allGroups.length}
+            description="Vehicles waiting for gate-in photos"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Vehicle, Driver..."
+          >
+            <StageToolbar
+              shown={groupedPendingRecords.length}
+              total={allGroups.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllFilters}
+              filters={
+                <>
+                  <StageFilterSelect value={vehicleFilter} onChange={setVehicleFilter} allLabel="All Vehicles" options={uniqueVehicles} />
+                  <StageFilterSelect value={driverFilter} onChange={setDriverFilter} allLabel="All Drivers" options={uniqueDrivers} />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                  <StageDivider />
+                  <StageColumnsMenu
+                    columns={[...PAGE_COLUMNS]}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={(isAdmin || isFeatureEnabled('can_toggle_columns'))}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(vehicleFilter !== "ALL" ? [{ label: `Vehicle: ${vehicleFilter}`, onClear: () => setVehicleFilter("ALL") }] : []),
+                ...(driverFilter !== "ALL" ? [{ label: `Driver: ${driverFilter}`, onClear: () => setDriverFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+            <div className="hidden overflow-x-auto md:block">
+              <Table>
+              <StageTableHeaderRows
+                columns={orderedVisibleCols.map(c => GATE_TABLE_COLUMNS.find(t => t.id === c.id)!)}
+                table={table}
+                leading={
+                  <Checkbox
+                    checked={filteredRecords.length > 0 && filteredRecords.every((r: any) => selectedRows.includes(r.order_key))}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                }
+                alwaysShowTotals
+                decimals={GATE_DECIMALS}
+                tones={TOTAL_COL_TONES}
+                onReorder={handleColumnReorder}
+                dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+              />
+            <TableBody>
+              {isPendingLoading && pendingRecords.length === 0 ? (
+                [...Array(5)].map((_, i) => (
+                  <TableRow key={i} className="opacity-40">
+                    {[...Array(orderedVisibleCols.length + 1)].map((_, j) => (
+                      <TableCell key={j} className="py-4">
+                        <div className="h-4 w-full bg-slate-200 animate-pulse rounded" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : pendingRecords.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
+                    No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
+                  </TableCell>
+                </TableRow>
+              ) : groupedPendingRecords.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                    <p className="font-medium text-slate-500">No matching records found</p>
+                    <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                      Clear Filters
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                groupedPendingRecords.map(group => {
+                  const first = group.records[0]
+                  const draft = first.draft_data || {}
+                  const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
+                  const orderKeys = group.records.map((r: any) => r.order_key)
+                  const allSelected = orderKeys.every(k => selectedRows.includes(k))
+                  return (
+                    <TableRow
+                      key={orderKeys.join(",")}
+                      className={`transition-colors cursor-pointer hover:bg-blue-50/50 ${allSelected ? "bg-blue-50" : ""}`}
+                    >
+                      <TableCell className="text-left px-4">
+                        <Checkbox
+                          checked={allSelected}
+                          onCheckedChange={() => {
+                            if (allSelected) setSelectedRows(prev => prev.filter(k => !orderKeys.includes(k)))
+                            else setSelectedRows(prev => [...new Set([...prev, ...orderKeys])])
+                          }}
+                        />
+                      </TableCell>
+                      {orderedVisibleCols.map(col => {
+                        switch (col.id) {
+                          case "orderNo":
+                            return (
+                              <TableCell key={col.id} className="px-4 text-xs text-blue-700 font-bold">
+                                {orderKeys.map(k => <div key={k} className="whitespace-nowrap">{k}</div>)}
+                              </TableCell>
+                            )
+                          case "vehicle_no":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{draft.vehicleNumber || "—"}</TableCell>
+                          case "driver_name":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{draft.driverName || "—"}</TableCell>
+                          case "saved_by":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{first.username}</TableCell>
+                          case "saved_at":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right tabular-nums">{group.date}</TableCell>
+                          case "products":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{fmtNum(totalProducts, 0)}</TableCell>
+                          default: {
+                            const fieldName = COL_FIELD_MAP[col.id as ColId]
+                            if (!fieldName) return null
+                            const val = first[fieldName]
+                            if (DATE_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right tabular-nums">{formatDate(val)}</TableCell>
+                            }
+                            if (BOOL_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
+                            }
+                            if (NUMBER_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{fmtNum(val, GATE_DECIMALS[col.id] ?? 2)}</TableCell>
+                            }
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ?? "—"}</TableCell>
+                          }
+                        }
+                      })}
+                    </TableRow>
+                  )
+                })
+              )}
+            </TableBody>
+          </Table>
+            </div>
+
+            <div className="space-y-3 p-3 md:hidden">
           {isPendingLoading && pendingRecords.length === 0 ? (
             [...Array(3)].map((_, i) => (
               <Card key={i} className="border-slate-200 p-4 shadow-sm">
@@ -934,7 +1131,12 @@ const buildSlipParties = () => {
               No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
             </Card>
           ) : (
-            groupedPendingRecords.map(group => {
+            groupedPendingRecords.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-slate-500">No matching records found</p>
+              <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+            </div>
+          ) : groupedPendingRecords.map(group => {
               const first = group.records[0]
               const draft = first.draft_data || {}
               const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
@@ -987,111 +1189,7 @@ const buildSlipParties = () => {
             })
           )}
         </div>
-
-        {/* Pending table */}
-        <Card className="hidden md:block border-none shadow-sm overflow-auto max-h-150">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={pendingRecords.length > 0 && selectedRows.length === pendingRecords.length}
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map(col => {
-                    const sf = COL_SORT_FIELD[col.id]
-                    return (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
-                        onClick={sf ? () => handlePendingSort(sf) : undefined}
-                      >
-                        {col.label}{sf && <PendingSortIcon field={sf} />}
-                      </SortableTableHead>
-                    )
-                  })}
-                </ColumnDragProvider>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPendingLoading && pendingRecords.length === 0 ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="opacity-40">
-                    {[...Array(orderedVisibleCols.length + 1)].map((_, j) => (
-                      <TableCell key={j} className="py-4">
-                        <div className="h-4 w-full bg-slate-200 animate-pulse rounded" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : pendingRecords.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
-                    No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                groupedPendingRecords.map(group => {
-                  const first = group.records[0]
-                  const draft = first.draft_data || {}
-                  const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
-                  const orderKeys = group.records.map((r: any) => r.order_key)
-                  const allSelected = orderKeys.every(k => selectedRows.includes(k))
-                  return (
-                    <TableRow
-                      key={orderKeys.join(",")}
-                      className={`transition-colors cursor-pointer hover:bg-blue-50/50 ${allSelected ? "bg-blue-50" : ""}`}
-                    >
-                      <TableCell className="text-center">
-                        <Checkbox
-                          checked={allSelected}
-                          onCheckedChange={() => {
-                            if (allSelected) setSelectedRows(prev => prev.filter(k => !orderKeys.includes(k)))
-                            else setSelectedRows(prev => [...new Set([...prev, ...orderKeys])])
-                          }}
-                        />
-                      </TableCell>
-                      {orderedVisibleCols.map(col => {
-                        switch (col.id) {
-                          case "orderNo":
-                            return (
-                              <TableCell key={col.id} className="text-center text-xs text-blue-700 font-bold">
-                                {orderKeys.map(k => <div key={k} className="whitespace-nowrap">{k}</div>)}
-                              </TableCell>
-                            )
-                          case "vehicle_no":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.vehicleNumber || "—"}</TableCell>
-                          case "driver_name":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.driverName || "—"}</TableCell>
-                          case "saved_by":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{first.username}</TableCell>
-                          case "saved_at":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{group.date}</TableCell>
-                          case "products":
-                            return <TableCell key={col.id} className="text-center"><Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">{totalProducts} item(s)</Badge></TableCell>
-                          default: {
-                            const fieldName = COL_FIELD_MAP[col.id as ColId]
-                            if (!fieldName) return null
-                            const val = first[fieldName]
-                            if (DATE_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{formatDate(val)}</TableCell>
-                            }
-                            if (BOOL_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
-                            }
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ?? "—"}</TableCell>
-                          }
-                        }
-                      })}
-                    </TableRow>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
+          </CardContent>
         </Card>
 
         {/* Pagination */}
@@ -1205,13 +1303,34 @@ const buildSlipParties = () => {
                       {/* Desktop table */}
                       <Table className="hidden md:table">
                         <TableHeader className="bg-slate-50">
+                          <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                            <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({selectedGroupRecords.length})</TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => {
+                                    const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                    return sum + skuWt * qty
+                                  }, 0))}
+                            </TableCell>
+                            <TableCell className="px-4" />
+                            <TableCell className="px-4" />
+                            <TableCell className="px-4" />
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => {
+                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
+                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
+                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                return sum + rateWoGst * qty
+                              }, 0), 2)}
+                            </TableCell>
+                          </TableRow>
                           <TableRow>
-                            <TableHead className="text-[10px] uppercase font-black h-10 pl-4">PRODUCT NAME</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT (KGS)</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY DISPATCH</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10 pr-4">TAXABLE AMOUNT</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap">Product Name</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[130px]">Weight (KGS)</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[150px]">Actual Qty Dispatch</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[190px]">Rate (Inc. with Taxes) (₹)</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[110px]">Rate (₹)</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[150px]">Taxable Amount (₹)</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1224,59 +1343,27 @@ const buildSlipParties = () => {
                             const totalWt = skuWt * qty
                             return (
                               <TableRow key={idx} className="h-14">
-                                <TableCell className="p-2 pl-4">
+                                <TableCell className="px-4 py-2">
                                   <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</span>
                                 </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-mono font-bold text-slate-700">
-                                  {totalWt ? totalWt.toFixed(4) : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {totalWt ? fmtNum(totalWt) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2">
-                                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                    {qty || "—"}
-                                  </Badge>
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-blue-700">
+                                  {qty ? fmtNum(qty) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                  {rate ? `₹${rate.toFixed(2)}` : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {rate ? fmtNum(rate, 2) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                  {rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {rateWoGst ? fmtNum(rateWoGst, 2) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2 pr-4 text-xs font-bold text-slate-700">
-                                  {taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {taxableAmount ? fmtNum(taxableAmount, 2) : "—"}
                                 </TableCell>
                               </TableRow>
                             )
                           })}
-                          <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                            <TableCell className="text-[10px] uppercase font-black text-slate-900 pl-4">Total</TableCell>
-                            <TableCell className="text-center">
-                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                                {(() => {
-                                  const total = selectedGroupRecords.reduce((sum, r) => {
-                                    const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
-                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
-                                    return sum + skuWt * qty
-                                  }, 0)
-                                  return total.toFixed(4)
-                                })()}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                                {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell />
-                            <TableCell />
-                            <TableCell className="text-center pr-4 text-xs text-blue-700 font-black">
-                              ₹{selectedGroupRecords.reduce((sum, r) => {
-                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
-                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
-                                return sum + rateWoGst * qty
-                              }, 0).toFixed(2)}
-                            </TableCell>
-                          </TableRow>
                         </TableBody>
                       </Table>
 
@@ -1295,57 +1382,51 @@ const buildSlipParties = () => {
                               <div className="grid grid-cols-2 gap-3 text-xs">
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{totalWt ? totalWt.toFixed(4) : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{totalWt ? fmtNum(totalWt) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                                  <p className="mt-1 font-mono font-bold text-blue-700">{qty || "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-blue-700">{qty ? fmtNum(qty) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{rate ? `₹${rate.toFixed(2)}` : "—"}</p>
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes) (₹)</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{rate ? fmtNum(rate, 2) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}</p>
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{rateWoGst ? fmtNum(rateWoGst, 2) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2 col-span-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtNum(taxableAmount, 2) : "—"}</p>
                                 </div>
                               </div>
                             </div>
                           )
                         })}
-                        <div className="grid grid-cols-3 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
+                        <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
                           <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                            <p className="mt-1 font-black text-blue-700">
-                              {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
-                            <p className="mt-1 font-black text-blue-700">
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Weight (KGS)</p>
+                            <p className="mt-1 font-mono tabular-nums font-black text-blue-700">
                               {(() => {
                                 const total = selectedGroupRecords.reduce((sum, r) => {
                                   const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
                                   const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                   return sum + skuWt * qty
                                 }, 0)
-                                return total.toFixed(4)
+                                return fmtNum(total)
                               })()}
                             </p>
                           </div>
                           <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Taxable Amount</p>
-                            <p className="mt-1 font-black text-blue-700">
-                              ₹{selectedGroupRecords.reduce((sum, r) => {
+                            <p className="text-[9px] uppercase font-black text-slate-500">Taxable Amount (₹)</p>
+                            <p className="mt-1 font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => {
                                 const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
                                 const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
                                 const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                 return sum + rateWoGst * qty
-                              }, 0).toFixed(2)}
+                              }, 0), 2)}
                             </p>
                           </div>
                         </div>

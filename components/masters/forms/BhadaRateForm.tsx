@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Route } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { depotApi, transportMasterApi } from "@/lib/api-service"
 import { STATUS_OPTIONS } from "../types"
 import { BhadaRateSectionalHistoryTable } from "@/components/bhada-rate-sectional-history-table"
 
@@ -30,6 +32,23 @@ export function BhadaRateForm({
       applyChange()
     }
   }
+
+  // Where the rate applies (all optional): from-depot and transporter come from their masters
+  const { data: depots = [] } = useQuery({
+    queryKey: ["bhada-form-depots"],
+    queryFn: async () => {
+      const res = await depotApi.getAll({ all: "true" })
+      return res.success ? (res.data?.depots || []) : []
+    },
+  })
+  const { data: transporters = [] } = useQuery({
+    queryKey: ["bhada-form-transporters"],
+    queryFn: async () => {
+      const res = await transportMasterApi.getAll({ all: "true" })
+      return res.success ? (res.data?.transporters || []) : []
+    },
+  })
+  const NONE = "__any__"
 
   return (
     <div className="space-y-5 py-2">
@@ -102,6 +121,77 @@ export function BhadaRateForm({
           />
         </div>
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <Label htmlFor="br_rate_type" className="text-xs font-semibold text-slate-800">Rate Type</Label>
+          <Select
+            value={bhadaRateForm.rate_type || "Bhada Rate"}
+            onValueChange={val => attemptChange("Rate Type", () => setBhadaRateForm((prev: any) => ({ ...prev, rate_type: val })))}
+          >
+            <SelectTrigger id="br_rate_type" className="w-full text-xs">
+              <SelectValue placeholder="Select rate type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Bhada Rate">Bhada Rate (₹ per MT)</SelectItem>
+              <SelectItem value="Fixed Bhada">Fixed Bhada (₹ per trip)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="br_destination" className="text-xs font-semibold text-slate-800">Destination</Label>
+          <Input
+            id="br_destination"
+            className="text-xs font-medium"
+            value={bhadaRateForm.destination || ""}
+            onChange={e => {
+              const val = e.target.value
+              attemptChange("Destination", () => setBhadaRateForm((prev: any) => ({ ...prev, destination: val })))
+            }}
+            placeholder="Town / district / state in the delivery address (optional)"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <Label htmlFor="br_depot" className="text-xs font-semibold text-slate-800">From Depot</Label>
+          <Select
+            value={bhadaRateForm.depot_id ? String(bhadaRateForm.depot_id) : NONE}
+            onValueChange={val => attemptChange("From Depot", () => setBhadaRateForm((prev: any) => ({ ...prev, depot_id: val === NONE ? null : Number(val) })))}
+          >
+            <SelectTrigger id="br_depot" className="w-full text-xs">
+              <SelectValue placeholder="Any depot" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>Any depot</SelectItem>
+              {depots.map((d: any) => (
+                <SelectItem key={d.id} value={String(d.id)}>{d.depot_name || d.depotName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="br_transporter" className="text-xs font-semibold text-slate-800">Transporter</Label>
+          <Select
+            value={bhadaRateForm.transporter_id ? String(bhadaRateForm.transporter_id) : NONE}
+            onValueChange={val => attemptChange("Transporter", () => setBhadaRateForm((prev: any) => ({ ...prev, transporter_id: val === NONE ? null : Number(val) })))}
+          >
+            <SelectTrigger id="br_transporter" className="w-full text-xs">
+              <SelectValue placeholder="Any transporter" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>Any transporter</SelectItem>
+              {transporters.map((t: any) => (
+                <SelectItem key={t.id} value={String(t.id)}>{t.transporter_name || t.transporterName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500 -mt-2">
+        Leave a field empty to match anything. When a transport bill is made, the most specific matching rate in force on the dispatch date is shown as its Planned Bhada Rate.
+      </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         <div className="space-y-1.5">

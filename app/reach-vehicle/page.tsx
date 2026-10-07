@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
@@ -27,15 +27,42 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+import { useColumnOrder } from "@/hooks/use-column-order"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips } from "@/components/stage-list"
+import { stageColumnChips } from "@/components/stage-list-extras"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
+
+const RV_COLUMNS: StageColDef<any>[] = [
+  { id: "orderNo", label: "Order No.", accessor: (r) => r.order?.orderNo },
+  { id: "customerName", label: "Customer Name", accessor: (r) => r.customer?.customerName },
+  { id: "vehicleNo", label: "Vehicle No.", accessor: (r) => r.vehicle?.registrationNo },
+  { id: "driver", label: "Driver", accessor: (r) => r.driver?.driverName },
+  { id: "transporter", label: "Transporter", accessor: (r) => r.transporter?.transporterName },
+  { id: "status", label: "Status", accessor: () => "Ready" },
+]
+const RV_COLUMN_IDS = RV_COLUMNS.map((c) => c.id)
 
 const FREIGHT_RATE_TYPES = ["PER TON", "PER LTR", "PER TIN", "PER KG", "FIXED"]
 
 export default function ReachVehiclePage() {
-  const { user, isReadOnly } = useAuth()
+  const { user, isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const { toast } = useToast()
   const queryClient = useQueryClient()
 
+  // Tab is remembered permanently by the shell (persistKey); filters / quick search are session-scoped.
+  // Refresh/reload only reloads data - never clears it. Reset (resetAllFilters) is the only way to clear.
+  const [listView, patchListView] = usePersistedFilters("reach-vehicle", {
+    quickSearch: "",
+    customerFilter: "ALL",
+  })
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
+  const { quickSearch, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
   const [filterValues, setFilterValues] = useState({
     status: "",
     startDate: "",
@@ -232,15 +259,75 @@ export default function ReachVehiclePage() {
   }
 
   const toggleSelectAll = () => {
-    if (data.length > 0 && selectedItems.length === data.length) setSelectedItems([])
-    else setSelectedItems(data.map((r: any) => r.id?.toString()).filter(Boolean))
+    const visibleIds = table.rows.map((r: any) => r.id?.toString()).filter(Boolean) as string[]
+    if (visibleIds.length > 0 && visibleIds.every((id) => selectedItems.includes(id))) setSelectedItems([])
+    else setSelectedItems(visibleIds)
   }
 
   const customerNames = Array.from(new Set(data.map((r: any) => r.customer?.customerName).filter(Boolean))) as string[]
   const totalPages = pendingData?.pagination?.totalPages || 1
 
+  // ── Stage list table (search / filters / sort / totals) ──
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns("reach-vehicle", RV_COLUMN_IDS)
+  const [columnOrder, setColumnOrder] = useColumnOrder("reach-vehicle", RV_COLUMN_IDS)
+  const orderedVisibleCols = useMemo(
+    () => columnOrder.map((id) => RV_COLUMNS.find((c) => c.id === id)).filter((c): c is StageColDef<any> => !!c && visibleColumns.includes(c.id)),
+    [columnOrder, visibleColumns]
+  )
+  const handleColumnReorder = useCallback(
+    (newVisibleOrder: string[]) => {
+      const hidden = columnOrder.filter((id) => !visibleColumns.includes(id))
+      setColumnOrder([...newVisibleOrder, ...hidden])
+    },
+    [columnOrder, visibleColumns, setColumnOrder]
+  )
+  const baseFilter = useCallback(
+    (r: any) => {
+      if (customerFilter !== "ALL" && r.customer?.customerName !== customerFilter) return false
+      const q = quickSearch.trim().toLowerCase()
+      if (q && !RV_COLUMNS.some((c) => String(c.accessor?.(r) ?? "").toLowerCase().includes(q))) return false
+      return true
+    },
+    [customerFilter, quickSearch]
+  )
+  const table = useStageTable({ rows: data, columns: RV_COLUMNS, baseFilter, persistKey: "reach-vehicle" })
+  const activeFiltersCount = table.activeColumnFilterCount + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0)
+  const resetAllFilters = () => {
+    patchListView({ customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const filterChips = [
+    ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+    ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+    ...stageColumnChips(table, RV_COLUMNS),
+  ]
+
+  const renderCell = (item: any, id: string) => {
+    switch (id) {
+      case "orderNo":
+        return <TableCell key={id} className="px-4 text-left text-xs text-blue-700 font-bold whitespace-nowrap">{item.order?.orderNo}</TableCell>
+      case "customerName":
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600"><span className="font-medium text-slate-700">{item.customer?.customerName}</span></TableCell>
+      case "vehicleNo":
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600 whitespace-nowrap">{item.vehicle?.registrationNo || "—"}</TableCell>
+      case "driver":
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.driver?.driverName || "—"}</TableCell>
+      case "transporter":
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.transporter?.transporterName || "—"}</TableCell>
+      case "status":
+        return (
+          <TableCell key={id} className="px-4 text-left">
+            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap">Ready</Badge>
+          </TableCell>
+        )
+      default:
+        return null
+    }
+  }
+
   return (
     <WorkflowStageShell
+      persistKey="reach-vehicle"
       partyNames={customerNames}
       title="Stage 13: Reach Vehicle"
       description="Record vehicle arrival, accidents, or vehicle changes during transit."
@@ -285,134 +372,161 @@ export default function ReachVehiclePage() {
           </Button>
         </div>
 
-        <Card className="border-none shadow-sm overflow-hidden py-0 gap-0">
-          {/* Desktop Table View */}
-          <div className="hidden md:block max-h-[600px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  <TableHead className="w-10 text-center">
-                    <Checkbox checked={data.length > 0 && selectedItems.length === data.length} onCheckedChange={toggleSelectAll} />
-                  </TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Order No.</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Customer Name</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Vehicle No.</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Driver</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Transporter</TableHead>
-                  <TableHead className="whitespace-nowrap text-center">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isPendingLoading && data.length === 0 ? (
-                  [...Array(5)].map((_, i) => (
-                    <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                      <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                      {[0, 1, 2, 3, 4].map((k) => (
-                        <TableCell key={k} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                      ))}
-                      <TableCell className="text-center py-4"><div className="h-5 w-16 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Pending Loads"
+            shown={table.rows.length}
+            total={data.length}
+            description="Vehicles in transit ready to be marked as reached"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Vehicle..."
+          >
+            <StageToolbar
+              shown={table.rows.length}
+              total={data.length}
+              activeCount={activeFiltersCount}
+              onReset={resetAllFilters}
+              filters={
+                <>
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerNames} className="min-w-[130px]" />
+                  <StageDivider />
+                  <StageColumnsMenu
+                    columns={RV_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips chips={filterChips} />
+          </StageListHeader>
+          <CardContent className="p-0">
+            {/* Desktop Table View */}
+            <div className="hidden overflow-x-auto rounded-b-xl md:block">
+              <Table>
+                <StageTableHeaderRows
+                  columns={orderedVisibleCols}
+                  table={table}
+                  leading={
+                    <Checkbox
+                      checked={table.rows.length > 0 && table.rows.every((r: any) => selectedItems.includes(r.id?.toString()))}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  }
+                  onReorder={handleColumnReorder}
+                  dragDisabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
+                />
+                <TableBody>
+                  {isPendingLoading && data.length === 0 ? (
+                    [...Array(5)].map((_, i) => (
+                      <TableRow key={i} className="opacity-40 border-b border-slate-50">
+                        <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                        {orderedVisibleCols.map((c) => (
+                          <TableCell key={c.id} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : table.rows.length > 0 ? (
+                    table.rows.map((item: any) => {
+                      const id = item.id?.toString()
+                      return (
+                        <TableRow
+                          key={id}
+                          className={cn(
+                            "cursor-pointer transition-colors",
+                            selectedItems.includes(id) ? "bg-blue-50/40" : "hover:bg-slate-50/60"
+                          )}
+                          onClick={() => toggleSelectItem(id)}
+                        >
+                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox checked={selectedItems.includes(id)} onCheckedChange={() => toggleSelectItem(id)} />
+                          </TableCell>
+                          {orderedVisibleCols.map((c) => renderCell(item, c.id))}
+                        </TableRow>
+                      )
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                        {data.length === 0 ? "No orders pending for reach vehicle stage" : "No matching records found for the filters"}
+                      </TableCell>
                     </TableRow>
-                  ))
-                ) : data.length > 0 ? (
-                  data.map((item: any) => {
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden max-h-[600px] overflow-y-auto p-3">
+              {isPendingLoading && data.length === 0 ? (
+                <div className="grid grid-cols-1 gap-4">
+                  {[...Array(4)].map((_, i) => (
+                    <Card key={i} className="p-4 space-y-4 border-slate-100 shadow-sm animate-pulse">
+                      <div className="flex justify-between">
+                        <div className="h-4 w-32 bg-slate-200 rounded" />
+                        <div className="h-5 w-20 bg-slate-200 rounded-full" />
+                      </div>
+                      <div className="h-5 w-3/4 bg-slate-100 rounded" />
+                    </Card>
+                  ))}
+                </div>
+              ) : table.rows.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4">
+                  {table.rows.map((item: any) => {
                     const id = item.id?.toString()
                     return (
-                      <TableRow
+                      <Card
                         key={id}
                         className={cn(
-                          "cursor-pointer transition-colors",
-                          selectedItems.includes(id) ? "bg-blue-50/40" : "hover:bg-slate-50/60"
+                          "p-4 border-2 transition-all shadow-sm bg-white cursor-pointer",
+                          selectedItems.includes(id) ? "border-blue-500 bg-blue-50/30 shadow-md" : "border-slate-100 hover:border-blue-200"
                         )}
                         onClick={() => toggleSelectItem(id)}
                       >
-                        <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={selectedItems.includes(id)} onCheckedChange={() => toggleSelectItem(id)} />
-                        </TableCell>
-                        <TableCell className="text-center text-xs text-blue-700 font-bold whitespace-nowrap">{item.order?.orderNo}</TableCell>
-                        <TableCell className="text-center text-xs text-slate-600"><span className="font-medium text-slate-700">{item.customer?.customerName}</span></TableCell>
-                        <TableCell className="text-center text-xs text-slate-600 whitespace-nowrap">{item.vehicle?.registrationNo || "—"}</TableCell>
-                        <TableCell className="text-center text-xs text-slate-600">{item.driver?.driverName || "—"}</TableCell>
-                        <TableCell className="text-center text-xs text-slate-600">{item.transporter?.transporterName || "—"}</TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap">Ready</Badge>
-                        </TableCell>
-                      </TableRow>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <h3 className="text-sm font-bold text-slate-900 leading-tight break-words">{item.customer?.customerName}</h3>
+                          </div>
+                          <Checkbox
+                            checked={selectedItems.includes(id)}
+                            onCheckedChange={() => toggleSelectItem(id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-1 h-5 w-5"
+                          />
+                        </div>
+
+                        <div className="mt-4 flex flex-col gap-1">
+                          <p className="font-mono text-sm font-black text-blue-700 break-all">{item.order?.orderNo}</p>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 gap-3 border-y border-slate-100 py-3">
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Vehicle No.</p>
+                            <p className="text-xs font-bold text-slate-700">{item.vehicle?.registrationNo || "—"}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                          <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black">Ready</Badge>
+                        </div>
+                      </Card>
                     )
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                      No orders pending for reach vehicle stage
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Mobile Card View */}
-          <div className="md:hidden max-h-[600px] overflow-y-auto p-3">
-            {isPendingLoading && data.length === 0 ? (
-              <div className="grid grid-cols-1 gap-4">
-                {[...Array(4)].map((_, i) => (
-                  <Card key={i} className="p-4 space-y-4 border-slate-100 shadow-sm animate-pulse">
-                    <div className="flex justify-between">
-                      <div className="h-4 w-32 bg-slate-200 rounded" />
-                      <div className="h-5 w-20 bg-slate-200 rounded-full" />
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  {data.length === 0 ? "No orders pending for reach vehicle stage" : "No matching records found for the filters"}
+                  {data.length > 0 && (
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" onClick={resetAllFilters}>Clear Filters</Button>
                     </div>
-                    <div className="h-5 w-3/4 bg-slate-100 rounded" />
-                  </Card>
-                ))}
-              </div>
-            ) : data.length > 0 ? (
-              <div className="grid grid-cols-1 gap-4">
-                {data.map((item: any) => {
-                  const id = item.id?.toString()
-                  return (
-                    <Card
-                      key={id}
-                      className={cn(
-                        "p-4 border-2 transition-all shadow-sm bg-white cursor-pointer",
-                        selectedItems.includes(id) ? "border-blue-500 bg-blue-50/30 shadow-md" : "border-slate-100 hover:border-blue-200"
-                      )}
-                      onClick={() => toggleSelectItem(id)}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-1">
-                          <h3 className="text-sm font-bold text-slate-900 leading-tight break-words">{item.customer?.customerName}</h3>
-                        </div>
-                        <Checkbox
-                          checked={selectedItems.includes(id)}
-                          onCheckedChange={() => toggleSelectItem(id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-1 h-5 w-5"
-                        />
-                      </div>
-
-                      <div className="mt-4 flex flex-col gap-1">
-                        <p className="font-mono text-sm font-black text-blue-700 break-all">{item.order?.orderNo}</p>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-2 gap-3 border-y border-slate-100 py-3">
-                        <div>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Vehicle No.</p>
-                          <p className="text-xs font-bold text-slate-700">{item.vehicle?.registrationNo || "—"}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                        <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black">Ready</Badge>
-                      </div>
-                    </Card>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                No orders pending for reach vehicle stage
-              </div>
-            )}
-          </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardContent>
         </Card>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">

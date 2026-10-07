@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon } from "@/components/stage-list"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -37,6 +40,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum, fmtDate } from "@/lib/table-format"
 
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
@@ -238,7 +242,7 @@ export default function SecurityApprovalPage() {
         manual_sauda_no: filterValues.manualSaudaNo,
         do_date_from: filterValues.startDate,
         do_date_to: filterValues.endDate,
-        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
+        customer_name: !filterValues.partyName || filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
       return response.success ? response.data : { approvals: [], pagination: { total: 0 } };
     },
@@ -595,26 +599,6 @@ export default function SecurityApprovalPage() {
     })
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
   function getDynamicColumnValue(group: any, colId: string) {
     const directValue = group?.[colId]
     if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
@@ -631,33 +615,17 @@ export default function SecurityApprovalPage() {
     return "—"
   }
 
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    // Sort on the raw YYYY-MM-DD (chronological), not the formatted DD/MM/YYYY.
-    if (colId === "actualDispatchDate") return group.actualDate && group.actualDate !== "NoDate" ? group.actualDate : ""
-    if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
-    if (colId === "processId" || colId === "processid") return group.processId || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "productCount") return String(group._productCount || 0)
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group._allProducts?.every((p: any) => p.status_1 === "Completed") ? "Verified" : "Pending Verification"
-    }
-    return String(getDynamicColumnValue(group, colId))
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
+  // ── Stage table filter state ──
+  // Status is remembered permanently; the rest is session-scoped (usePersistedFilters). Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("security-approval", {
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "PENDING" | "REJECTED",
+    customerFilter: "ALL",
+  }, { permanentKeys: ["statusFilter"] })
+  const { quickSearch, statusFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "PENDING" | "REJECTED") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
   const [columnOrder, setColumnOrder] = useColumnOrder("security-approval", PAGE_COLUMNS.map(c => c.id))
   // actualDispatchDate is a computed core column, always shown (it isn't in the toggle
@@ -676,27 +644,113 @@ export default function SecurityApprovalPage() {
     setColumnOrder([...coreInNewOrder, ...hiddenCols])
   }, [columnOrder, setColumnOrder])
 
-  const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    partySoDate:       "partySoDate",
-    actualDispatchDate: "actualDispatchDate",
-    orderNo:           "doNumber",
-    processid:         "processId",
-    customerName:      "customerName",
-    vehicleNo:         "vehicleNo",
-    orderPunchRemarks: "orderPunchRemarks",
+  const EXTRA_COLS_EXCLUDED = ['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products']
+  const NUMERIC_TOTAL_COLS = new Set(["actual_qty_dispatch"])
+  // Table standard: numeric + date extra columns right aligned, plain fixed decimals / dd/mm/yyyy.
+  const NUM_DECIMALS: Record<string, number> = {
+    actual_qty_dispatch: 4, orderQty: 4, qtyToDispatch: 4, actual_qty: 4, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+    gross_weight: 4, tare_weight: 4, net_weight: 4, extra_weight: 4,
+    rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
   }
-  const CENTER_COLS: ColId[] = ["vehicleNo", "orderPunchRemarks"]
+  const DATE_COL_IDS = new Set([
+    "deliveryDate", "invoice_date", "fitness_end_date", "insurance_end_date", "tax_end_date",
+    "pollution_end_date", "permit1_end_date", "permit2_end_date",
+  ])
+  const fmtExtra = (id: string, v: any) => {
+    if (v === "—" || v === null || v === undefined || v === "") return "—"
+    if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
+    if (DATE_COL_IDS.has(id)) return fmtDate(v)
+    return String(v)
+  }
+  const joinDo = (g: any, key: string) =>
+    (g.doDetails || []).map((d: any) => d[key]).filter((v: any) => v && v !== "—").join(" ") || ""
+  const isRejectedGroup = (g: any) => g._allProducts.some((p: any) => p.security_guard_status === "REJECT")
+
+  const extraColIds = useMemo(
+    () => visibleColumns.filter(colId => !EXTRA_COLS_EXCLUDED.includes(colId) && ALL_COLUMNS.some(c => c.id === colId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleColumns]
+  )
+
+  const tableCols = useMemo<StageColDef<any>[]>(() => {
+    const coreAcc: Record<string, StageColDef<any>> = {
+      partySoDate: { id: "partySoDate", label: "DO Date", type: "date", accessor: g => g._allProducts[0]?.party_so_date || g._allProducts[0]?.partySoDate },
+      actualDispatchDate: { id: "actualDispatchDate", label: "Actual Dispatch Date", type: "date", accessor: g => (g.actualDate && g.actualDate !== "NoDate" ? g.actualDate : "") },
+      orderNo: { id: "orderNo", label: "DO Numbers", accessor: g => joinDo(g, "doNumber") || g.doNumber },
+      processid: { id: "processid", label: "Manual Sauda No.", accessor: g => joinDo(g, "processId") || g.processId },
+      customerName: { id: "customerName", label: "Customer Name", accessor: g => Array.from(g.customerNames as Set<string>).join(", ") },
+      vehicleNo: { id: "vehicleNo", label: "Vehicle No.", accessor: g => g.vehicleNo },
+      orderPunchRemarks: { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: g => joinDo(g, "orderPunchRemarks") || g.orderPunchRemarks },
+    }
+    const core = orderedVisibleCols.map(c => coreAcc[c.id]).filter(Boolean)
+    const extra: StageColDef<any>[] = extraColIds.map(colId => {
+      const numeric = NUMERIC_TOTAL_COLS.has(colId)
+      const isNum = colId in NUM_DECIMALS
+      const isDate = DATE_COL_IDS.has(colId)
+      return {
+        id: colId,
+        label: numeric ? "Actual Qty Dispatch (MT)" : (ALL_COLUMNS.find(c => c.id === colId)?.label || colId),
+        type: isNum ? "number" : isDate ? "date" : "text",
+        total: numeric,
+        accessor: (g: any) => {
+          const v = getDynamicColumnValue(g, colId)
+          if (isNum) return Number(v) || 0
+          if (isDate) return v === "—" ? "" : v
+          return String(v)
+        },
+      } as StageColDef<any>
+    })
+    const status: StageColDef<any> = {
+      id: "__status",
+      label: "Status",
+      accessor: g => (isRejectedGroup(g) ? "Rejected" : "Pending Guard"),
+    }
+    return [...core, ...extra, status]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedVisibleCols, extraColIds])
+
+  const baseFilter = useCallback((g: any) => {
+    if (statusFilter === "REJECTED" && !isRejectedGroup(g)) return false
+    if (statusFilter === "PENDING" && isRejectedGroup(g)) return false
+    if (customerFilter !== "ALL" && !(g.customerNames as Set<string>).has(customerFilter)) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [joinDo(g, "doNumber"), g.doNumber, joinDo(g, "processId"), Array.from(g.customerNames as Set<string>).join(" "), g.vehicleNo, joinDo(g, "orderPunchRemarks")]
+        .join(" ")
+        .toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, customerFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: tableCols, baseFilter, persistKey: "security-approval" })
+  const sortedDisplayRows = table.rows
+  const uniqueCustomerNames = useMemo(
+    () => Array.from(new Set(displayRows.flatMap((g: any) => Array.from(g.customerNames as Set<string>)))).sort() as string[],
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllTableFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const statusColDef = tableCols[tableCols.length - 1]
+  const statusSortable = true
+  const RIGHT_COLS = new Set<string>(["partySoDate", "actualDispatchDate", ...Object.keys(NUM_DECIMALS), ...Array.from(DATE_COL_IDS)])
+  const colAlign = (id: string): "left" | "right" => (RIGHT_COLS.has(id) ? "right" : "left")
 
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
-        return <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
+        return <TableCell key={colId} className="p-4 text-right text-xs text-slate-600 font-mono tabular-nums min-w-[115px]">{group.partySoDate}</TableCell>
       case "actualDispatchDate": {
         const dispatchedDates = group.doDetails && group.doDetails.length > 0
           ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
           : [group.actualDispatchDate]
         return (
-          <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">
+          <TableCell key={colId} className="p-4 text-right text-xs text-slate-600 font-mono tabular-nums min-w-[115px]">
             <div className="flex flex-col gap-1.5">
               {dispatchedDates.map((date: any, idx: number) => (
                 <span key={`${date}-${idx}`}>{date}</span>
@@ -707,7 +761,7 @@ export default function SecurityApprovalPage() {
       }
       case "orderNo":
         return (
-          <TableCell key={colId} className="p-4 text-center">
+          <TableCell key={colId} className="p-4 text-left">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
                 <span key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-blue-700">{d.doNumber}</span>
@@ -728,10 +782,10 @@ export default function SecurityApprovalPage() {
       case "customerName":
         return <TableCell key={colId} className="p-4 text-xs text-slate-600"><span className="font-medium text-slate-700">{group.customerName}</span></TableCell>
       case "vehicleNo":
-        return <TableCell key={colId} className="text-center p-4"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
+        return <TableCell key={colId} className="text-left p-4"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
       case "orderPunchRemarks":
         return (
-          <TableCell key={colId} className="text-center p-4">
+          <TableCell key={colId} className="text-left p-4">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
                 <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
@@ -757,7 +811,7 @@ export default function SecurityApprovalPage() {
   }
 
   const toggleSelectAll = () => {
-    const enabledRows = displayRows.filter(r => !r.isDisabled)
+    const enabledRows = sortedDisplayRows.filter(r => !r.isDisabled)
     if (selectedItems.length === enabledRows.length && enabledRows.length > 0) {
       setSelectedItems([])
     } else {
@@ -804,6 +858,7 @@ export default function SecurityApprovalPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="security-approval"
       title="Stage 8: Security Guard Approval"
       description="Upload bilty and vehicle images for security verification."
       pendingCount={pendingResult?.pagination?.total || 0}
@@ -853,94 +908,118 @@ export default function SecurityApprovalPage() {
             Process Security ({selectedItems.length})
           </Button>
 
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                {/* "products" ("Items") has no real column here — the product list/count is
-                    always shown via the fixed "{n} PRODUCTS" expand header, not a toggleable
-                    cell — so it's excluded here to avoid a broken checkbox. */}
-                <ColumnToggleContent columns={ALL_COLUMNS.filter(c => c.id !== "products")} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
 
-        <Card className="hidden md:block border-none shadow-xl rounded-3xl overflow-hidden bg-white/50 backdrop-blur-md">
-          <Table>
-            <TableHeader className="bg-slate-50 sticky top-0 z-10">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && selectedItems.length === displayRows.filter(r => !r.isDisabled).length && displayRows.filter(r => !r.isDisabled).length > 0}
-                    onCheckedChange={toggleSelectAll}
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Pending Security Approvals"
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            description="Vehicles awaiting security guard verification"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Vehicle..."
+          >
+            <StageToolbar
+              shown={sortedDisplayRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllTableFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "PENDING", label: "Pending Guard" },
+                      { value: "REJECTED", label: "Rejected" },
+                    ]}
                   />
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
+                  {/* "products" ("Items") has no real column here — the product list/count is
+                      always shown via the fixed "{n} PRODUCTS" expand header, not a toggleable
+                      cell — so it's excluded here to avoid a broken checkbox. */}
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS.filter(c => c.id !== "products")}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusFilter === "PENDING" ? "Pending Guard" : "Rejected"}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
+              <TableRow>
+                <TableHead className="w-12 text-left align-top py-2.5 px-4">
+                  <div className="mt-8 flex justify-start">
+                    <Checkbox
+                      checked={sortedDisplayRows.length > 0 && selectedItems.length === sortedDisplayRows.filter(r => !r.isDisabled).length && sortedDisplayRows.filter(r => !r.isDisabled).length > 0}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </div>
                 </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map(col => {
-                    const sf = COL_SORT_FIELD[col.id]
-                    return (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
-                        onClick={sf ? () => handlePendingSort(sf) : undefined}
-                      >
-                        {col.label}{sf && <PendingSortIcon field={sf} />}
-                      </SortableTableHead>
-                    )
-                  })}
-                  {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
-                    const col = ALL_COLUMNS.find(c => c.id === colId)
-                    if (!col) return null
-                    return (
-                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
-                        {col.label}
-                        <PendingSortIcon field={colId} />
-                      </SortableTableHead>
-                    )
-                  })}
+                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...extraColIds]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
+                  {[...tableCols.slice(0, -1)].map(col => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={colAlign(col.id)} width={colAlign(col.id) === "right" ? "min-w-[125px]" : undefined} />
+                  ))}
+                  <StageHeadCell key={statusColDef.id} col={statusColDef} table={table} align="left" />
                 </ColumnDragProvider>
-                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
+              {sortedDisplayRows.length > 0 && (
+                <StageTotalsRow
+                  columns={[{ id: "__select", label: "" }, ...tableCols]}
+                  totals={table.totals}
+                  count={sortedDisplayRows.length}
+                  labelColumnId={tableCols[0]?.id}
+                  unit=""
+                  format={(n) => n.toFixed(4)}
+                  tones={{ actual_qty_dispatch: "blue" }}
+                  align={Object.fromEntries([...tableCols.map(c => [c.id, colAlign(c.id)]), ["__select", "center" as const]])}
+                />
+              )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    <TableCell className="p-4 text-center"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="p-4 text-center"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-5 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
+                    {tableCols.map(c => (
+                      <TableCell key={c.id} className="p-4"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                    ))}
                   </TableRow>
                 ))
-              ) : displayRows.length > 0 ? (
-                displayRows.map((group) => (
+              ) : sortedDisplayRows.length > 0 ? (
+                sortedDisplayRows.map((group) => (
                   <TableRow key={group._rowKey} className={cn("hover:bg-blue-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : "")}>
-                    <TableCell className="text-center p-4">
+                    <TableCell className="text-left px-4 py-4">
                       <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </TableCell>
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
-                    {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
-                      const col = ALL_COLUMNS.find(c => c.id === colId)
-                      if (!col) return null
+                    {extraColIds.map(colId => {
                       return (
-                        <TableCell key={colId} className="text-center p-4">
-                          <span className="text-xs text-slate-600">{String(getDynamicColumnValue(group, colId))}</span>
+                        <TableCell key={colId} className={cn("p-4", colAlign(colId) === "right" ? "text-right min-w-[125px]" : "text-left")}>
+                          {colId in NUM_DECIMALS
+                            ? <span className="text-xs text-slate-600 font-mono tabular-nums">{fmtExtra(colId, getDynamicColumnValue(group, colId))}</span>
+                            : DATE_COL_IDS.has(colId)
+                              ? <span className="text-xs text-slate-600 font-mono tabular-nums">{fmtExtra(colId, getDynamicColumnValue(group, colId))}</span>
+                              : <span className="text-xs text-slate-600">{String(getDynamicColumnValue(group, colId))}</span>}
                         </TableCell>
                       )
                     })}
-                    <TableCell className="text-center p-4">
+                    <TableCell className="text-left p-4">
                       {group._allProducts.some((p: any) => p.security_guard_status === 'REJECT') ? (
                         <Badge className="bg-red-100 text-red-700 border-red-200 font-black text-[10px] uppercase">REJECTED</Badge>
                       ) : (
@@ -951,19 +1030,23 @@ export default function SecurityApprovalPage() {
                 ))
               ) : (
                   <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).length} className="text-center py-20">
+                  <TableCell colSpan={orderedVisibleCols.length + 2 + extraColIds.length} className="text-center py-20">
                     <div className="flex flex-col items-center gap-2">
                       <ShieldAlert className="w-12 h-12 text-slate-200" />
-                      <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No vehicles pending for security check</p>
+                      <p className="text-slate-400 font-black uppercase tracking-widest text-xs">{displayRows.length > 0 ? "No matching vehicles for the applied filters" : "No vehicles pending for security check"}</p>
+                      {displayRows.length > 0 && (
+                        <button onClick={clearAllTableFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold normal-case tracking-normal">Clear Filters</button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
-
+          </div>
+          <div className="hidden md:block">
           {/* Pending Pagination Footer */}
-          <div className="px-6 py-4 border-t bg-slate-50/50 flex items-center justify-between rounded-b-3xl">
+          <div className="px-6 py-4 border-t bg-slate-50/50 flex items-center justify-between ">
             <div className="text-xs text-slate-500 font-medium tracking-tight">
               Showing <span className="text-slate-900">{(pendingPage - 1) * 10 + 1}</span> to <span className="text-slate-900">{Math.min(pendingPage * 10, pendingResult?.pagination?.total || 0)}</span> of <span className="text-slate-900">{pendingResult?.pagination?.total || 0}</span> orders
             </div>
@@ -993,6 +1076,8 @@ export default function SecurityApprovalPage() {
               </Button>
             </div>
           </div>
+          </div>
+          </CardContent>
         </Card>
 
         {/* Mobile Card View */}
@@ -1005,7 +1090,7 @@ export default function SecurityApprovalPage() {
                 <div className="h-4 w-1/2 bg-slate-200 rounded" />
               </Card>
             ))
-          ) : displayRows.length > 0 ? (
+          ) : sortedDisplayRows.length > 0 ? (
             sortedDisplayRows.map((group) => (
               <Card key={group._rowKey} className={cn("p-4 border-2 transition-all relative overflow-hidden", selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-lg" : "border-slate-100 bg-white shadow-sm")}>
                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
@@ -1085,8 +1170,8 @@ export default function SecurityApprovalPage() {
                         const val = getDynamicColumnValue(group, colId);
                         return (
                           <div key={colId} className="space-y-0.5 border-l-2 border-slate-100 pl-3">
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{col.label}</p>
-                            <p className="text-xs font-bold text-slate-700 leading-relaxed">{String(val)}</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{NUMERIC_TOTAL_COLS.has(colId) ? `${col.label} (MT)` : col.label}</p>
+                            <p className={cn("text-xs font-bold text-slate-700 leading-relaxed", colAlign(colId) === "right" && "font-mono tabular-nums")}>{fmtExtra(colId, val)}</p>
                           </div>
                         );
                       })}
@@ -1098,7 +1183,10 @@ export default function SecurityApprovalPage() {
           ) : (
             <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-100">
               <ShieldAlert className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-              <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No pending vehicles</p>
+              <p className="text-slate-400 font-black uppercase tracking-widest text-xs">{displayRows.length > 0 ? "No matching records found" : "No pending vehicles"}</p>
+              {displayRows.length > 0 && (
+                <button onClick={clearAllTableFilters} className="text-xs text-blue-600 hover:underline mt-2 font-semibold">Clear Filters</button>
+              )}
             </div>
           )}
 
@@ -1372,9 +1460,17 @@ export default function SecurityApprovalPage() {
                             {/* Desktop Table */}
                             <div className="hidden lg:block">
                               <Table>
-                                <TableHeader className="bg-slate-50">
+                                <TableHeader className="bg-slate-50 border-b">
+                                  <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                                    <TableCell className="w-12 px-4"></TableCell>
+                                    <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({orderProducts.length})</TableCell>
+                                    <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700 min-w-[120px]">
+                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch || p.actualQty) || 0), 0))}
+                                    </TableCell>
+                                    <TableCell className="px-4"></TableCell>
+                                  </TableRow>
                                   <TableRow>
-                                    <TableHead className="w-12 text-center h-10">
+                                    <TableHead className="w-12 text-left h-10 px-4">
                                       <Checkbox
                                         checked={allOrderSelected}
                                         disabled={isOrderDisabled}
@@ -1387,15 +1483,15 @@ export default function SecurityApprovalPage() {
                                         }}
                                       />
                                     </TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-center h-10">QTY</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-center h-10">STATUS</TableHead>
+                                    <TableHead className="px-4 text-left h-10">Product Info</TableHead>
+                                    <TableHead className="px-4 text-right h-10 min-w-[120px]">Qty (MT)</TableHead>
+                                    <TableHead className="px-4 text-left h-10">Status</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                   {orderProducts.map((product: any) => (
                                     <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                                      <TableCell className="text-center p-2">
+                                      <TableCell className="text-left px-4 py-2">
                                         <Checkbox
                                           checked={selectedProducts.includes(product._rowKey)}
                                           onCheckedChange={() => {
@@ -1407,18 +1503,16 @@ export default function SecurityApprovalPage() {
                                           }}
                                         />
                                       </TableCell>
-                                      <TableCell className="p-2">
+                                      <TableCell className="px-4 py-2 text-left">
                                         <div className="flex flex-col">
                                           <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{product.specificOrderNo}</span>
                                         </div>
                                       </TableCell>
-                                      <TableCell className="text-center p-2">
-                                        <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                          {product.actual_qty_dispatch || product.actualQty || "0"}
-                                        </Badge>
+                                      <TableCell className="text-right px-4 py-2 font-mono tabular-nums text-xs font-semibold text-blue-700 min-w-[120px]">
+                                        {fmtNum(product.actual_qty_dispatch || product.actualQty || 0)}
                                       </TableCell>
-                                      <TableCell className="text-center p-2">
+                                      <TableCell className="text-left px-4 py-2">
                                         {product.security_guard_status === 'REJECT' ? (
                                           <Badge variant="destructive" className="font-black text-[8px] uppercase">REJECTED BY SECURITY</Badge>
                                         ) : product.actual_1 == null ? (
@@ -1456,7 +1550,7 @@ export default function SecurityApprovalPage() {
                                   <div className="flex-1 space-y-1">
                                     <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center gap-2">
                                       <span className="text-xs font-black text-slate-800 uppercase leading-tight break-words">{product.productName}</span>
-                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">QTY: {product.actual_qty_dispatch || 0}</Badge>
+                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Qty (MT): {fmtNum(product.actual_qty_dispatch || 0)}</Badge>
                                     </div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{product.specificOrderNo}</p>
                                     {product.security_guard_status === 'REJECT' ? (

@@ -1,14 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Download, Landmark, Loader2 } from "lucide-react"
 import { reportsApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
+import { cn } from "@/lib/utils"
+import { fmtDate, fmtNum } from "@/lib/table-format"
 
 type LossRow = {
   booked_at: string
@@ -26,8 +28,18 @@ type LossRow = {
 }
 type LossReport = { count: number; total: number; head: string; months: { month: string; count: number; amount: number }[]; rows: LossRow[] }
 
-const inr = (n: number) => `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+const SEARCH_CLS = "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700"
+const docsOf = (r: LossRow) =>
+  [r.credit_note_no && `CN ${r.credit_note_no}`, r.debit_note_no && `DN ${r.debit_note_no}`, r.reverse_transfer_no && `RST ${r.reverse_transfer_no}`].filter(Boolean).join(" · ")
+const LOSS_COLS: { id: string; label: string; right?: boolean; text: (r: LossRow) => string }[] = [
+  { id: "date", label: "Booked on", right: true, text: (r) => fmtDate(r.booked_at) },
+  { id: "order", label: "Order", text: (r) => `${r.order_no || ""} ${r.order_category || ""} ${r.invoice_no || ""}` },
+  { id: "customer", label: "Customer", text: (r) => r.customer_name || "" },
+  { id: "depot", label: "Depot", text: (r) => r.depot_name || "" },
+  { id: "product", label: "Product", text: (r) => r.product_name || "" },
+  { id: "docs", label: "Documents", text: (r) => docsOf(r) },
+  { id: "loss", label: "Loss (₹)", right: true, text: (r) => fmtNum(r.amount, 2) },
+]
 const monthLabel = (m: string) => {
   const [y, mo] = m.split("-")
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" })
@@ -44,6 +56,15 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
   const [to, setTo] = useState("")
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<LossReport | null>(null)
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const shownRows = useMemo(
+    () => (report?.rows || []).filter((r) => LOSS_COLS.every((c) => {
+      const q = (filters[c.id] || "").trim().toLowerCase()
+      return !q || c.text(r).toLowerCase().includes(q)
+    })),
+    [report, filters]
+  )
+  const shownTotal = shownRows.reduce((t, r) => t + (Number(r.amount) || 0), 0)
 
   const load = async () => {
     setLoading(true)
@@ -118,8 +139,8 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
               <div className="space-y-5">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-medium text-slate-500">Total company loss</p>
-                    <p className="text-xl font-semibold text-slate-900">{inr(report.total)}</p>
+                    <p className="text-xs font-medium text-slate-500">Total company loss (₹)</p>
+                    <p className="text-xl font-semibold text-slate-900">{fmtNum(report.total, 2)}</p>
                   </div>
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
                     <p className="text-xs font-medium text-slate-500">Shipments</p>
@@ -134,15 +155,24 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                 {report.months.length > 1 && (
                   <div className="overflow-hidden rounded-lg border">
                     <Table>
-                      <TableHeader className="bg-slate-50"><TableRow>
-                        <TableHead>Month</TableHead><TableHead className="text-center">Shipments</TableHead><TableHead className="text-right">Loss</TableHead>
-                      </TableRow></TableHeader>
+                      <TableHeader className="bg-slate-50 border-b">
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                          <TableCell className="px-4 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({report.months.length})</TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">{report.months.reduce((t, m) => t + (Number(m.count) || 0), 0)}</TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">{fmtNum(report.months.reduce((t, m) => t + (Number(m.amount) || 0), 0), 2)}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableHead className="px-4 text-left whitespace-nowrap">Month</TableHead>
+                          <TableHead className="px-4 text-right whitespace-nowrap min-w-[110px]">Shipments</TableHead>
+                          <TableHead className="px-4 text-right whitespace-nowrap min-w-[120px]">Loss (₹)</TableHead>
+                        </TableRow>
+                      </TableHeader>
                       <TableBody>
                         {report.months.map(m => (
                           <TableRow key={m.month}>
-                            <TableCell className="text-sm">{monthLabel(m.month)}</TableCell>
-                            <TableCell className="text-center text-sm">{m.count}</TableCell>
-                            <TableCell className="text-right text-sm font-medium">{inr(m.amount)}</TableCell>
+                            <TableCell className="px-4 text-left text-sm">{monthLabel(m.month)}</TableCell>
+                            <TableCell className="px-4 text-right text-sm font-mono tabular-nums">{fmtNum(m.count, 0)}</TableCell>
+                            <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtNum(m.amount, 2)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -152,39 +182,52 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
 
                 <div className="max-h-[360px] overflow-auto rounded-lg border">
                   <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-slate-50"><TableRow>
-                      <TableHead className="whitespace-nowrap">Booked on</TableHead>
-                      <TableHead>Order</TableHead>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Depot</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="whitespace-nowrap">Documents</TableHead>
-                      <TableHead className="text-right">Loss</TableHead>
-                    </TableRow></TableHeader>
+                    <TableHeader className="sticky top-0 z-10 bg-slate-50 border-b">
+                      <TableRow>
+                        {LOSS_COLS.map((c) => (
+                          <TableHead key={`search-${c.id}`} className="whitespace-nowrap align-top pt-2.5 pb-1 px-4">
+                            <Input
+                              placeholder="Search..."
+                              value={filters[c.id] || ""}
+                              onChange={(e) => setFilters((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                              className={cn(SEARCH_CLS, c.right ? "text-right" : "text-left")}
+                            />
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                      {shownRows.length > 0 && (
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                          {LOSS_COLS.map((c, i) => (
+                            <TableCell key={`total-${c.id}`} className={cn("px-4", c.right ? "text-right" : "text-left", i === 0 && "font-black text-slate-900 uppercase tracking-wider text-[11px]", c.id === "loss" && "font-mono tabular-nums font-black text-slate-900")}>
+                              {i === 0 ? `Total (${shownRows.length})` : c.id === "loss" ? fmtNum(shownTotal, 2) : ""}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      )}
+                      <TableRow>
+                        {LOSS_COLS.map((c) => (
+                          <TableHead key={c.id} className={cn("whitespace-nowrap align-top py-2.5 px-4", c.right ? "text-right min-w-[120px]" : "text-left")}>{c.label}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
-                      {report.rows.map((r, i) => (
+                      {shownRows.length === 0 ? (
+                        <TableRow><TableCell colSpan={LOSS_COLS.length} className="text-center py-8 text-slate-500">No matching records found for the filters.</TableCell></TableRow>
+                      ) : shownRows.map((r, i) => (
                         <TableRow key={i}>
-                          <TableCell className="whitespace-nowrap text-sm">{fmtDate(r.booked_at)}</TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="px-4 text-right whitespace-nowrap text-sm">{fmtDate(r.booked_at)}</TableCell>
+                          <TableCell className="px-4 text-left text-sm">
                             <p className="font-medium text-slate-900">{r.order_no}</p>
                             <p className="text-xs text-slate-500">{r.order_category}{r.invoice_no ? ` · Inv ${r.invoice_no}` : ""}</p>
                           </TableCell>
-                          <TableCell className="text-sm">{r.customer_name || "—"}</TableCell>
-                          <TableCell className="text-sm">{r.depot_name || "—"}</TableCell>
-                          <TableCell className="text-sm">{r.product_name || "—"}</TableCell>
-                          <TableCell className="text-xs text-slate-600">
-                            {[r.credit_note_no && `CN ${r.credit_note_no}`, r.debit_note_no && `DN ${r.debit_note_no}`, r.reverse_transfer_no && `RST ${r.reverse_transfer_no}`].filter(Boolean).join(" · ") || "—"}
-                          </TableCell>
-                          <TableCell className="text-right text-sm font-medium">{inr(Number(r.amount))}</TableCell>
+                          <TableCell className="px-4 text-left text-sm">{r.customer_name || "—"}</TableCell>
+                          <TableCell className="px-4 text-left text-sm">{r.depot_name || "—"}</TableCell>
+                          <TableCell className="px-4 text-left text-sm">{r.product_name || "—"}</TableCell>
+                          <TableCell className="px-4 text-left text-xs text-slate-600">{docsOf(r) || "—"}</TableCell>
+                          <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtNum(r.amount, 2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
-                    <TableFooter className="bg-slate-50">
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-sm font-semibold text-slate-900">Total</TableCell>
-                        <TableCell className="text-right text-sm font-semibold text-slate-900">{inr(report.total)}</TableCell>
-                      </TableRow>
-                    </TableFooter>
                   </Table>
                 </div>
               </div>

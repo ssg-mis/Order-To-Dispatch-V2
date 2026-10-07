@@ -1,9 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -19,11 +18,53 @@ import { depotApi, orderApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Boxes, Loader2, PackageOpen, Scale } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { fmtDate, fmtNum } from "@/lib/table-format"
 
-const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN") : "—")
 const today = () => new Date().toISOString().split("T")[0]
 const num = (v: any) => parseFloat(v) || 0
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000
+
+const dash = (v: any) => (v === null || v === undefined || v === "" ? "—" : String(v))
+const fmtN = (n: number) => n.toFixed(4)
+
+const NUM = "font-mono tabular-nums min-w-[110px]"
+const DT = "font-mono tabular-nums min-w-[110px]"
+
+const PENDING_COLUMNS: StageDataCol<any>[] = [
+  { id: "order_no", label: "DO Number", align: "left", accessor: (r) => r.order.orderNo, render: (r) => <span className="font-bold text-slate-700">{r.order.orderNo}</span> },
+  { id: "dsr", label: "DSR", align: "left", accessor: (r) => r.dispatch?.dsrNumber, render: (r) => dash(r.dispatch?.dsrNumber) },
+  { id: "customer", label: "Customer", align: "left", accessor: (r) => r.customer?.customerName, cellClassName: "font-medium", render: (r) => dash(r.customer?.customerName) },
+  { id: "invoice", label: "Original Invoice", align: "left", accessor: (r) => r.order.refInvoiceNo, render: (r) => <span className="font-bold text-slate-700">{dash(r.order.refInvoiceNo)}</span> },
+  { id: "product", label: "Product", align: "left", accessor: (r) => r.sku?.skuName, render: (r) => dash(r.sku?.skuName) },
+  { id: "qty", label: "Qty Sent Back", type: "number", align: "right", accessor: (r) => num(r.gate.expectedQty), tone: "blue", cellClassName: NUM, render: (r) => fmtNum(num(r.gate.expectedQty), 4) },
+  { id: "reason", label: "Reason", align: "left", accessor: (r) => r.order.returnReason, render: (r) => dash(r.order.returnReason) },
+  { id: "vehicle", label: "Vehicle", align: "left", accessor: (r) => r.vehicle?.registrationNo, render: (r) => dash(r.vehicle?.registrationNo) },
+  { id: "planned", label: "Planned", type: "date", align: "right", accessor: (r) => r.gate.plannedAt, cellClassName: DT, render: (r) => fmtDate(r.gate.plannedAt) },
+]
+
+const HISTORY_COLUMNS: StageDataCol<any>[] = [
+  { id: "received_on", label: "Received On", type: "date", align: "right", accessor: (r) => r.gate.receivedDate, cellClassName: DT, render: (r) => fmtDate(r.gate.receivedDate) },
+  { id: "order_no", label: "DO Number", align: "left", accessor: (r) => r.order.orderNo, render: (r) => <span className="font-bold text-slate-700">{r.order.orderNo}</span> },
+  { id: "customer", label: "Customer", align: "left", accessor: (r) => r.customer?.customerName, cellClassName: "font-medium", render: (r) => dash(r.customer?.customerName) },
+  { id: "invoice", label: "Original Invoice", align: "left", accessor: (r) => r.order.refInvoiceNo, render: (r) => dash(r.order.refInvoiceNo) },
+  { id: "product", label: "Product", align: "left", accessor: (r) => r.sku?.skuName, render: (r) => dash(r.sku?.skuName) },
+  { id: "batch", label: "Batch No.", align: "left", accessor: (r) => r.gate.batchNo, render: (r) => dash(r.gate.batchNo) },
+  { id: "expiry", label: "Expiry", type: "date", align: "right", accessor: (r) => r.gate.expiryDate, cellClassName: DT, render: (r) => fmtDate(r.gate.expiryDate) },
+  { id: "expected", label: "Expected", type: "number", align: "right", accessor: (r) => num(r.gate.expectedQty), tone: "blue", cellClassName: NUM, render: (r) => fmtNum(num(r.gate.expectedQty), 4) },
+  { id: "received", label: "Received", type: "number", align: "right", accessor: (r) => num(r.gate.receivedQty), tone: "purple", cellClassName: NUM, render: (r) => fmtNum(num(r.gate.receivedQty), 4) },
+  { id: "good", label: "Good (restocked)", type: "number", align: "right", accessor: (r) => num(r.gate.goodQty), tone: "emerald", cellClassName: cn(NUM, "font-semibold text-emerald-600"), render: (r) => fmtNum(num(r.gate.goodQty), 4) },
+  {
+    id: "damaged", label: "Damaged", type: "number", align: "right", accessor: (r) => num(r.gate.damagedQty), tone: "amber", cellClassName: NUM,
+    render: (r) => <span className={cn(num(r.gate.damagedQty) > 0 && "text-amber-700")}>{fmtNum(num(r.gate.damagedQty), 4)}</span>,
+  },
+  { id: "disposition", label: "Disposition", align: "left", accessor: (r) => r.gate.damagedDisposition, render: (r) => (num(r.gate.damagedQty) > 0 ? dash(r.gate.damagedDisposition) : "—") },
+  { id: "shortage", label: "Shortage", type: "number", align: "right", accessor: (r) => num(r.gate.shortageQty), tone: "red", cellClassName: NUM, render: (r) => <span className={cn(num(r.gate.shortageQty) > 0 && "font-semibold text-red-600")}>{fmtNum(num(r.gate.shortageQty), 4)}</span> },
+  { id: "depot", label: "Restock Depot", align: "left", accessor: (r) => r.restockDepotName, render: (r) => dash(r.restockDepotName) },
+  { id: "rst", label: "RST No.", align: "left", accessor: (r) => r.gate.rstNo, render: (r) => dash(r.gate.rstNo) },
+  { id: "net_wt", label: "Net Wt (kg)", type: "number", align: "right", accessor: (r) => (r.gate.netWeight != null ? num(r.gate.netWeight) : null), total: true, tone: "blue", cellClassName: NUM, render: (r) => (r.gate.netWeight != null ? fmtNum(num(r.gate.netWeight), 4) : "—") },
+  { id: "wt_diff", label: "Wt Diff (kg)", type: "number", align: "right", accessor: (r) => (r.gate.weightDifference != null ? num(r.gate.weightDifference) : null), total: true, tone: "amber", cellClassName: NUM, render: (r) => <span className={cn(Math.abs(num(r.gate.weightDifference)) > 0.5 && "font-semibold text-amber-700")}>{r.gate.weightDifference != null ? fmtNum(num(r.gate.weightDifference), 4) : "—"}</span> },
+  { id: "remarks", label: "Remarks", accessor: (r) => r.gate.remarks, align: "left", render: (r) => <span className="block max-w-[200px] truncate" title={r.gate.remarks || ""}>{dash(r.gate.remarks)}</span> },
+]
 
 const emptyForm = () => ({
   receivedDate: today(),
@@ -246,6 +287,7 @@ export default function UnloadReturnedStockPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="unload-returned-stock"
       partyNames={[]}
       title="Stage 18: Unload Returned Stock"
       description="Weighment and RST recording for returned stock: receive, weigh, check and restock. Billing then issues the documents (Stage 19)."
@@ -261,52 +303,18 @@ export default function UnloadReturnedStockPage() {
       searchPlaceholder="Search DO / Customer / Invoice..."
       isHistoryLoading={isHistoryLoading}
       historyContent={
-        <Card className="border-none shadow-sm overflow-hidden py-0 gap-0">
-          <div className="max-h-[600px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  {["Received On", "DO Number", "Customer", "Original Invoice", "Product", "Batch No.", "Expiry", "Expected", "Received", "Good (restocked)", "Damaged", "Shortage", "Restock Depot", "RST No.", "Net Wt (kg)", "Wt Diff (kg)", "Remarks"].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isHistoryLoading ? (
-                  <TableRow><TableCell colSpan={17} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
-                ) : history.length === 0 ? (
-                  <TableRow><TableCell colSpan={17} className="py-10 text-center text-slate-500">No returned stock received yet.</TableCell></TableRow>
-                ) : (
-                  history.map((r) => (
-                    <TableRow key={r.gate.id}>
-                      <TableCell className="text-center text-xs">{fmtDate(r.gate.receivedDate)}</TableCell>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{r.order.orderNo}</TableCell>
-                      <TableCell className="text-center text-xs font-medium">{r.customer?.customerName || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.order.refInvoiceNo || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.sku?.skuName || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.gate.batchNo || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{fmtDate(r.gate.expiryDate)}</TableCell>
-                      <TableCell className="text-center text-xs tabular-nums">{num(r.gate.expectedQty)}</TableCell>
-                      <TableCell className="text-center text-xs tabular-nums">{num(r.gate.receivedQty)}</TableCell>
-                      <TableCell className="text-center text-xs font-semibold text-emerald-600 tabular-nums">{num(r.gate.goodQty)}</TableCell>
-                      <TableCell className="text-center text-xs tabular-nums">
-                        {num(r.gate.damagedQty) > 0 ? (
-                          <span className="text-amber-700">{num(r.gate.damagedQty)} <Badge className="ml-1 bg-amber-100 text-amber-700">{r.gate.damagedDisposition}</Badge></span>
-                        ) : "0"}
-                      </TableCell>
-                      <TableCell className={cn("text-center text-xs tabular-nums", num(r.gate.shortageQty) > 0 && "font-semibold text-red-600")}>{num(r.gate.shortageQty)}</TableCell>
-                      <TableCell className="text-center text-xs">{r.restockDepotName || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.gate.rstNo || "—"}</TableCell>
-                      <TableCell className="text-center text-xs tabular-nums">{r.gate.netWeight != null ? num(r.gate.netWeight) : "—"}</TableCell>
-                      <TableCell className={cn("text-center text-xs tabular-nums", Math.abs(num(r.gate.weightDifference)) > 0.5 && "font-semibold text-amber-700")}>{r.gate.weightDifference != null ? num(r.gate.weightDifference) : "—"}</TableCell>
-                      <TableCell className="max-w-[200px] truncate text-xs" title={r.gate.remarks || ""}>{r.gate.remarks || "—"}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+        <StageDataCard
+          storageKey="unload-returned-stock-history"
+          title="Returned Stock Received"
+          description="Returned stock unloaded, weighed and restocked."
+          rows={history}
+          columns={HISTORY_COLUMNS}
+          rowKey={(r: any) => r.gate.id}
+          loading={isHistoryLoading}
+          emptyText="No returned stock received yet."
+          selects={[{ id: "depot", allLabel: "All Depots", getValue: (r: any) => r.restockDepotName }]}
+          format={fmtN}
+        />
       }
     >
       <div className="space-y-4">
@@ -321,44 +329,24 @@ export default function UnloadReturnedStockPage() {
           </Button>
         </div>
 
-        <Card className="gap-0 overflow-hidden border-none py-0 shadow-sm">
-          <div className="max-h-[600px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  <TableHead className="w-10" />
-                  {["DO Number", "DSR", "Customer", "Original Invoice", "Product", "Qty Sent Back", "Reason", "Vehicle", "Planned"].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isPendingLoading ? (
-                  <TableRow><TableCell colSpan={10} className="py-10 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
-                ) : pending.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="py-10 text-center text-slate-500">No returned stock waiting to be unloaded.</TableCell></TableRow>
-                ) : (
-                  pending.map((r) => (
-                    <TableRow key={r.gate.id} className={cn(selectedId === r.gate.id && "bg-blue-50/50")}>
-                      <TableCell className="text-center">
-                        <Checkbox checked={selectedId === r.gate.id} onCheckedChange={() => setSelectedId(selectedId === r.gate.id ? null : r.gate.id)} />
-                      </TableCell>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{r.order.orderNo}</TableCell>
-                      <TableCell className="text-center text-xs">{r.dispatch.dsrNumber || "—"}</TableCell>
-                      <TableCell className="text-center text-xs font-medium">{r.customer?.customerName || "—"}</TableCell>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{r.order.refInvoiceNo || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.sku?.skuName || "—"}</TableCell>
-                      <TableCell className="text-center text-xs font-semibold tabular-nums">{num(r.gate.expectedQty)}</TableCell>
-                      <TableCell className="text-center text-xs">{r.order.returnReason || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{r.vehicle?.registrationNo || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{fmtDate(r.gate.plannedAt)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+        <StageDataCard
+          storageKey="unload-returned-stock"
+          title="Returns To Unload"
+          description="Returned stock waiting to be unloaded, weighed and restocked."
+          rows={pending}
+          columns={PENDING_COLUMNS}
+          rowKey={(r: any) => r.gate.id}
+          loading={isPendingLoading}
+          emptyText="No returned stock waiting to be unloaded."
+          selects={[{ id: "vehicle", allLabel: "All Vehicles", getValue: (r: any) => r.vehicle?.registrationNo }]}
+          leading={{
+            cell: (r: any) => (
+              <Checkbox checked={selectedId === r.gate.id} onCheckedChange={() => setSelectedId(selectedId === r.gate.id ? null : r.gate.id)} />
+            ),
+          }}
+          rowClassName={(r: any) => (selectedId === r.gate.id ? "bg-blue-50/50" : undefined)}
+          format={fmtN}
+        />
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -391,7 +379,7 @@ export default function UnloadReturnedStockPage() {
                         ["Product", selected.sku?.skuName || "—"],
                         ["Original Invoice", selected.order.refInvoiceNo || "—"],
                         ["Return Reason", selected.order.returnReason || "—"],
-                        ["Qty Sent Back", String(expected)],
+                        ["Qty Sent Back", fmtNum(expected, 4)],
                       ].map(([label, value]) => (
                         <div key={label}>
                           <p className="mb-1 text-[10px] font-bold uppercase leading-none tracking-widest text-slate-500">{label}</p>

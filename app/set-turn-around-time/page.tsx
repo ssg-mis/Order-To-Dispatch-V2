@@ -31,6 +31,8 @@ const STAGE_OPTIONS = [
   "Credit Note",
   "Unload Returned Stock",
   "Issue Documents Against Returned Stock",
+  "Transport Bills",
+  "Diesel Bills",
   "Gate In",
 ]
 

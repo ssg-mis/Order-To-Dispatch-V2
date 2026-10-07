@@ -33,6 +33,7 @@ import {
   Workflow,
   Warehouse,
   MapPin,
+  Fuel,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
 import { useMemo } from "react"
@@ -79,6 +80,8 @@ const modules = [
   { title: "Return", icon: Undo2, url: "/return" },
   { title: "Unload Returned Stock", icon: PackageOpen, url: "/unload-returned-stock" },
   { title: "Issue Documents Against Returned Stock", icon: FileCheck, url: "/issue-return-documents" },
+  { title: "Transport Bills", icon: Truck, url: "/transport-bills" },
+  { title: "Diesel Bills", icon: Fuel, url: "/diesel-bills" },
   { title: "Variable Parameters", icon: Calculator, url: "/variable-parameters" },
   { title: "Set Turn Around Time", icon: Clock, url: "/set-turn-around-time" },
   { title: "Production", icon: Factory, url: "/production" },

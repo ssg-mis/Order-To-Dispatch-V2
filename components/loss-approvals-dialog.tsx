@@ -10,10 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { unloadingApi } from "@/lib/api-service"
 import { LOSS_CAUSES, BORNE_BY_LABEL, BORNE_BY_STYLE, type BorneBy } from "@/lib/loss-causes"
+import { fmtNum, fmtDate } from "@/lib/table-format"
 import { Loader2, CheckCircle, XCircle, ImageIcon } from "lucide-react"
 
 const PARTIES: BorneBy[] = ["company", "transporter", "customer"]
-const fmt = (n: any) => `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmt = (n: any) => fmtNum(n || 0, 2)
 
 /**
  * Company Admin sign-off on losses reported at Unloading. Approving lets the loss
@@ -109,19 +110,19 @@ export function LossApprovalsDialog({ open, onOpenChange }: { open: boolean; onO
                       <div className="min-w-0">
                         <p className="font-black text-blue-700">{row.so_no} <span className="text-slate-400 font-medium">· {row.invoice_no || "No invoice"}</span></p>
                         <p className="text-sm font-medium text-slate-700">{row.party_name}</p>
-                        <p className="text-xs text-slate-500">{row.product_name} × {Number(row.actual_qty_dispatch) || 0} · received {row.received_date || "—"}</p>
+                        <p className="text-xs text-slate-500">{row.product_name} · Dispatched qty: <span className="font-mono tabular-nums">{fmtNum(row.actual_qty_dispatch || 0, 4)}</span> · Received: <span className="font-mono tabular-nums">{fmtDate(row.received_date)}</span></p>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total loss</p>
-                        <p className="text-lg font-black text-red-600">{fmt(row.total_loss_value)}</p>
-                        <p className="text-xs text-slate-500">{Number(row.total_loss_qty) || 0} units</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total loss (₹)</p>
+                        <p className="text-lg font-black font-mono tabular-nums text-red-600">{fmt(row.total_loss_value)}</p>
+                        <p className="text-xs text-slate-500">Loss qty (units): <span className="font-mono tabular-nums">{fmtNum(row.total_loss_qty || 0, 4)}</span></p>
                       </div>
                     </div>
 
                     <div className="space-y-2 text-sm">
                       {shortage > 0 && shortageParty && (
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2">
-                          <span>Shortage: <b>{shortage}</b> — {LOSS_CAUSES[row.shortage_cause]?.label || row.shortage_cause}</span>
+                          <span>Shortage qty: <b className="font-mono tabular-nums">{fmtNum(shortage, 4)}</b> — {LOSS_CAUSES[row.shortage_cause]?.label || row.shortage_cause}</span>
                           <PartySelect value={shortageParty} onChange={(p) => setOverrides(o => ({ ...o, [ul]: { containers: o[ul]?.containers || {}, shortage: p } }))} />
                         </div>
                       )}
@@ -131,7 +132,7 @@ export function LossApprovalsDialog({ open, onOpenChange }: { open: boolean; onO
                           <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2">
                             <span className="min-w-0">
                               <b>{c.containerSerialNumber}</b> — {c.damageType === "whole" ? "whole container" : `${c.items?.length || 0} internal item(s)`} — {LOSS_CAUSES[c.cause]?.label || c.cause}
-                              <span className="ml-2 text-slate-500">{fmt(c.lossValue)}</span>
+                              <span className="ml-2 text-slate-500">Loss (₹): <span className="font-mono tabular-nums">{fmt(c.lossValue)}</span></span>
                             </span>
                             <span className="flex items-center gap-2">
                               {party && <PartyBadge party={party} />}

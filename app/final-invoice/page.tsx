@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import * as React from "react"
+import { useState, useMemo, useCallback } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -9,11 +10,174 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Card, CardContent } from "@/components/ui/card"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+import { useColumnOrder } from "@/hooks/use-column-order"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
 import { Printer, CheckCircle, FileText, Receipt, ExternalLink } from "lucide-react"
 import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
+import { fmtNum } from "@/lib/table-format"
+
+const FINAL_INVOICE_COLS: StageColDef<any>[] = [
+  { id: "customer_name", label: "Customer", accessor: (r) => r.customer_name || "" },
+  { id: "invoice_no", label: "Invoice No.", accessor: (r) => r.invoice_no || "" },
+  { id: "vehicle_no", label: "Vehicle No.", accessor: (r) => r.vehicle_no || "" },
+  { id: "bill_amount", label: "Bill Amount (₹)", type: "number", accessor: (r) => parseFloat(r.bill_amount || 0) || 0, total: true },
+  {
+    id: "documents",
+    label: "Documents",
+    noSort: true,
+    accessor: (r) => [r.invoice_copy && "Invoice", r.e_invoice_file && "eInvoice", r.e_way_bill_file && "eWay Bill"].filter(Boolean).join(" "),
+  },
+]
+const FINAL_INVOICE_COL_IDS = FINAL_INVOICE_COLS.map((c) => c.id)
+
+/** Stage list card (header + toolbar + per-column search + TOTAL row) shared by the Pending and History tabs. */
+function FinalInvoiceTable({
+  storageKey,
+  title,
+  description,
+  rows,
+  isHistory,
+  renderCell,
+  renderActions,
+}: {
+  storageKey: string
+  title: string
+  description: string
+  rows: any[]
+  isHistory: boolean
+  renderCell: (row: any, colId: string) => React.ReactNode
+  renderActions: (row: any, isHistory: boolean) => React.ReactNode
+}) {
+  const { isAdmin, isFeatureEnabled } = useAuth()
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns(storageKey, FINAL_INVOICE_COL_IDS)
+  const [columnOrder, setColumnOrder] = useColumnOrder(storageKey, FINAL_INVOICE_COL_IDS)
+  const [listView, patchListView] = usePersistedFilters(storageKey, { quickSearch: "", customerFilter: "ALL" })
+  const { quickSearch, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+
+  const baseFilter = useCallback(
+    (r: any) => {
+      if (customerFilter !== "ALL" && (r.customer_name || "") !== customerFilter) return false
+      const q = quickSearch.trim().toLowerCase()
+      if (q && ![r.customer_name, r.invoice_no, r.vehicle_no].join(" ").toLowerCase().includes(q)) return false
+      return true
+    },
+    [customerFilter, quickSearch]
+  )
+  const table = useStageTable<any>({ rows, columns: FINAL_INVOICE_COLS, baseFilter, persistKey: storageKey })
+
+  const orderedVisible = columnOrder.filter((id) => visibleColumns.includes(id))
+  const orderedCols = orderedVisible.map((id) => FINAL_INVOICE_COLS.find((c) => c.id === id)).filter(Boolean) as StageColDef<any>[]
+  const handleColumnReorder = useCallback(
+    (newVisibleOrder: string[]) => {
+      const set = new Set(newVisibleOrder)
+      setColumnOrder([...newVisibleOrder, ...columnOrder.filter((id) => !set.has(id))])
+    },
+    [columnOrder, setColumnOrder]
+  )
+  const customerOptions = useMemo(() => Array.from(new Set(rows.map((r) => r.customer_name).filter(Boolean))).sort() as string[], [rows])
+  const activeCount = (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const reset = () => {
+    setCustomerFilter("ALL")
+    setQuickSearch("")
+    table.clearColumnFilters()
+  }
+
+  return (
+    <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+      <StageListHeader
+        title={title}
+        shown={table.rows.length}
+        total={rows.length}
+        description={description}
+        searchValue={quickSearch}
+        onSearchChange={setQuickSearch}
+        searchPlaceholder="Search Customer, Invoice, Vehicle..."
+      >
+        <StageToolbar
+          shown={table.rows.length}
+          total={rows.length}
+          activeCount={activeCount}
+          onReset={reset}
+          filters={
+            <>
+              <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerOptions} />
+              <StageColumnsMenu
+                columns={FINAL_INVOICE_COLS}
+                visibleColumns={visibleColumns}
+                setVisibleColumns={setVisibleColumns}
+                show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+              />
+            </>
+          }
+        />
+        <StageActiveChips
+          chips={[
+            ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+            ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+          ]}
+        />
+      </StageListHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
+              <TableRow>
+                <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}>
+                  {orderedCols.map((col) => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={col.id === "bill_amount" ? "right" : "left"} />
+                  ))}
+                </ColumnDragProvider>
+                <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-left">
+                  <div className="min-h-7 mb-2" />
+                  Action
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <StageTotalsRow
+                columns={orderedCols}
+                totals={table.totals}
+                count={table.rows.length}
+                unit=""
+                trailingCells={1}
+                format={(n) => fmtNum(n, 2)}
+                tones={{ bill_amount: "emerald" }}
+                align={{ bill_amount: "right" }}
+              />
+              {table.rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedCols.length + 1} className="text-center py-12 text-muted-foreground">
+                    <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                    <button onClick={reset} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                      Clear Filters
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                table.rows.map((row, idx) => (
+                  <TableRow key={row.invoice_id || idx} className="hover:bg-slate-50 transition-colors">
+                    {orderedCols.map((col) => renderCell(row, col.id))}
+                    <TableCell className="px-4 text-left">{renderActions(row, isHistory)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function FinalInvoicePage() {
   const queryClient = useQueryClient()
@@ -133,55 +297,66 @@ export default function FinalInvoicePage() {
     if (win) { win.document.write(printContent); win.document.close(); win.focus(); win.print() }
   }
 
-  const renderRows = (rows: any[], isHistory = false) => rows.map((row, idx) => (
-    <TableRow key={row.invoice_id || idx} className="hover:bg-slate-50 transition-colors">
-      <TableCell className="font-semibold text-slate-800">{row.customer_name || "—"}</TableCell>
-      <TableCell className="font-mono text-sm">{row.invoice_no || "—"}</TableCell>
-      <TableCell>{row.vehicle_no || "—"}</TableCell>
-      <TableCell className="font-semibold">₹{parseFloat(row.bill_amount || 0).toFixed(2)}</TableCell>
-      <TableCell>
-        <div className="flex gap-2">
-          {row.invoice_copy && (
-            <a href={row.invoice_copy} target="_blank" rel="noopener noreferrer">
-              <Badge variant="outline" className="text-blue-600 border-blue-300 gap-1 cursor-pointer hover:bg-blue-50">
-                <FileText className="h-3 w-3" /> Invoice
-              </Badge>
-            </a>
-          )}
-          {row.e_invoice_file && (
-            <a href={row.e_invoice_file} target="_blank" rel="noopener noreferrer">
-              <Badge variant="outline" className="text-green-600 border-green-300 gap-1 cursor-pointer hover:bg-green-50">
-                <CheckCircle className="h-3 w-3" /> eInvoice
-              </Badge>
-            </a>
-          )}
-          {row.e_way_bill_file && (
-            <a href={row.e_way_bill_file} target="_blank" rel="noopener noreferrer">
-              <Badge variant="outline" className="text-purple-600 border-purple-300 gap-1 cursor-pointer hover:bg-purple-50">
-                <Receipt className="h-3 w-3" /> eWay Bill
-              </Badge>
-            </a>
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => handlePrint(row)} className="gap-1 h-8">
-            <Printer className="h-3 w-3" /> Print
-          </Button>
-          {!isHistory && (
-            <Button size="sm" onClick={() => handleOpenDialog(row)} className="gap-1 h-8 bg-blue-600 hover:bg-blue-700">
-              Upload Files
-            </Button>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
-  ))
+  const renderCell = (row: any, colId: string) => {
+    switch (colId) {
+      case "customer_name":
+        return <TableCell key={colId} className="px-4 text-left font-semibold text-slate-800">{row.customer_name || "—"}</TableCell>
+      case "invoice_no":
+        return <TableCell key={colId} className="px-4 text-left font-mono text-sm">{row.invoice_no || "—"}</TableCell>
+      case "vehicle_no":
+        return <TableCell key={colId} className="px-4 text-left">{row.vehicle_no || "—"}</TableCell>
+      case "bill_amount":
+        return <TableCell key={colId} className="px-4 text-right font-semibold font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtNum(row.bill_amount || 0, 2)}</TableCell>
+      case "documents":
+        return (
+          <TableCell key={colId} className="px-4 text-left">
+            <div className="flex gap-2">
+              {row.invoice_copy && (
+                <a href={row.invoice_copy} target="_blank" rel="noopener noreferrer">
+                  <Badge variant="outline" className="text-blue-600 border-blue-300 gap-1 cursor-pointer hover:bg-blue-50">
+                    <FileText className="h-3 w-3" /> Invoice
+                  </Badge>
+                </a>
+              )}
+              {row.e_invoice_file && (
+                <a href={row.e_invoice_file} target="_blank" rel="noopener noreferrer">
+                  <Badge variant="outline" className="text-green-600 border-green-300 gap-1 cursor-pointer hover:bg-green-50">
+                    <CheckCircle className="h-3 w-3" /> eInvoice
+                  </Badge>
+                </a>
+              )}
+              {row.e_way_bill_file && (
+                <a href={row.e_way_bill_file} target="_blank" rel="noopener noreferrer">
+                  <Badge variant="outline" className="text-purple-600 border-purple-300 gap-1 cursor-pointer hover:bg-purple-50">
+                    <Receipt className="h-3 w-3" /> eWay Bill
+                  </Badge>
+                </a>
+              )}
+            </div>
+          </TableCell>
+        )
+      default:
+        return null
+    }
+  }
+
+  const renderActions = (row: any, isHistory = false) => (
+    <div className="flex gap-2">
+      <Button size="sm" variant="outline" onClick={() => handlePrint(row)} className="gap-1 h-8">
+        <Printer className="h-3 w-3" /> Print
+      </Button>
+      {!isHistory && (
+        <Button size="sm" onClick={() => handleOpenDialog(row)} className="gap-1 h-8 bg-blue-600 hover:bg-blue-700">
+          Upload Files
+        </Button>
+      )}
+    </div>
+  )
 
   return (
     <>
       <WorkflowStageShell
+        persistKey="final-invoice"
         partyNames={customerNames}
         title="Stage 11: Make Final Invoice"
         description="eInvoice / eWay Bill upload for now, direct generation later"
@@ -197,21 +372,15 @@ export default function FinalInvoicePage() {
                 <p className="font-semibold">No history yet</p>
               </div>
             ) : (
-              <div className="rounded-xl border overflow-hidden shadow-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Invoice No.</TableHead>
-                      <TableHead>Vehicle No.</TableHead>
-                      <TableHead>Bill Amount</TableHead>
-                      <TableHead>Documents</TableHead>
-                      <TableHead>Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>{renderRows(historyRows, true)}</TableBody>
-                </Table>
-              </div>
+              <FinalInvoiceTable
+                storageKey="final-invoice-history"
+                title="Final Invoice History"
+                description="Invoices with final documents already submitted"
+                rows={historyRows}
+                isHistory
+                renderCell={renderCell}
+                renderActions={renderActions}
+              />
             )}
           </div>
         }
@@ -228,21 +397,15 @@ export default function FinalInvoicePage() {
               <p className="text-sm">All invoices have been finalized</p>
             </div>
           ) : (
-            <div className="rounded-xl border overflow-hidden shadow-sm">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50">
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Invoice No.</TableHead>
-                    <TableHead>Vehicle No.</TableHead>
-                    <TableHead>Bill Amount</TableHead>
-                    <TableHead>Documents</TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>{renderRows(pendingRows)}</TableBody>
-              </Table>
-            </div>
+            <FinalInvoiceTable
+              storageKey="final-invoice"
+              title="Final Invoices List"
+              description="Invoices awaiting eInvoice / eWay Bill upload"
+              rows={pendingRows}
+              isHistory={false}
+              renderCell={renderCell}
+              renderActions={renderActions}
+            />
           )}
         </div>
       </WorkflowStageShell>

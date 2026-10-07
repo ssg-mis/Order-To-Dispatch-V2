@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -34,6 +34,7 @@ import { checkInvoiceApi, skuApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { fmtNum, fmtDate } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -41,6 +42,9 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
 
 const INDIAN_STATES = [
   "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
@@ -152,6 +156,40 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
       </div>
     </div>
   )
+}
+
+// Table standard: numeric + date columns right aligned, units in headings, plain fixed decimals.
+const NUM_DECIMALS: Record<string, number> = {
+  products: 0,
+  actual_qty_dispatch: 4, orderQty: 4, qtyToDispatch: 4, actual_qty: 4, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+  gross_weight: 4, tare_weight: 4, net_weight: 4, extra_weight: 4,
+  rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
+}
+const DATE_COL_IDS = new Set(["partySoDate", "actual1Date", "deliveryDate", "invoice_date", "dispatch_date_confirmed", "fitness_end_date", "insurance_end_date", "tax_end_date", "pollution_end_date", "permit1_end_date", "permit2_end_date"])
+const MONEY_HEAD_IDS = new Set(["rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "bill_amount"])
+const isRightCol = (id: string) => id in NUM_DECIMALS || DATE_COL_IDS.has(id)
+const fmtCell = (id: string, v: any) => {
+  if (v === "—" || v === null || v === undefined || v === "") return "—"
+  if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
+  if (DATE_COL_IDS.has(id)) return fmtDate(v)
+  return String(v)
+}
+const colLabel = (id: string, label: string) => (MONEY_HEAD_IDS.has(id) ? `${label} (₹)` : label)
+
+function getDynamicColumnValue(group: any, colId: string) {
+  const directValue = group?.[colId]
+  if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
+
+  const firstProduct = group?._allProducts?.[0] || {}
+  const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
+
+  const orderValue = (firstOrder as any)?.[colId]
+  if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
+
+  const productValue = (firstProduct as any)?.[colId]
+  if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
+
+  return "—"
 }
 
 export default function CheckInvoicePage() {
@@ -464,57 +502,78 @@ export default function CheckInvoicePage() {
     })
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Stage list table state (column search / date range / sort / totals) ──
+  // Status buttons are remembered permanently; quick search / customer filter only for the session.
+  // Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("check-invoice", {
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "PENDING" | "ISSUE",
+    customerFilter: "ALL",
+  }, { permanentKeys: ["statusFilter"] })
+  const { quickSearch, statusFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "PENDING" | "ISSUE") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
+  const groupStatus = (g: any): string =>
+    g.isReverted || g._allProducts?.some((p: any) => p.status_1 === "Issue") ? "Issue Reported" : "Pending Review"
+
+  const stageCols = useMemo<StageColDef<any>[]>(() => {
+    const std: StageColDef<any>[] = [
+      { id: "partySoDate", label: "DO Date", type: "date", accessor: (g) => g._allProducts?.[0]?.party_so_date },
+      { id: "orderNo", label: "DO Number", accessor: (g) => g.orderNo },
+      { id: "processid", label: "Manual Sauda No.", accessor: (g) => g.processid },
+      { id: "customerName", label: "Customer Name", accessor: (g) => g.customerName },
+      { id: "actual1Date", label: "Dispatched Date", type: "date", accessor: (g) => g._allProducts?.[0]?.lrc_actual_1 || g._allProducts?.[0]?.actual_1 },
+      { id: "invoiceNo", label: "Invoice No.", accessor: (g) => g.invoiceNo },
+      { id: "vehicleNo", label: "Vehicle No.", accessor: (g) => g.vehicleNo },
+      { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: (g) => g.orderPunchRemarks },
+      { id: "status", label: "Status", accessor: (g) => groupStatus(g) },
+      { id: "products", label: "Items", type: "number", accessor: (g) => g._productCount || 0, total: true },
+    ]
+    const stdIds = new Set(std.map((c) => c.id))
+    const SUMMABLE_DYN = new Set(["bill_amount", "gross_weight", "tare_weight", "net_weight", "extra_weight"])
+    const dyn: StageColDef<any>[] = ALL_COLUMNS.filter((c) => !stdIds.has(c.id)).map((c) =>
+      c.id in NUM_DECIMALS
+        ? { id: c.id, label: colLabel(c.id, c.label), type: "number" as const, accessor: (g: any) => Number(getDynamicColumnValue(g, c.id)) || 0, ...(SUMMABLE_DYN.has(c.id) ? { total: true } : {}) }
+        : { id: c.id, label: colLabel(c.id, c.label), type: DATE_COL_IDS.has(c.id) ? ("date" as const) : undefined, accessor: (g: any) => String(getDynamicColumnValue(g, c.id)) }
+    )
+    return [...std, ...dyn]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const baseFilter = useCallback(
+    (g: any) => {
+      if (statusFilter === "PENDING" && groupStatus(g) !== "Pending Review") return false
+      if (statusFilter === "ISSUE" && groupStatus(g) !== "Issue Reported") return false
+      if (customerFilter !== "ALL" && g.customerName !== customerFilter) return false
+      const q = quickSearch.trim().toLowerCase()
+      if (q) {
+        const hay = [g.orderNo, g.customerName, g.invoiceNo, g.vehicleNo, g.processid, g.orderPunchRemarks].join(" ").toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statusFilter, customerFilter, quickSearch]
+  )
+
+  const table = useStageTable<any>({ rows: displayRows, columns: stageCols, baseFilter, persistKey: "check-invoice" })
+  const orderedCols = useMemo(
+    () => orderedVisible.map((id) => stageCols.find((c) => c.id === id)).filter(Boolean) as StageColDef<any>[],
+    [orderedVisible.join("|"), stageCols] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const customerOptions = useMemo(
+    () => Array.from(new Set(displayRows.map((g: any) => g.customerName).filter(Boolean))).sort() as string[],
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const resetAllFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
   }
 
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    if (colId === "orderNo") return group.orderNo || ""
-    if (colId === "processid") return group.processid || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "actual1Date") return group.actual1Date || ""
-    if (colId === "invoiceNo") return group.invoiceNo || ""
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group.isReverted 
-        ? "Issue Reported" 
-        : group._allProducts?.some((p: any) => p.status_1 === "Issue") 
-          ? "Issue Reported" 
-          : "Pending Review"
-    }
-    if (colId === "products") return String(group._productCount || 0)
-    return String(getDynamicColumnValue(group, colId))
-  }
-
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
 
   const toggleSelectItem = (itemKey: string) => {
     setSelectedItems(prev =>
@@ -526,13 +585,15 @@ export default function CheckInvoicePage() {
 
   // Issued/reverted records are awaiting re-issue from Make Invoice and cannot be
   // verified, so they are excluded from selection (view-only via the eye action).
-  const selectableRows = useMemo(() => displayRows.filter(r => !r.isReverted), [displayRows])
+  const selectableRows = useMemo(() => table.rows.filter((r: any) => !r.isReverted), [table.rows])
+  const allSelectableChecked = selectableRows.length > 0 && selectableRows.every((r: any) => selectedItems.includes(r._rowKey))
 
   const toggleSelectAll = () => {
-    if (selectableRows.length > 0 && selectedItems.length === selectableRows.length) {
-      setSelectedItems([])
+    if (allSelectableChecked) {
+      const ids = new Set(selectableRows.map((r: any) => r._rowKey))
+      setSelectedItems(prev => prev.filter(k => !ids.has(k)))
     } else {
-      setSelectedItems(selectableRows.map(r => r._rowKey))
+      setSelectedItems(prev => Array.from(new Set([...prev, ...selectableRows.map((r: any) => r._rowKey)])))
     }
   }
 
@@ -706,24 +767,10 @@ export default function CheckInvoicePage() {
   })
 
 
-  const getDynamicColumnValue = (group: any, colId: string) => {
-    const directValue = group?.[colId]
-    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
-
-    const firstProduct = group?._allProducts?.[0] || {}
-    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
-
-    const orderValue = (firstOrder as any)?.[colId]
-    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
-
-    const productValue = (firstProduct as any)?.[colId]
-    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
-
-    return "—"
-  }
 
   return (
     <WorkflowStageShell
+      persistKey="check-invoice"
       partyNames={customerNames}
       title="Stage 10: Check Invoice"
       description="Review and verify invoices grouped by Customer."
@@ -757,7 +804,7 @@ export default function CheckInvoicePage() {
           orderListKey="invoices"
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
-          mapRemarks={(order: any) => `${order.remarks_2 || "-"} ${order.freight_rate ? `| Freight: ₹${order.freight_rate}` : ""}`}
+          mapRemarks={(order: any) => `${order.remarks_2 || "-"} ${order.freight_rate ? `| Freight (₹): ${order.freight_rate}` : ""}`}
           getDate={(order: any) => order.actual_6 || order.timestamp || null}
         />
       }
@@ -774,68 +821,98 @@ export default function CheckInvoicePage() {
             Verify Invoice ({selectedItems.length})
           </Button>
 
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full bg-transparent sm:w-auto">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
 
         {/* Main Table (Grouped) */}
-        <Card className="border-none shadow-sm overflow-hidden md:max-h-[600px] md:overflow-auto">
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+          <StageListHeader
+            title="Invoices List"
+            shown={table.rows.length}
+            total={displayRows.length}
+            description="Invoices pending verification, grouped by invoice"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Invoice, Vehicle..."
+          >
+            <StageToolbar
+              shown={table.rows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={resetAllFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "PENDING", label: "Pending Review" },
+                      { value: "ISSUE", label: "Issue Reported" },
+                      { value: "ALL", label: "All" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerOptions} />
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusFilter === "PENDING" ? "Pending Review" : "Issue Reported"}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox checked={selectableRows.length > 0 && selectedItems.length === selectableRows.length} onCheckedChange={toggleSelectAll} />
+                <TableHead className="w-12 px-4 text-left align-middle">
+                  <Checkbox checked={allSelectableChecked} onCheckedChange={toggleSelectAll} />
                 </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisible.map(id => {
-                    const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                    if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                    if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number<PendingSortIcon field="orderNo" /></SortableTableHead>
-                    if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
-                    if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
-                    if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
-                    if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No.<PendingSortIcon field="invoiceNo" /></SortableTableHead>
-                    if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
-                    if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                    if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
-                    const dynCol = ALL_COLUMNS.find(c => c.id === id)
-                    if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
-                    return null
-                  })}
+                  {orderedCols.map(col => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={isRightCol(col.id) ? "right" : "left"} />
+                  ))}
                 </ColumnDragProvider>
               </TableRow>
             </TableHeader>
             <TableBody>
+              <StageTotalsRow
+                columns={[{ id: "__sel", label: "" }, ...orderedCols]}
+                totals={table.totals}
+                count={table.rows.length}
+                labelColumnId={orderedCols[0]?.id}
+                unit=""
+                format={(n, id) => fmtNum(n, NUM_DECIMALS[id] ?? 2)}
+                tones={{ products: "blue", actual_qty_dispatch: "purple", bill_amount: "emerald" }}
+                align={Object.fromEntries([["__sel", "left"],...orderedCols.map(c => [c.id, isRightCol(c.id) ? "right" : "left"])]) as Record<string, "center" | "left" | "right">}
+              />
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {orderedVisible.map(id => (
-                      <TableCell key={id} className="text-center py-4">
-                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-16" : id === "orderNo" || id === "processid" || id === "invoiceNo" || id === "vehicleNo" || id === "actual1Date" ? "w-24" : "w-20")} />
+                      <TableCell key={id} className={cn("px-4 py-4", isRightCol(id) ? "text-right" : "text-left")}>
+                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", isRightCol(id) && "ml-auto",id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-16" : id === "orderNo" || id === "processid" || id === "invoiceNo" || id === "vehicleNo" || id === "actual1Date" ? "w-24" : "w-20")} />
                       </TableCell>
                     ))}
                   </TableRow>
                 ))
-              ) : sortedDisplayRows.length > 0 ? (
-                sortedDisplayRows.map((group) => (
+              ) : table.rows.length > 0 ? (
+                table.rows.map((group) => (
                   <TableRow
                     key={group._rowKey}
                     className={`${selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""} ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
                   >
-                    <TableCell className="text-center">
+                    <TableCell className="px-4 text-left">
                       {group.isReverted ? (
                         <Button
                           variant="ghost"
@@ -854,9 +931,9 @@ export default function CheckInvoicePage() {
                       )}
                     </TableCell>
                     {orderedVisible.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
+                      if (id === "partySoDate") return <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{group.partySoDate}</TableCell>
                       if (id === "orderNo") return (
-                        <TableCell key={id} className="text-center text-xs">
+                        <TableCell key={id} className="px-4 text-left text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.orderNo }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-blue-700 font-bold">{d.doNumber}</span>
@@ -864,10 +941,10 @@ export default function CheckInvoicePage() {
                           </div>
                         </TableCell>
                       )
-                      if (id === "processid") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.processid}</TableCell>
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.customerName}</TableCell>
+                      if (id === "processid") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.processid}</TableCell>
+                      if (id === "customerName") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.customerName}</TableCell>
                       if (id === "actual1Date") return (
-                        <TableCell key={id} className="text-center text-xs text-slate-600">
+                        <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actual1Date }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
@@ -876,15 +953,15 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "invoiceNo") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
+                        <TableCell key={id} className="px-4 text-left text-xs font-medium">
                           {group._allProducts?.[0]?.invoice_copy ? (
                             <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
                           ) : group.invoiceNo}
                         </TableCell>
                       )
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
+                      if (id === "vehicleNo") return <TableCell key={id} className="px-4 text-left"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
@@ -893,7 +970,7 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "status") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           {group.isReverted ? (
                             <Badge className="bg-red-100 text-red-700">Issue Reported</Badge>
                           ) : group._allProducts.some((p: any) => p.status_1 === "Issue") ? (
@@ -904,23 +981,31 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "products") return (
-                        <TableCell key={id} className="text-center">
-                          <Badge variant="secondary">{group._productCount} items</Badge>
+                        <TableCell key={id} className="px-4 text-right text-xs font-mono tabular-nums">
+                          {fmtNum(group._productCount, 0)}
                         </TableCell>
                       )
-                      return <TableCell key={id} className="text-center text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
+                      return isRightCol(id)
+                        ? <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{fmtCell(id, getDynamicColumnValue(group, id))}</TableCell>
+                        : <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                     })}
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell colSpan={1 + orderedVisible.length} className="text-center py-8 text-muted-foreground">
-                    No invoices pending for review
+                    {displayRows.length > 0 ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                        <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                      </div>
+                    ) : "No invoices pending for review"}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </div>
           <div className="space-y-3 p-3 md:hidden">
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
@@ -931,8 +1016,8 @@ export default function CheckInvoicePage() {
                   </div>
                 </div>
               ))
-            ) : displayRows.length > 0 ? (
-              displayRows.map((group) => {
+            ) : table.rows.length > 0 ? (
+              table.rows.map((group) => {
                 const display = buildCheckInvoiceDisplay(group)
                 const selected = selectedItems.includes(group._rowKey)
                 return (
@@ -1001,7 +1086,7 @@ export default function CheckInvoicePage() {
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Items</p>
-                        <p className="mt-1 font-bold">{display.productCount} items</p>
+                        <p className="mt-1 font-bold font-mono tabular-nums">{fmtNum(display.productCount, 0)}</p>
                       </div>
                       {visibleColumns.includes("vehicleNo") && (
                         <div className="rounded-md bg-slate-50 p-2">
@@ -1020,12 +1105,12 @@ export default function CheckInvoicePage() {
                         </div>
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                        <p className="mt-1 font-mono font-bold">{display.qty}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Qty to Dispatch</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtNum(display.qty, 4)}</p>
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Amount</p>
-                        <p className="mt-1 font-mono font-bold">₹{Number(display.amount).toFixed(2)}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Amount (₹)</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtNum(display.amount, 2)}</p>
                       </div>
                     </div>
                     {dynamicColumns.length > 0 && (
@@ -1035,8 +1120,8 @@ export default function CheckInvoicePage() {
                           if (!col) return null
                           return (
                             <div key={colId} className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">{col.label}</p>
-                              <p className="mt-1 font-bold break-words">{String(getDynamicColumnValue(group, colId))}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">{colLabel(colId, col.label)}</p>
+                              <p className="mt-1 font-bold break-words">{fmtCell(colId, getDynamicColumnValue(group, colId))}</p>
                             </div>
                           )
                         })}
@@ -1061,10 +1146,16 @@ export default function CheckInvoicePage() {
               })
             ) : (
               <div className="py-10 text-center text-muted-foreground">
-                No invoices pending for review
+                {displayRows.length > 0 ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                    <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                  </div>
+                ) : "No invoices pending for review"}
               </div>
             )}
           </div>
+          </CardContent>
         </Card>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
@@ -1367,8 +1458,39 @@ export default function CheckInvoicePage() {
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
                   <Table className="hidden md:table">
                     <TableHeader className="bg-slate-50">
+                      <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4 text-left font-black text-slate-900">Total ({selectedProducts.length})</TableCell>
+                        <TableCell className="px-4 text-right font-mono tabular-nums">
+                          {(() => {
+                            const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .reduce((sum, p) => {
+                                const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
+                                const skuWt = parseFloat(skuWtStr || "") || 0;
+                                const q = parseFloat(p.actualQty) || 0;
+                                return sum + (skuWt * q);
+                              }, 0);
+                            return fmtNum(totalSelectedWt, 4);
+                          })()}
+                        </TableCell>
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4 text-right font-mono tabular-nums">
+                          {fmtNum(selectedGroups.flatMap(g => g._allProducts)
+                            .filter(p => selectedProducts.includes(p._rowKey))
+                            .reduce((sum, p) => {
+                              const r = Number(p.rate) || 0;
+                              const rateWoGst = parseFloat((r / 1.05).toFixed(2));
+                              const q = parseFloat(p.actualQty) || 0;
+                              return sum + (rateWoGst * q);
+                            }, 0), 2)}
+                        </TableCell>
+                        <TableCell colSpan={3} className="px-4" />
+                      </TableRow>
                       <TableRow>
-                        <TableHead className="w-12 text-center h-10">
+                        <TableHead className="w-12 px-4 text-left h-10">
                           <Checkbox
                             checked={selectedGroups.every(g => g._allProducts.every((p: any) => selectedProducts.includes(p._rowKey)))}
                             onCheckedChange={(checked) => {
@@ -1381,15 +1503,15 @@ export default function CheckInvoicePage() {
                             }}
                           />
                         </TableHead>
-                        <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT(KGS)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">TAXABLE AMOUNT</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE NO</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE DATE</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">TRUCK NO</TableHead>
+                        <TableHead className="px-4 text-left h-10">Product Info</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Weight (KGS)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
+                        <TableHead className="px-4 text-left h-10 whitespace-nowrap">Invoice No</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Invoice Date</TableHead>
+                        <TableHead className="px-4 text-left h-10 whitespace-nowrap">Truck No</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1401,7 +1523,7 @@ export default function CheckInvoicePage() {
 
                         return (
                           <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                            <TableCell className="text-center p-2">
+                            <TableCell className="px-4 py-2 text-left">
                               <Checkbox
                                 checked={selectedProducts.includes(product._rowKey)}
                                 onCheckedChange={() => {
@@ -1413,51 +1535,49 @@ export default function CheckInvoicePage() {
                                 }}
                               />
                             </TableCell>
-                            <TableCell className="p-2">
+                            <TableCell className="px-4 py-2">
                               <div className="flex flex-col">
                                 <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
                                 <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {(() => {
                                 const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                                 const skuWt = parseFloat(skuWtStr || "") || 0;
                                 const totalWt = skuWt * qty;
                                 if (!totalWt) return "—";
-                                return totalWt.toFixed(4);
+                                return fmtNum(totalWt, 4);
                               })()}
                             </TableCell>
-                            <TableCell className="text-center p-2">
-                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                {product.actualQty || "0"}
-                              </Badge>
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {fmtNum(product.actualQty || 0, 4)}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               <Popover>
                                 <PopoverTrigger asChild>
                                   <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                    {originalRate ? `₹${originalRate.toFixed(2)}` : "—"}
+                                    {originalRate ? originalRate.toFixed(2) : "—"}
                                   </span>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
                                   <div className="space-y-1.5">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
                                     <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
+                                      {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
                                     </p>
                                   </div>
                                 </PopoverContent>
                               </Popover>
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              {originalRate ? `₹${rateWoGst.toFixed(2)}` : "—"}
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {originalRate ? rateWoGst.toFixed(2) : "—"}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              {taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {taxableAmount ? taxableAmount.toFixed(2) : "—"}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-green-700">
+                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-green-700">
                               {product.invoice_copy ? (
                                 <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline">
                                   {product.invoiceNo || "View Invoice"}
@@ -1466,54 +1586,16 @@ export default function CheckInvoicePage() {
                                 <span>{product.invoiceNo || "—"}</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-black">
-                              {product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}
+                            <TableCell className="px-4 py-2 text-right text-xs font-black font-mono tabular-nums whitespace-nowrap">
+                              {fmtDate(product.invoiceDate)}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-slate-700">
                               {(product.truckNo || "—").toUpperCase()}
                             </TableCell>
                           </TableRow>
                         );
                       })}
 
-                      {/* Summary Row */}
-                      <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                        <TableCell />
-                        <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {(() => {
-                              const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
-                                .filter(p => selectedProducts.includes(p._rowKey))
-                                .reduce((sum, p) => {
-                                  const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
-                                  const skuWt = parseFloat(skuWtStr || "") || 0;
-                                  const q = parseFloat(p.actualQty) || 0;
-                                  return sum + (skuWt * q);
-                                }, 0);
-                              return totalSelectedWt.toFixed(4);
-                            })()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-center text-xs text-blue-700 font-black">
-                          ₹{selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => {
-                              const r = Number(p.rate) || 0;
-                              const rateWoGst = parseFloat((r / 1.05).toFixed(2));
-                              const q = parseFloat(p.actualQty) || 0;
-                              return sum + (rateWoGst * q);
-                            }, 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell colSpan={3} />
-                      </TableRow>
                     </TableBody>
                   </Table>
 
@@ -1568,48 +1650,48 @@ export default function CheckInvoicePage() {
 
                           <div className="grid grid-cols-2 gap-3 text-xs">
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Weight(KGS)</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">
+                              <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
                                 {(() => {
                                   const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                                   const skuWt = parseFloat(skuWtStr || "") || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  return totalWt.toFixed(4);
+                                  return fmtNum(totalWt, 4);
                                 })()}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                              <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-blue-700">{fmtNum(product.actualQty || 0, 4)}</p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
                               <Popover>
                                 <PopoverTrigger asChild>
-                                  <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">
-                                    {originalRate ? `₹${originalRate.toFixed(2)}` : "—"}
+                                  <p className="mt-1 cursor-pointer font-mono tabular-nums font-bold text-slate-700">
+                                    {originalRate ? fmtNum(originalRate, 2) : "—"}
                                   </p>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
                                   <div className="space-y-1.5">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
                                     <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
+                                      {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
                                     </p>
                                   </div>
                                 </PopoverContent>
                               </Popover>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">
-                                {originalRate ? `₹${(originalRate / 1.05).toFixed(2)}` : "—"}
+                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
+                                {originalRate ? fmtNum(originalRate / 1.05, 2) : "—"}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtNum(taxableAmount, 2) : "—"}</p>
                             </div>
                             <div className="rounded-md bg-green-50 p-2">
                               <p className="text-[10px] font-black uppercase text-green-700">Invoice No</p>
@@ -1635,14 +1717,8 @@ export default function CheckInvoicePage() {
                     })}
                     <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
                       <div>
-                        <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                        <p className="mt-1 font-black text-blue-700">
-                          {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                        </p>
-                      </div>
-                      <div>
                         <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
-                        <p className="mt-1 font-black text-blue-700">
+                        <p className="mt-1 font-mono tabular-nums font-black text-blue-700">
                           {(() => {
                             const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
@@ -1652,7 +1728,7 @@ export default function CheckInvoicePage() {
                                 const q = parseFloat(p.actualQty) || 0;
                                 return sum + (skuWt * q);
                               }, 0);
-                            return totalSelectedWt.toFixed(4);
+                            return fmtNum(totalSelectedWt, 4);
                           })()}
                         </p>
                       </div>
