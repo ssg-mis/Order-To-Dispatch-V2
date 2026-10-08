@@ -436,6 +436,70 @@ export function CustomerForm({
               )}
             </div>
           )}
+        
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">Aadhaar Card</Label>
+            <FileUploadField
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.aadhaar_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => {
+              if (files[0]) {
+                handleCustomerFieldChangeAttempt("Aadhaar Card Upload", "documents", () => {
+                  handleFileUpload(files[0], "aadhaar_upload")
+                })
+              }
+            }}
+            onRemove={() => {
+              handleCustomerFieldChangeAttempt("Aadhaar Card Removal", "documents", () => {
+                handleFileRemove("aadhaar_upload")
+              })
+            }}
+          />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">PAN Card</Label>
+            <FileUploadField
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.pan_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => {
+              if (files[0]) {
+                handleCustomerFieldChangeAttempt("PAN Card Upload", "documents", () => {
+                  handleFileUpload(files[0], "pan_upload")
+                })
+              }
+            }}
+            onRemove={() => {
+              handleCustomerFieldChangeAttempt("PAN Card Removal", "documents", () => {
+                handleFileRemove("pan_upload")
+              })
+            }}
+          />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">GST Certificate</Label>
+            <FileUploadField
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.gst_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => {
+              if (files[0]) {
+                handleCustomerFieldChangeAttempt("GST Certificate Upload", "documents", () => {
+                  handleFileUpload(files[0], "gst_certificate_upload")
+                })
+              }
+            }}
+            onRemove={() => {
+              handleCustomerFieldChangeAttempt("GST Certificate Removal", "documents", () => {
+                handleFileRemove("gst_certificate_upload")
+              })
+            }}
+          />
+          </div>
         </div>
       </div>
 
@@ -498,6 +562,28 @@ export function CustomerForm({
             {customerForm.msme_registration_wef && (
               <p className="text-xs text-slate-500">{formatDocDate(customerForm.msme_registration_wef)}</p>
             )}
+          </div>
+        
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">MSME Certificate</Label>
+            <FileUploadField
+            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+            value={customerForm.msme_certificate_upload || ""}
+            helperText="Max file size: 20 MB"
+            uploading={false}
+            onFilesSelected={(files) => {
+              if (files[0]) {
+                handleCustomerFieldChangeAttempt("MSME Certificate Upload", "documents", () => {
+                  handleFileUpload(files[0], "msme_certificate_upload")
+                })
+              }
+            }}
+            onRemove={() => {
+              handleCustomerFieldChangeAttempt("MSME Certificate Removal", "documents", () => {
+                handleFileRemove("msme_certificate_upload")
+              })
+            }}
+          />
           </div>
         </div>
       </div>
@@ -567,105 +653,10 @@ export function CustomerForm({
               <p className="text-xs text-slate-500">{formatDocDate(customerForm.fssai_valid_upto)}</p>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Document Uploads */}
-      <div className="border-t border-slate-200 pt-4 space-y-3">
-        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
-            <FileText className="h-4.5 w-4.5 text-blue-600" />
-            <span>Document Uploads</span>
-          </Label>
-          {editingItem?.id && (
-            <CustomerSectionalHistoryTable
-              section="documents"
-              customerId={editingItem.id}
-              customerName={customerForm.customer_name}
-              title="Document Uploads History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
-            />
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <FileUploadField
-            label="Aadhaar Card"
-            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-            value={customerForm.aadhaar_upload || ""}
-            helperText="Max file size: 20 MB"
-            uploading={false}
-            onFilesSelected={(files) => {
-              if (files[0]) {
-                handleCustomerFieldChangeAttempt("Aadhaar Card Upload", "documents", () => {
-                  handleFileUpload(files[0], "aadhaar_upload")
-                })
-              }
-            }}
-            onRemove={() => {
-              handleCustomerFieldChangeAttempt("Aadhaar Card Removal", "documents", () => {
-                handleFileRemove("aadhaar_upload")
-              })
-            }}
-          />
-          <FileUploadField
-            label="PAN Card"
-            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-            value={customerForm.pan_upload || ""}
-            helperText="Max file size: 20 MB"
-            uploading={false}
-            onFilesSelected={(files) => {
-              if (files[0]) {
-                handleCustomerFieldChangeAttempt("PAN Card Upload", "documents", () => {
-                  handleFileUpload(files[0], "pan_upload")
-                })
-              }
-            }}
-            onRemove={() => {
-              handleCustomerFieldChangeAttempt("PAN Card Removal", "documents", () => {
-                handleFileRemove("pan_upload")
-              })
-            }}
-          />
-          <FileUploadField
-            label="GST Certificate"
-            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-            value={customerForm.gst_certificate_upload || ""}
-            helperText="Max file size: 20 MB"
-            uploading={false}
-            onFilesSelected={(files) => {
-              if (files[0]) {
-                handleCustomerFieldChangeAttempt("GST Certificate Upload", "documents", () => {
-                  handleFileUpload(files[0], "gst_certificate_upload")
-                })
-              }
-            }}
-            onRemove={() => {
-              handleCustomerFieldChangeAttempt("GST Certificate Removal", "documents", () => {
-                handleFileRemove("gst_certificate_upload")
-              })
-            }}
-          />
-          <FileUploadField
-            label="MSME Certificate"
-            accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-            value={customerForm.msme_certificate_upload || ""}
-            helperText="Max file size: 20 MB"
-            uploading={false}
-            onFilesSelected={(files) => {
-              if (files[0]) {
-                handleCustomerFieldChangeAttempt("MSME Certificate Upload", "documents", () => {
-                  handleFileUpload(files[0], "msme_certificate_upload")
-                })
-              }
-            }}
-            onRemove={() => {
-              handleCustomerFieldChangeAttempt("MSME Certificate Removal", "documents", () => {
-                handleFileRemove("msme_certificate_upload")
-              })
-            }}
-          />
-          <FileUploadField
-            label="FSSAI Certificate"
+        
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">FSSAI Certificate</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.fssai_certificate_upload || ""}
             helperText="Max file size: 20 MB"
@@ -683,66 +674,11 @@ export function CustomerForm({
               })
             }}
           />
-        </div>
-      </div>
-
-      {/* Godown Tagging Details */}
-      <div className="border-t border-slate-200 pt-4 space-y-3">
-        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
-            <Warehouse className="h-4.5 w-4.5 text-blue-600" />
-            <span>Belongs to Which Godown</span>
-          </Label>
-          {editingItem?.id && (
-            <CustomerSectionalHistoryTable
-              section="godown"
-              customerId={editingItem.id}
-              customerName={customerForm.customer_name}
-              title="Godown History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
-            />
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-slate-800">Select Godowns</Label>
-            <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 p-2.5 bg-slate-50/40">
-              {(godownDepots || []).map((d: any) => {
-                const checked = (customerForm.godown_ids || []).includes(d.id)
-                return (
-                  <label key={d.id} className="flex items-center gap-2 text-xs font-medium text-slate-800 cursor-pointer hover:text-slate-900">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(val) => {
-                        handleCustomerFieldChangeAttempt("Tagged Godowns", "godown", () => {
-                          const current = customerForm.godown_ids || []
-                          setCustomerForm(prev => ({
-                            ...prev,
-                            godown_ids: val ? [...current, d.id] : current.filter((id: number) => id !== d.id),
-                          }))
-                        })
-                      }}
-                    />
-                    {d.depot_name}
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="is_required_for_commitment" className="text-xs font-semibold text-slate-800">Is Required for Commitment</Label>
-            <Select value={customerForm.is_required_for_commitment || "No"} onValueChange={val => setCustomerForm({...customerForm, is_required_for_commitment: val})}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Yes">Yes</SelectItem>
-                <SelectItem value="No">No</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
         </div>
       </div>
 
-      {/* Bank Details */}
+            {/* Bank Details */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
           <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
