@@ -955,6 +955,75 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card</Label>
+                    <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.aadhaar_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm(prev => ({ ...prev, aadhaar_upload: res.data.url }))
+                            toast({ title: "Success", description: "Aadhaar Card uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm(prev => ({ ...prev, aadhaar_upload: "" }))}
+                  />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-slate-700">PAN Card</Label>
+                    <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.pan_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm(prev => ({ ...prev, pan_upload: res.data.url }))
+                            toast({ title: "Success", description: "PAN Card uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm(prev => ({ ...prev, pan_upload: "" }))}
+                  />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-slate-700">GST Certificate</Label>
+                    <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.gst_certificate_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: res.data.url }))
+                            toast({ title: "Success", description: "GST Certificate uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: "" }))}
+                  />
+                  </div>
                 </>
               )}
 
@@ -1056,6 +1125,29 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       placeholder="Select type"
                       searchPlaceholder="Search..."
                     />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-slate-700">MSME Certificate</Label>
+                    <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.msme_certificate_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm(prev => ({ ...prev, msme_certificate_upload: res.data.url }))
+                            toast({ title: "Success", description: "MSME Certificate uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm(prev => ({ ...prev, msme_certificate_upload: "" }))}
+                  />
                   </div>
                 </>
               )}
@@ -1260,115 +1352,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                 </div>
               )}
 
-              {activeSection === "documents" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:col-span-3">
-                  <FileUploadField
-                    label="Aadhaar Card"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.aadhaar_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, aadhaar_upload: res.data.url }))
-                            toast({ title: "Success", description: "Aadhaar Card uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, aadhaar_upload: "" }))}
-                  />
-                  <FileUploadField
-                    label="PAN Card"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.pan_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, pan_upload: res.data.url }))
-                            toast({ title: "Success", description: "PAN Card uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, pan_upload: "" }))}
-                  />
-                  <FileUploadField
-                    label="GST Certificate"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.gst_certificate_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: res.data.url }))
-                            toast({ title: "Success", description: "GST Certificate uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: "" }))}
-                  />
-                  <FileUploadField
-                    label="MSME Certificate"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.msme_certificate_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, msme_certificate_upload: res.data.url }))
-                            toast({ title: "Success", description: "MSME Certificate uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, msme_certificate_upload: "" }))}
-                  />
-                  <FileUploadField
-                    label="FSSAI Certificate"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.fssai_certificate_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, fssai_certificate_upload: res.data.url }))
-                            toast({ title: "Success", description: "FSSAI Certificate uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, fssai_certificate_upload: "" }))}
-                  />
-                </div>
-              )}
+              
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-emerald-200">
@@ -1443,6 +1427,9 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     <th className="py-2.5 px-3 border-r border-slate-300 font-mono">PAN No</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">GST Status</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Place of Supply</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Aadhaar Card</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">PAN Card</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">GST Certificate</th>
                   </>
                 )}
 
@@ -1450,6 +1437,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                   <>
                     <th className="py-2.5 px-3 border-r border-slate-300">MSME Reg No</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">MSME Type</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">MSME Certificate</th>
                   </>
                 )}
 
@@ -1458,6 +1446,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     <th className="py-2.5 px-3 border-r border-slate-300">FSSAI Licence No</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Licence Type</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Valid Upto</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">FSSAI Certificate</th>
                   </>
                 )}
 
@@ -1486,13 +1475,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                   </>
                 )}
 
-                {activeSection === "documents" && (
-                  <>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Document Type</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Previous File</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Uploaded File</th>
-                  </>
-                )}
+                
 
                 <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300">Updated By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[90px]">Actions</th>
@@ -1835,19 +1818,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       </>
                     )}
 
-                    {activeSection === "documents" && (
-                      <>
-                        <td className="py-2 px-3 border-r border-slate-200 font-semibold text-slate-900">
-                          {row.fieldName || "Document Upload"}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-600">
-                          {renderFileLink(row.oldValue)}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 font-medium text-rose-800 bg-rose-50/40">
-                          {renderFileLink(row.newValue)}
-                        </td>
-                      </>
-                    )}
+                    
 
                     <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap border-r border-slate-200">
                       <div className="flex items-center justify-end gap-1 text-[11px]">

@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Combobox } from "@/components/ui/combobox"
 import { FileUploadField } from "@/components/file-upload-field"
 import { masterHistoryApi, depotApi, orderApi } from "@/lib/api-service"
+import { fmtDate, fmtDateTime } from "@/lib/table-format"
 import { useToast } from "@/hooks/use-toast"
 
 type DepotSectionType = "basic" | "tags" | "documents"
@@ -225,10 +226,11 @@ export function DepotEffectiveDatesModalView({
       }
 
       if (!dateMap.has(key)) {
-        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", changes: [], ids: [] })
+        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", changedAt: null, changes: [], ids: [] })
       }
 
       const entry = dateMap.get(key)
+      entry.changedAt = item.createdAt || item.updatedAt || item.changedAt || entry.changedAt
       if (item.id && !entry.ids.includes(item.id)) entry.ids.push(item.id)
       if (item.fieldName) {
         entry.changes.push({ id: item.id, fieldName: item.fieldName, oldValue: item.oldValue, newValue: item.newValue })
@@ -495,7 +497,7 @@ export function DepotEffectiveDatesModalView({
 
   return (
     <div className="space-y-4 text-slate-800">
-      <div className="flex items-center justify-between border-b pb-2.5">
+      <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="outline"
@@ -638,13 +640,13 @@ export function DepotEffectiveDatesModalView({
           <table className="w-full text-xs text-left border-collapse">
             <thead>
               <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
-                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 border-r border-slate-300 w-36 font-bold">
+                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 text-right border-r border-slate-300 w-36 font-bold">
                   Applicable From (W.E.F)
                 </th>
                 {DEDICATED_COLUMNS[activeSection].map((label) => (
                   <th key={label} className="py-2.5 px-3 border-r border-slate-300 whitespace-nowrap">{label}</th>
                 ))}
-                <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
+                <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Actions</th>
               </tr>
             </thead>
@@ -654,7 +656,7 @@ export function DepotEffectiveDatesModalView({
                 const isFuture = version.wefDate > todayStr
                 const isActive = version.wefDate === activeRecordId
                 const formattedWef = version.wefDate
-                  ? new Date(version.wefDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/ /g, "-")
+                  ? fmtDate(version.wefDate)
                   : "—"
 
                 return (
@@ -664,16 +666,12 @@ export function DepotEffectiveDatesModalView({
                       isActive ? "bg-emerald-50/40 font-medium" : isFuture ? "bg-amber-50/30" : vIdx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
                     } hover:bg-slate-100/80`}
                   >
-                    <td className="py-2 px-3 font-bold text-slate-900 bg-amber-50/50 border-r border-slate-300 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-1">
+                    <td className="py-2 px-3 font-bold text-slate-900 bg-amber-50/50 border-r border-slate-300 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <Calendar className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                         <span className="font-mono text-[11px]">{formattedWef}</span>
-                        {isActive && (
-                          <Badge className="ml-1 bg-emerald-600 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold border-none">Active</Badge>
-                        )}
-                        {isFuture && (
-                          <Badge className="ml-1 bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold border-none">Scheduled</Badge>
-                        )}
+                        
+                        
                       </div>
                     </td>
 
@@ -687,11 +685,12 @@ export function DepotEffectiveDatesModalView({
                       )
                     })}
 
-                    <td className="py-2.5 px-3 text-right border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
-                      <div className="flex items-center justify-end gap-1 font-medium">
+                    <td className="py-2.5 px-3 text-left border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
+                      <div className="flex items-center justify-start gap-1 font-medium">
                         <User className="h-3 w-3 text-slate-400" />
                         <span>{version.changedByName}</span>
                       </div>
+                      {version.changedAt && <div className="text-[10px] text-slate-400 font-normal pl-4">{fmtDateTime(version.changedAt)}</div>}
                     </td>
 
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">

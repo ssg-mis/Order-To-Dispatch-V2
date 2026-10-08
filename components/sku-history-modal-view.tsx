@@ -18,6 +18,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { masterHistoryApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
+import { fmtDate, fmtDateTime } from "@/lib/table-format"
+
+// Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
+const displayVal = (v: any): any =>
+  typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v.trim()) ? fmtDate(v.trim()) : v
 
 interface SkuHistoryModalViewProps {
   skuId: number
@@ -116,6 +121,7 @@ export function SkuHistoryModalView({
         dateMap.set(key, {
           wefDate: key,
           changedByName: item.changedByName || item.changedBy || "Admin",
+          changedAt: item.createdAt || item.updatedAt || item.changedAt,
           changes: [],
           ids: [],
         })
@@ -134,6 +140,7 @@ export function SkuHistoryModalView({
           changedByName: item.changedByName || item.changedBy || "Admin",
         })
         if (item.changedByName) entry.changedByName = item.changedByName
+        { const ts = item.createdAt || item.updatedAt || item.changedAt; if (ts) entry.changedAt = ts }
       }
     }
 
@@ -188,8 +195,7 @@ export function SkuHistoryModalView({
   const formatDate = (dateStr: string) => {
     if (!dateStr || dateStr === "unknown") return "—"
     const [y, m, d] = dateStr.split("-")
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    return `${parseInt(d, 10)}-${months[parseInt(m, 10) - 1]}-${y}`
+    return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`
   }
 
   const renderFileLink = (url: string | null) => {
@@ -231,7 +237,7 @@ export function SkuHistoryModalView({
   return (
     <div className="space-y-4 text-slate-800">
       {/* Back Button */}
-      <div className="flex items-center justify-between border-b pb-2.5">
+      <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="ghost"
@@ -447,9 +453,12 @@ export function SkuHistoryModalView({
                         Scheduled
                       </Badge>
                     )}
-                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-1">
-                      <User className="h-3 w-3" />
-                      {version.changedByName || "Admin"}
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-1 text-left">
+                      <User className="h-3 w-3 shrink-0" />
+                      <span className="flex flex-col leading-tight">
+                        <span>{version.changedByName || "Admin"}</span>
+                        <span className="text-[10px] text-slate-400">{fmtDateTime(version.changedAt)}</span>
+                      </span>
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -491,12 +500,12 @@ export function SkuHistoryModalView({
                               <td className="py-2 px-4 text-slate-500">
                                 {oldIsUrl
                                   ? renderFileLink(change.oldValue)
-                                  : change.oldValue || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.oldValue) || <span className="text-slate-300">—</span>}
                               </td>
                               <td className="py-2 px-4 font-semibold text-emerald-700 bg-emerald-50/40">
                                 {newIsUrl
                                   ? renderFileLink(change.newValue)
-                                  : change.newValue || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.newValue) || <span className="text-slate-300">—</span>}
                               </td>
                             </tr>
                           )
