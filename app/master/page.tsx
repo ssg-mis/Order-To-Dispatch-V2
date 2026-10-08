@@ -21,7 +21,7 @@ import { Combobox } from "@/components/ui/combobox"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
-import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, oilTagApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi, masterHistoryApi } from "@/lib/api-service"
+import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, oilTagApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, districtApi, subDistrictApi, lookupApi, masterHistoryApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
@@ -155,6 +155,21 @@ import {
 } from "@/lib/masterTabConfig"
 
 export default function MasterPage() {
+
+  // Global scroll restoration for all master forms
+  useEffect(() => {
+    const savedScroll = sessionStorage.getItem('masterFormScrollTop');
+    if (savedScroll) {
+      setTimeout(() => {
+        const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+        if (container) {
+          container.scrollTop = parseInt(savedScroll, 10);
+        }
+      }, 50);
+      sessionStorage.removeItem('masterFormScrollTop');
+    }
+  }); // Runs on every render, but only does something if savedScroll exists
+
   const { toast } = useToast()
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -2290,6 +2305,26 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   })
   const states = useMemo(() => statesData || [], [statesData])
   const activeStates = useMemo(() => states.filter((s: any) => s.status === 'Active'), [states])
+
+  const { data: districtsData } = useQuery({
+    queryKey: ["master-districts"],
+    queryFn: async () => {
+      const res = await districtApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.districts || []) : []
+    }
+  })
+  const activeDistricts = useMemo(() => (districtsData || []).filter((d: any) => d.status === 'Active'), [districtsData])
+
+  const { data: subDistrictsData } = useQuery({
+    queryKey: ["master-sub_districts"],
+    queryFn: async () => {
+      const res = await subDistrictApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.sub_districts || res.data.subDistricts || []) : []
+    }
+  })
+  const activeSubDistricts = useMemo(() => (subDistrictsData || []).filter((sd: any) => sd.status === 'Active'), [subDistrictsData])
+
+
 
   // GST Registration Status/Type dropdown options - sourced from Reference Data
   // (simple_lookups), never hardcoded, same pattern as activeStates above.
@@ -4884,6 +4919,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           handleCustomerFieldChangeAttempt={handleCustomerFieldChangeAttempt}
           setCustomerEffectiveDatesSection={setCustomerEffectiveDatesSection}
           activeStates={activeStates}
+          activeDistricts={activeDistricts}
+          activeSubDistricts={activeSubDistricts}
           activeGstRegStatuses={activeGstRegStatuses}
           activeGstRegTypes={activeGstRegTypes}
           activeMsmeRegTypes={activeMsmeRegTypes}
@@ -6670,7 +6707,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <div className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
                   <div className="space-y-3">
                     {/* Standalone Top Back Button */}
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="sticky -top-6 z-50 -mt-8 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
                       <Button
                         type="button"
                         variant="outline"
@@ -6734,7 +6771,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               ) : activeTab === 'sku_details' && skuHistoryModalOpen && editingItem?.id ? (
                 <div className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="sticky -top-6 z-50 -mt-8 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
                       <Button
                         type="button"
                         variant="outline"
@@ -6806,7 +6843,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         variant="outline"
                         size="sm"
                         className="h-7 px-2.5 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center gap-1.5 shadow-2xs mr-6"
-                        onClick={() => setShowAuditTrailView(true)}
+                        onClick={() => {
+                          const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+                          if (container) {
+                            sessionStorage.setItem('masterFormScrollTop', container.scrollTop.toString());
+                          }
+                          setShowAuditTrailView(true);
+                        }}
                       >
                         <Clock className="h-3.5 w-3.5 text-blue-600" />
                         <span>Audit Trail Log</span>

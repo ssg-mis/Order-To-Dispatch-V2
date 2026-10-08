@@ -172,7 +172,7 @@ function CustomerEffectiveDatesContent() {
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-6xl space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
+      <div className="sticky top-0 z-40 bg-slate-50 -mx-4 md:-mx-6 px-4 md:px-6 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <Button
             variant="ghost"
