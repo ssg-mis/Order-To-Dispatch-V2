@@ -31,7 +31,7 @@ import { Save, Plus, Trash2, CheckCircle2, RefreshCw, ChevronRight, CalendarIcon
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi, oilTagApi } from "@/lib/api-service"
+import { customerApi, commitmentPunchApi, brokerApi, salespersonApi, skuApi, depotApi, orderApi, ledgerApi, oilTagApi, lookupApi } from "@/lib/api-service"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
@@ -209,8 +209,11 @@ export default function CommitmentPunchPage() {
     { id: "1", sku: "", qty: "", rate: "" },
   ])
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([])
-  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
-  const [gstRatePercent, setGstRatePercent] = useState<string>("5")
+  // GST is NOT typed by the user: each SKU's GST % comes from the Finished Good master
+  // (skus.gst_rate_id -> gst_rate lookup) and Same/Other State is detected from the
+  // depot's state vs the customer's state.
+  const [gstRateById, setGstRateById] = useState<Record<string, number>>({})
+  const [depotState, setDepotState] = useState<string>("")
   const [isProcessing, setIsProcessing] = useState(false)
   const [skuRegistry, setSkuRegistry] = useState<Record<string, any>>({})
 
@@ -249,6 +252,52 @@ export default function CommitmentPunchPage() {
   const [addCustomerId, setAddCustomerId] = useState<number | null>(null)
   const { addresses: shipToOptions, hasMultiple: hasMultipleShipTo } = useCustomerAddresses(addCustomerId, statesById)
   const [customerList, setCustomerList] = useState<any[]>([])
+
+  // GST rate lookup (id -> %), same source the Finished Good master uses for its GST Rate dropdown
+  useEffect(() => {
+    let cancelled = false
+    lookupApi.getAll("gst_rate", { page: 1, limit: 1000, all: "true" }).then((res: any) => {
+      if (cancelled || !res?.success) return
+      const items = res.data?.items || []
+      const map: Record<string, number> = {}
+      items.forEach((it: any) => {
+        const id = it.id ?? it.lookup_id
+        const pct = parseFloat(it.rate)
+        if (id != null && Number.isFinite(pct)) map[String(id)] = pct
+      })
+      setGstRateById(map)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Dispatch-from depot's state (Depot master)
+  useEffect(() => {
+    let cancelled = false
+    if (!processDepoName) { setDepotState(""); return }
+    depotApi.getAll({ search: processDepoName, all: "true" }).then((res: any) => {
+      if (cancelled) return
+      const list = res?.data?.depots || []
+      const depot = list.find((d: any) => (d.depot_name || "").toLowerCase() === processDepoName.toLowerCase()) || list[0]
+      setDepotState((depot?.state || "").toString())
+    }).catch(() => { if (!cancelled) setDepotState("") })
+    return () => { cancelled = true }
+  }, [processDepoName])
+
+  // Customer's state (Customer master) -> Same State / Other State is detected, never typed
+  const customerState = (customerList.find((c: any) => (c.customer_name || "").toLowerCase() === processCustomerName.toLowerCase())?.state || "").toString()
+  const stateDetected = !!depotState.trim() && !!customerState.trim()
+  const gstSupplyType: "INTRA" | "INTER" =
+    stateDetected && depotState.trim().toLowerCase() !== customerState.trim().toLowerCase() ? "INTER" : "INTRA"
+
+  // GST % of a SKU row = the GST Rate set on that Finished Good in the master (0 when not set)
+  const skuGstPercent = (skuName: string): number => {
+    const d = skuRegistry[skuName]
+    const id = d?.gst_rate_id ?? d?.gstRateId
+    return id != null && gstRateById[String(id)] != null ? gstRateById[String(id)] : 0
+  }
+  const rateWithoutGst = (skuName: string, rate: string | number): number =>
+    (parseFloat(String(rate)) || 0) / (1 + skuGstPercent(skuName) / 100)
+
   const [orderType, setOrderType] = useState("")
   const [transportType, setTransportType] = useState("self")
   const [brokerName, setBrokerName] = useState("")
@@ -2595,6 +2644,27 @@ export default function CommitmentPunchPage() {
                       <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[130px]">Rate *</th>
                       <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[140px]">
                         <div className="flex items-center gap-1">
+                          <span>Rate w/o GST</span>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-slate-400 hover:text-blue-600">
+                                <Info className="h-3.5 w-3.5" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-64 p-3 text-xs space-y-1" align="start">
+                              <p className="font-bold text-slate-800">Rate w/o GST Formula:</p>
+                              <p className="font-mono text-blue-700 bg-blue-50 p-1.5 rounded border border-blue-100">
+                                Rate ÷ (1 + GST Rate)
+                              </p>
+                              <p className="text-slate-500 text-[11px] pt-1">
+                                Calculated automatically. GST % is taken from the Finished Good (SKU) master.
+                              </p>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      </th>
+                      <th className="py-2 px-2 text-left font-medium text-slate-600 text-xs w-[140px]">
+                        <div className="flex items-center gap-1">
                           <span>Taxable Amount</span>
                           <Popover>
                             <PopoverTrigger asChild>
@@ -2605,7 +2675,7 @@ export default function CommitmentPunchPage() {
                             <PopoverContent className="w-64 p-3 text-xs space-y-1" align="start">
                               <p className="font-bold text-slate-800">Taxable Amount Formula:</p>
                               <p className="font-mono text-blue-700 bg-blue-50 p-1.5 rounded border border-blue-100">
-                                Rate × Qty (Box) × Nos per Main UOM
+                                Rate w/o GST × Qty (Box) × Nos per Main UOM
                               </p>
                               <p className="text-slate-500 text-[11px] pt-1">
                                 Nos per Main UOM is fetched from the SKU master data.
@@ -2634,7 +2704,9 @@ export default function CommitmentPunchPage() {
                       const nosPerMainUom = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
                       const qtyBox = parseFloat(row.qty) || 0;
                       const rate = parseFloat(row.rate) || 0;
-                      const taxableAmount = rate * qtyBox * nosPerMainUom;
+                      const gstPct = skuGstPercent(row.sku);
+                      const rateExGst = rateWithoutGst(row.sku, row.rate);
+                      const taxableAmount = rateExGst * qtyBox * nosPerMainUom;
 
                       return (
                         <tr key={row.id} className="border-b last:border-0">
@@ -2682,6 +2754,14 @@ export default function CommitmentPunchPage() {
                                   {packType}
                                 </span>
                               )}
+                            </div>
+                          </td>
+                          <td className="py-1 px-2">
+                            <div
+                              className="h-8 flex items-center justify-end px-2 bg-slate-50 border rounded text-xs font-mono tabular-nums text-slate-700 cursor-not-allowed"
+                              title={row.sku ? `Rate ÷ (1 + ${gstPct}% GST from Finished Good master)` : "Select a SKU"}
+                            >
+                              {rateExGst.toFixed(4)}
                             </div>
                           </td>
                           <td className="py-1 px-2">
@@ -2785,6 +2865,12 @@ export default function CommitmentPunchPage() {
                           </div>
                         </div>
                         <div className="space-y-2">
+                          <Label>Rate w/o GST</Label>
+                          <div className="h-10 flex items-center justify-end px-3 bg-slate-50 border rounded text-sm font-mono tabular-nums text-slate-700">
+                            {rateWithoutGst(row.sku, row.rate).toFixed(4)}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
                           <div className="flex items-center gap-1">
                             <Label>Taxable Amount</Label>
                             <Popover>
@@ -2796,7 +2882,7 @@ export default function CommitmentPunchPage() {
                               <PopoverContent className="w-64 p-3 text-xs space-y-1" align="start">
                                 <p className="font-bold text-slate-800">Taxable Amount Formula:</p>
                                 <p className="font-mono text-blue-700 bg-blue-50 p-1.5 rounded border border-blue-100">
-                                  Rate × Qty (Box) × Nos per Main UOM
+                                  Rate w/o GST × Qty (Box) × Nos per Main UOM
                                 </p>
                                 <p className="text-slate-500 text-[11px] pt-1">
                                   Nos per Main UOM is fetched from the SKU master data.
@@ -2809,7 +2895,7 @@ export default function CommitmentPunchPage() {
                               const skuData = skuRegistry[row.sku];
                               const nosPerMainUom = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
                               const qtyBox = parseFloat(row.qty) || 0;
-                              const rate = parseFloat(row.rate) || 0;
+                              const rate = rateWithoutGst(row.sku, row.rate);
                               return (rate * qtyBox * nosPerMainUom).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                             })()}
                           </div>
@@ -2890,23 +2976,28 @@ export default function CommitmentPunchPage() {
 
             {/* ── Total Taxable Value & GST Breakdown ── */}
             {(() => {
-              const skuTaxableTotal = skuRows.reduce((sum, r) => {
+              // Per-SKU taxable value and GST (GST % comes from each Finished Good's master record)
+              const skuLines = skuRows.map(r => {
                 const skuData = skuRegistry[r.sku];
                 const nos = parseFloat(skuData?.nos_per_main_uom || skuData?.items_per_box || 1);
                 const q = parseFloat(r.qty) || 0;
-                const rate = parseFloat(r.rate) || 0;
-                return sum + (rate * q * nos);
-              }, 0);
+                const taxable = rateWithoutGst(r.sku, r.rate) * q * nos;
+                return { taxable, pct: skuGstPercent(r.sku) };
+              });
+              const skuTaxableTotal = skuLines.reduce((sum, l) => sum + l.taxable, 0);
 
               const ledgerTotal = ledgerRows.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
               const totalTaxableValue = skuTaxableTotal + ledgerTotal;
 
-              // Calculate Dynamic GST (using gstRatePercent state, default 5.0%, CGST/SGST = rate/2)
-              const numericGstRate = parseFloat(gstRatePercent) || 0;
+              // GST on SKU lines only (additional ledger charges add to taxable value, same as Order Approval).
+              // Same State => CGST + SGST (half each); Other State => IGST.
+              const igst = skuLines.reduce((sum, l) => sum + l.taxable * (l.pct / 100), 0);
+              const cgst = igst / 2;
+              const sgst = igst / 2;
+              const distinctRates = Array.from(new Set(skuLines.filter(l => l.taxable > 0).map(l => l.pct)));
+              const numericGstRate = distinctRates.length === 1 ? distinctRates[0] : 0;
               const halfRate = numericGstRate / 2;
-              const cgst = totalTaxableValue * (halfRate / 100);
-              const sgst = totalTaxableValue * (halfRate / 100);
-              const igst = totalTaxableValue * (numericGstRate / 100);
+              const rateLabel = (pct: number) => distinctRates.length === 1 ? ` (${pct.toFixed(1)}%)` : distinctRates.length > 1 ? " (mixed rates)" : "";
               const totalGstAmount = gstSupplyType === "INTRA" ? (cgst + sgst) : igst;
               const totalOrderValue = totalTaxableValue + totalGstAmount;
 
@@ -2940,60 +3031,31 @@ export default function CommitmentPunchPage() {
                   <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xs">
                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Indicative)</p>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold text-slate-500">GST Rate:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="100"
-                          value={gstRatePercent}
-                          onChange={(e) => setGstRatePercent(e.target.value)}
-                          placeholder="5"
-                          className="w-14 h-5 px-1 text-[11px] font-mono font-bold text-blue-700 bg-white border border-slate-300 rounded text-right focus:outline-none focus:border-blue-500"
-                        />
-                        <span className="text-[10px] font-bold text-slate-600">%</span>
-                      </div>
+                      <p className="text-[10px] font-bold text-slate-500">
+                        GST % from Finished Good master
+                      </p>
                     </div>
                     <div className="p-4 max-w-sm ml-auto space-y-2 text-xs">
-                      {/* State Supply Toggle */}
-                      <div className="flex items-center justify-between bg-slate-100 p-0.5 rounded-lg text-[10px] font-semibold text-slate-600 mb-3">
-                        <button
-                          type="button"
-                          onClick={() => setGstSupplyType("INTRA")}
-                          className={cn(
-                            "flex-1 py-1 rounded text-center transition-all cursor-pointer",
-                            gstSupplyType === "INTRA"
-                              ? "bg-white text-blue-700 shadow-xs font-bold"
-                              : "text-slate-500 hover:text-slate-800"
-                          )}
-                        >
-                          Same State
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGstSupplyType("INTER")}
-                          className={cn(
-                            "flex-1 py-1 rounded text-center transition-all cursor-pointer",
-                            gstSupplyType === "INTER"
-                              ? "bg-white text-blue-700 shadow-xs font-bold"
-                              : "text-slate-500 hover:text-slate-800"
-                          )}
-                        >
-                          Other State
-                        </button>
+                      {/* Same / Other State is auto-detected from Depot state vs Customer state (no manual toggle) */}
+                      <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] mb-3">
+                        <span className={cn("font-black uppercase tracking-wide", !stateDetected ? "text-amber-700" : gstSupplyType === "INTRA" ? "text-emerald-700" : "text-blue-700")}>
+                          {!stateDetected ? "State not detected" : gstSupplyType === "INTRA" ? "Same State" : "Other State"}
+                        </span>
+                        <span className="text-slate-500 font-medium text-right">
+                          {stateDetected ? `${depotState} → ${customerState}` : "Select Depo & Customer (state taken from masters)"}
+                        </span>
                       </div>
 
                       {gstSupplyType === "INTRA" ? (
                         <>
                           <div className="flex justify-between items-center">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%)</span>
+                            <span className="font-black uppercase text-slate-500 text-[10px]">CGST{rateLabel(halfRate)}</span>
                             <span className="font-mono font-bold text-slate-700">
                               ₹{cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%)</span>
+                            <span className="font-black uppercase text-slate-500 text-[10px]">SGST{rateLabel(halfRate)}</span>
                             <span className="font-mono font-bold text-slate-700">
                               ₹{sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
@@ -3001,7 +3063,7 @@ export default function CommitmentPunchPage() {
                         </>
                       ) : (
                         <div className="flex justify-between items-center">
-                          <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%)</span>
+                          <span className="font-black uppercase text-slate-500 text-[10px]">IGST{rateLabel(numericGstRate)}</span>
                           <span className="font-mono font-bold text-slate-700">
                             ₹{igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
