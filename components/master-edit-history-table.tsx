@@ -5,6 +5,15 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, ChevronDown, Clock, User, FileEdit, Loader2, History, ArrowRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { masterHistoryApi } from "@/lib/api-service"
+import { fmtDate, fmtDateTime } from "@/lib/table-format"
+
+// Display-only: ISO date / datetime strings become dd/mm/yyyy; everything else unchanged.
+const fmtHistVal = (v: string): string => {
+  const t = String(v).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return fmtDate(t)
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t)) return fmtDateTime(t)
+  return v
+}
 
 interface HistoryItem {
   id: number | string
@@ -163,14 +172,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                 {/* Audit Log Timestamp */}
                 <div className="w-44 flex items-center gap-1.5 text-xs font-bold text-slate-800 whitespace-nowrap">
                   <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                  {new Date(group.createdAt).toLocaleString('en-IN', { 
-                    day: '2-digit', 
-                    month: '2-digit', 
-                    year: '2-digit', 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: true 
-                  })}
+                  {fmtDateTime(group.createdAt)}
                 </div>
 
                 {/* Field Count Badge & Summary */}
@@ -187,7 +189,10 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
               {/* Changed By User */}
               <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold shrink-0 ml-3 bg-white border border-slate-200/80 px-2.5 py-1 rounded-md shadow-2xs">
                 <User className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-700 capitalize">{group.changedByName}</span>
+                <div className="flex flex-col items-start leading-tight text-left">
+                  <span className="text-slate-700 capitalize">{group.changedByName}</span>
+                  <span className="text-[10px] font-normal text-slate-400">{fmtDateTime(group.createdAt)}</span>
+                </div>
               </div>
             </div>
 
@@ -216,7 +221,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                           </td>
                           <td className="py-2.5 px-3.5 text-slate-600 bg-amber-50/20 border-r border-slate-200 font-mono text-[11px] break-all">
                             {item.oldValue ? (
-                              <span className="text-slate-700">{item.oldValue}</span>
+                              <span className="text-slate-700">{fmtHistVal(item.oldValue)}</span>
                             ) : (
                               <span className="text-slate-400 italic text-[10px]">None / Blank</span>
                             )}
@@ -225,7 +230,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                             {item.newValue ? (
                               <span className="text-emerald-950 flex items-center gap-1.5">
                                 <ArrowRight className="h-3 w-3 text-emerald-600 shrink-0 hidden sm:inline" />
-                                {item.newValue}
+                                {fmtHistVal(item.newValue)}
                               </span>
                             ) : (
                               <span className="text-slate-400 italic text-[10px]">Cleared / Empty</span>

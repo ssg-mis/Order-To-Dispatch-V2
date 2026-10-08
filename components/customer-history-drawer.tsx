@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { customerApi } from "@/lib/api-service"
+import { fmtDate, fmtDateTime } from "@/lib/table-format"
 
 interface CustomerHistoryDrawerProps {
   open: boolean
@@ -85,7 +86,7 @@ export function CustomerHistoryDrawer({ open, onOpenChange, section, customerId,
               {items.map((row: any, idx: number) => {
                 const isLatest = idx === 0
                 const formattedWef = row.wefDate
-                  ? new Date(row.wefDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                  ? fmtDate(row.wefDate)
                   : 'Initial Version'
 
                 return (
@@ -147,14 +148,16 @@ export function CustomerHistoryDrawer({ open, onOpenChange, section, customerId,
                         <div><span className="text-slate-400">FSSAI No: </span><span className="font-mono font-medium">{row.fssaiNo || '—'}</span></div>
                         <div className="flex gap-4">
                           <div><span className="text-slate-400">Licence: </span>{row.fssaiLicenceType || '—'}</div>
-                          <div><span className="text-slate-400">Valid Upto: </span>{row.fssaiValidUpto ? new Date(row.fssaiValidUpto).toLocaleDateString('en-IN') : '—'}</div>
+                          <div><span className="text-slate-400">Valid Upto: </span>{fmtDate(row.fssaiValidUpto)}</div>
                         </div>
                       </div>
                     )}
 
                     <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-                      <span>By: {row.changedByName || 'System'}</span>
-                      <span>{row.createdAt ? new Date(row.createdAt).toLocaleDateString('en-IN') : ''}</span>
+                      <div className="flex flex-col items-start leading-tight text-left">
+                        <span>By: {row.changedByName || 'System'}</span>
+                        <span className="text-[10px] text-slate-400">{fmtDateTime(row.createdAt)}</span>
+                      </div>
                     </div>
                   </div>
                 )
