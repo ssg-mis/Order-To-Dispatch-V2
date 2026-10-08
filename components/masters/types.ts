@@ -34,6 +34,11 @@ export interface Customer {
   email: string
   address_line_1: string
   address_line_2: string
+  city?: string
+  post?: string
+  thana?: string
+  district?: string
+  sub_district?: string
   state: string
   state_id?: number | null
   pincode: string
