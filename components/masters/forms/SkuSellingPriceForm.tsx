@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -34,6 +35,8 @@ export function SkuSellingPriceForm({
   handleSkuSellingPriceFieldChangeAttempt,
   onOpenSkuSellingPriceHistory,
 }: SkuSellingPriceFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleSkuSellingPriceFieldChangeAttempt) {
       handleSkuSellingPriceFieldChangeAttempt(fieldName, applyChange)
@@ -53,7 +56,7 @@ export function SkuSellingPriceForm({
           <SkuSellingPriceSectionalHistoryTable
             skuSellingPriceId={editingItem.id}
             title="Pricing History"
-            onOpenView={() => onOpenSkuSellingPriceHistory?.()}
+            onOpenView={handleOpenEffectiveDatesView(() => onOpenSkuSellingPriceHistory?.())}
           />
         )}
       </div>

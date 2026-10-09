@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
+import {useState, useMemo, useEffect, useRef} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -69,6 +69,15 @@ export function InsuranceDetailEffectiveDatesModalView({
   onBack,
   onInsuranceDetailUpdated,
 }: InsuranceDetailEffectiveDatesModalViewProps) {
+
+  // Scroll to top on mount for history view
+  useEffect(() => {
+    const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+    if (container) {
+      setTimeout(() => { container.scrollTop = 0; }, 10);
+    }
+  }, []);
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
 

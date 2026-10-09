@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -47,6 +48,8 @@ export function DepotForm({
   handleFileUpload,
   handleFileRemove,
 }: DepotFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="space-y-5 py-2">
       {/* Basic Details */}
@@ -62,7 +65,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Depot History"
-              onOpenView={(sec) => setDepotEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -165,7 +168,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Tags History"
-              onOpenView={(sec) => setDepotEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -222,7 +225,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Document Uploads History"
-              onOpenView={(sec) => setDepotEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>

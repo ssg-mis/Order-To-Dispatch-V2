@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -35,6 +36,8 @@ export function DriverForm({
   handleDriverFieldChangeAttempt,
   setDriverEffectiveDatesSection,
 }: DriverFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, section: DriverSectionType, applyChange: () => void) => {
     if (handleDriverFieldChangeAttempt) {
       handleDriverFieldChangeAttempt(fieldName, section, applyChange)
@@ -61,7 +64,7 @@ export function DriverForm({
         <DriverSectionalHistoryTable
           section={section}
           driverId={editingItem.id}
-          onOpenView={(sec) => setDriverEffectiveDatesSection?.(sec)}
+          onOpenView={handleOpenEffectiveDatesView((sec) => setDriverEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

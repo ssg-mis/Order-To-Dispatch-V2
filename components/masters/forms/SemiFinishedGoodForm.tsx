@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -49,6 +50,8 @@ export function SemiFinishedGoodForm({
   handleSemiFinishedGoodFieldChangeAttempt,
   setSemiFinishedGoodEffectiveDatesSection,
 }: SemiFinishedGoodFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, section: SemiFinishedGoodSectionType, applyChange: () => void) => {
     if (handleSemiFinishedGoodFieldChangeAttempt) {
       handleSemiFinishedGoodFieldChangeAttempt(fieldName, section, applyChange)
@@ -87,7 +90,7 @@ export function SemiFinishedGoodForm({
         <SemiFinishedGoodSectionalHistoryTable
           section={section}
           semiFinishedGoodId={editingItem.id}
-          onOpenView={(sec) => setSemiFinishedGoodEffectiveDatesSection?.(sec)}
+          onOpenView={handleOpenEffectiveDatesView((sec) => setSemiFinishedGoodEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

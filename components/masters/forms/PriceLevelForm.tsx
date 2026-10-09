@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -35,6 +36,8 @@ export function PriceLevelForm({
   handlePriceLevelFieldChangeAttempt,
   setPriceLevelEffectiveDatesSection,
 }: PriceLevelFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const { toast } = useToast()
 
   const attemptChange = (fieldName: string, section: 'header' | 'items', applyChange: () => void) => {
@@ -59,7 +62,7 @@ export function PriceLevelForm({
               section="header"
               priceLevelId={editingItem.id}
               title="Header Details History"
-              onOpenView={(section) => setPriceLevelEffectiveDatesSection?.(section)}
+              onOpenView={handleOpenEffectiveDatesView((section) => setPriceLevelEffectiveDatesSection?.(section))}
             />
           )}
         </div>
@@ -114,7 +117,7 @@ export function PriceLevelForm({
               section="items"
               priceLevelId={editingItem.id}
               title="Price Items History"
-              onOpenView={(section) => setPriceLevelEffectiveDatesSection?.(section)}
+              onOpenView={handleOpenEffectiveDatesView((section) => setPriceLevelEffectiveDatesSection?.(section))}
             />
           )}
         </div>

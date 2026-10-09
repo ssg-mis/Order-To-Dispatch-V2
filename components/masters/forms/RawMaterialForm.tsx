@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -50,6 +51,8 @@ export function RawMaterialForm({
   handleRawMaterialFieldChangeAttempt,
   setRawMaterialEffectiveDatesSection,
 }: RawMaterialFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const { toast } = useToast()
 
   const attemptChange = (fieldName: string, section: RawMaterialSectionType, applyChange: () => void) => {
@@ -78,7 +81,7 @@ export function RawMaterialForm({
         <RawMaterialSectionalHistoryTable
           section={section}
           rawMaterialId={editingItem.id}
-          onOpenView={(sec) => setRawMaterialEffectiveDatesSection?.(sec)}
+          onOpenView={handleOpenEffectiveDatesView((sec) => setRawMaterialEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

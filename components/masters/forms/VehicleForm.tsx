@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -54,6 +55,8 @@ export function VehicleForm({
   handleVehicleFieldChangeAttempt,
   setVehicleEffectiveDatesSection,
 }: VehicleFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, section: VehicleSectionType, applyChange: () => void) => {
     if (handleVehicleFieldChangeAttempt) {
       handleVehicleFieldChangeAttempt(fieldName, section, applyChange)
@@ -82,7 +85,7 @@ export function VehicleForm({
         <VehicleSectionalHistoryTable
           section={section}
           vehicleId={editingItem.id}
-          onOpenView={(sec) => setVehicleEffectiveDatesSection?.(sec)}
+          onOpenView={handleOpenEffectiveDatesView((sec) => setVehicleEffectiveDatesSection?.(sec))}
         />
       )}
     </div>
@@ -467,7 +470,7 @@ export function VehicleForm({
             <VehicleSectionalHistoryTable
               section="permits"
               vehicleId={editingItem.id}
-              onOpenView={(sec) => setVehicleEffectiveDatesSection?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setVehicleEffectiveDatesSection?.(sec))}
             />
           )}
         </div>

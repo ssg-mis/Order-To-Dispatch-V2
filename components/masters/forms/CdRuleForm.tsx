@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -25,6 +26,8 @@ export function CdRuleForm({
   handleCdRuleFieldChangeAttempt,
   setCdRuleEffectiveDatesOpen,
 }: CdRuleFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleCdRuleFieldChangeAttempt) {
       handleCdRuleFieldChangeAttempt(fieldName, applyChange)
@@ -43,7 +46,7 @@ export function CdRuleForm({
         {editingItem?.id && (
           <CdRuleSectionalHistoryTable
             cdRuleId={editingItem.id}
-            onOpenView={() => setCdRuleEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setCdRuleEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

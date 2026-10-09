@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -25,6 +26,8 @@ export function BhadaRateForm({
   handleBhadaRateFieldChangeAttempt,
   setBhadaRateEffectiveDatesOpen,
 }: BhadaRateFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleBhadaRateFieldChangeAttempt) {
       handleBhadaRateFieldChangeAttempt(fieldName, applyChange)
@@ -60,7 +63,7 @@ export function BhadaRateForm({
         {editingItem?.id && (
           <BhadaRateSectionalHistoryTable
             bhadaRateId={editingItem.id}
-            onOpenView={() => setBhadaRateEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setBhadaRateEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

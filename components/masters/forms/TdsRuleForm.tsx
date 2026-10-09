@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -23,6 +24,8 @@ export function TdsRuleForm({
   handleTdsRuleFieldChangeAttempt,
   setTdsRuleEffectiveDatesOpen,
 }: TdsRuleFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleTdsRuleFieldChangeAttempt) {
       handleTdsRuleFieldChangeAttempt(fieldName, applyChange)
@@ -41,7 +44,7 @@ export function TdsRuleForm({
         {editingItem?.id && (
           <TdsRuleSectionalHistoryTable
             tdsRuleId={editingItem.id}
-            onOpenView={() => setTdsRuleEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setTdsRuleEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

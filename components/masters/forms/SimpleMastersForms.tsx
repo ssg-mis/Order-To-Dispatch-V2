@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -46,7 +47,7 @@ export function LedgerGroupForm({
         {editingItem?.id && (
           <LedgerGroupSectionalHistoryTable
             ledgerGroupId={editingItem.id}
-            onOpenView={() => setLedgerGroupEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setLedgerGroupEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -162,7 +163,7 @@ export function StockGroupForm({
         {editingItem?.id && (
           <StockGroupSectionalHistoryTable
             stockGroupId={editingItem.id}
-            onOpenView={() => setStockGroupEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setStockGroupEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -255,7 +256,7 @@ export function UnitForm({
         {editingItem?.id && (
           <UnitSectionalHistoryTable
             unitId={editingItem.id}
-            onOpenView={() => setUnitEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setUnitEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -308,6 +309,8 @@ export function OilTagForm({
   oilTagForm: any
   setOilTagForm: React.Dispatch<React.SetStateAction<any>>
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -336,6 +339,8 @@ export function BhadaRateForm({
   bhadaRateForm: any
   setBhadaRateForm: React.Dispatch<React.SetStateAction<any>>
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

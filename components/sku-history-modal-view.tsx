@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import {useState, useMemo, useEffect} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -37,6 +37,15 @@ export function SkuHistoryModalView({
   initialSection = "basic",
   onBack,
 }: SkuHistoryModalViewProps) {
+
+  // Scroll to top on mount for history view
+  useEffect(() => {
+    const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+    if (container) {
+      setTimeout(() => { container.scrollTop = 0; }, 10);
+    }
+  }, []);
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
 

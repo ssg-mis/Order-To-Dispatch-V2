@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Input } from "@/components/ui/input"
@@ -54,6 +55,8 @@ export function FinishedGoodsForm({
   openingStockByDepot = {},
   setOpeningStockByDepot,
 }: FinishedGoodsFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const openHistoryView = (section: 'basic' | 'uom' | 'weights' | 'tax' | 'depots') => {
     if (setSkuEffectiveDatesSection) {
       setSkuEffectiveDatesSection(section)
@@ -82,7 +85,7 @@ export function FinishedGoodsForm({
               skuId={editingItem.id}
               skuName={skuDetailsForm.sku_name}
               title="Basic Details History"
-              onOpenView={openHistoryView}
+              onOpenView={handleOpenEffectiveDatesView(openHistoryView)}
             />
           )}
         </div>
@@ -180,7 +183,7 @@ export function FinishedGoodsForm({
               skuId={editingItem.id}
               skuName={skuDetailsForm.sku_name}
               title="UOM & Units History"
-              onOpenView={openHistoryView}
+              onOpenView={handleOpenEffectiveDatesView(openHistoryView)}
             />
           )}
         </div>
@@ -324,7 +327,7 @@ export function FinishedGoodsForm({
               skuId={editingItem.id}
               skuName={skuDetailsForm.sku_name}
               title="Weights & Filling History"
-              onOpenView={openHistoryView}
+              onOpenView={handleOpenEffectiveDatesView(openHistoryView)}
             />
           )}
         </div>
@@ -560,7 +563,7 @@ export function FinishedGoodsForm({
               skuId={editingItem.id}
               skuName={skuDetailsForm.sku_name}
               title="Tax Details History"
-              onOpenView={openHistoryView}
+              onOpenView={handleOpenEffectiveDatesView(openHistoryView)}
             />
           )}
         </div>
@@ -742,7 +745,7 @@ export function FinishedGoodsForm({
                   skuId={editingItem.id}
                   skuName={skuDetailsForm.sku_name}
                   title="Depot History"
-                  onOpenView={openHistoryView}
+                  onOpenView={handleOpenEffectiveDatesView(openHistoryView)}
                 />
               )}
             </div>

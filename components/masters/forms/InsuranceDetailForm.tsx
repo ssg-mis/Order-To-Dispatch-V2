@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React, { useState } from "react"
 import { Label } from "@/components/ui/label"
@@ -26,6 +27,8 @@ export function InsuranceDetailForm({
   handleInsuranceDetailFieldChangeAttempt,
   setInsuranceDetailEffectiveDatesOpen,
 }: InsuranceDetailFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [insuranceCustomerSearch, setInsuranceCustomerSearch] = useState("")
 
@@ -47,7 +50,7 @@ export function InsuranceDetailForm({
         {editingItem?.id && (
           <InsuranceDetailSectionalHistoryTable
             insuranceDetailId={editingItem.id}
-            onOpenView={() => setInsuranceDetailEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setInsuranceDetailEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

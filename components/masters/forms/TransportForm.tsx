@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -52,6 +53,8 @@ export function TransportForm({
   handleTransportFieldChangeAttempt,
   setTransportEffectiveDatesSection,
 }: TransportFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, section: TransportSectionType, applyChange: () => void) => {
     if (handleTransportFieldChangeAttempt) {
       handleTransportFieldChangeAttempt(fieldName, section, applyChange)
@@ -73,7 +76,7 @@ export function TransportForm({
             <TransportSectionalHistoryTable
               section="basic"
               transportId={editingItem.id}
-              onOpenView={(sec) => setTransportEffectiveDatesSection?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setTransportEffectiveDatesSection?.(sec))}
             />
           )}
         </div>
