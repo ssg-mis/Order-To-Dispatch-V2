@@ -90,7 +90,7 @@ export function SemiFinishedGoodForm({
         <SemiFinishedGoodSectionalHistoryTable
           section={section}
           semiFinishedGoodId={editingItem.id}
-          onOpenView={handleOpenEffectiveDatesView((sec) => setSemiFinishedGoodEffectiveDatesSection?.(sec))}
+          onOpenView={handleOpenEffectiveDatesView((sec: any) => setSemiFinishedGoodEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

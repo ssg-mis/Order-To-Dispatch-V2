@@ -85,7 +85,7 @@ export function VehicleForm({
         <VehicleSectionalHistoryTable
           section={section}
           vehicleId={editingItem.id}
-          onOpenView={handleOpenEffectiveDatesView((sec) => setVehicleEffectiveDatesSection?.(sec))}
+          onOpenView={handleOpenEffectiveDatesView((sec: any) => setVehicleEffectiveDatesSection?.(sec))}
         />
       )}
     </div>
@@ -470,7 +470,7 @@ export function VehicleForm({
             <VehicleSectionalHistoryTable
               section="permits"
               vehicleId={editingItem.id}
-              onOpenView={handleOpenEffectiveDatesView((sec) => setVehicleEffectiveDatesSection?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setVehicleEffectiveDatesSection?.(sec))}
             />
           )}
         </div>

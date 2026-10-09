@@ -65,7 +65,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="Broker History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setBrokerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -162,7 +162,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="GST & Tax History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setBrokerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -250,7 +250,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="MSME History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setBrokerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -289,7 +289,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="FSSAI History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setBrokerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -328,7 +328,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="Document Uploads History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setBrokerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>

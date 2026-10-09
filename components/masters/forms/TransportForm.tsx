@@ -76,7 +76,7 @@ export function TransportForm({
             <TransportSectionalHistoryTable
               section="basic"
               transportId={editingItem.id}
-              onOpenView={handleOpenEffectiveDatesView((sec) => setTransportEffectiveDatesSection?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setTransportEffectiveDatesSection?.(sec))}
             />
           )}
         </div>
@@ -249,7 +249,7 @@ export function TransportForm({
         editingItem={editingItem}
         isTransport={true}
         transportName={transportForm.transporter_name}
-        onOpenTransportHistory={(sec) => setTransportEffectiveDatesSection?.(sec as TransportSectionType)}
+        onOpenTransportHistory={(sec: any) => setTransportEffectiveDatesSection?.(sec as TransportSectionType)}
       />
     </div>
   )

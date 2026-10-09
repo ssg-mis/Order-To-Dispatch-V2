@@ -64,7 +64,7 @@ export function DriverForm({
         <DriverSectionalHistoryTable
           section={section}
           driverId={editingItem.id}
-          onOpenView={handleOpenEffectiveDatesView((sec) => setDriverEffectiveDatesSection?.(sec))}
+          onOpenView={handleOpenEffectiveDatesView((sec: any) => setDriverEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

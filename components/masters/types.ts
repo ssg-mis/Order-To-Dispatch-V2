@@ -322,7 +322,7 @@ export interface CustomerBankAccount {
   account_holder_name?: string
   account_number?: string
   ifsc_code?: string
-  status?: string
+  status?: "Active" | "Inactive"
 }
 
 // --- Constants & Defaults ---

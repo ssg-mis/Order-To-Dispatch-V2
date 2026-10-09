@@ -62,7 +62,7 @@ export function PriceLevelForm({
               section="header"
               priceLevelId={editingItem.id}
               title="Header Details History"
-              onOpenView={handleOpenEffectiveDatesView((section) => setPriceLevelEffectiveDatesSection?.(section))}
+              onOpenView={handleOpenEffectiveDatesView((section: any) => setPriceLevelEffectiveDatesSection?.(section))}
             />
           )}
         </div>
@@ -117,7 +117,7 @@ export function PriceLevelForm({
               section="items"
               priceLevelId={editingItem.id}
               title="Price Items History"
-              onOpenView={handleOpenEffectiveDatesView((section) => setPriceLevelEffectiveDatesSection?.(section))}
+              onOpenView={handleOpenEffectiveDatesView((section: any) => setPriceLevelEffectiveDatesSection?.(section))}
             />
           )}
         </div>

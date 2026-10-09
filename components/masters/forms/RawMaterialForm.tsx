@@ -81,7 +81,7 @@ export function RawMaterialForm({
         <RawMaterialSectionalHistoryTable
           section={section}
           rawMaterialId={editingItem.id}
-          onOpenView={handleOpenEffectiveDatesView((sec) => setRawMaterialEffectiveDatesSection?.(sec))}
+          onOpenView={handleOpenEffectiveDatesView((sec: any) => setRawMaterialEffectiveDatesSection?.(sec))}
         />
       )}
     </div>

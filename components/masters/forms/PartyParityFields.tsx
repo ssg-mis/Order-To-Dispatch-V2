@@ -81,7 +81,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="GST & Tax History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenSalespersonHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -89,7 +89,7 @@ export function PartyParityFields({
               section="gst"
               transportId={editingItem.id}
               title="GST & Tax History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenTransportHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -189,7 +189,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="MSME History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenSalespersonHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -197,7 +197,7 @@ export function PartyParityFields({
               section="msme"
               transportId={editingItem.id}
               title="MSME History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenTransportHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -242,7 +242,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="FSSAI History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenSalespersonHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -250,7 +250,7 @@ export function PartyParityFields({
               section="fssai"
               transportId={editingItem.id}
               title="FSSAI History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenTransportHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -295,7 +295,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="Document Uploads History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenSalespersonHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -303,7 +303,7 @@ export function PartyParityFields({
               section="documents"
               transportId={editingItem.id}
               title="Document Uploads History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => onOpenTransportHistory?.(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>

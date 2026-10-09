@@ -65,7 +65,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Depot History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -168,7 +168,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Tags History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -225,7 +225,7 @@ export function DepotForm({
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
               title="Document Uploads History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setDepotEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>

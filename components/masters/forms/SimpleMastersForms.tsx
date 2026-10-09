@@ -27,6 +27,7 @@ export function LedgerGroupForm({
   handleLedgerGroupFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setLedgerGroupEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleLedgerGroupFieldChangeAttempt) {
       handleLedgerGroupFieldChangeAttempt(fieldName, applyChange)
@@ -143,6 +144,7 @@ export function StockGroupForm({
   handleStockGroupFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setStockGroupEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleStockGroupFieldChangeAttempt) {
       handleStockGroupFieldChangeAttempt(fieldName, applyChange)
@@ -238,6 +240,7 @@ export function UnitForm({
   handleUnitFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setUnitEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleUnitFieldChangeAttempt) {
       handleUnitFieldChangeAttempt(fieldName, applyChange)

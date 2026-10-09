@@ -62,7 +62,7 @@ export function SalespersonForm({
             salespersonId={editingItem.id}
             salespersonName={salespersonForm.salesman_name}
             title="Salesperson History"
-            onOpenView={handleOpenEffectiveDatesView((sec) => setSalespersonEffectiveDatesSection(sec))}
+            onOpenView={handleOpenEffectiveDatesView((sec: any) => setSalespersonEffectiveDatesSection(sec))}
           />
         )}
       </div>

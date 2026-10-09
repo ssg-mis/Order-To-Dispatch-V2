@@ -65,7 +65,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="Petrol Pump History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setPetrolPumpEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -166,7 +166,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="GST & Tax History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setPetrolPumpEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -258,7 +258,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="MSME History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setPetrolPumpEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -304,7 +304,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="FSSAI History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setPetrolPumpEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -350,7 +350,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="Document Uploads History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setPetrolPumpEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>

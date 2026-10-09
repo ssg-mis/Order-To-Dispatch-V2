@@ -108,7 +108,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Customer History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -211,7 +211,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Mailing Details History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -356,7 +356,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="GST Registration History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -543,7 +543,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="MSME Details History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -672,7 +672,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="FSSAI Details History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -768,7 +768,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Godown History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -811,7 +811,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Bank Details History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -939,7 +939,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Ledger Group History"
-              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
