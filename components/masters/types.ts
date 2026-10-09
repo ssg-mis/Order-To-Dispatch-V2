@@ -45,11 +45,14 @@ export interface Customer {
   pan: string
   gstin: string
   gst_registered: string
+  gst_status?: string
   gst_registration_type?: string | null
   gst_registration_wef?: string | null
   msme_registration_no?: string | null
   msme_registration_type?: string | null
   msme_registration_wef?: string | null
+  msme_activity_type?: string
+  msme_status?: string
   fssai_no?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
@@ -319,6 +322,7 @@ export interface CustomerBankAccount {
   account_holder_name?: string
   account_number?: string
   ifsc_code?: string
+  status?: string
 }
 
 // --- Constants & Defaults ---

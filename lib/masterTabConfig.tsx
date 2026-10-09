@@ -36,7 +36,7 @@ export const blankCustomerAddress = (): CustomerAddress => ({
 })
 
 export const blankCustomerBankAccount = (): CustomerBankAccount => ({
-  bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "",
+  bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "", status: "Active"
 })
 
 // Customer-Master field parity block (Phases 10/11/12/21) - the same blank

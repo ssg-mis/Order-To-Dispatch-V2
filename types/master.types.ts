@@ -20,6 +20,7 @@ export interface CustomerBankAccount {
   account_holder_name?: string
   account_number?: string
   ifsc_code?: string
+  status?: "Active" | "Inactive"
 }
 
 export interface Customer {
