@@ -2284,10 +2284,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     () => (allActiveDepotsData || []).filter((d: Depot) => d.status === 'Active'),
     [allActiveDepotsData]
   )
-  // "Belongs to Which Godown" options - exactly these 5, sourced from the real
-  // Depot records (never a hardcoded id list, in case they get re-seeded).
+  // "Belongs to Which Godown" options - sourced from all active Depot records
   const godownDepots = useMemo(
-    () => activeDepots.filter((d: any) => GODOWN_NAMES.includes(d.depot_name)),
+    () => activeDepots,
     [activeDepots]
   )
 
@@ -2363,10 +2362,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     },
     staleTime: 5 * 60 * 1000,
   })
-  const activeMsmeRegTypes = useMemo(
-    () => (msmeRegTypeData || []).filter((r: any) => r.status === 'Active'),
-    [msmeRegTypeData]
-  )
+  const activeMsmeRegTypes = useMemo(() => {
+    const filtered = (msmeRegTypeData || []).filter((r: any) => r.status === 'Active')
+    const orderMap: Record<string, number> = { "Micro": 1, "Small": 2, "Medium": 3 }
+    return filtered.sort((a: any, b: any) => (orderMap[a.name] || 99) - (orderMap[b.name] || 99))
+  }, [msmeRegTypeData])
   const { data: fssaiLicenceTypeData } = useQuery({
     queryKey: ["lookup-fssai_licence_type"],
     queryFn: async () => {

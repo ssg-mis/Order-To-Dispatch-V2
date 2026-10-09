@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -25,6 +26,8 @@ export interface CustomerFormProps {
   ) => void
   setCustomerEffectiveDatesSection: (sec: any) => void
   activeStates: any[]
+  activeDistricts?: any[]
+  activeSubDistricts?: any[]
   activeGstRegStatuses?: any[]
   activeGstRegTypes?: any[]
   activeMsmeRegTypes?: any[]
@@ -89,6 +92,7 @@ export function CustomerForm({
   handleFileUpload,
   handleFileRemove,
 }: CustomerFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   return (
     <div className="space-y-5 py-2">
       {/* Customer Basic Details */}
@@ -104,7 +108,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Customer History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -207,7 +211,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Mailing Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -271,8 +275,12 @@ export function CustomerForm({
           return (
             <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
               <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                <span className="text-xs font-bold text-slate-900">Address {index + 1}</span>
-                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => removeAddressRow(index)}>Remove</Button>
+                <span className="text-xs font-bold text-slate-900">
+                  {index === 0 ? "Primary Address" : `Additional Address ${index}`}
+                </span>
+                {index > 0 && (
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => removeAddressRow(index)}>Remove</Button>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-slate-800">Address Line</Label>
@@ -348,7 +356,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="GST Registration History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -427,7 +435,7 @@ export function CustomerForm({
               <Input
                 id="gst_registration_wef"
                 type="date"
-                className="font-medium"
+                className={`font-medium ${!customerForm.gst_registration_wef ? 'text-slate-500' : ''}`}
                 value={customerForm.gst_registration_wef?.split('T')[0] || ''}
                 onChange={e => setCustomerForm({...customerForm, gst_registration_wef: e.target.value})}
               />
@@ -436,6 +444,25 @@ export function CustomerForm({
               )}
             </div>
           )}
+          
+          <div className="space-y-1.5">
+            <Label htmlFor="gst_status" className="text-xs font-semibold text-slate-800">Status</Label>
+            <Select
+              value={customerForm.gst_status || "Active"}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("Status", "gst", () => {
+                  setCustomerForm(prev => ({ ...prev, gst_status: val }))
+                })
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-800">Aadhaar Card</Label>
@@ -516,7 +543,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="MSME Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -533,7 +560,7 @@ export function CustomerForm({
                   setCustomerForm(prev => ({ ...prev, msme_registration_no: val }))
                 })
               }}
-              placeholder="Enter MSME registration no"
+              placeholder="UDYAM-XX-00-0000000"
             />
           </div>
           <div className="space-y-1.5">
@@ -551,17 +578,61 @@ export function CustomerForm({
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="msme_activity_type" className="text-xs font-semibold text-slate-800">Activity Type</Label>
+            <Select
+              value={customerForm.msme_activity_type || ""}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("Activity Type", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_activity_type: val }))
+                })
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select activity type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Unknown">Unknown</SelectItem>
+                <SelectItem value="Manufacturing">Manufacturing</SelectItem>
+                <SelectItem value="Services">Services</SelectItem>
+                <SelectItem value="Trades">Trades</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="msme_registration_wef" className="text-xs font-semibold text-slate-800">MSME W.E.F. Date (Applicable From)</Label>
             <Input
               id="msme_registration_wef"
               type="date"
-              className="font-medium"
+              className={`font-medium ${!customerForm.msme_registration_wef ? 'text-slate-500' : ''}`}
               value={customerForm.msme_registration_wef?.split('T')[0] || ''}
-              onChange={e => setCustomerForm({...customerForm, msme_registration_wef: e.target.value})}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("MSME W.E.F. Date", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_registration_wef: val }))
+                })
+              }}
             />
             {customerForm.msme_registration_wef && (
               <p className="text-xs text-slate-500">{formatDocDate(customerForm.msme_registration_wef)}</p>
             )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_status" className="text-xs font-semibold text-slate-800">MSME Status</Label>
+            <Select
+              value={customerForm.msme_status || "Active"}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("MSME Status", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_status: val }))
+                })
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         
           <div className="space-y-1.5">
@@ -601,30 +672,37 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="FSSAI Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div className="space-y-1.5">
-            <Label htmlFor="fssai_no" className="text-xs font-semibold text-slate-800">FSSAI No</Label>
+            <Label htmlFor="fssai_no" className="text-xs font-semibold text-slate-800">FSSAI Licence No</Label>
             <Input
               id="fssai_no"
               className="font-mono"
               value={customerForm.fssai_no || ''}
               onChange={e => {
                 const val = e.target.value
-                handleCustomerFieldChangeAttempt("FSSAI No", "fssai", () => {
+                handleCustomerFieldChangeAttempt("FSSAI Licence No", "fssai", () => {
                   setCustomerForm(prev => ({ ...prev, fssai_no: val }))
                 })
               }}
-              placeholder="Enter FSSAI no"
+              placeholder="14-digit FSSAI No"
             />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fssai_licence_type" className="text-xs font-semibold text-slate-800">FSSAI Licence Type</Label>
             <Combobox
-              options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              options={[...activeFssaiLicenceTypes]
+                .sort((a: any, b: any) => {
+                  const order = ["Registration", "State Licence", "National Licence"]
+                  const aIdx = order.indexOf(a.name)
+                  const bIdx = order.indexOf(b.name)
+                  return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+                })
+                .map((r: any) => ({ value: r.name, label: r.name }))}
               value={customerForm.fssai_licence_type || ""}
               onValueChange={val => {
                 handleCustomerFieldChangeAttempt("FSSAI Licence Type", "fssai", () => {
@@ -640,7 +718,7 @@ export function CustomerForm({
             <Input
               id="fssai_valid_upto"
               type="date"
-              className="font-medium"
+              className={`font-medium ${!customerForm.fssai_valid_upto ? 'text-slate-500' : ''}`}
               value={customerForm.fssai_valid_upto?.split('T')[0] || ''}
               onChange={e => {
                 const val = e.target.value
@@ -677,8 +755,50 @@ export function CustomerForm({
           </div>
         </div>
       </div>
+      {/* Godown Tagging Details */}
+      <div className="border-t border-slate-200 pt-4 space-y-3">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
+            <Warehouse className="h-4.5 w-4.5 text-blue-600" />
+            <span>Belongs to Which Godown</span>
+          </Label>
+          {editingItem?.id && (
+            <CustomerSectionalHistoryTable
+              section="godown"
+              customerId={editingItem.id}
+              customerName={customerForm.customer_name}
+              title="Godown History"
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">Select Godown</Label>
+            <Select 
+              value={customerForm.godown_ids?.[0]?.toString() || godownDepots?.find(d => d.depot_name?.toLowerCase() === 'banari')?.id?.toString() || ""} 
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("Godown", "godown", () => {
+                  setCustomerForm(prev => ({
+                    ...prev,
+                    godown_ids: val ? [parseInt(val, 10)] : [],
+                  }))
+                })
+              }}
+            >
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select godown" /></SelectTrigger>
+              <SelectContent>
+                {[...(godownDepots || [])].sort((a: any, b: any) => (a.depot_name || "").localeCompare(b.depot_name || "")).map((d: any) => (
+                  <SelectItem key={d.id} value={d.id.toString()}>{d.depot_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-            {/* Bank Details */}
+        </div>
+      </div>
+
+      {/* Bank Details */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
           <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
@@ -691,7 +811,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Bank Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -699,21 +819,19 @@ export function CustomerForm({
           <div className="flex flex-col items-end space-y-2">
             <p className="text-xs text-slate-400 w-full">No bank details added.</p>
             <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 shadow-2xs" onClick={() => {
-              handleCustomerFieldChangeAttempt("Add Bank Account", "bank", () => {
-                addBankAccountRow()
-              })
+              addBankAccountRow()
             }}>+ Add Bank Account</Button>
           </div>
         )}
         {(customerForm.bank_accounts || []).map((bank, index) => (
           <div key={index} className="space-y-3 pt-1">
             <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-              <span className="text-xs font-bold text-slate-900">Bank Account {index + 1}</span>
-              {(customerForm.bank_accounts || []).length > 1 && (
+              <span className="text-xs font-bold text-slate-900">
+                {index === 0 ? "Primary Bank Account" : `Additional Bank Account ${index}`}
+              </span>
+              {index > 0 && (
                 <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => {
-                  handleCustomerFieldChangeAttempt(`Remove Bank Account ${index + 1}`, "bank", () => {
-                    removeBankAccountRow(index)
-                  })
+                  removeBankAccountRow(index)
                 }}>
                   Remove Account
                 </Button>
@@ -777,13 +895,30 @@ export function CustomerForm({
                 />
                 {bankAccountErrors[index] && <p className="text-xs text-red-500 mt-1">{bankAccountErrors[index]}</p>}
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-800">Status</Label>
+                <Select
+                  value={bank.status || "Active"}
+                  onValueChange={(val: "Active" | "Inactive") => {
+                    handleCustomerFieldChangeAttempt("Status", "bank", () => {
+                      updateBankAccountRow(index, { status: val })
+                    })
+                  }}
+                >
+                  <SelectTrigger className="w-full h-9 border-slate-200">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {index === (customerForm.bank_accounts || []).length - 1 && (
               <div className="flex justify-end pt-1">
                 <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 shadow-2xs" onClick={() => {
-                  handleCustomerFieldChangeAttempt("Add Bank Account", "bank", () => {
-                    addBankAccountRow()
-                  })
+                  addBankAccountRow()
                 }}>+ Add Bank Account</Button>
               </div>
             )}
@@ -804,7 +939,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Ledger Group History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>

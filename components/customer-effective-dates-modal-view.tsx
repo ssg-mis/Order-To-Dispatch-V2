@@ -62,6 +62,18 @@ export function CustomerEffectiveDatesModalView({
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
+  // Always scroll to top when the history view opens
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Use scrollIntoView on our own ref - most reliable across all dialog structures
+    setTimeout(() => {
+      topRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      // Also reset any scrollable ancestor containers
+      const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+      if (container) container.scrollTop = 0;
+    }, 30);
+  }, []);
+
   const [activeSection, setActiveSection] = useState<SectionType>(initialSection)
   const [isAdding, setIsAdding] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -74,9 +86,7 @@ export function CustomerEffectiveDatesModalView({
   const [editingVersion, setEditingVersion] = useState<{ ids: (number | string)[]; wefDate: string } | null>(null)
   const wefDateInputRef = useRef<HTMLInputElement>(null)
 
-  const GODOWN_NAMES = ["Banari", "Ambikapur", "Dallirajhara", "Raigarh", "Rajnandgaon"]
-
-  // Fetch depots for Godown section checkboxes (exact 5 valid Godown depots)
+  // Fetch depots for Godown section checkboxes (all active depots)
   const { data: godownsData } = useQuery({
     queryKey: ["depots-for-customer-godown-history"],
     queryFn: async () => {
@@ -86,7 +96,7 @@ export function CustomerEffectiveDatesModalView({
     staleTime: 5 * 60 * 1000,
   })
   const godownDepots = useMemo(
-    () => (godownsData || []).filter((d: any) => d.status === "Active" && GODOWN_NAMES.includes(d.depot_name)),
+    () => (godownsData || []).filter((d: any) => d.status === "Active"),
     [godownsData]
   )
 
@@ -123,7 +133,9 @@ export function CustomerEffectiveDatesModalView({
   const activeMsmeRegTypes = useMemo(() => {
     const raw = msmeRegTypesRes?.data?.items || msmeRegTypesRes?.data || []
     const list = Array.isArray(raw) ? raw : []
-    return list.filter((b: any) => b.status === "Active")
+    const filtered = list.filter((b: any) => b.status === "Active")
+    const orderMap: Record<string, number> = { "Micro": 1, "Small": 2, "Medium": 3 }
+    return filtered.sort((a: any, b: any) => (orderMap[a.name] || 99) - (orderMap[b.name] || 99))
   }, [msmeRegTypesRes])
 
   // Fetch ledger group options for Ledger section dropdown
@@ -238,7 +250,7 @@ export function CustomerEffectiveDatesModalView({
   const activeRecordId = useMemo(() => {
     if (!items || items.length === 0) return null
     const todayStr = new Date().toISOString().split("T")[0]
-    
+
     // Find the first row in descending order where WEF date <= today
     const activeItem = items.find((item: any) => {
       const wefStr = item.wefDate || item.wef_date || item.createdAt
@@ -253,7 +265,7 @@ export function CustomerEffectiveDatesModalView({
   const activeRecord = useMemo(() => {
     if (!items || items.length === 0) return {}
     const todayStr = new Date().toISOString().split("T")[0]
-    
+
     // Find the first row in descending order where WEF date <= today
     const found = items.find((item: any) => {
       const wefStr = item.wefDate || item.wef_date || item.createdAt
@@ -336,18 +348,23 @@ export function CustomerEffectiveDatesModalView({
         gst_registration_type: latest.gstRegistrationType || latest.gst_registration_type || customerForm?.gst_registration_type || "Regular",
         is_gst_registered: latest.isGstRegistered || latest.is_gst_registered || customerForm?.gst_registered || "Registered",
         place_of_supply: latest.placeOfSupply || latest.place_of_supply || customerForm?.place_of_supply || "",
+        gst_status: latest.gstStatus || latest.gst_status || customerForm?.gst_status || "Active",
       })
     } else if (activeSection === "msme") {
       setNewVersionForm({
         wefDate: new Date().toISOString().split("T")[0],
         msme_registration_no: latest.msmeRegistrationNo || latest.msme_registration_no || customerForm?.msme_registration_no || "",
         msme_registration_type: latest.msmeRegistrationType || latest.msme_registration_type || customerForm?.msme_registration_type || "",
+        msme_activity_type: latest.msmeActivityType || latest.msme_activity_type || customerForm?.msme_activity_type || "",
+        msme_status: latest.msmeStatus || latest.msme_status || customerForm?.msme_status || "Active",
       })
     } else if (activeSection === "fssai") {
       setNewVersionForm({
         wefDate: new Date().toISOString().split("T")[0],
         fssai_no: latest.fssaiNo || latest.fssai_no || customerForm?.fssai_no || "",
+        fssai_licence_type: latest.fssaiLicenceType || latest.fssai_licence_type || customerForm?.fssai_licence_type || "",
         fssai_valid_upto: latest.fssaiValidUpto || latest.fssai_valid_upto || customerForm?.fssai_valid_upto || "",
+        fssai_certificate_upload: latest.fssaiCertificateUpload || latest.fssai_certificate_upload || customerForm?.fssai_certificate_upload || "",
       })
     } else if (activeSection === "godown") {
       const initialIds = Array.isArray(customerForm?.godown_ids) ? [...customerForm.godown_ids] : []
@@ -389,12 +406,12 @@ export function CustomerEffectiveDatesModalView({
           return field === target || field.includes(target) || target.includes(field)
         })
         if (match) {
-          match.focus()
+          match.focus({ preventScroll: true })
           return
         }
       }
       if (wefDateInputRef.current) {
-        wefDateInputRef.current.focus()
+        wefDateInputRef.current.focus({ preventScroll: true })
       }
     }, 150)
     return () => clearTimeout(timer)
@@ -434,21 +451,32 @@ export function CustomerEffectiveDatesModalView({
           gst_registration_type: latest.gstRegistrationType || latest.gst_registration_type || customerForm?.gst_registration_type || "Regular",
           is_gst_registered: latest.isGstRegistered || latest.is_gst_registered || customerForm?.gst_registered || "Registered",
           place_of_supply: latest.placeOfSupply || latest.place_of_supply || "",
+          gst_status: latest.gstStatus || latest.gst_status || customerForm?.gst_status || "Active",
         })
       } else if (activeSection === "msme") {
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
           msme_registration_no: latest.msmeRegistrationNo || latest.msme_registration_no || customerForm?.msme_registration_no || "",
           msme_registration_type: latest.msmeRegistrationType || latest.msme_registration_type || customerForm?.msme_registration_type || "",
+          msme_activity_type: latest.msmeActivityType || latest.msme_activity_type || customerForm?.msme_activity_type || "",
+          msme_status: latest.msmeStatus || latest.msme_status || customerForm?.msme_status || "Active",
         })
       } else if (activeSection === "fssai") {
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
           fssai_no: latest.fssaiNo || latest.fssai_no || customerForm?.fssai_no || "",
+          fssai_licence_type: latest.fssaiLicenceType || latest.fssai_licence_type || customerForm?.fssai_licence_type || "",
           fssai_valid_upto: latest.fssaiValidUpto || latest.fssai_valid_upto || customerForm?.fssai_valid_upto || "",
+          fssai_certificate_upload: latest.fssaiCertificateUpload || latest.fssai_certificate_upload || customerForm?.fssai_certificate_upload || "",
         })
       } else if (activeSection === "godown") {
-        const initialIds = Array.isArray(customerForm?.godown_ids) ? [...customerForm.godown_ids] : []
+        let initialIds = Array.isArray(customerForm?.godown_ids) && customerForm.godown_ids.length > 0 ? [...customerForm.godown_ids] : []
+        if (initialIds.length === 0) {
+           const banariId = godownDepots.find((d: any) => d.depot_name?.toLowerCase() === 'banari')?.id
+           if (banariId) {
+              initialIds = [banariId]
+           }
+        }
         const initialNames = godownDepots.filter((d: any) => initialIds.includes(d.id)).map((d: any) => d.depot_name).join(", ")
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
@@ -460,10 +488,10 @@ export function CustomerEffectiveDatesModalView({
         const activeBanks = (Array.isArray(latest.bank_accounts) && latest.bank_accounts.length > 0)
           ? latest.bank_accounts
           : (Array.isArray(latest.bankAccounts) && latest.bankAccounts.length > 0)
-          ? latest.bankAccounts
-          : (Array.isArray(customerForm?.bank_accounts) && customerForm.bank_accounts.length > 0)
-          ? customerForm.bank_accounts
-          : [{ bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }]
+            ? latest.bankAccounts
+            : (Array.isArray(customerForm?.bank_accounts) && customerForm.bank_accounts.length > 0)
+              ? customerForm.bank_accounts
+              : [{ bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }]
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
           bank_accounts: JSON.parse(JSON.stringify(activeBanks)),
@@ -487,9 +515,9 @@ export function CustomerEffectiveDatesModalView({
     setIsAdding(!isAdding)
   }
 
-const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/
-const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
-const PINCODE_REGEX = /^[1-9][0-9]{5}$/
+  const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/
+  const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
+  const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
   const handleSaveNewVersion = async () => {
     if (!customerId) return
@@ -609,7 +637,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
       await queryClient.invalidateQueries({ queryKey: ["customer-sectional-history", activeSection, customerId] })
       await queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
       await queryClient.invalidateQueries({ queryKey: ["master-customers"] })
-      
+
       // Refetch latest customer data from server to keep main Customer Edit Form in sync
       const updatedCust = await customerApi.getById(customerId)
       if (updatedCust?.success && updatedCust.data) {
@@ -630,7 +658,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
   }
 
   return (
-    <div className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
+    <div ref={topRef} className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
       {/* Standalone Top Back Button */}
       <div className="flex items-center justify-between pb-1">
         <Button
@@ -652,316 +680,288 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
           {activeSection === "basic"
             ? "Customer Details History"
             : activeSection === "mailing"
-            ? "Mailing Address History"
-            : activeSection === "gst"
-            ? "GST Registration History"
-            : activeSection === "msme"
-            ? "MSME Registration History"
-            : activeSection === "fssai"
-            ? "FSSAI License History"
-            : activeSection === "godown"
-            ? "Belongs to Godown History"
-            : activeSection === "bank"
-            ? "Bank Details History"
-            : activeSection === "ledger"
-            ? "Ledger Group History"
-            : "Document Uploads History"}
+              ? "Mailing Address History"
+              : activeSection === "gst"
+                ? "GST Registration History"
+                : activeSection === "msme"
+                  ? "MSME Registration History"
+                  : activeSection === "fssai"
+                    ? "FSSAI License History"
+                    : activeSection === "godown"
+                      ? "Belongs to Godown History"
+                      : activeSection === "bank"
+                        ? "Bank Details History"
+                        : "Ledger Group History"}
         </h2>
         <p className="text-xs text-slate-500 font-medium mt-0.5">
           Customer: <span className="font-bold text-slate-800">{customerName || `#${customerId}`}</span>
         </p>
       </div>
 
-        {/* Navigation Tabs (Strict Form Order Sequence) */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("basic")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "basic"
-                ? "bg-slate-900 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+      {/* Navigation Tabs (Strict Form Order Sequence) */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("basic")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "basic"
+            ? "bg-slate-900 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <User className="h-3.5 w-3.5" />
-            Customer History
-          </button>
+        >
+          <User className="h-3.5 w-3.5" />
+          Customer History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("mailing")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "mailing"
-                ? "bg-blue-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("mailing")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "mailing"
+            ? "bg-blue-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <Mail className="h-3.5 w-3.5" />
-            Mailing History
-          </button>
+        >
+          <Mail className="h-3.5 w-3.5" />
+          Mailing History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("gst")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "gst"
-                ? "bg-emerald-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("gst")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "gst"
+            ? "bg-emerald-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <FileText className="h-3.5 w-3.5" />
-            GST History
-          </button>
+        >
+          <FileText className="h-3.5 w-3.5" />
+          GST History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("msme")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "msme"
-                ? "bg-amber-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("msme")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "msme"
+            ? "bg-amber-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <Award className="h-3.5 w-3.5" />
-            MSME History
-          </button>
+        >
+          <Award className="h-3.5 w-3.5" />
+          MSME History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("fssai")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "fssai"
-                ? "bg-purple-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("fssai")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "fssai"
+            ? "bg-purple-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <ShieldAlert className="h-3.5 w-3.5" />
-            FSSAI History
-          </button>
+        >
+          <ShieldAlert className="h-3.5 w-3.5" />
+          FSSAI History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("documents")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "documents"
-                ? "bg-rose-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("godown")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "godown"
+            ? "bg-indigo-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Document Uploads History
-          </button>
+        >
+          <Warehouse className="h-3.5 w-3.5" />
+          Godowns History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("godown")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "godown"
-                ? "bg-indigo-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("bank")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "bank"
+            ? "bg-cyan-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <Warehouse className="h-3.5 w-3.5" />
-            Godowns History
-          </button>
+        >
+          <Landmark className="h-3.5 w-3.5" />
+          Bank Details History
+        </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("bank")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "bank"
-                ? "bg-cyan-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSection("ledger")
+            setIsAdding(false)
+          }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeSection === "ledger"
+            ? "bg-teal-600 text-white shadow-xs"
+            : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
             }`}
-          >
-            <Landmark className="h-3.5 w-3.5" />
-            Bank Details History
-          </button>
+        >
+          <Layers className="h-3.5 w-3.5" />
+          Ledger Group History
+        </button>
+      </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSection("ledger")
-              setIsAdding(false)
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeSection === "ledger"
-                ? "bg-teal-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
-            }`}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Ledger Group History
-          </button>
-        </div>
-
-        {/* Section Action Bar */}
-        <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-          <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-            {activeSection === "basic" && <User className="h-3.5 w-3.5 text-slate-900" />}
-            {activeSection === "mailing" && <Mail className="h-3.5 w-3.5 text-blue-600" />}
-            {activeSection === "gst" && <FileText className="h-3.5 w-3.5 text-emerald-600" />}
-            {activeSection === "msme" && <Award className="h-3.5 w-3.5 text-amber-600" />}
-            {activeSection === "fssai" && <ShieldAlert className="h-3.5 w-3.5 text-purple-600" />}
-            {activeSection === "godown" && <Warehouse className="h-3.5 w-3.5 text-indigo-600" />}
-            {activeSection === "bank" && <Landmark className="h-3.5 w-3.5 text-cyan-600" />}
-            {activeSection === "ledger" && <Layers className="h-3.5 w-3.5 text-teal-600" />}
-            {activeSection === "documents" && <Upload className="h-3.5 w-3.5 text-rose-600" />}
-            {activeSection === "basic"
-              ? "Customer Details History Table"
-              : activeSection === "mailing"
+      {/* Section Action Bar */}
+      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+        <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+          {activeSection === "basic" && <User className="h-3.5 w-3.5 text-slate-900" />}
+          {activeSection === "mailing" && <Mail className="h-3.5 w-3.5 text-blue-600" />}
+          {activeSection === "gst" && <FileText className="h-3.5 w-3.5 text-emerald-600" />}
+          {activeSection === "msme" && <Award className="h-3.5 w-3.5 text-amber-600" />}
+          {activeSection === "fssai" && <ShieldAlert className="h-3.5 w-3.5 text-purple-600" />}
+          {activeSection === "godown" && <Warehouse className="h-3.5 w-3.5 text-indigo-600" />}
+          {activeSection === "bank" && <Landmark className="h-3.5 w-3.5 text-cyan-600" />}
+          {activeSection === "ledger" && <Layers className="h-3.5 w-3.5 text-teal-600" />}
+          {activeSection === "basic"
+            ? "Customer Details History Table"
+            : activeSection === "mailing"
               ? "Mailing History Table"
               : activeSection === "gst"
-              ? "GST History Table"
-              : activeSection === "msme"
-              ? "MSME History Table"
-              : activeSection === "fssai"
-              ? "FSSAI History Table"
-              : activeSection === "godown"
-              ? "Godowns History Table"
-              : activeSection === "bank"
-              ? "Bank Details History Table"
-              : activeSection === "ledger"
-              ? "Ledger Group History Table"
-              : "Document Uploads History Table"}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px] bg-white text-slate-700 border-slate-300">
-              {items.length} {items.length === 1 ? "Version" : "Versions"}
-            </Badge>
-            <Button
-              type="button"
-              size="sm"
-              className={`h-7 px-2.5 text-xs font-semibold shadow-xs flex items-center gap-1 border-none ${
-                isAdding
-                  ? "bg-slate-600 hover:bg-slate-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
-              }`}
-              onClick={handleToggleAdd}
-            >
-              {isAdding ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-              {isAdding ? "Cancel Form" : "Add Effective Date Version"}
-            </Button>
-          </div>
+                ? "GST History Table"
+                : activeSection === "msme"
+                  ? "MSME History Table"
+                  : activeSection === "fssai"
+                    ? "FSSAI History Table"
+                    : activeSection === "godown"
+                      ? "Godowns History Table"
+                      : activeSection === "bank"
+                        ? "Bank Details History Table"
+                        : "Ledger Group History Table"}
         </div>
 
-        {/* Add New Version Form Panel */}
-        {isAdding && (
-          <div className="p-3.5 bg-emerald-50/70 rounded-xl border border-emerald-300 shadow-xs space-y-3 animate-in fade-in-50">
-            <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
-              <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5 text-emerald-600" />
-                Log New {activeSection === "basic" ? "CUSTOMER DETAILS" : activeSection.toUpperCase()} Version (Applicable From Date)
-              </span>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px] bg-white text-slate-700 border-slate-300">
+            {items.length} {items.length === 1 ? "Version" : "Versions"}
+          </Badge>
+          <Button
+            type="button"
+            size="sm"
+            className={`h-7 px-2.5 text-xs font-semibold shadow-xs flex items-center gap-1 border-none ${isAdding
+              ? "bg-slate-600 hover:bg-slate-700 text-white"
+              : "bg-emerald-600 hover:bg-emerald-700 text-white"
+              }`}
+            onClick={handleToggleAdd}
+          >
+            {isAdding ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+            {isAdding ? "Cancel Form" : "Add Effective Date Version"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Add New Version Form Panel */}
+      {isAdding && (
+        <div className="p-3.5 bg-emerald-50/70 rounded-xl border border-emerald-300 shadow-xs space-y-3 animate-in fade-in-50">
+          <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
+            <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5 text-emerald-600" />
+              Log New {activeSection === "basic" ? "CUSTOMER DETAILS" : activeSection.toUpperCase()} Version (Applicable From Date)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="space-y-1">
+              <Label className="text-[11px] font-bold text-slate-700">Applicable From (W.E.F Date) *</Label>
+              <Input
+                ref={wefDateInputRef}
+                type="date"
+                autoFocus
+                className={`h-8 text-xs font-semibold border-emerald-300 focus-visible:ring-emerald-400 bg-white ${!newVersionForm.wefDate ? 'text-slate-500' : ''}`}
+                value={newVersionForm.wefDate || ""}
+                onChange={(e) => setNewVersionForm({ ...newVersionForm, wefDate: e.target.value })}
+              />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold text-slate-700">Applicable From (W.E.F Date) *</Label>
-                <Input
-                  ref={wefDateInputRef}
-                  type="date"
-                  autoFocus
-                  className="h-8 text-xs font-semibold border-emerald-300 focus-visible:ring-emerald-400 bg-white"
-                  value={newVersionForm.wefDate || ""}
-                  onChange={(e) => setNewVersionForm({ ...newVersionForm, wefDate: e.target.value })}
-                />
-              </div>
-
-              {activeSection === "basic" && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Customer Name</Label>
-                    <Input
-                      data-field-name="Customer Name"
-                      className="h-8 text-xs bg-white"
-                      placeholder="Customer Name"
-                      value={newVersionForm.customer_name || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, customer_name: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Email</Label>
-                    <Input
-                      data-field-name="Email"
-                      type="email"
-                      className="h-8 text-xs bg-white"
-                      placeholder="email@example.com"
-                      value={newVersionForm.email || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, email: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Contact Person</Label>
-                    <Input
-                      data-field-name="Contact Person"
-                      className="h-8 text-xs bg-white"
-                      placeholder="Contact Person"
-                      value={newVersionForm.contact_person || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, contact_person: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Contact Number</Label>
-                    <Input
-                      data-field-name="Contact Number"
-                      className="h-8 text-xs bg-white"
-                      placeholder="10-digit Mobile Number"
-                      maxLength={10}
-                      value={newVersionForm.contact || ""}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 10)
-                        setNewVersionForm({ ...newVersionForm, contact: val })
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Status</Label>
-                    <Select
-                      value={newVersionForm.status || "Active"}
-                      onValueChange={(val: string) => setNewVersionForm({ ...newVersionForm, status: val })}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Select Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Active">Active</SelectItem>
-                        <SelectItem value="Inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card</Label>
-                    <FileUploadField
+            {activeSection === "basic" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Customer Name</Label>
+                  <Input
+                    data-field-name="Customer Name"
+                    className="h-8 text-xs bg-white"
+                    placeholder="Customer Name"
+                    value={newVersionForm.customer_name || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, customer_name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Email</Label>
+                  <Input
+                    data-field-name="Email"
+                    type="email"
+                    className="h-8 text-xs bg-white"
+                    placeholder="email@example.com"
+                    value={newVersionForm.email || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Contact Person</Label>
+                  <Input
+                    data-field-name="Contact Person"
+                    className="h-8 text-xs bg-white"
+                    placeholder="Contact Person"
+                    value={newVersionForm.contact_person || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, contact_person: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Contact Number</Label>
+                  <Input
+                    data-field-name="Contact Number"
+                    className="h-8 text-xs bg-white"
+                    placeholder="10-digit Mobile Number"
+                    maxLength={10}
+                    value={newVersionForm.contact || ""}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 10)
+                      setNewVersionForm({ ...newVersionForm, contact: val })
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Status</Label>
+                  <Select
+                    value={newVersionForm.status || "Active"}
+                    onValueChange={(val: string) => setNewVersionForm({ ...newVersionForm, status: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card</Label>
+                  <FileUploadField
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     value={newVersionForm.aadhaar_upload || ""}
                     helperText="Max file size: 20 MB"
                     uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
                     onFilesSelected={async (files) => {
                       if (files[0]) {
                         try {
@@ -977,14 +977,15 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     }}
                     onRemove={() => setNewVersionForm(prev => ({ ...prev, aadhaar_upload: "" }))}
                   />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">PAN Card</Label>
-                    <FileUploadField
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">PAN Card</Label>
+                  <FileUploadField
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     value={newVersionForm.pan_upload || ""}
                     helperText="Max file size: 20 MB"
                     uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
                     onFilesSelected={async (files) => {
                       if (files[0]) {
                         try {
@@ -1000,14 +1001,15 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     }}
                     onRemove={() => setNewVersionForm(prev => ({ ...prev, pan_upload: "" }))}
                   />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">GST Certificate</Label>
-                    <FileUploadField
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">GST Certificate</Label>
+                  <FileUploadField
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     value={newVersionForm.gst_certificate_upload || ""}
                     helperText="Max file size: 20 MB"
                     uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
                     onFilesSelected={async (files) => {
                       if (files[0]) {
                         try {
@@ -1023,116 +1025,170 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     }}
                     onRemove={() => setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: "" }))}
                   />
-                  </div>
-                </>
-              )}
+                </div>
+              </>
+            )}
 
-              {activeSection === "mailing" && (
-                <>
-                  <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-[11px] font-semibold text-slate-700">Address Line 1</Label>
-                    <Input
-                      data-field-name="Address Line 1"
-                      className="h-8 text-xs bg-white"
-                      placeholder="Street / Office Address"
-                      value={newVersionForm.address_line_1 || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Pincode</Label>
-                    <Input
-                      data-field-name="Pincode"
-                      className="h-8 text-xs font-mono bg-white"
-                      placeholder="6-digit PIN"
-                      maxLength={6}
-                      value={newVersionForm.pincode || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, pincode: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+            {activeSection === "mailing" && (
+              <>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-[11px] font-semibold text-slate-700">Address Line 1</Label>
+                  <Input
+                    data-field-name="Address Line 1"
+                    className="h-8 text-xs bg-white"
+                    placeholder="Street / Office Address"
+                    value={newVersionForm.address_line_1 || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Pincode</Label>
+                  <Input
+                    data-field-name="Pincode"
+                    className="h-8 text-xs font-mono bg-white"
+                    placeholder="6-digit PIN"
+                    maxLength={6}
+                    value={newVersionForm.pincode || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, pincode: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
 
-              {activeSection === "gst" && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">GSTIN / UIN *</Label>
-                    <Input
-                      data-field-name="GSTIN"
-                      className="h-8 text-xs font-mono uppercase bg-white"
-                      placeholder="Enter GSTIN / UIN"
-                      maxLength={15}
-                      value={newVersionForm.gstin || ""}
-                      onChange={(e) => {
-                        const val = e.target.value.toUpperCase()
-                        const autoPan = val.length === 15 ? val.slice(2, 12) : (newVersionForm.pan || "")
-                        setNewVersionForm({ ...newVersionForm, gstin: val, pan: autoPan })
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">PAN Number</Label>
-                    <Input
-                      data-field-name="PAN"
-                      className="h-8 text-xs font-mono uppercase bg-white"
-                      placeholder="ABCDE1234F"
-                      maxLength={10}
-                      value={newVersionForm.pan || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, pan: e.target.value.toUpperCase() })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">GST Status</Label>
-                    <Input
-                      data-field-name="GST Registration Status"
-                      className="h-8 text-xs bg-white"
-                      placeholder="Registered / Unregistered"
-                      value={newVersionForm.is_gst_registered || "Registered"}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, is_gst_registered: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Registration Type</Label>
-                    <Input
-                      data-field-name="GST Registration Type"
-                      className="h-8 text-xs bg-white"
-                      placeholder="Regular / Composition"
-                      value={newVersionForm.gst_registration_type || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, gst_registration_type: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+            {activeSection === "gst" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">GSTIN / UIN *</Label>
+                  <Input
+                    data-field-name="GSTIN"
+                    className="h-8 text-xs font-mono uppercase bg-white"
+                    placeholder="Enter GSTIN / UIN"
+                    maxLength={15}
+                    value={newVersionForm.gstin || ""}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase()
+                      const autoPan = val.length === 15 ? val.slice(2, 12) : (newVersionForm.pan || "")
+                      setNewVersionForm({ ...newVersionForm, gstin: val, pan: autoPan })
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">PAN Number</Label>
+                  <Input
+                    data-field-name="PAN"
+                    className="h-8 text-xs font-mono uppercase bg-white"
+                    placeholder="ABCDE1234F"
+                    maxLength={10}
+                    value={newVersionForm.pan || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, pan: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">GST Registration Status</Label>
+                  <Select
+                    value={newVersionForm.is_gst_registered || "Registered"}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, is_gst_registered: val })}
+                  >
+                    <SelectTrigger className="h-8 bg-white text-xs">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Registered">Registered</SelectItem>
+                      <SelectItem value="Unregistered">Unregistered</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Registration Type</Label>
+                  <Input
+                    data-field-name="GST Registration Type"
+                    className="h-8 text-xs bg-white"
+                    placeholder="Regular / Composition"
+                    value={newVersionForm.gst_registration_type || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, gst_registration_type: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Status</Label>
+                  <Select
+                    value={newVersionForm.gst_status || "Active"}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, gst_status: val })}
+                  >
+                    <SelectTrigger className="h-8 bg-white text-xs">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
 
-              {activeSection === "msme" && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">MSME Registration No</Label>
-                    <Input
-                      data-field-name="MSME Registration No"
-                      className="h-8 text-xs font-mono bg-white"
-                      placeholder="UDYAM-XX-00-0000000"
-                      value={newVersionForm.msme_registration_no || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, msme_registration_no: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">MSME Type</Label>
-                    <Combobox
-                      options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-                      value={newVersionForm.msme_registration_type || ""}
-                      onValueChange={(val) => setNewVersionForm({ ...newVersionForm, msme_registration_type: val })}
-                      placeholder="Select type"
-                      searchPlaceholder="Search..."
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">MSME Certificate</Label>
-                    <FileUploadField
+            {activeSection === "msme" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">MSME Registration No</Label>
+                  <Input
+                    data-field-name="MSME Registration No"
+                    className="h-8 text-xs font-mono bg-white"
+                    placeholder="UDYAM-XX-00-0000000"
+                    value={newVersionForm.msme_registration_no || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, msme_registration_no: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">MSME Registration Type</Label>
+                  <Combobox
+                    options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+                    value={newVersionForm.msme_registration_type || ""}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, msme_registration_type: val })}
+                    placeholder="Select type"
+                    searchPlaceholder="Search..."
+                    className="h-8 bg-white text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Activity Type</Label>
+                  <Select
+                    value={newVersionForm.msme_activity_type || ""}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, msme_activity_type: val })}
+                  >
+                    <SelectTrigger className="h-8 bg-white text-xs">
+                      <SelectValue placeholder="Select activity type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Unknown">Unknown</SelectItem>
+                      <SelectItem value="Manufacturing">Manufacturing</SelectItem>
+                      <SelectItem value="Services">Services</SelectItem>
+                      <SelectItem value="Trades">Trades</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">MSME Status</Label>
+                  <Select
+                    value={newVersionForm.msme_status || "Active"}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, msme_status: val })}
+                  >
+                    <SelectTrigger className="h-8 bg-white text-xs">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">MSME Certificate</Label>
+                  <FileUploadField
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     value={newVersionForm.msme_certificate_upload || ""}
                     helperText="Max file size: 20 MB"
                     uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
                     onFilesSelected={async (files) => {
                       if (files[0]) {
                         try {
@@ -1148,116 +1204,122 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     }}
                     onRemove={() => setNewVersionForm(prev => ({ ...prev, msme_certificate_upload: "" }))}
                   />
-                  </div>
-                </>
-              )}
+                </div>
+              </>
+            )}
 
-              {activeSection === "fssai" && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">FSSAI Licence No</Label>
-                    <Input
-                      data-field-name="FSSAI No"
-                      className="h-8 text-xs font-mono bg-white"
-                      placeholder="14-digit FSSAI No"
-                      value={newVersionForm.fssai_no || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, fssai_no: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">FSSAI Licence Type</Label>
-                    <Combobox
-                      options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-                      value={newVersionForm.fssai_licence_type || ""}
-                      onValueChange={(val) => setNewVersionForm({ ...newVersionForm, fssai_licence_type: val })}
-                      placeholder="Select licence type"
-                      searchPlaceholder="Search..."
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Valid Upto Date</Label>
-                    <Input
-                      data-field-name="FSSAI Valid Upto"
-                      type="date"
-                      className="h-8 text-xs bg-white"
-                      value={newVersionForm.fssai_valid_upto || ""}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, fssai_valid_upto: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+            {activeSection === "fssai" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">FSSAI Licence No</Label>
+                  <Input
+                    data-field-name="FSSAI No"
+                    className="h-8 text-xs font-mono bg-white"
+                    placeholder="14-digit FSSAI No"
+                    value={newVersionForm.fssai_no || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, fssai_no: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">FSSAI Licence Type</Label>
+                  <Combobox
+                    options={[...activeFssaiLicenceTypes]
+                      .sort((a: any, b: any) => {
+                        const order = ["Registration", "State Licence", "National Licence"]
+                        const aIdx = order.indexOf(a.name)
+                        const bIdx = order.indexOf(b.name)
+                        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+                      })
+                      .map((r: any) => ({ value: r.name, label: r.name }))}
+                    value={newVersionForm.fssai_licence_type || ""}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, fssai_licence_type: val })}
+                    placeholder="Select licence type"
+                    searchPlaceholder="Search..."
+                    className="h-8 bg-white text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Valid Upto Date</Label>
+                  <Input
+                    data-field-name="FSSAI Valid Upto"
+                    type="date"
+                    className={`h-8 text-xs bg-white ${!newVersionForm.fssai_valid_upto ? 'text-slate-500' : ''}`}
+                    value={newVersionForm.fssai_valid_upto || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, fssai_valid_upto: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">FSSAI Certificate</Label>
+                  <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.fssai_certificate_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm(prev => ({ ...prev, fssai_certificate_upload: res.data.url }))
+                            toast({ title: "Success", description: "FSSAI Certificate uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm(prev => ({ ...prev, fssai_certificate_upload: "" }))}
+                  />
+                </div>
+              </>
+            )}
 
-              {activeSection === "godown" && (
-                <>
-                  <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-[11px] font-semibold text-slate-700">Belongs to Which Godown *</Label>
-                    <div className="grid grid-cols-2 gap-2 rounded-md border border-emerald-300 p-2 bg-white max-h-32 overflow-y-auto">
-                      {godownDepots.map((d: any) => {
-                        const currentIds: number[] = newVersionForm.godown_ids !== undefined ? (newVersionForm.godown_ids || []) : (customerForm?.godown_ids || [])
-                        const checked = currentIds.includes(d.id)
-                        return (
-                          <label key={d.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(val) => {
-                                const nextIds = val ? [...currentIds, d.id] : currentIds.filter((id: number) => id !== d.id)
-                                const selectedNames = godownDepots.filter((dep: any) => nextIds.includes(dep.id)).map((dep: any) => dep.depot_name).join(", ")
-                                setNewVersionForm({
-                                  ...newVersionForm,
-                                  godown_ids: nextIds,
-                                  newValue: selectedNames || "None",
-                                })
-                              }}
-                            />
-                            {d.depot_name}
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] font-semibold text-slate-700">Is Required for Commitment</Label>
-                    <Input
-                      className="h-8 text-xs bg-white"
-                      placeholder="Yes / No"
-                      value={newVersionForm.is_required_for_commitment || customerForm?.is_required_for_commitment || "No"}
-                      onChange={(e) => setNewVersionForm({ ...newVersionForm, is_required_for_commitment: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+            {activeSection === "godown" && (
+              <>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-[11px] font-semibold text-slate-700">Belongs to Which Godown *</Label>
+                  <Select 
+                    value={
+                      (newVersionForm.godown_ids !== undefined ? newVersionForm.godown_ids?.[0]?.toString() : customerForm?.godown_ids?.[0]?.toString()) 
+                      || godownDepots?.find((d: any) => d.depot_name?.toLowerCase() === 'banari')?.id?.toString() 
+                      || ""
+                    }
+                    onValueChange={(val) => {
+                      const nextIds = val ? [parseInt(val, 10)] : []
+                      const selectedNames = godownDepots?.find((dep: any) => String(dep.id) === val)?.depot_name
+                      setNewVersionForm({
+                        ...newVersionForm,
+                        godown_ids: nextIds,
+                        newValue: selectedNames || "None",
+                      })
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue placeholder="Select godown" /></SelectTrigger>
+                    <SelectContent>
+                      {[...(godownDepots || [])].sort((a: any, b: any) => (a.depot_name || "").localeCompare(b.depot_name || "")).map((d: any) => (
+                        <SelectItem key={d.id} value={d.id.toString()}>{d.depot_name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              {activeSection === "bank" && (
-                <div className="space-y-3 sm:col-span-3 border-t border-emerald-200 pt-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold text-slate-800">Bank Accounts Details</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2.5 text-xs font-semibold bg-white border-slate-300 text-blue-700 hover:bg-blue-50"
-                      onClick={() => {
-                        const current = newVersionForm.bank_accounts || []
-                        setNewVersionForm({
-                          ...newVersionForm,
-                          bank_accounts: [...current, { bank_name_id: null, account_holder_name: "", account_number: "", ifsc_code: "" }],
-                        })
-                      }}
-                    >
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Add Bank Account
-                    </Button>
-                  </div>
+              </>
+            )}
 
-                  {(!newVersionForm.bank_accounts || newVersionForm.bank_accounts.length === 0) && (
-                    <p className="text-xs text-slate-400 border border-dashed rounded-lg p-3 text-center bg-white">
-                      No bank accounts added for this version. Click + Add Bank Account above.
-                    </p>
-                  )}
+            {activeSection === "bank" && (
+              <div className="space-y-3 sm:col-span-3 border-t border-emerald-200 pt-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-slate-800">Bank Accounts Details</Label>
+                </div>
 
-                  {(newVersionForm.bank_accounts || []).map((bank: any, idx: number) => (
-                    <div key={idx} className="rounded-lg border border-emerald-200 p-3 space-y-3 bg-emerald-50/50 shadow-2xs">
-                      <div className="flex items-center justify-between border-b pb-1.5">
-                        <span className="text-xs font-bold text-slate-700">Bank Account {idx + 1}</span>
+                {(newVersionForm.bank_accounts || []).map((bank: any, idx: number) => (
+                  <div key={idx} className="rounded-lg border border-emerald-200 p-3 space-y-3 bg-emerald-50/50 shadow-2xs">
+                    <div className="flex items-center justify-between border-b pb-1.5">
+                      <span className="text-xs font-bold text-slate-700">
+                        {idx === 0 ? "Primary Bank Account" : `Additional Bank Account ${idx}`}
+                      </span>
+                      {idx > 0 && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -1270,136 +1332,159 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                         >
                           Remove
                         </Button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold text-slate-600">Bank Name</Label>
+                        <Combobox
+                          options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                          value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
+                          onValueChange={(val) => {
+                            const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
+                              i === idx ? { ...b, bank_name_id: val ? parseInt(val, 10) : null } : b
+                            )
+                            setNewVersionForm({ ...newVersionForm, bank_accounts: next })
+                          }}
+                          placeholder="Select Bank"
+                          searchPlaceholder="Search bank..."
+                          className="h-8 bg-white text-xs"
+                        />
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                        <div className="space-y-1">
-                          <Label className="text-[11px] font-semibold text-slate-600">Bank Name</Label>
-                          <Combobox
-                            options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
-                            value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
-                            onValueChange={(val) => {
-                              const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
-                                i === idx ? { ...b, bank_name_id: val ? parseInt(val, 10) : null } : b
-                              )
-                              setNewVersionForm({ ...newVersionForm, bank_accounts: next })
-                            }}
-                            placeholder="Select Bank"
-                            searchPlaceholder="Search bank..."
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px] font-semibold text-slate-600">Account Holder Name</Label>
-                          <Input
-                            className="h-8 text-xs bg-white"
-                            placeholder="Account Holder Name"
-                            value={bank.account_holder_name || ""}
-                            onChange={(e) => {
-                              const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
-                                i === idx ? { ...b, account_holder_name: e.target.value } : b
-                              )
-                              setNewVersionForm({ ...newVersionForm, bank_accounts: next })
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px] font-semibold text-slate-600">Account Number</Label>
-                          <Input
-                            className="h-8 text-xs font-mono bg-white"
-                            placeholder="Account Number"
-                            value={bank.account_number || ""}
-                            onChange={(e) => {
-                              const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
-                                i === idx ? { ...b, account_number: e.target.value } : b
-                              )
-                              setNewVersionForm({ ...newVersionForm, bank_accounts: next })
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px] font-semibold text-slate-600">IFSC Code</Label>
-                          <Input
-                            className="h-8 text-xs font-mono uppercase bg-white"
-                            placeholder="SBIN0001234"
-                            maxLength={11}
-                            value={bank.ifsc_code || ""}
-                            onChange={(e) => {
-                              const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
-                                i === idx ? { ...b, ifsc_code: e.target.value.toUpperCase() } : b
-                              )
-                              setNewVersionForm({ ...newVersionForm, bank_accounts: next })
-                            }}
-                          />
-                        </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold text-slate-600">Account Holder Name</Label>
+                        <Input
+                          className="h-8 text-xs bg-white"
+                          placeholder="Account Holder Name"
+                          value={bank.account_holder_name || ""}
+                          onChange={(e) => {
+                            const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
+                              i === idx ? { ...b, account_holder_name: e.target.value } : b
+                            )
+                            setNewVersionForm({ ...newVersionForm, bank_accounts: next })
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold text-slate-600">Account Number</Label>
+                        <Input
+                          className="h-8 text-xs font-mono bg-white"
+                          placeholder="Account Number"
+                          value={bank.account_number || ""}
+                          onChange={(e) => {
+                            const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
+                              i === idx ? { ...b, account_number: e.target.value } : b
+                            )
+                            setNewVersionForm({ ...newVersionForm, bank_accounts: next })
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold text-slate-600">IFSC Code</Label>
+                        <Input
+                          className="h-8 text-xs font-mono uppercase bg-white"
+                          placeholder="SBIN0001234"
+                          maxLength={11}
+                          value={bank.ifsc_code || ""}
+                          onChange={(e) => {
+                            const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
+                              i === idx ? { ...b, ifsc_code: e.target.value.toUpperCase() } : b
+                            )
+                            setNewVersionForm({ ...newVersionForm, bank_accounts: next })
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold text-slate-600">Status</Label>
+                        <Select
+                          value={bank.status || "Active"}
+                          onValueChange={(val: "Active" | "Inactive") => {
+                            const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
+                              i === idx ? { ...b, status: val } : b
+                            )
+                            setNewVersionForm({ ...newVersionForm, bank_accounts: next })
+                          }}
+                        >
+                          <SelectTrigger className="h-8 bg-white border-slate-200">
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Active">Active</SelectItem>
+                            <SelectItem value="Inactive">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
+            )}
 
-              {activeSection === "ledger" && (
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-[11px] font-semibold text-slate-700">Ledger Group</Label>
-                  <Combobox
-                    options={ledgerGroupOptions.map((g: any) => ({ value: String(g.id), label: g.group_name }))}
-                    value={newVersionForm.ledger_group_id ? String(newVersionForm.ledger_group_id) : (newVersionForm.newValue || "")}
-                    onValueChange={(val) => {
-                      const sel = ledgerGroupOptions.find((g: any) => String(g.id) === val)
-                      setNewVersionForm({ ...newVersionForm, ledger_group_id: val, newValue: sel?.group_name || val })
-                    }}
-                    placeholder="Select ledger group"
-                    searchPlaceholder="Search ledger group..."
-                  />
-                </div>
-              )}
+            {activeSection === "ledger" && (
+              <div className="space-y-1 sm:col-span-2">
+                <Label className="text-[11px] font-semibold text-slate-700">Ledger Group</Label>
+                <Combobox
+                  options={ledgerGroupOptions.map((g: any) => ({ value: String(g.id), label: g.group_name }))}
+                  value={newVersionForm.ledger_group_id ? String(newVersionForm.ledger_group_id) : (newVersionForm.newValue || "")}
+                  onValueChange={(val) => {
+                    const sel = ledgerGroupOptions.find((g: any) => String(g.id) === val)
+                    setNewVersionForm({ ...newVersionForm, ledger_group_id: val, newValue: sel?.group_name || val })
+                  }}
+                  placeholder="Select ledger group"
+                  searchPlaceholder="Search ledger group..."
+                  className="h-8 bg-white text-xs"
+                />
+              </div>
+            )}
 
-              
-            </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-emerald-200">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs bg-white"
-                onClick={() => { setIsAdding(false); setEditingVersion(null) }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                className="h-7 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1"
-                disabled={isSaving}
-                onClick={handleSaveNewVersion}
-              >
-                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                Save Applicable Version
-              </Button>
-            </div>
           </div>
-        )}
 
-        {/* History Table */}
-        {isLoading ? (
-          <div className="flex items-center justify-center min-h-[280px] text-xs text-slate-400 gap-2 bg-white rounded-lg border border-slate-200">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-            <span>Loading {activeSection.toUpperCase()} versions...</span>
+          <div className="flex justify-end gap-2 pt-2 border-t border-emerald-200">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs bg-white"
+              onClick={() => { setIsAdding(false); setEditingVersion(null) }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1"
+              disabled={isSaving}
+              onClick={handleSaveNewVersion}
+            >
+              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save Applicable Version
+            </Button>
           </div>
-        ) : items.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 bg-white min-h-[280px] flex items-center justify-center">
-            <div>
-              No effective-dated {activeSection.toUpperCase()} versions recorded yet. Click{" "}
-              <strong className="text-emerald-700">Add Effective Date Version</strong> above to create one.
-            </div>
+        </div>
+      )}
+
+      {/* History Table */}
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-[280px] text-xs text-slate-400 gap-2 bg-white rounded-lg border border-slate-200">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+          <span>Loading {activeSection.toUpperCase()} versions...</span>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 bg-white min-h-[280px] flex items-center justify-center">
+          <div>
+            No effective-dated {activeSection.toUpperCase()} versions recorded yet. Click{" "}
+            <strong className="text-emerald-700">Add Effective Date Version</strong> above to create one.
           </div>
-        ) : (
-          <div className="rounded-lg border border-slate-200 overflow-x-auto shadow-2xs bg-white min-h-[280px]">
-            <table className="w-full text-xs text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
-                  <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 border-r border-slate-300 w-32 font-bold">
-                    Applicable From (W.E.F)
-                  </th>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-200 overflow-x-auto shadow-2xs bg-white min-h-[280px]">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
+                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 border-r border-slate-300 w-32 font-bold">
+                  Applicable From (W.E.F)
+                </th>
 
                 {activeSection === "basic" && (
                   <>
@@ -1425,7 +1510,8 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                     <th className="py-2.5 px-3 border-r border-slate-300">Registration Type</th>
                     <th className="py-2.5 px-3 border-r border-slate-300 font-mono">GSTIN/UIN</th>
                     <th className="py-2.5 px-3 border-r border-slate-300 font-mono">PAN No</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">GST Status</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">GST Registration Status</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Status</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Place of Supply</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Aadhaar Card</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">PAN Card</th>
@@ -1436,7 +1522,9 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                 {activeSection === "msme" && (
                   <>
                     <th className="py-2.5 px-3 border-r border-slate-300">MSME Reg No</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">MSME Type</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">MSME Registration Type</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Activity Type</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">MSME Status</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">MSME Certificate</th>
                   </>
                 )}
@@ -1452,9 +1540,7 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
                 {activeSection === "godown" && (
                   <>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Field Name</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Previous Godowns</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">New Tagged Godowns</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Belongs to Which Godown</th>
                   </>
                 )}
 
@@ -1469,13 +1555,11 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
                 {activeSection === "ledger" && (
                   <>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Field Name</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Previous Ledger Group</th>
-                    <th className="py-2.5 px-3 border-r border-slate-300">New Ledger Group</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300 text-left w-full">Ledger Group</th>
                   </>
                 )}
 
-                
+
 
                 <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300">Updated By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[90px]">Actions</th>
@@ -1492,8 +1576,8 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
                 const formattedWef = wefStr
                   ? new Date(wefStr)
-                      .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-                      .replace(/ /g, "-")
+                    .toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                    .replace(/ /g, "-")
                   : "—"
 
                 const renderFileLink = (url: string | null) => {
@@ -1580,16 +1664,8 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                       <div className="flex items-center justify-center gap-1">
                         <Calendar className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                         <span>{formattedWef}</span>
-                        {isActive && (
-                          <Badge className="ml-1 bg-emerald-600 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold">
-                            Active
-                          </Badge>
-                        )}
-                        {isFuture && (
-                          <Badge className="ml-1 bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold">
-                            Scheduled
-                          </Badge>
-                        )}
+                        
+                        
                       </div>
                     </td>
 
@@ -1630,11 +1706,10 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                           <td className="py-2 px-3 border-r border-slate-200">
                             <Badge
                               variant="outline"
-                              className={`text-[10px] px-2 py-0.5 font-bold ${
-                                statusVal === "Inactive"
-                                  ? "bg-red-50 text-red-700 border-red-200"
-                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              }`}
+                              className={`text-[10px] px-2 py-0.5 font-bold ${statusVal === "Inactive"
+                                ? "bg-red-50 text-red-700 border-red-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                }`}
                             >
                               {statusVal}
                             </Badge>
@@ -1674,6 +1749,13 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                             {row.isGstRegistered || "Registered"}
                           </Badge>
                         </td>
+                        <td className="py-2 px-3 border-r border-slate-200">
+                          <Badge variant="outline" className={`text-[10px] px-2 py-0.5 font-bold ${
+                            (row.gstStatus || row.gst_status || "Active") === "Inactive" ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          }`}>
+                            {row.gstStatus || row.gst_status || "Active"}
+                          </Badge>
+                        </td>
                         <td className="py-2 px-3 border-r border-slate-200 text-slate-600">
                           {row.gstin ? row.gstin.slice(0, 2) : "—"}
                         </td>
@@ -1687,6 +1769,16 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
                         </td>
                         <td className="py-2 px-3 border-r border-slate-200 text-slate-700">
                           {row.msmeRegistrationType || "—"}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200 text-slate-700">
+                          {row.msmeActivityType || row.msme_activity_type || customerForm?.msme_activity_type || "—"}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200">
+                          <Badge variant="outline" className={`text-[10px] px-2 py-0.5 font-bold ${
+                            (row.msmeStatus || row.msme_status || "Active") === "Inactive" ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          }`}>
+                            {row.msmeStatus || row.msme_status || "Active"}
+                          </Badge>
                         </td>
                       </>
                     )}
@@ -1707,12 +1799,6 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
                     {activeSection === "godown" && (
                       <>
-                        <td className="py-2 px-3 border-r border-slate-200 font-semibold text-slate-900">
-                          {row.fieldName || "Belongs to Godown"}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-600">
-                          {row.oldValue || "—"}
-                        </td>
                         <td className="py-2 px-3 border-r border-slate-200 font-medium text-emerald-800 bg-emerald-50/40">
                           {row.newValue || "—"}
                         </td>
@@ -1806,24 +1892,26 @@ const PINCODE_REGEX = /^[1-9][0-9]{5}$/
 
                     {activeSection === "ledger" && (
                       <>
-                        <td className="py-2 px-3 border-r border-slate-200 font-semibold text-slate-900">
-                          {row.fieldName || "Ledger Group ID"}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-600">
-                          {row.oldValue || "—"}
-                        </td>
                         <td className="py-2 px-3 border-r border-slate-200 font-medium text-teal-800 bg-teal-50/40">
                           {row.newValue || "—"}
                         </td>
                       </>
                     )}
 
-                    
+
 
                     <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap border-r border-slate-200">
-                      <div className="flex items-center justify-end gap-1 text-[11px]">
+                      <div className="flex flex-col items-end gap-0.5 text-[11px]">
+                        <div className="flex items-center justify-end gap-1 text-[11px]">
                         <User className="h-3 w-3 text-slate-400" />
                         <span>{row.changedByName || "Admin"}</span>
+                      </div>
+                        <span className="text-[9px] text-slate-400 mr-1">
+                          {row.createdAt ? new Date(row.createdAt).toLocaleString("en-IN", {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit'
+                          }).replace(',', '') : "—"}
+                        </span>
                       </div>
                     </td>
 
