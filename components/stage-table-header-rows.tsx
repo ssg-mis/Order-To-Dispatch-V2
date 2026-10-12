@@ -29,12 +29,12 @@ function SearchCell({ col, table, right = isRightCol(col), extraClass }: { col: 
   const filterable = !col.noFilter && !!col.accessor
   const range = table.dateRanges[col.id] || {}
   return (
-    <TableHead className={cn("whitespace-nowrap align-top pt-2.5 pb-1 px-4", colWidthClass(col), extraClass, right && "text-right")}>
+    <TableHead className={cn("whitespace-nowrap align-top pt-3 pb-1.5 px-4 min-w-[120px]", colWidthClass(col), extraClass, right && "text-right")}>
       <div onClick={(e) => e.stopPropagation()} className="w-full mb-0.5 min-h-7">
         {!filterable ? null : col.type === "date" ? (
           <Popover>
             <PopoverTrigger asChild>
-              <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+              <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-white hover:bg-slate-50 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
                 <span className="truncate font-medium">{range.from || range.to ? "Filtered" : "Filter..."}</span>
                 <CalendarIcon className="h-3 w-3 opacity-60 ml-1 shrink-0" />
               </button>
@@ -66,8 +66,8 @@ function SearchCell({ col, table, right = isRightCol(col), extraClass }: { col: 
             value={table.columnFilters[col.id] || ""}
             onChange={(e) => table.setColumnFilter(col.id, e.target.value)}
             className={cn(
-              "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
-              right ? "text-right" : "text-left"
+              "h-7 text-[10px] w-full px-2.5 py-0 bg-white hover:bg-slate-50 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+              "text-left"
             )}
           />
         )}
@@ -88,7 +88,7 @@ function HeadingInner({ col, table, right = isRightCol(col) }: { col: StageColDe
         )}
         onClick={sortable ? () => table.toggleSort(col.id) : undefined}
       >
-        <span>{col.label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">{col.label}</span>
         {sortable && <StageSortIcon active={table.sortField === col.id} dir={table.sortDir} />}
       </div>
     </div>
@@ -161,7 +161,7 @@ export function StageTableHeaderRows({
         ))}
       </TableRow>
       {hasTotals && (
-        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+        <TableRow className="bg-blue-50/60 border-y border-blue-100 font-bold text-xs text-slate-800 hover:bg-blue-50/60 z-10">
           {leading !== undefined && <TableCell className="px-2" />}
           {all.map((col, i) => (
             <TotalCell key={`total-${col.id}`} col={col} table={table} count={table.rows.length} isLabel={i === 0} decimals={decimals} tones={tones} right={rightOf(col)} />

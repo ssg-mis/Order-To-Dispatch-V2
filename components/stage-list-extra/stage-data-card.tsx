@@ -220,7 +220,7 @@ export function StageDataCard<T>({
   const showColumnsMenu = isAdmin || isFeatureEnabled("can_toggle_columns")
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0">
+    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
       <StageListHeader
         title={title}
         shown={table.rows.length}
@@ -317,7 +317,7 @@ export function StageDataCard<T>({
                 table.rows.map((row) => (
                   <TableRow
                     key={rowKey(row)}
-                    className={cn(onRowClick && "cursor-pointer", rowClassName?.(row))}
+                    className={cn("even:bg-slate-50/50 hover:bg-blue-50/60 transition-colors", onRowClick && "cursor-pointer", rowClassName?.(row))}
                     onClick={onRowClick ? () => onRowClick(row) : undefined}
                   >
                     {leading && <TableCell className="px-4 text-left">{leading.cell(row)}</TableCell>}

@@ -3,7 +3,7 @@
 /**
  * Shared stage-list UI - the exact look of Commitment Punch, reused by every stage:
  *   1. Card header: title + "x of y" badge + description + quick search
- *   2. Filter toolbar: segmented status buttons, selects, Columns menu, "Showing x of y", Reset
+ *   2. Filter toolbar: segmented status buttons, selects, Columns menu, Reset
  *   3. Table header: per-column Search box (or date-range Filter) ABOVE the heading, sortable
  *   4. TOTAL row between the search box and the heading (portalled into the header cells)
  *
@@ -17,15 +17,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
-import { TableCell, TableRow } from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
+import { ShellFiltersContext } from "@/components/workflow/shell-filters-context"
 
 // ─── Card header (title, badge, description, quick search) + toolbar slot ───
 
@@ -52,43 +52,51 @@ export function StageListHeader({
   /** Put <StageToolbar/> (and <StageActiveChips/>) here. */
   children?: React.ReactNode
 }) {
+  // When rendered inside a WorkflowStageShell, pull the shell's filters (search / dates / party) into
+  // this strip so there is only one filter section.
+  const shell = React.useContext(ShellFiltersContext)
+  const claimId = React.useId()
+  const claim = shell?.claim
+  const release = shell?.release
+  useIsoLayoutEffect(() => {
+    claim?.(claimId)
+    return () => release?.(claimId)
+  }, [claim, release, claimId])
+
+  // Compact single-row strip (toolbar + search). Title/description live in the page heading.
   return (
-    <CardHeader className="p-4 sm:p-5 space-y-3 bg-white border-b border-slate-200/80">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">{title}</CardTitle>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-              {shown} of {total}
-            </span>
-          </div>
-          {description && <CardDescription className="text-xs text-slate-500 mt-0.5">{description}</CardDescription>}
-        </div>
-        <div className="flex items-center gap-2">
-          {actions}
-          {onSearchChange && (
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <Input
-                placeholder={searchPlaceholder}
-                className="pl-9 pr-8 text-xs h-8.5 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border-slate-200 rounded-lg transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
-                value={searchValue ?? ""}
-                onChange={(e) => onSearchChange(e.target.value)}
-              />
-              {searchValue && (
-                <button
-                  onClick={() => onSearchChange("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-4 py-3 bg-slate-100/80 border-b border-slate-200">
+      {shell && shell.claimedBy === claimId && <div className="contents text-xs">{shell.node}</div>}
       {children}
-    </CardHeader>
+      <div className="order-2 flex w-full items-center gap-2 sm:w-auto sm:ml-auto">
+        {actions}
+        {shell && shell.claimedBy === claimId && (
+          <div
+            ref={shell.setActionsEl}
+            className="flex items-center gap-2 empty:hidden [&>button]:!h-8 [&>button]:!w-auto [&>button]:px-3 [&>button]:text-xs"
+          />
+        )}
+        {onSearchChange && !(shell && shell.claimedBy === claimId) && (
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Input
+              placeholder={searchPlaceholder}
+              className="pl-8 pr-8 text-xs h-8 bg-white hover:bg-white focus:bg-white border-slate-200 rounded-md transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
+              value={searchValue ?? ""}
+              onChange={(e) => onSearchChange(e.target.value)}
+            />
+            {searchValue && (
+              <button
+                onClick={() => onSearchChange("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -103,21 +111,31 @@ export function StageSegmented<V extends string>({
   onChange: (v: V) => void
   options: { value: V; label: string }[]
 }) {
-  return (
-    <div className="flex items-center bg-white p-0.5 rounded-md border border-slate-200 shadow-2xs">
+  // Inside a WorkflowStageShell the strip already carries search + party + filters, so the status
+  // toggle gets its own row underneath instead of crowding the main one.
+  const shell = React.useContext(ShellFiltersContext)
+  const toggle = (
+    <div className="flex h-8 items-center bg-slate-50 p-0.5 rounded-md border border-slate-200">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            "px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-pointer",
-            value === o.value ? "bg-blue-600 text-white shadow-xs font-bold" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+            "h-full px-2.5 text-xs font-semibold rounded transition-all cursor-pointer",
+            value === o.value ? "bg-blue-600 text-white shadow-xs font-bold" : "text-slate-600 hover:text-slate-900 hover:bg-white"
           )}
         >
           {o.label}
         </button>
       ))}
+    </div>
+  )
+  if (!shell) return toggle
+  return (
+    <div className="order-3 flex w-full items-center gap-3 border-t border-slate-200/80 pt-2.5">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
+      {toggle}
     </div>
   )
 }
@@ -138,7 +156,7 @@ export function StageFilterSelect({
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={cn("h-8 text-xs min-w-[115px] max-w-[190px] bg-white border-slate-200 shadow-2xs truncate", className)}>
+      <SelectTrigger className={cn("!h-8 text-xs min-w-[115px] max-w-[190px] bg-white border-slate-200 shadow-2xs truncate px-2.5 py-0", className)}>
         <SelectValue placeholder={allLabel} />
       </SelectTrigger>
       <SelectContent className="max-h-64">
@@ -169,8 +187,8 @@ export function StageColumnsMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="bg-transparent">
-          <Settings2 className="mr-2 h-4 w-4" />
+        <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs bg-transparent">
+          <Settings2 className="mr-1.5 h-3.5 w-3.5" />
           Columns
         </Button>
       </DropdownMenuTrigger>
@@ -196,17 +214,14 @@ export function StageToolbar({
   onReset: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
-      <div className="flex flex-wrap items-center gap-2">{filters}</div>
-      <div className="flex items-center gap-2 ml-auto sm:ml-0">
-        <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
-          Showing <strong className="text-slate-800">{shown}</strong> of {total}
-        </span>
+    <div className="order-1 contents text-xs">
+      <div className="contents">{filters}</div>
+      <div className="contents">
         {activeCount > 0 && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2 rounded transition-colors gap-1 cursor-pointer"
+            className="h-8 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2 rounded transition-colors gap-1 cursor-pointer"
             onClick={onReset}
           >
             <X className="h-3 w-3" />
@@ -219,13 +234,15 @@ export function StageToolbar({
 }
 
 export function StageDivider() {
-  return <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
+  const shell = React.useContext(ShellFiltersContext)
+  if (shell) return null
+  return <div className="hidden sm:block h-5 w-px bg-slate-200" />
 }
 
 export function StageActiveChips({ chips }: { chips: { label: string; onClear: () => void }[] }) {
   if (chips.length === 0) return null
   return (
-    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+    <div className="order-3 flex w-full flex-wrap items-center gap-1.5">
       <span className="text-[11px] font-semibold text-slate-400 mr-1">Active:</span>
       {chips.map((c) => (
         <Badge key={c.label} variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
@@ -282,14 +299,14 @@ export function StageHeadCell<T>({
     <SortableTableHead
       id={col.id}
       fill
-      className={cn("whitespace-nowrap align-top py-0 px-4 group/header", width, isRight && "text-right")}
+      className={cn("whitespace-nowrap align-top py-0 px-4 min-w-[120px] group/header", width, isRight && "text-right")}
     >
       <div className="flex flex-col w-full">
-        <div onClick={(e) => e.stopPropagation()} className="w-full pt-2.5 pb-2 min-h-7 box-content">
+        <div onClick={(e) => e.stopPropagation()} className="w-full pt-3 pb-2 min-h-7 box-content">
           {!filterable ? null : col.type === "date" ? (
             <Popover>
               <PopoverTrigger asChild>
-                <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+                <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-white hover:bg-slate-50 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
                   <span className="truncate font-medium">{range.from || range.to ? "Filtered" : "Filter..."}</span>
                   <CalendarIcon className="h-3 w-3 opacity-60 ml-1 shrink-0" />
                 </button>
@@ -331,8 +348,8 @@ export function StageHeadCell<T>({
               value={table.columnFilters[col.id] || ""}
               onChange={(e) => table.setColumnFilter(col.id, e.target.value)}
               className={cn(
-                "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
-                isRight ? "text-right" : "text-left"
+                "h-7 text-[10px] w-full px-2.5 py-0 bg-white hover:bg-slate-50 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                "text-left"
               )}
             />
           )}
@@ -347,11 +364,28 @@ export function StageHeadCell<T>({
           )}
           onClick={sortable ? () => table.toggleSort(col.id) : undefined}
         >
-          <span>{col.label}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">{col.label}</span>
           {sortable && <StageSortIcon active={table.sortField === col.id} dir={table.sortDir} />}
         </div>
       </div>
     </SortableTableHead>
+  )
+}
+
+/**
+ * Header cell for a non-data column (e.g. "Action") next to <StageHeadCell/>s. It has the same three
+ * bands (search gap / totals slot / heading) so the search row, TOTAL band and headings run
+ * unbroken across the whole table.
+ */
+export function StageActionHead({ label = "Action", className }: { label?: React.ReactNode; className?: string }) {
+  return (
+    <TableHead className={cn("whitespace-nowrap align-top py-0 px-4 text-left", className)}>
+      <div className="flex w-full flex-col">
+        <div className="box-content min-h-7 w-full pt-3 pb-2" />
+        <div data-stage-total-slot="__action" className="w-full empty:hidden" />
+        <div className="flex w-full items-center py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">{label}</div>
+      </div>
+    </TableHead>
   )
 }
 
@@ -373,7 +407,7 @@ const cleanTotal = (s: string) => s.replace(/[₹,]/g, "").trim()
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
 
 const BAND_CLASS =
-  "-mx-4 px-4 min-h-8 flex items-center bg-slate-100/90 border-y border-t-slate-200 border-b-2 border-b-slate-300 font-bold text-xs text-slate-800 whitespace-nowrap"
+  "-mx-4 px-4 min-h-8 flex items-center bg-blue-50/60 border-y border-blue-100 font-bold text-xs text-slate-800 whitespace-nowrap"
 
 /**
  * Totals row. Pages render it as the first child of <TableBody>, but with the table standard the
@@ -466,6 +500,9 @@ export function StageTotalsRow<T>({
             col.id
           )
         })}
+        {slotIds
+          .filter((id) => !columns.some((c) => c.id === id))
+          .map((id) => createPortal(<div className={BAND_CLASS} />, state.slots[id], id))}
       </>
     )
   }
@@ -474,7 +511,7 @@ export function StageTotalsRow<T>({
   return (
     <>
       <tr hidden ref={sentinel} />
-      <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+      <TableRow className="bg-blue-50/60 border-y border-blue-100 font-bold text-xs text-slate-800 hover:bg-blue-50/60 z-10">
         {Array.from({ length: leadingCells }).map((_, i) => (
           <TableCell key={`total-lead-${i}`} className="px-2" />
         ))}
@@ -491,5 +528,58 @@ export function StageTotalsRow<T>({
         ))}
       </TableRow>
     </>
+  )
+}
+
+/**
+ * Page-level bulk action buttons (e.g. "Process Selected"). Inside a WorkflowStageShell they are
+ * portalled into the list strip (right side) so the table starts right under the heading; elsewhere
+ * (or until the list has mounted) they render as a plain right-aligned row.
+ */
+export function StageActionBar({ children }: { children: React.ReactNode }) {
+  const shell = React.useContext(ShellFiltersContext)
+  if (shell?.actionsEl) return createPortal(children, shell.actionsEl)
+  return <div className="flex flex-wrap justify-end gap-2">{children}</div>
+}
+
+/**
+ * Standard pagination footer for every stage list (replaces the per-page copies):
+ * "Page x of y | N <noun>" on the left, Previous / Next on the right.
+ */
+export function StagePagination({
+  page,
+  totalPages,
+  total,
+  noun = "Items",
+  onPrev,
+  onNext,
+  prevDisabled,
+  nextDisabled,
+}: {
+  page: number
+  totalPages: number
+  total: number
+  noun?: string
+  onPrev: () => void
+  onNext: () => void
+  prevDisabled?: boolean
+  nextDisabled?: boolean
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-100/80 px-4 py-2.5 text-xs shadow-xs">
+      <div className="font-medium text-slate-500">
+        Page <strong className="text-slate-800">{page}</strong> of <strong className="text-slate-800">{totalPages}</strong>
+        <span className="mx-2 text-slate-300">|</span>
+        <strong className="text-slate-800">{total}</strong> {noun}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white" disabled={prevDisabled ?? page <= 1} onClick={onPrev}>
+          Previous
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white" disabled={nextDisabled ?? page >= totalPages} onClick={onNext}>
+          Next
+        </Button>
+      </div>
+    </div>
   )
 }

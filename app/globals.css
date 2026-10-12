@@ -272,3 +272,22 @@
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
 }
+
+/* Stage list tables: subtle zebra striping (component layer, so row-specific utility colours still win). */
+@layer components {
+  .stage-card tbody > tr:nth-child(even) {
+    background-color: color-mix(in srgb, var(--color-slate-50) 50%, transparent);
+  }
+}
+
+/*
+ * Stage list tables: ONE body-cell standard for every stage (font size + row height).
+ * Unlayered on purpose so it wins over per-page `text-xs` / padding utilities.
+ */
+.stage-card tbody > tr {
+  height: 2.75rem;
+}
+.stage-card tbody > tr > td {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
