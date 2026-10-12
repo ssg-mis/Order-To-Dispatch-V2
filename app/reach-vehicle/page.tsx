@@ -32,7 +32,7 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination } from "@/components/stage-list"
 import { stageColumnChips } from "@/components/stage-list-extras"
 import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
 
@@ -361,7 +361,7 @@ export default function ReachVehiclePage() {
     >
       <div className="space-y-4">
         {/* Action Bar */}
-        <div className="flex justify-end gap-2">
+        <StageActionBar>
           <Button
             onClick={() => setIsDialogOpen(true)}
             disabled={selectedItems.length === 0}
@@ -370,9 +370,9 @@ export default function ReachVehiclePage() {
             <CheckCircle className="mr-2 h-4 w-4" />
             Record Reach Vehicle ({selectedItems.length})
           </Button>
-        </div>
+                </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Loads"
             shown={table.rows.length}
@@ -529,33 +529,16 @@ export default function ReachVehiclePage() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{totalPages}</span>
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Loads
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-              disabled={pendingPage === 1}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => p + 1)}
-              disabled={pendingPage >= totalPages}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={totalPages}
+          total={pendingData?.pagination?.total || 0}
+          noun="Loads"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1}
+          nextDisabled={pendingPage >= totalPages}
+        />
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

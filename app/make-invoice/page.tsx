@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar } from "@/components/stage-list"
 import { matchesSearch } from "@/lib/search-utils"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
@@ -1074,7 +1074,7 @@ export default function MakeInvoicePage() {
     >
       <div className="space-y-4">
         {/* Action Bar */}
-        <div className="flex flex-col justify-end gap-2 sm:flex-row">
+        <StageActionBar>
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
@@ -1084,10 +1084,10 @@ export default function MakeInvoicePage() {
             Create Invoice ({selectedItems.length})
           </Button>
 
-        </div>
+                </StageActionBar>
 
         {/* Main Table (Grouped) */}
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Invoice Queue"
             shown={sortedDisplayRows.length}

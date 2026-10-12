@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon, StageActionBar } from "@/components/stage-list"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -898,7 +898,7 @@ export default function SecurityApprovalPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex justify-end gap-2">
+        <StageActionBar>
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
@@ -908,9 +908,9 @@ export default function SecurityApprovalPage() {
             Process Security ({selectedItems.length})
           </Button>
 
-        </div>
+                </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Security Approvals"
             shown={sortedDisplayRows.length}

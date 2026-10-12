@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi, driverMasterApi, draftApi } from "@/lib/api-service"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -27,8 +27,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
-  StageActiveChips, StageSortIcon, type StageTotalTone,
-} from "@/components/stage-list"
+  StageActiveChips, StageSortIcon, type StageTotalTone, StageActionBar, StagePagination } from "@/components/stage-list"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -957,7 +956,7 @@ const buildSlipParties = () => {
       }
     >
       <div className="space-y-4">
-        <div className="flex justify-end gap-2">
+        <StageActionBar>
           <Button
             onClick={handleOpenSelectedDialog}
             disabled={selectedRows.length === 0 || isReadOnly}
@@ -967,8 +966,8 @@ const buildSlipParties = () => {
             Gate In Selected ({selectedRows.length})
           </Button>
 
-        </div>
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+                </StageActionBar>
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Gate In List"
             shown={groupedPendingRecords.length}
@@ -1193,26 +1192,16 @@ const buildSlipParties = () => {
         </Card>
 
         {/* Pagination */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span>
-            {pendingResult?.pagination?.totalPages && (
-              <> of <span className="text-blue-600 px-1">{pendingResult.pagination.totalPages}</span></>
-            )}
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingResult?.pagination?.total || 0}</span> items
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30">
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold">
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingResult?.pagination?.totalPages || 1}
+          total={pendingResult?.pagination?.total || 0}
+          noun="Items"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1}
+          nextDisabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
+        />
       </div>
 
       {/* ── Gate-In Dialog ─────────────────────────────────────────────────── */}

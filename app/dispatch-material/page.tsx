@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -38,8 +38,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
-  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone,
-} from "@/components/stage-list"
+  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone, StagePagination } from "@/components/stage-list"
 
 // Formatted display strings ("1,234.50", "₹1,234.50", "—") -> number.
 const parseDisplayNumber = (v: unknown): number => {
@@ -1245,7 +1244,7 @@ export default function DispatchMaterialPage() {
         </div>
       )}
 
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
         <StageListHeader
           title="Dispatch Planning List"
           shown={sortedDisplayRows.length}
@@ -1348,14 +1347,14 @@ export default function DispatchMaterialPage() {
                         col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                       )}>
                         {col.id === "status" ? (
-                          <div className="flex flex-col items-start gap-1">
+                          <div className="flex items-center gap-2">
                             <Badge className="bg-orange-100 text-orange-700">Pending</Badge>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500 font-medium">({row._productCount} Items)</span>
                             )}
                           </div>
                         ) : col.id === "productName" ? (
-                          <div className="flex flex-col items-start">
+                          <div className="flex items-center gap-2">
                             <span className="font-medium text-slate-700">{row._allProducts[0]?.productName}</span>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500">+ {row._productCount - 1} more types</span>
@@ -1464,36 +1463,16 @@ export default function DispatchMaterialPage() {
           )}
         </div>
 
-        <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-            Showing Page <span className="text-slate-900 mx-1">{pendingPage}</span>
-            {pendingData?.pagination?.totalPages && (
-              <> of <span className="text-slate-900 mx-1">{pendingData.pagination.totalPages}</span></>
-            )}
-            <span className="ml-2 text-slate-300">|</span>
-            <span className="ml-2">{pendingData?.pagination?.total || 0} order{(pendingData?.pagination?.total || 0) !== 1 ? 's' : ''} in this depot</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-              disabled={pendingPage === 1 || isPendingLoading}
-              className="h-8 rounded-lg gap-1 px-3 font-bold shadow-sm"
-            >
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => p + 1)}
-              disabled={isPendingLoading || pendingPage >= (pendingData?.pagination?.totalPages || 1)}
-              className="h-8 rounded-lg gap-1 px-3 font-bold shadow-sm"
-            >
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingData?.pagination?.totalPages || 1}
+          total={pendingData?.pagination?.total || 0}
+          noun="Orders"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1 || isPendingLoading}
+          nextDisabled={isPendingLoading || pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+        />
         </CardContent>
       </Card>
 

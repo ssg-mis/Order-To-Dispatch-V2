@@ -24,8 +24,7 @@ import {
   StageActiveChips,
   StageHeadCell,
   StageTotalsRow,
-  type StageTotalTone,
-} from "@/components/stage-list"
+  type StageTotalTone, StagePagination } from "@/components/stage-list"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { fmtNum, fmtDate, fmtDateTime } from "@/lib/table-format"
 import { ApprovalDetailDialog } from "@/components/approval-of-order/approval-detail-dialog"
@@ -239,7 +238,7 @@ export default function ApprovalOfOrderPage() {
 
   const tableContent = (
     <div className="space-y-4">
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
         <StageListHeader
           title={activeTab === "pending" ? "Approval List" : "Approval History"}
           shown={displayRows.length}
@@ -337,7 +336,7 @@ export default function ApprovalOfOrderPage() {
                         "whitespace-nowrap px-4 text-xs",
                         TOTAL_COLUMN_IDS.has(col.id) && "text-right font-mono tabular-nums",
                         !TOTAL_COLUMN_IDS.has(col.id) && RIGHT_ALIGN_COLS.has(col.id) && "text-right tabular-nums",
-                        col.id === "order_no" ? "font-bold text-blue-700" : "text-slate-600"
+                        col.id === "order_no" ? "font-bold text-blue-700" : "text-foreground"
                       )}
                       title={col.id === "remarks" ? row.remarks || undefined : undefined}
                     >
@@ -448,33 +447,16 @@ export default function ApprovalOfOrderPage() {
         </CardContent>
       </Card>
 
-      <div className="mt-4 flex w-full flex-col gap-3 rounded-2xl border border-blue-50 bg-white/50 p-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="rounded-full border border-slate-200/50 bg-slate-100/50 px-4 py-2 text-xs font-bold text-slate-500">
-          Page <span className="px-1 text-blue-600">{currentPage}</span> of <span className="px-1 text-blue-600">{currentPagination?.totalPages || 1}</span>
-          <span className="mx-2 text-slate-300">|</span>
-          Total <span className="px-1 text-blue-600">{currentPagination?.total || 0}</span> Orders
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:flex">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1 || isLoading}
-            className="h-9 rounded-xl border-slate-200 transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 active:scale-95 disabled:opacity-30"
-          >
-            <ChevronLeft className="mr-1 h-4 w-4" /> Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => p + 1)}
-            disabled={currentPage >= (currentPagination?.totalPages || 1) || isLoading}
-            className="h-9 rounded-xl border-slate-200 text-xs font-bold transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 active:scale-95 disabled:opacity-30"
-          >
-            Next <ChevronRight className="ml-1 h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <StagePagination
+        page={currentPage}
+        totalPages={currentPagination?.totalPages || 1}
+        total={currentPagination?.total || 0}
+        noun="Orders"
+        onPrev={() => setPage((p) => Math.max(1, p - 1))}
+        onNext={() => setPage((p) => p + 1)}
+        prevDisabled={currentPage === 1 || isLoading}
+        nextDisabled={currentPage >= (currentPagination?.totalPages || 1) || isLoading}
+      />
     </div>
   )
 

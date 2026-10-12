@@ -16,7 +16,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionHead } from "@/components/stage-list"
 import { Printer, CheckCircle, FileText, Receipt, ExternalLink } from "lucide-react"
 import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -93,7 +93,7 @@ function FinalInvoiceTable({
   }
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
       <StageListHeader
         title={title}
         shown={table.rows.length}
@@ -137,10 +137,7 @@ function FinalInvoiceTable({
                     <StageHeadCell key={col.id} col={col} table={table} align={col.id === "bill_amount" ? "right" : "left"} />
                   ))}
                 </ColumnDragProvider>
-                <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-left">
-                  <div className="min-h-7 mb-2" />
-                  Action
-                </TableHead>
+                <StageActionHead />
               </TableRow>
             </TableHeader>
             <TableBody>

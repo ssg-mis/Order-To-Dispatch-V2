@@ -7,7 +7,7 @@ import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination } from "@/components/stage-list"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -26,7 +26,7 @@ import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { actualDispatchApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
@@ -1751,7 +1751,7 @@ export default function ActualDispatchPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row justify-end gap-2">
+        <StageActionBar>
           <Button
             onClick={() => handleOpenDialog()}
             disabled={selectedOrders.length === 0}
@@ -1760,7 +1760,7 @@ export default function ActualDispatchPage() {
           >
             Confirm Dispatch ({selectedOrders.length})
           </Button>
-        </div>
+                </StageActionBar>
 
         {availableDepots.length > 0 && (
           <div className="mt-4 mb-2">
@@ -1780,7 +1780,7 @@ export default function ActualDispatchPage() {
           </div>
         )}
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Dispatches"
             shown={sortedDisplayRows.length}
@@ -1807,7 +1807,6 @@ export default function ActualDispatchPage() {
                       { value: "DRAFT", label: "Draft" },
                     ]}
                   />
-                  <StageDivider />
                   <StageFilterSelect value={oilFilter} onChange={setOilFilter} allLabel="All Oils" options={uniqueOilTypes} />
                   <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
                   <StageColumnsMenu
@@ -1897,7 +1896,7 @@ export default function ActualDispatchPage() {
                           col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                         )}>
                           {col.id === "status" ? (
-                            <div className="flex flex-col items-start gap-1">
+                            <div className="flex items-center gap-2">
                               {row.has_draft ? (
                                 <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">Draft Saved</Badge>
                               ) : row.has_gate_in ? (
@@ -2011,43 +2010,16 @@ export default function ActualDispatchPage() {
               </div>
             )}
           </div>
-          <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50/50 rounded-b-2xl">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-              Showing Page <span className="text-slate-900 mx-1">{displayRows.length > 0 ? pendingPage : 0}</span>
-              {displayRows.length > 0 && (
-                <> of <span className="text-slate-900 mx-1">
-                  {/* Backend paginates pending rows by whole order now, so totalPages is
-                      authoritative — no need to guess from raw row count vs limit. */}
-                  {pendingResult?.pagination?.totalPages || 1}
-                </span></>
-              )}
-              <span className="ml-2 text-slate-300">|</span>
-              <span className="ml-2 text-[10px] lowercase italic font-normal text-slate-400">{displayRows.length} item{displayRows.length !== 1 ? 's' : ''} in this depot</span>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-                disabled={pendingPage === 1 || displayRows.length === 0}
-                className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => p + 1)}
-                disabled={
-                  displayRows.length === 0 ||
-                  pendingPage >= (pendingResult?.pagination?.totalPages || 1)
-                }
-                className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                Next <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingResult?.pagination?.totalPages || 1}
+            total={displayRows.length}
+            noun="Items"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || displayRows.length === 0}
+            nextDisabled={displayRows.length === 0 || pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
+          />
           </CardContent>
         </Card>
       </div>

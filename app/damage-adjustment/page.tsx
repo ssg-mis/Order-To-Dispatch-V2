@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageSortIcon } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageSortIcon, StageActionBar } from "@/components/stage-list"
 import { stageColumnChips } from "@/components/stage-list-extras"
 import { StageTableHeaderRows, bodyCellClass } from "@/components/stage-table-header-rows"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
@@ -611,7 +611,7 @@ export default function DamageAdjustmentPage() {
     >
       <div className="space-y-4">
         {/* Action Bar */}
-        <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
+        <StageActionBar>
           <Button
             onClick={handleOpenDialog}
             disabled={selectedItems.length === 0}
@@ -620,9 +620,9 @@ export default function DamageAdjustmentPage() {
             <CheckCircle className="mr-2 h-4 w-4" />
             Process Adjustment ({selectedItems.length})
           </Button>
-        </div>
+                </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Damage Adjustments"
             shown={table.rows.length}
