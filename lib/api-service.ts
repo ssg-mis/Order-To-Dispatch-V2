@@ -231,6 +231,14 @@ export const orderApi = {
     });
   },
 
+  /** Order Punch Modify: replace the order's line items. items: [{ id?, sku_id, order_quantity, rate_of_material }] */
+  updateItems: async (id: number, items: any[]): Promise<ApiResponse> => {
+    return request(`/orders/${id}/items`, {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    });
+  },
+
   delete: async (id: number): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.delete(id), {
       method: 'DELETE',

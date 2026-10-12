@@ -27,12 +27,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { useToast } from "@/hooks/use-toast"
-import { orderApi, customerApi, depotApi, brokerApi } from "@/lib/api-service"
+import { orderApi, customerApi, depotApi, brokerApi, skuApi } from "@/lib/api-service"
 import { fetchCustomerDropdownOptions, fetchDepotDropdownOptions } from "@/components/order-punch/customer-dropdown"
 import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { cn } from "@/lib/utils"
-import { FileText, MapPin, Receipt, Loader2 } from "lucide-react"
+import { fmtNum } from "@/lib/table-format"
+import { extractState } from "@/components/order-punch/order-punch-form"
+import { FileText, MapPin, Receipt, Loader2, Plus, Trash2 } from "lucide-react"
 
 interface ModifyOrderDialogProps {
   order: any
@@ -65,6 +67,42 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
   const [sameAsCustomerAddress, setSameAsCustomerAddress] = useState(true)
   const [selectedAddressId, setSelectedAddressId] = useState<"default" | number>("default")
 
+  // Editable order items. `id` is the order_item id (absent for a line added here).
+  type ItemRow = { key: string; id?: number; skuId?: number; skuName: string; qty: string; rate: string }
+  const [itemRows, setItemRows] = useState<ItemRow[]>([])
+  const [originalItems, setOriginalItems] = useState<string>("")
+  const [skuList, setSkuList] = useState<any[]>([])
+  const newKey = () => Math.random().toString(36).slice(2, 10)
+  const normalizeItems = (rows: ItemRow[]) => JSON.stringify(rows.map((r) => ({ id: r.id ?? null, skuId: r.skuId ?? null, qty: String(r.qty), rate: String(r.rate) })))
+  const itemsChanged = itemRows.length > 0 && normalizeItems(itemRows) !== originalItems
+
+  // GST breakdown (indicative, same maths as Add Order): taxable = rate x nos-per-main-uom x qty.
+  const [gstRatePercent, setGstRatePercent] = useState("5")
+  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
+  const skuOf = (skuId?: number) => skuList.find((s: any) => s.id === skuId)
+  const billingState = depotRecord?.state || ""
+  const shippingState = extractState(customerAddress || "") || ""
+  useEffect(() => {
+    if (billingState && shippingState) {
+      setGstSupplyType(billingState.trim().toLowerCase() === shippingState.trim().toLowerCase() ? "INTRA" : "INTER")
+    }
+  }, [billingState, shippingState])
+  const numericGstRate = parseFloat(gstRatePercent) || 0
+  const halfRate = numericGstRate / 2
+  const totalQty = itemRows.reduce((n, r) => n + (parseFloat(r.qty) || 0), 0)
+  const totalWeight = itemRows.reduce((n, r) => n + (parseFloat(skuOf(r.skuId)?.sku_weight) || 0) * (parseFloat(r.qty) || 0), 0)
+  const totalTaxable = itemRows.reduce(
+    (n, r) => n + (parseFloat(r.rate) || 0) * (parseFloat(skuOf(r.skuId)?.nos_per_main_uom) || 0) * (parseFloat(r.qty) || 0),
+    0
+  )
+  const orderCgst = totalTaxable * (halfRate / 100)
+  const orderSgst = totalTaxable * (halfRate / 100)
+  const orderIgst = totalTaxable * (numericGstRate / 100)
+  const totalGstAmount = gstSupplyType === "INTRA" ? orderCgst + orderSgst : orderIgst
+  const orderRawTotal = totalTaxable + totalGstAmount
+  const orderRoundedTotal = Math.round(orderRawTotal)
+  const orderRoundOff = orderRoundedTotal - orderRawTotal
+
   const statesById = useStatesMap()
   const { addresses: addressOptions, hasMultiple: hasMultipleAddresses } = useCustomerAddresses(customerRecord?.id ?? null, statesById)
 
@@ -87,6 +125,16 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
     setDeliveryAddress(order.customer_delivery_address || "")
     setSelectedAddressId("default")
     setBrokerId(order.broker_id ? String(order.broker_id) : "")
+    const rows: ItemRow[] = (order.items || []).map((it: any) => ({
+      key: newKey(),
+      id: it.id,
+      skuId: it.sku_id,
+      skuName: it.sku_name || "",
+      qty: it.order_quantity != null ? String(parseFloat(it.order_quantity)) : "",
+      rate: it.rate_of_material != null ? String(parseFloat(it.rate_of_material)) : "",
+    }))
+    setItemRows(rows)
+    setOriginalItems(normalizeItems(rows))
 
     if (order.depot_id) {
       setDepotRecord({ id: order.depot_id, depot_name: order.depot_name })
@@ -112,6 +160,13 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
 
     return () => { cancelled = true }
   }, [open, order])
+
+  useEffect(() => {
+    if (!open || skuList.length > 0) return
+    skuApi.getAll({ all: "true" }).then((res: any) => {
+      if (res?.success) setSkuList(res.data?.skuDetails || res.data?.skus || [])
+    }).catch(() => {})
+  }, [open, skuList.length])
 
   useEffect(() => {
     if (sameAsCustomerAddress) setDeliveryAddress(customerAddress)
@@ -146,8 +201,29 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
       toast({ title: "Customer required", description: "Please select a customer.", variant: "destructive" })
       return
     }
+    // Item changes are validated and saved first; they send the order back for re-approval.
+    if (itemsChanged) {
+      for (const [i, r] of itemRows.entries()) {
+        if (!r.skuId) { toast({ title: "Product required", description: `Select a product for item ${i + 1}.`, variant: "destructive" }); return }
+        if (!(parseFloat(r.qty) > 0)) { toast({ title: "Quantity required", description: `Enter a quantity greater than 0 for item ${i + 1}.`, variant: "destructive" }); return }
+        if (!(parseFloat(r.rate) >= 0) || r.rate === "") { toast({ title: "Rate required", description: `Enter a rate for item ${i + 1}.`, variant: "destructive" }); return }
+      }
+    }
     setIsSaving(true)
     try {
+      if (itemsChanged) {
+        const itemRes = await orderApi.updateItems(order.id, itemRows.map((r) => ({
+          id: r.id,
+          sku_id: r.skuId,
+          order_quantity: parseFloat(r.qty),
+          rate_of_material: parseFloat(r.rate),
+        })))
+        if (!itemRes?.success) {
+          toast({ title: "Items not saved", description: itemRes?.message || "Could not update the items.", variant: "destructive" })
+          setIsSaving(false)
+          return
+        }
+      }
       const patch: Record<string, any> = {
         customerId: customerRecord.id,
         depotId: depotRecord?.id ?? null,
@@ -165,7 +241,7 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
       }
       const res = await orderApi.update(order.id, patch)
       if (res.success) {
-        toast({ title: "Order updated", description: `${order.order_no} has been modified.` })
+        toast({ title: "Order updated", description: itemsChanged ? `${order.order_no} was modified and sent back to Approval of Order.` : `${order.order_no} has been modified.` })
         onOpenChange(false)
         onSaved()
       } else {
@@ -390,6 +466,183 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
             </div>
           </div>
         </div>
+
+        {/* Order items: editable. Saving item changes sends the order back to Approval of Order. */}
+        {itemRows.length > 0 && (
+          <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="flex items-center gap-2 text-base font-bold text-slate-900">
+                <FileText className="h-4 w-4 text-blue-600" />
+                Order Items
+                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">{itemRows.length}</span>
+              </Label>
+              <span className="text-[11px] text-slate-500">
+                {itemsChanged ? "Item changes will send this order back to Approval of Order." : "Change a product, quantity or rate, or add / remove items."}
+              </span>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2.5 text-left">Product</th>
+                    <th className="w-36 px-3 py-2.5 text-right">Order Qty</th>
+                    <th className="w-36 px-3 py-2.5 text-right">Rate (₹)</th>
+                    <th className="w-12 px-3 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemRows.map((r) => (
+                    <tr key={r.key} className="border-b border-slate-100 last:border-0">
+                      <td className="px-3 py-2 min-w-[280px]">
+                        <AsyncCombobox
+                          placeholder="Select product"
+                          searchPlaceholder="Search products..."
+                          value={r.skuName}
+                          onValueChange={() => {}}
+                          onSelectOption={(opt: any) => {
+                            if (opt?.original) {
+                              setItemRows((rows) => rows.map((x) => (x.key === r.key ? { ...x, skuId: opt.original.id, skuName: opt.original.sku_name } : x)))
+                            }
+                          }}
+                          fetchOptions={async (search: string, page: number) => {
+                            const q = (search || "").toLowerCase().trim()
+                            const list = skuList.filter((s: any) => !q || (s.sku_name || "").toLowerCase().includes(q))
+                            const size = 20
+                            const slice = list.slice((page - 1) * size, page * size)
+                            return {
+                              options: slice.map((s: any) => ({ value: s.sku_name, label: s.sku_name, original: s })),
+                              hasMore: page * size < list.length,
+                            }
+                          }}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="text-right font-mono tabular-nums"
+                          value={r.qty}
+                          onChange={(e) => setItemRows((rows) => rows.map((x) => (x.key === r.key ? { ...x, qty: e.target.value } : x)))}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="text-right font-mono tabular-nums"
+                          value={r.rate}
+                          onChange={(e) => setItemRows((rows) => rows.map((x) => (x.key === r.key ? { ...x, rate: e.target.value } : x)))}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          title={itemRows.length === 1 ? "An order needs at least one item" : "Remove item"}
+                          disabled={itemRows.length === 1}
+                          onClick={() => setItemRows((rows) => rows.filter((x) => x.key !== r.key))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 bg-white"
+              onClick={() => setItemRows((rows) => [...rows, { key: newKey(), skuName: "", qty: "", rate: "" }])}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add item
+            </Button>
+
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Order Weight (KG)</p>
+                <p className="text-sm font-bold text-blue-700">{fmtNum(totalWeight, 3)}</p>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Order Qty</p>
+                <p className="text-sm font-bold text-blue-700">{fmtNum(totalQty, 3)}</p>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Taxable Amount (₹)</p>
+                <p className="text-sm font-bold text-blue-700">{fmtNum(totalTaxable, 2)}</p>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Indicative)</p>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-500">GST Rate:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={gstRatePercent}
+                    onChange={(e) => setGstRatePercent(e.target.value)}
+                    placeholder="5"
+                    className="h-5 w-14 rounded border border-slate-300 bg-white px-1 text-right font-mono text-[11px] font-bold text-blue-700 focus:outline-none"
+                  />
+                  <span className="text-[10px] font-bold text-slate-600">%</span>
+                </div>
+              </div>
+              <div className="ml-auto max-w-sm space-y-2 p-4 text-xs">
+                <div className="mb-3 flex items-center justify-between rounded-lg bg-slate-100 p-0.5 text-[10px] font-semibold text-slate-600">
+                  {(["INTRA", "INTER"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setGstSupplyType(t)}
+                      className={cn(
+                        "flex-1 cursor-pointer rounded py-1 text-center transition-all",
+                        gstSupplyType === t ? "bg-white font-bold text-blue-700 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                      )}
+                    >
+                      {t === "INTRA" ? "Same State" : "Other State"}
+                    </button>
+                  ))}
+                </div>
+                {gstSupplyType === "INTRA" ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-slate-500">CGST ({halfRate.toFixed(1)}%) (₹)</span>
+                      <span className="font-mono font-bold text-slate-700">{fmtNum(orderCgst, 2)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-slate-500">SGST ({halfRate.toFixed(1)}%) (₹)</span>
+                      <span className="font-mono font-bold text-slate-700">{fmtNum(orderSgst, 2)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-500">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
+                    <span className="font-mono font-bold text-slate-700">{fmtNum(orderIgst, 2)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-500">Round Off (₹)</span>
+                  <span className="font-mono font-bold text-slate-500">{`${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between border-t border-slate-200 pt-2">
+                  <span className="text-[11px] font-black uppercase text-slate-800">Total Order Value (₹)</span>
+                  <span className="font-mono text-sm font-black text-blue-700">{fmtNum(orderRoundedTotal, 2)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <DialogFooter className="pt-3 border-t border-slate-200 mt-4 flex justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>

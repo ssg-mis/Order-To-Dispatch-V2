@@ -42,7 +42,7 @@ const INDIAN_STATES = [
   "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
 ]
 
-function extractState(addr: string): string | null {
+export function extractState(addr: string): string | null {
   if (!addr) return null
   const lower = addr.toLowerCase()
   for (const s of INDIAN_STATES) {
