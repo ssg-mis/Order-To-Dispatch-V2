@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StageActionBar } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -16,7 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { depotApi, orderApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Boxes, Loader2, PackageOpen, Scale } from "lucide-react"
+import { Boxes, Info, Loader2, PackageOpen, Scale } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
 
@@ -287,10 +289,30 @@ export default function UnloadReturnedStockPage() {
 
   return (
     <WorkflowStageShell
+      headerActions={
+        activeTab === "pending" ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9" title="How unloading works" aria-label="How unloading works">
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[380px] space-y-2 p-4">
+              <p className="text-sm font-semibold text-slate-900">Unload returned stock</p>
+              <ul className="space-y-1.5 text-xs text-slate-600">
+                <li>Record weighment and RST for the returned stock: receive, weigh, check and restock.</li>
+                <li><b>Good quantity</b> is deducted from Sales at the depot you choose (Inventory tab).</li>
+                <li><b>Damaged quantity</b> is held for reprocessing or scrap.</li>
+                <li>Billing then issues the documents at Stage 19.</li>
+              </ul>
+            </PopoverContent>
+          </Popover>
+        ) : null
+      }
       persistKey="unload-returned-stock"
       partyNames={[]}
       title="Stage 18: Unload Returned Stock"
-      description="Weighment and RST recording for returned stock: receive, weigh, check and restock. Billing then issues the documents (Stage 19)."
+      description="Receive, weigh, check and restock returned stock."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -318,16 +340,12 @@ export default function UnloadReturnedStockPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-500">
-            <Boxes className="mr-1.5 inline h-4 w-4 align-text-bottom" />
-            Good quantity is deducted from Sales at the depot you choose (Inventory tab). Damaged quantity is held for reprocessing or scrap.
-          </p>
+        <StageActionBar>
           <Button onClick={openDialog} disabled={!selected || isReadOnly} className="bg-blue-600 hover:bg-blue-700">
             <PackageOpen className="mr-2 h-4 w-4" />
             Unload Returned Stock
           </Button>
-        </div>
+        </StageActionBar>
 
         <StageDataCard
           storageKey="unload-returned-stock"

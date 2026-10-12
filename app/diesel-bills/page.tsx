@@ -5,6 +5,8 @@ import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StageActionBar } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -16,7 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { orderApi, dieselBillApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { BadgeCheck, Fuel, Loader2, Lock, Plus, Save, Truck } from "lucide-react"
+import { Info, BadgeCheck, Fuel, Loader2, Lock, Plus, Save, Truck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
 
@@ -242,10 +244,29 @@ export default function DieselBillsPage() {
 
   return (
     <WorkflowStageShell
+      headerActions={
+        activeTab === "pending" ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9" title="How diesel bills work" aria-label="How diesel bills work">
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[400px] space-y-2 p-4">
+              <p className="text-sm font-semibold text-slate-900">How diesel bills work</p>
+              <ul className="list-disc space-y-1.5 pl-4 text-xs text-slate-600">
+                <li>One diesel bill per trip. It shows the diesel <b>planned</b> (Plan Vehicle) next to the diesel <b>actually given</b> (Make Invoice).</li>
+                <li>After approval the figures are locked and the actual diesel is posted to the fuel station&apos;s ledger under the group <b>Fuel Stations</b>.</li>
+                <li>Trips with a vehicle change, an accident, or stock returned to the factory are handled here too.</li>
+              </ul>
+            </PopoverContent>
+          </Popover>
+        ) : null
+      }
       persistKey="diesel-bills"
       partyNames={[]}
       title="Stage 21: Diesel Bills"
-      description="Planned vs. actual diesel finalisation and ledger posting."
+      description="Planned vs actual diesel and ledger posting."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -274,18 +295,12 @@ export default function DieselBillsPage() {
       }
     >
       <div className="space-y-4">
-        <div className="rounded-lg border bg-white p-3 text-xs text-slate-600 shadow-sm">
-          One diesel bill per trip. It shows the diesel <b>planned</b> (Plan Vehicle) next to the diesel <b>actually given</b> (Make Invoice). After approval the
-          figures are locked and the actual diesel is posted to the fuel station&apos;s ledger under the group <b>Fuel Stations</b>. Trips with a vehicle change,
-          an accident, or stock returned to the factory are handled here too.
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2">
+        <StageActionBar>
           <Button onClick={() => selected && setOpenId(selected.id)} disabled={!selected} className="bg-blue-600 hover:bg-blue-700">
             <Fuel className="mr-2 h-4 w-4" />
             Open Diesel Bill
           </Button>
-        </div>
+        </StageActionBar>
 
         <StageDataCard
           storageKey="diesel-bills"

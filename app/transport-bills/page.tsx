@@ -5,6 +5,8 @@ import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StageActionBar } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -16,7 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { orderApi, transportBillApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { BadgeCheck, FileText, Loader2, Lock, Receipt, Save, Truck } from "lucide-react"
+import { Info, BadgeCheck, FileText, Loader2, Lock, Receipt, Save, Truck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
 
@@ -272,10 +274,29 @@ export default function TransportBillsPage() {
 
   return (
     <WorkflowStageShell
+      headerActions={
+        activeTab === "pending" ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9" title="How transport bills work" aria-label="How transport bills work">
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[400px] space-y-2 p-4">
+              <p className="text-sm font-semibold text-slate-900">How transport bills work</p>
+              <ul className="list-disc space-y-1.5 pl-4 text-xs text-slate-600">
+                <li>A bill is created for a trip run by a <b>transporter vehicle</b> once the goods are unloaded (and any loss approved), or once returned stock reaches the factory.</li>
+                <li>Company, attached and party vehicles need no transportation-charge calculation, so they do not appear here.</li>
+                <li>After a vehicle change or accident the trip can have two bills: <b>Leg 1</b> for the original vehicle and <b>Leg 2</b> for the vehicle that took over.</li>
+              </ul>
+            </PopoverContent>
+          </Popover>
+        ) : null
+      }
       persistKey="transport-bills"
       partyNames={[]}
       title="Stage 20: Transport Bills"
-      description="Bhada settlement for a transporter-vehicle trip: planned vs actual transportation, approval, and the Payment Voucher."
+      description="Bhada settlement, approval and Payment Voucher per trip."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -303,18 +324,12 @@ export default function TransportBillsPage() {
       }
     >
       <div className="space-y-4">
-        <div className="rounded-lg border bg-white p-3 text-xs text-slate-600 shadow-sm">
-          A bill is created for a trip run by a <b>transporter vehicle</b> once the goods are unloaded (and any loss approved), or once returned stock reaches
-          the factory. Company, attached and party vehicles need no transportation-charge calculation, so they do not appear here. After a vehicle change or
-          accident the trip can have two bills: <b>Leg 1</b> for the original vehicle and <b>Leg 2</b> for the vehicle that took over.
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2">
+        <StageActionBar>
           <Button onClick={() => selected && openBill(selected.id)} disabled={!selected} className="bg-blue-600 hover:bg-blue-700">
             <Truck className="mr-2 h-4 w-4" />
             Open Transport Bill
           </Button>
-        </div>
+        </StageActionBar>
 
         <StageDataCard
           storageKey="transport-bills"

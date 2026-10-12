@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
+import { StageActionBar } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -222,7 +223,7 @@ export default function IssueReturnDocumentsPage() {
       persistKey="issue-return-documents"
       partyNames={[]}
       title="Stage 19: Issue Documents Against Returned Stock"
-      description="Billing: the customer's debit note and our credit note against the original invoice, for the returned stock received at Stage 18."
+      description="Customer debit note and our credit note against the original invoice."
       pendingCount={pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
@@ -249,12 +250,12 @@ export default function IssueReturnDocumentsPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap justify-end gap-2">
+        <StageActionBar>
           <Button onClick={openDialog} disabled={!selected || isReadOnly} className="bg-blue-600 hover:bg-blue-700">
             <Receipt className="mr-2 h-4 w-4" />
             Issue Documents
           </Button>
-        </div>
+        </StageActionBar>
 
         <StageDataCard
           storageKey="issue-return-documents"

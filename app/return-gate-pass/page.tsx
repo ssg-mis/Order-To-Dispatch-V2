@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -99,7 +100,7 @@ export default function ReturnGatePassPage() {
   const [driverName, setDriverName] = useState("")
   const [remarks, setRemarks] = useState("")
   const [isSaving, setIsSaving] = useState(false)
-  const [search, setSearch] = useState("")
+  const search = ""
 
   const { data: depots = [] } = useQuery({
     queryKey: ["depots-all"],
@@ -125,6 +126,27 @@ export default function ReturnGatePassPage() {
       return res.success ? (res.data?.passes || []) : []
     },
   })
+
+  const PASS_COLUMNS: StageDataCol<any>[] = [
+    { id: "pass_no", label: "Pass No.", accessor: (p) => p.pass_no, render: (p) => <span className="font-bold text-slate-700">{p.pass_no}</span> },
+    { id: "issued_at", label: "Date & Time", type: "date", accessor: (p) => p.issued_at, render: (p) => fmtDateTime(p.issued_at) },
+    {
+      id: "return_type", label: "Type", accessor: (p) => p.return_type,
+      render: (p) => <Badge className={p.return_type === "Depot Return" ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}>{p.return_type}</Badge>,
+    },
+    { id: "vehicle_no", label: "Vehicle", accessor: (p) => p.vehicle_no, render: (p) => <span className="font-semibold">{p.vehicle_no}</span> },
+    { id: "customer", label: "Customer / Depot", accessor: (p) => p.customer_name, render: (p) => p.customer_name || "—" },
+    { id: "destination", label: "Proceeds To", accessor: (p) => p.destination_depot, render: (p) => p.destination_depot || "—" },
+    { id: "reference_no", label: "Reference", accessor: (p) => p.reference_no, render: (p) => p.reference_no || "—" },
+    {
+      id: "print", label: "", noSort: true, noFilter: true,
+      render: (p) => (
+        <Button variant="outline" size="sm" onClick={() => reprint(p)}>
+          <Printer className="mr-1.5 h-3.5 w-3.5" />Print
+        </Button>
+      ),
+    },
+  ]
 
   const canSave = !isSaving && !isReadOnly && vehicleNo.trim() && customerRec?.id && destinationDepotId
 
@@ -169,12 +191,12 @@ export default function ReturnGatePassPage() {
   }
 
   return (
-    <div className="max-w-full space-y-6 p-6" suppressHydrationWarning>
+    <div className="p-3 sm:px-6 sm:py-3 max-w-full space-y-2 sm:space-y-3" suppressHydrationWarning>
       <div className="flex items-center gap-3">
         <SidebarTrigger className="-ml-1" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Stock Return Gate Pass</h1>
-          <p className="text-muted-foreground">Main Gate: issue a fill-in-the-blank pass for a vehicle bringing returned stock.</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stock Return Gate Pass</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Main Gate: issue a fill-in-the-blank pass for a vehicle bringing returned stock.</p>
         </div>
         <Button variant="outline" className="ml-auto" onClick={() => router.push("/return")}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -244,51 +266,18 @@ export default function ReturnGatePassPage() {
         </div>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800"><FileText className="h-4 w-4 text-slate-500" />Issued Passes</h2>
-          <Input className="h-9 max-w-xs" placeholder="Search pass no / vehicle / customer" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Card className="gap-0 overflow-hidden border-none py-0 shadow-sm">
-          <div className="max-h-[480px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  {["Pass No.", "Date & Time", "Type", "Vehicle", "Customer / Depot", "Proceeds To", "Reference", ""].map((h) => (
-                    <TableHead key={h} className="whitespace-nowrap text-center">{h}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</TableCell></TableRow>
-                ) : passes.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-slate-500">No gate passes issued yet.</TableCell></TableRow>
-                ) : (
-                  passes.map((p: any) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="text-center text-xs font-bold text-slate-700">{p.pass_no}</TableCell>
-                      <TableCell className="text-center text-xs">{fmtDateTime(p.issued_at)}</TableCell>
-                      <TableCell className="text-center text-xs">
-                        <Badge className={p.return_type === "Depot Return" ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}>{p.return_type}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center text-xs font-semibold">{p.vehicle_no}</TableCell>
-                      <TableCell className="text-center text-xs font-medium">{p.customer_name || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{p.destination_depot || "—"}</TableCell>
-                      <TableCell className="text-center text-xs">{p.reference_no || "—"}</TableCell>
-                      <TableCell className="text-center">
-                        <Button variant="outline" size="sm" onClick={() => reprint(p)}>
-                          <Printer className="mr-1.5 h-3.5 w-3.5" />Print
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      </div>
+      <StageDataCard
+        storageKey="return-gate-pass"
+        title="Issued Passes"
+        description="Gate passes issued for returns."
+        rows={passes}
+        columns={PASS_COLUMNS}
+        rowKey={(p: any) => p.id}
+        loading={isLoading}
+        emptyText="No gate passes issued yet."
+        searchPlaceholder="Search pass no / vehicle / customer"
+        statusOf={(p: any) => p.return_type}
+      />
     </div>
   )
 }
