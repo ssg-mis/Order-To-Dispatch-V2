@@ -8,7 +8,7 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar } from "@/components/stage-list"
 import { StageTotalsRowLead, stageColumnChips } from "@/components/stage-list-extras"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -27,7 +27,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle, FileText, IndianRupee, Loader2, ReceiptText, ShieldAlert, ShieldCheck } from "lucide-react"
+import { BarChart3, CheckCircle, ChevronDown, FileText, IndianRupee, Loader2, ReceiptText, ShieldAlert, ShieldCheck } from "lucide-react"
 import { collectionApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
@@ -134,6 +134,8 @@ export default function CollectionPage() {
   // View mode / history entry type are remembered permanently; searches and status selects only for the session.
   // The Pending/History tab is owned and remembered by WorkflowStageShell (persistKey).
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
+  // Summary cards are collapsed by default so the table sits right under the heading.
+  const [showSummary, setShowSummary] = useState(false)
   const [pendView, patchPendView] = usePersistedFilters("collection", {
     view: "receivable" as View,
     pendingSearch: "",
@@ -523,6 +525,22 @@ export default function CollectionPage() {
   return (
     <WorkflowStageShell
       persistKey="collection"
+      headerActions={
+        activeTab === "pending" ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowSummary((v) => !v)}
+            aria-expanded={showSummary}
+            className={cn("h-9", showSummary && "border-blue-300 bg-blue-50 text-blue-700")}
+          >
+            <BarChart3 className="mr-2 h-4 w-4" />
+            Summary
+            <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-600">{money(summary?.receivable.outstanding)}</span>
+            <ChevronDown className={cn("ml-1 h-4 w-4 transition-transform", showSummary && "rotate-180")} />
+          </Button>
+        ) : null
+      }
       partyNames={[]}
       title="Stage 16: Collection"
       description="Daily receivables tracking, TDS master and cash discount."
@@ -539,7 +557,7 @@ export default function CollectionPage() {
       isHistoryLoading={isHistoryLoading}
       historyContent={
         <div className="space-y-3">
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Collection History"
             shown={historyTable.rows.length}
@@ -640,29 +658,30 @@ export default function CollectionPage() {
     >
       <div className="space-y-4">
         {/* Summary */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Receivable Outstanding (₹)</p>
-            <p className="text-lg font-bold text-red-600">{money(summary?.receivable.outstanding)}</p>
-            <p className="text-[11px] text-slate-500">{summary?.receivable.count ?? 0} bills</p>
-          </Card>
-          <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Disputed Outstanding (₹)</p>
-            <p className="text-lg font-bold text-amber-600">{money(summary?.disputed.outstanding)}</p>
-            <p className="text-[11px] text-slate-500">{summary?.disputed.count ?? 0} bills</p>
-          </Card>
-          <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">TDS Receivable (open bills) (₹)</p>
-            <p className="text-lg font-bold text-orange-600">{money(summary?.total_tds_receivable)}</p>
-          </Card>
-          <Card className="p-3 gap-1 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cash Discount (open bills) (₹)</p>
-            <p className="text-lg font-bold text-blue-600">{money(summary?.total_cd_given)}</p>
-          </Card>
-        </div>
+        {showSummary && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="p-3 gap-1 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Receivable Outstanding (₹)</p>
+              <p className="text-lg font-bold text-red-600">{money(summary?.receivable.outstanding)}</p>
+              <p className="text-[11px] text-slate-500">{summary?.receivable.count ?? 0} bills</p>
+            </Card>
+            <Card className="p-3 gap-1 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Disputed Outstanding (₹)</p>
+              <p className="text-lg font-bold text-amber-600">{money(summary?.disputed.outstanding)}</p>
+              <p className="text-[11px] text-slate-500">{summary?.disputed.count ?? 0} bills</p>
+            </Card>
+            <Card className="p-3 gap-1 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">TDS Receivable (open bills) (₹)</p>
+              <p className="text-lg font-bold text-orange-600">{money(summary?.total_tds_receivable)}</p>
+            </Card>
+            <Card className="p-3 gap-1 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cash Discount (open bills) (₹)</p>
+              <p className="text-lg font-bold text-blue-600">{money(summary?.total_cd_given)}</p>
+            </Card>
+          </div>
+        )}
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
-          <div className="flex flex-wrap gap-2 justify-end">
+        <StageActionBar>
             <Button
               variant="outline"
               onClick={() => selectedInvoice && setReceiptsFor(selectedInvoice)}
@@ -699,10 +718,9 @@ export default function CollectionPage() {
               <CheckCircle className="mr-2 h-4 w-4" />
               Add Receipt
             </Button>
-          </div>
-        </div>
+        </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
           <StageListHeader
             title="Collections List"
             shown={pendingTable.rows.length}
