@@ -1,14 +1,17 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Card } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { returnApi } from "@/lib/api-service"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeftRight, Printer, Undo2 } from "lucide-react"
+import { ArrowLeftRight, ChevronDown, Info, Plus, Printer, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
 
@@ -82,78 +85,142 @@ export default function ReturnPage() {
     },
   })
 
+  const [tab, setTab] = useState<"sales" | "stock">("sales")
+
   return (
-    <div className="max-w-full space-y-6 p-6" suppressHydrationWarning>
-      <div className="flex items-center gap-3">
-        <SidebarTrigger className="-ml-1" />
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Stage 17: Return</h1>
-          <p className="text-muted-foreground">Raise a return. The goods are then received at Stage 18 and Billing issues the documents at Stage 19.</p>
+    <div className="p-3 sm:px-6 sm:py-3 max-w-full space-y-2 sm:space-y-3" suppressHydrationWarning>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "sales" | "stock")} className="w-full">
+        {/* Heading: title left, tabs + actions right (same pattern as the other stages) */}
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-start gap-3 min-w-0">
+            <SidebarTrigger className="-ml-1" />
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stage 17: Return</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground">Raise customer and stock returns, then track them to documents.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap xl:shrink-0">
+            <TabsList className="grid h-9 w-[300px] grid-cols-2 rounded-lg bg-muted/50 p-1">
+              <TabsTrigger value="sales" className="rounded-md py-1 text-xs">
+                Sales Returns
+                <span className="ml-1.5 rounded-full bg-white px-1.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200">{salesReturns.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="stock" className="rounded-md py-1 text-xs">
+                Stock Returns
+                <span className="ml-1.5 rounded-full bg-white px-1.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200">{stockReturns.length}</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" className="h-9 w-9" title="How returns work" aria-label="How returns work">
+                  <Info className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[420px] space-y-3 p-4">
+                <p className="text-sm font-semibold text-slate-900">How returns work</p>
+                <p className="-mt-1.5 text-xs text-muted-foreground">Goods are received at Stage 18 and Billing issues the documents at Stage 19.</p>
+                <div className="space-y-2.5 text-xs text-slate-600">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Case I &amp; II · Stock transfer</p>
+                    <p>Depot → Banari, or depot → depot. Raised as a Stock Transfer order against the original transfer; stock-out and stock-in follow automatically.</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Case III · Customer return</p>
+                    <p>Punch an order in the <b>Sales Return</b> category against the original invoice. After the pickup is dispatched, the goods are unloaded and weighed (Stage 18) and Billing issues the credit note (Stage 19).</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Main gate · Stock return gate pass</p>
+                    <p>A vehicle brings returned stock to the gate: issue a fill-in-the-blank pass for the handwritten entries.</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sales return flow</p>
+                    <p>Order Punch → Approval → Dispatch Planning → Plan Vehicle → Gate In → Actual Dispatch → <b>Stage 18 Unload Returned Stock</b> → <b>Stage 19 Issue Documents</b> (credit note).</p>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Button variant="outline" className="h-9" title="Stock Return Gate Pass" onClick={() => router.push("/return-gate-pass")}>
+              <Printer className="mr-2 h-4 w-4" />
+              Gate Pass
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="h-9 gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Plus className="h-4 w-4" />
+                  New Return
+                  <ChevronDown className="h-4 w-4 opacity-80" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={8} className="w-[340px] rounded-xl p-1.5 shadow-xl">
+                <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Raise a return
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  className="group cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2.5 focus:bg-blue-50"
+                  onClick={() => router.push("/order-punch/create?category=Sales%20Return")}
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 group-focus:bg-white">
+                    <Undo2 className="h-[18px] w-[18px]" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-900">Sales Return</span>
+                    <span className="block truncate text-xs text-muted-foreground">Customer sends goods back</span>
+                  </span>
+                  <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Case III</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="group cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2.5 focus:bg-blue-50"
+                  onClick={() => router.push("/order-punch/create?category=Stock%20Transfer&stockReturn=1")}
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 ring-1 ring-violet-100 group-focus:bg-white">
+                    <ArrowLeftRight className="h-[18px] w-[18px]" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-900">Stock Return</span>
+                    <span className="block truncate text-xs text-muted-foreground">Depot → Banari or depot → depot</span>
+                  </span>
+                  <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Case I &amp; II</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-      </div>
 
-      {/* The three return cases */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <Card className="gap-1 p-4 shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Case I &amp; II · Stock transfer</p>
-          <p className="text-sm text-slate-700">Depot → Banari, or depot → depot. Raised as a Stock Transfer order against the original transfer; stock-out and stock-in follow automatically.</p>
-          <Button variant="outline" size="sm" className="mt-2 w-fit" onClick={() => router.push("/order-punch/create?category=Stock%20Transfer&stockReturn=1")}>
-            <ArrowLeftRight className="mr-2 h-4 w-4" />
-            New Stock Return
-          </Button>
-        </Card>
-        <Card className="gap-1 p-4 shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Case III · Customer return</p>
-          <p className="text-sm text-slate-700">Punch an order in the <b>Sales Return</b> category against the original invoice. After the pickup is dispatched, the goods are unloaded and weighed (Stage 18) and Billing issues the credit note (Stage 19).</p>
-          <Button variant="outline" size="sm" className="mt-2 w-fit" onClick={() => router.push("/order-punch/create?category=Sales%20Return")}>
-            <Undo2 className="mr-2 h-4 w-4" />
-            New Sales Return
-          </Button>
-        </Card>
-        <Card className="gap-1 p-4 shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Main Gate · Stock Return gate pass</p>
-          <p className="text-sm text-slate-700">A vehicle brings returned stock to the gate: issue a fill-in-the-blank pass for the handwritten entries.</p>
-          <Button variant="outline" size="sm" className="mt-2 w-fit" onClick={() => router.push("/return-gate-pass")}>
-            <Printer className="mr-2 h-4 w-4" />
-            Stock Return Gate Pass
-          </Button>
-        </Card>
-      </div>
+        <TabsContent value="sales" className="mt-3">
+          <StageDataCard
+            storageKey="return-sales"
+            title="Sales Returns"
+            description="Customer returns and where each one is in the pipeline."
+            rows={salesReturns}
+            columns={SALES_COLUMNS}
+            rowKey={(s: any) => s.id}
+            loading={loadingSales}
+            emptyText="No sales returns yet."
+            statusOf={(s: any) => s.status}
+            format={fmtQty}
+          />
+        </TabsContent>
 
-      <div className="rounded-lg border bg-white p-4 text-sm text-slate-600 shadow-sm">
-        <span className="font-semibold text-slate-800">Sales Return flow: </span>
-        Order Punch → Approval → Dispatch Planning → Plan Vehicle → Gate In → Actual Dispatch →{" "}
-        <b>Stage 18 Unload Returned Stock</b> (weighment, RST, check, restock) → <b>Stage 19 Issue Documents Against Returned Stock</b> (credit note).
-      </div>
-
-      {/* Sales returns */}
-      <StageDataCard
-        storageKey="return-sales"
-        title="Sales Returns"
-        description="Customer returns and where each one is in the pipeline."
-        rows={salesReturns}
-        columns={SALES_COLUMNS}
-        rowKey={(s: any) => s.id}
-        loading={loadingSales}
-        emptyText="No sales returns yet."
-        statusOf={(s: any) => s.status}
-        format={fmtQty}
-      />
-
-      {/* Stock returns */}
-      <StageDataCard
-        storageKey="return-stock"
-        title="Stock Returns"
-        description="Depot-to-Banari / depot-to-depot returns, raised as a Stock Transfer against the original transfer."
-        rows={stockReturns}
-        columns={STOCK_COLUMNS}
-        rowKey={(s: any) => s.id}
-        loading={loadingStock}
-        emptyText="No stock returns yet."
-        statusOf={(s: any) => s.status}
-        selects={[{ id: "from", allLabel: "All From Depots", getValue: (s: any) => s.from_depot }]}
-        format={fmtQty}
-      />
+        <TabsContent value="stock" className="mt-3">
+          <StageDataCard
+            storageKey="return-stock"
+            title="Stock Returns"
+            description="Depot-to-Banari / depot-to-depot returns, raised as a Stock Transfer against the original transfer."
+            rows={stockReturns}
+            columns={STOCK_COLUMNS}
+            rowKey={(s: any) => s.id}
+            loading={loadingStock}
+            emptyText="No stock returns yet."
+            statusOf={(s: any) => s.status}
+            selects={[{ id: "from", allLabel: "All From Depots", getValue: (s: any) => s.from_depot }]}
+            format={fmtQty}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
