@@ -1245,6 +1245,19 @@ export const customerApi = {
     });
   },
 
+  /** Tag EXISTING customers to godown(s). rows: [{ customer_code?, gstin?, customer_name?, godown }]; mode 'add' | 'replace'. */
+  bulkTagGodowns: async (rows: any[], mode: 'add' | 'replace' = 'add', dryRun = false): Promise<ApiResponse> => {
+    return request('/customers/bulk-godown', {
+      method: 'POST',
+      body: JSON.stringify({ rows, mode, dry_run: dryRun }),
+    });
+  },
+
+  /** Every customer with its current godown(s) - feeds the Tag Godown sheet. */
+  getGodownTagSheet: async (): Promise<ApiResponse> => {
+    return request('/customers/godown-tags');
+  },
+
   getGstHistory: async (id: number): Promise<ApiResponse> => {
     return request(`/customers/${id}/gst-history`);
   },

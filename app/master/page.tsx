@@ -109,6 +109,7 @@ import {
   UnitForm,
 } from "@/components/masters/forms/SimpleMastersForms"
 import { CustomerBulkImportModal } from "@/components/masters/modals/customer-bulk-import-modal"
+import { CustomerGodownTagModal } from "@/components/masters/modals/customer-godown-tag-modal"
 import { DepotBulkImportModal } from "@/components/masters/modals/depot-bulk-import-modal"
 import { BrokerBulkImportModal } from "@/components/masters/modals/broker-bulk-import-modal"
 import { SalespersonBulkImportModal } from "@/components/masters/modals/salesperson-bulk-import-modal"
@@ -225,6 +226,7 @@ export default function MasterPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [customerBulkImportOpen, setCustomerBulkImportOpen] = useState(false)
+  const [customerGodownTagOpen, setCustomerGodownTagOpen] = useState(false)
   const [isExportingCustomers, setIsExportingCustomers] = useState(false)
   const [depotBulkImportOpen, setDepotBulkImportOpen] = useState(false)
   const [isExportingDepots, setIsExportingDepots] = useState(false)
@@ -6921,6 +6923,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                     <span>Import CSV</span>
                   </Button>
 
+                  {isAdminOrSuper && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 md:h-9 border-violet-200 bg-violet-50/60 hover:bg-violet-100/80 text-violet-800 shadow-2xs px-3 rounded-xl font-bold flex items-center gap-1.5"
+                      disabled={isMasterTabReadOnly}
+                      onClick={() => setCustomerGodownTagOpen(true)}
+                      title="Tag many existing customers to a godown (depot) at once"
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5 text-violet-600" />
+                      <span>Tag Godown</span>
+                    </Button>
+                  )}
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -8769,6 +8785,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CustomerGodownTagModal
+        open={customerGodownTagOpen}
+        onOpenChange={setCustomerGodownTagOpen}
+        onSuccess={() => {
+          refetchCustomer()
+        }}
+      />
 
       <CustomerBulkImportModal
         open={customerBulkImportOpen}
