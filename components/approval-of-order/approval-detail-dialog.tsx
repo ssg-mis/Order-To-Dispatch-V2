@@ -219,7 +219,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
               {detailsExpanded && (
                 <CardContent className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
                   <Field label="Customer Name" value={customer?.customerName} />
-                  <Field label="Depot" value={depot?.depotName} />
+                  <Field label="Dispatch From (Depot)" value={depot?.depotName} />
                   <Field label="Delivery Purpose" value={order?.deliveryPurpose} />
                   <Field label="Order Category" value={order?.orderCategory} />
                   <Field label="Order Type" value={order?.orderType} />
