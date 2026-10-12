@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react"
 import type React from "react"
 import Link from "next/link"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -38,6 +38,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips } from "@/components/stage-list"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { Calendar } from "@/components/ui/calendar"
@@ -1373,21 +1374,26 @@ export default function CommitmentPunchPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 max-w-full space-y-4 sm:space-y-6" suppressHydrationWarning>
+    <div className="p-3 sm:px-6 sm:py-3 max-w-full space-y-2 sm:space-y-3" suppressHydrationWarning>
 
-      {/* ── Page Header ── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
-        <div className="flex items-start gap-3 min-w-0">
+      {/* ── Page Header (title + filters + actions in one row) ── */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3 min-w-0 shrink-0">
           <SidebarTrigger className="-ml-1" />
           <div className="min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Commitment Punch</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">Manage and process customer oil commitments.</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stage 0: Commitment Punch</h1>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                {sortedPendingList.length} of {pendingList.length}
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-muted-foreground">Manage and process customer oil commitments.</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-          <Button variant="outline" size="sm" onClick={loadPending} disabled={isLoadingPending} className="w-full sm:w-auto">
-            <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingPending ? "animate-spin" : ""}`} />
-            Refresh
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center shrink-0">
+          <Button variant="outline" size="sm" onClick={loadPending} disabled={isLoadingPending} title="Refresh" aria-label="Refresh" className="w-full sm:w-9 sm:px-0">
+            <RefreshCw className={`h-4 w-4 ${isLoadingPending ? "animate-spin" : ""}`} />
+            <span className="sm:hidden ml-1">Refresh</span>
           </Button>
           <Button
             className="w-full gap-2 bg-blue-600 hover:bg-blue-700 sm:w-auto"
@@ -1400,208 +1406,69 @@ export default function CommitmentPunchPage() {
       </div>
 
       {/* ── Pending Commitments Table ── */}
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
-        <CardHeader className="p-4 sm:p-5 space-y-3 bg-white border-b border-slate-200/80">
-          {/* Row 1: Title, Subtitle, and Global Search */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
-                  Commitments List
-                </CardTitle>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                  {sortedPendingList.length} of {pendingList.length}
-                </span>
-              </div>
-              <CardDescription className="text-xs text-slate-500 mt-0.5">
-                Showing active customer commitments ready for processing
-              </CardDescription>
-            </div>
-
-            {/* Quick Search */}
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <Input
-                placeholder="Search PO, Customer, Oil..."
-                className="pl-9 pr-8 text-xs h-8.5 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border-slate-200 rounded-lg transition-all focus-visible:ring-1 focus-visible:ring-blue-600 shadow-2xs"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Row 2: Crisp, Organized Filter Toolbar (Zero collision, clear grouping) */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 rounded-lg bg-slate-50/90 border border-slate-200/80 text-xs">
-            {/* Filter Buttons Group */}
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Status Segmented Control */}
-              <div className="flex items-center bg-white p-0.5 rounded-md border border-slate-200 shadow-2xs">
-                {(["PENDING", "COMPLETED", "ALL"] as const).map((st) => (
-                  <button
-                    key={st}
-                    type="button"
-                    onClick={() => setSelectedStatusFilter(st)}
-                    className={cn(
-                      "px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-pointer",
-                      selectedStatusFilter === st
-                        ? "bg-blue-600 text-white shadow-xs font-bold"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                    )}
-                  >
-                    {st === "ALL" ? "All" : st === "PENDING" ? "PO Pending" : "Fully Raised"}
-                  </button>
-                ))}
-              </div>
-
-              <div className="hidden sm:block h-4 w-px bg-slate-200 mx-0.5" />
-
-              {/* Oil Type Filter */}
-              <Select value={selectedOilFilter} onValueChange={setSelectedOilFilter}>
-                <SelectTrigger className="h-8 text-xs min-w-[115px] bg-white border-slate-200 shadow-2xs">
-                  <SelectValue placeholder="All Oils" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Oils</SelectItem>
-                  {uniqueOilTypes.map(oil => (
-                    <SelectItem key={oil} value={oil}>{oil}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Customer Filter */}
-              <Select value={selectedCustomerFilter} onValueChange={setSelectedCustomerFilter}>
-                <SelectTrigger className="h-8 text-xs min-w-[130px] max-w-[180px] bg-white border-slate-200 shadow-2xs truncate">
-                  <SelectValue placeholder="All Customers" />
-                </SelectTrigger>
-                <SelectContent className="max-h-64">
-                  <SelectItem value="ALL">All Customers</SelectItem>
-                  {uniqueCustomers.map((cust: string) => (
-                    <SelectItem key={cust} value={cust} className="text-xs truncate">{cust}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Show / hide table columns - same control as the other stages */}
-              {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="bg-transparent">
-                      <Settings2 className="mr-2 h-4 w-4" />
-                      Columns
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                    <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-
-            {/* Right side: Count & Reset Action */}
-            <div className="flex items-center gap-2 ml-auto sm:ml-0">
-              <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
-                Showing <strong className="text-slate-800">{sortedPendingList.length}</strong> of {pendingList.length}
-              </span>
-
-              {activeFiltersCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2 rounded transition-colors gap-1 cursor-pointer"
-                  onClick={clearAllFilters}
-                >
-                  <X className="h-3 w-3" />
-                  Reset ({activeFiltersCount})
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {/* Row 3: Active Filter Chips (Clean, removable, visible only when active) */}
-          {activeFiltersCount > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span className="text-[11px] font-semibold text-slate-400 mr-1">Active:</span>
-
-              {selectedStatusFilter !== "ALL" && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  Status: {selectedStatusFilter === "PENDING" ? "PO Pending" : "Fully Raised"}
-                  <button onClick={() => setSelectedStatusFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-
-              {selectedOilFilter !== "ALL" && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  Oil: {selectedOilFilter}
-                  <button onClick={() => setSelectedOilFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-
-              {selectedCustomerFilter !== "ALL" && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  Customer: {selectedCustomerFilter}
-                  <button onClick={() => setSelectedCustomerFilter("ALL")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-
-              {commitmentDateFilter && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  Comm Date: {commitmentDateFilter}
-                  <button onClick={() => setCommitmentDateFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-
-
-              {dateFromFilter && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  From: {dateFromFilter}
-                  <button onClick={() => setDateFromFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-
-              {dateToFilter && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200 pl-2 pr-1 py-0.5">
-                  To: {dateToFilter}
-                  <button onClick={() => setDateToFilter("")} className="hover:text-blue-900 cursor-pointer p-0.5 rounded-full hover:bg-blue-100">
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </Badge>
-              )}
-            </div>
-          )}
-        </CardHeader>
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 min-h-[60vh] stage-card">
+        <StageListHeader
+          title="Commitments List"
+          shown={sortedPendingList.length}
+          total={pendingList.length}
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search PO, Customer, Oil..."
+        >
+          <StageToolbar
+            shown={sortedPendingList.length}
+            total={pendingList.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                <StageSegmented
+                  value={selectedStatusFilter}
+                  onChange={setSelectedStatusFilter}
+                  options={[
+                    { value: "PENDING", label: "PO Pending" },
+                    { value: "COMPLETED", label: "Fully Raised" },
+                    { value: "ALL", label: "All" },
+                  ]}
+                />
+                <StageDivider />
+                <StageFilterSelect value={selectedOilFilter} onChange={setSelectedOilFilter} allLabel="All Oils" options={uniqueOilTypes} />
+                <StageFilterSelect value={selectedCustomerFilter} onChange={setSelectedCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                <StageColumnsMenu
+                  columns={[...PAGE_COLUMNS]}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                />
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(selectedStatusFilter !== "ALL" ? [{ label: `Status: ${selectedStatusFilter === "PENDING" ? "PO Pending" : "Fully Raised"}`, onClear: () => setSelectedStatusFilter("ALL") }] : []),
+              ...(selectedOilFilter !== "ALL" ? [{ label: `Oil: ${selectedOilFilter}`, onClear: () => setSelectedOilFilter("ALL") }] : []),
+              ...(selectedCustomerFilter !== "ALL" ? [{ label: `Customer: ${selectedCustomerFilter}`, onClear: () => setSelectedCustomerFilter("ALL") }] : []),
+              ...(commitmentDateFilter ? [{ label: `Comm Date: ${commitmentDateFilter}`, onClear: () => setCommitmentDateFilter("") }] : []),
+              ...(dateFromFilter ? [{ label: `From: ${dateFromFilter}`, onClear: () => setDateFromFilter("") }] : []),
+              ...(dateToFilter ? [{ label: `To: ${dateToFilter}`, onClear: () => setDateToFilter("") }] : []),
+            ]}
+          />
+        </StageListHeader>
         <CardContent className="p-0">
           <div className="hidden overflow-x-auto rounded-b-xl md:block">
             <Table>
-              <TableHeader className="bg-slate-50 border-b">
+              <TableHeader className="bg-slate-50/70 border-b border-slate-200">
                 <TableRow>
                   {orderedVisibleCols.map(col => {
                     const isRight = RIGHT_ALIGN_COLS.includes(col.id)
                     const isCenter = CENTER_ALIGN_COLS.includes(col.id)
                     return (
-                      <TableHead key={`search-${col.id}`} className={`whitespace-nowrap align-top pt-2.5 pb-1 px-4 ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}>
+                      <TableHead key={`search-${col.id}`} className={`whitespace-nowrap align-top pt-3 pb-1.5 px-4 min-w-[120px] ${COL_WIDTHS[col.id] || ""}${isRight ? " text-right" : isCenter ? " text-center" : ""}`}>
                             <div onClick={(e) => e.stopPropagation()} className="w-full mb-0.5">
                               {col.id === "commitment_date" ? (
                                 <Popover>
                                   <PopoverTrigger asChild>
-                                    <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
+                                    <button className="flex items-center justify-between w-full h-7 px-2.5 text-[10px] text-slate-500 bg-white hover:bg-slate-50 border border-slate-200/70 hover:border-slate-300 rounded-md transition-all shadow-2xs">
                                       <span className="truncate font-medium">{dateFromFilter || dateToFilter ? "Filtered" : "Filter..."}</span>
                                       <CalendarIconLucide className="h-3 w-3 opacity-60 ml-1 shrink-0" />
                                     </button>
@@ -1646,8 +1513,8 @@ export default function CommitmentPunchPage() {
                                   value={columnFilters[col.id] || ""}
                                   onChange={(e) => handleColumnFilterChange(col.id, e.target.value)}
                                   className={cn(
-                                    "h-7 text-[10px] w-full px-2.5 py-0 bg-slate-50 hover:bg-slate-100 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
-                                    isCenter ? "text-center" : isRight ? "text-right" : "text-left"
+                                    "h-7 text-[10px] w-full px-2.5 py-0 bg-white hover:bg-slate-50 focus:bg-white border-slate-200/70 focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-100/50 shadow-2xs rounded-md transition-all placeholder:text-slate-400/80 font-medium text-slate-700",
+                                    "text-left"
                                   )}
                                 />
                               )}
@@ -1659,7 +1526,7 @@ export default function CommitmentPunchPage() {
                 </TableRow>
                 {/* ── Per-Column Totals ── */}
                 {sortedPendingList.length > 0 && (
-                  <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm z-10">
+                  <TableRow className="bg-blue-50/60 border-y border-blue-100 font-bold text-xs text-slate-800 hover:bg-blue-50/60 z-10">
                     {orderedVisibleCols.map(col => {
                       const isCenter = CENTER_ALIGN_COLS.includes(col.id)
                       const isRight = RIGHT_ALIGN_COLS.includes(col.id)
@@ -1731,7 +1598,7 @@ export default function CommitmentPunchPage() {
                               )}
                               onClick={sf ? () => handlePendingSort(sf) : undefined}
                             >
-                              <span>{col.label}</span>
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">{col.label}</span>
                               {sf && <PendingSortIcon field={sf} />}
                             </div>
                           </div>
@@ -1777,7 +1644,7 @@ export default function CommitmentPunchPage() {
                   sortedPendingList.map(row => (
                     <TableRow
                       key={row.id}
-                      className="hover:bg-slate-50 cursor-pointer transition-colors"
+                      className="even:bg-slate-50/50 hover:bg-blue-50/60 cursor-pointer transition-colors"
                       onClick={() => openProcessForCommitment(row)}
                     >
                       {orderedVisibleCols.map(col => renderCell(row, col.id))}
