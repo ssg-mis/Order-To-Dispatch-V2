@@ -55,7 +55,7 @@ const PAGE_COLUMNS: { id: string; label: string; type: ColType; width: string }[
   { id: "total_qty_box", label: "Total Qty (Box)", type: "number", width: "w-[130px]" },
   { id: "total_qty_kgs", label: "Total Qty (KGS)", type: "number", width: "w-[130px]" },
   { id: "total_order_amount", label: "Total Order Amount (₹)", type: "number", width: "w-[160px]" },
-  { id: "depot_name", label: "Dispatch From", type: "text", width: "w-[130px]" },
+  { id: "depot_name", label: "Dispatch From (Depot)", type: "text", width: "w-[170px]" },
   { id: "remarks", label: "Remarks", type: "text", width: "w-[200px]" },
   { id: "broker_name", label: "Broker", type: "text", width: "w-[130px]" },
   { id: "order_punch_by", label: "Order Punch By (User)", type: "text", width: "w-[190px]" },
@@ -209,20 +209,20 @@ export default function OrderPunchListPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 max-w-full space-y-4 sm:space-y-6" suppressHydrationWarning>
+    <div className="p-3 sm:px-6 sm:py-3 max-w-full space-y-2 sm:space-y-3" suppressHydrationWarning>
       {/* ── Page Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
         <div className="flex items-start gap-3 min-w-0">
           <SidebarTrigger className="-ml-1" />
           <div className="min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Order Punch</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">Delivery Order (DO) details punched into the system.</p>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stage 1: Order Punch</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">Delivery Order (DO) details punched into the system.</p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-          <Button variant="outline" size="sm" onClick={loadList} disabled={isLoading} className="w-full sm:w-auto">
-            <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
-            Refresh
+          <Button variant="outline" size="sm" onClick={loadList} disabled={isLoading} title="Refresh" aria-label="Refresh" className="w-full sm:w-9 sm:px-0">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            <span className="sm:hidden ml-1">Refresh</span>
           </Button>
           {!isReadOnly && (
             <Button
@@ -237,7 +237,7 @@ export default function OrderPunchListPage() {
       </div>
 
       {/* ── DO List Table ── */}
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
         <StageListHeader
           title="Order Punch List"
           shown={sortedRows.length}
@@ -258,7 +258,7 @@ export default function OrderPunchListPage() {
                   type="date"
                   value={doDateFilter}
                   onChange={(e) => setDoDateFilter(e.target.value)}
-                  className="h-8 text-xs w-[150px] bg-white border-slate-200 shadow-2xs"
+                  className="!h-8 py-0 px-2.5 text-xs md:text-xs w-[150px] bg-white border-slate-200 shadow-2xs"
                 />
                 <StageDivider />
                 <StageFilterSelect value={depotFilter} onChange={setDepotFilter} allLabel="All Depots" options={uniqueDepots} />
@@ -284,7 +284,7 @@ export default function OrderPunchListPage() {
 
         <CardContent className="p-0">
           <div className="overflow-x-auto rounded-b-xl">
-            <Table className="table-fixed">
+            <Table className="table-auto">
               <StageTableHeaderRows
                 columns={orderedVisibleCols.map((c) => STAGE_COLS.find((s) => s.id === c.id)!)}
                 trailingColumns={[MODIFY_COL]}
@@ -418,7 +418,6 @@ export default function OrderPunchListPage() {
       />
 
       <OrderPunchDetailModal orderId={viewOrderId} onClose={() => setViewOrderId(null)} />
-      <ModifyOrderDialog open={!!modifyOrder} onOpenChange={(o) => !o && setModifyOrder(null)} orderId={modifyOrder?.id} onSuccess={loadList} />
     </div>
   )
 }

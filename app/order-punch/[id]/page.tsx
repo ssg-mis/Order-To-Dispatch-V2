@@ -179,8 +179,8 @@ export default function OrderPunchDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight font-mono">{order.order_no}</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">{order.customer_name || "—"}</p>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight font-mono">{order.order_no}</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">{order.customer_name || "—"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

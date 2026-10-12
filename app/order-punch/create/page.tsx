@@ -12,8 +12,8 @@ export default function OrderPunchCreatePage() {
       <div className="flex items-center gap-3">
         <SidebarTrigger className="-ml-1" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Stage 1: Order Punch</h1>
-          <p className="text-muted-foreground">Create a new order with customer and product details.</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stage 1: Order Punch</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Create a new order with customer and product details.</p>
         </div>
       </div>
 
