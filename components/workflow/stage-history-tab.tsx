@@ -1,10 +1,11 @@
 "use client"
 
 import React, { useState, useMemo, useCallback } from "react"
+import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Eye, Search, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { Eye, Search, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ClipboardList, Copy, Check, User, Package, IndianRupee, CalendarDays, Warehouse, Truck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -15,7 +16,7 @@ import { isTimestamp } from "@/lib/date-utils"
 import { LOSS_CAUSES, BORNE_BY_LABEL, type BorneBy } from "@/lib/loss-causes"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
-import { StageListHeader, StageToolbar, StageSegmented, StageHeadCell, StageTotalsRow } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageHeadCell, StageTotalsRow, StagePagination } from "@/components/stage-list"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 const HISTORY_COLS: StageColDef<any>[] = [
@@ -26,7 +27,7 @@ const HISTORY_COLS: StageColDef<any>[] = [
   { id: "remarks", label: "Remarks", type: "text", accessor: (r) => r.remarks },
 ]
 const HISTORY_COL_IDS = HISTORY_COLS.map((c) => c.id)
-const HISTORY_WIDTHS: Record<string, string> = { date: "w-[12%]", orderNo: "w-[18%]", customerName: "w-[18%]", status: "w-[12%]", remarks: "w-[25%]" }
+const HISTORY_WIDTHS: Record<string, string> = { date: "w-[12%]", orderNo: "w-[16%]", customerName: "w-[24%]", status: "w-[12%]", remarks: "w-[21%]" }
 const noopReorder = () => {}
 
 interface StageHistoryTabProps {
@@ -295,7 +296,7 @@ export function StageHistoryTab({
   const totalItems = data?.pagination?.total || 0
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden">
+    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
       <StageListHeader
         title="Stage History"
         shown={table.rows.length}
@@ -346,7 +347,7 @@ export function StageHistoryTab({
       ) : historyItems && historyItems.length > 0 ? (
         <div className="overflow-x-auto max-h-[600px] overflow-y-auto relative">
           {/* Desktop Table View */}
-          <table className="w-full text-sm table-fixed hidden md:table">
+          <table className="w-full text-sm table-auto hidden md:table">
             <thead className="bg-slate-50 border-b sticky top-0 z-10 shadow-sm">
               <tr>
                 <ColumnDragProvider columnIds={HISTORY_COL_IDS} onReorder={noopReorder} disabled>
@@ -354,7 +355,7 @@ export function StageHistoryTab({
                     <StageHeadCell key={col.id} col={col} table={table} width={HISTORY_WIDTHS[col.id]} />
                   ))}
                 </ColumnDragProvider>
-                <th className="px-4 py-3 text-left w-[15%] align-bottom text-xs font-medium text-foreground">Action</th>
+                <th className="px-4 py-3 text-left w-[15%] align-bottom text-[11px] font-semibold uppercase tracking-wide text-slate-600">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -382,7 +383,7 @@ export function StageHistoryTab({
                           </Badge>
                         </TableCell>
                         <TableCell className="px-4 py-3 text-[10px] capitalize text-slate-600">
-                          <div className="break-words whitespace-normal leading-tight" title={item.customerName}>
+                          <div className="whitespace-nowrap" title={item.customerName}>
                             {item.customerName}
                           </div>
                         </TableCell>
@@ -424,7 +425,7 @@ export function StageHistoryTab({
                               {sibling.orderNo || "-"}
                             </TableCell>
                             <TableCell className="px-4 py-2.5 text-[10px] text-slate-500 capitalize">
-                              <div className="break-words whitespace-normal leading-tight" title={sibling.customerName}>
+                              <div className="whitespace-nowrap" title={sibling.customerName}>
                                 {sibling.customerName || "-"}
                               </div>
                             </TableCell>
@@ -468,7 +469,7 @@ export function StageHistoryTab({
                       <TableCell className="px-4 py-3 text-xs text-right tabular-nums">{rowItem.date || "-"}</TableCell>
                       <TableCell className="px-4 py-3 font-bold text-blue-700 text-xs">{rowItem.orderNo || "-"}</TableCell>
                       <TableCell className="px-4 py-3 text-[10px] font-semibold capitalize">
-                        <div className="break-words whitespace-normal leading-tight" title={rowItem.customerName}>
+                        <div className="whitespace-nowrap" title={rowItem.customerName}>
                           {rowItem.customerName || "-"}
                         </div>
                       </TableCell>
@@ -649,30 +650,17 @@ export function StageHistoryTab({
           </div>
 
           {/* Footer Navigation */}
-          <div className="px-3 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-slate-500 font-bold uppercase tracking-tighter">
-              Showing Page {historyPage} of {totalPages} ({totalItems} Groups)
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:flex">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={historyPage === 1}
-                className="font-bold uppercase tracking-widest text-[10px]"
-                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="font-bold uppercase tracking-widest text-[10px]"
-                disabled={historyPage >= totalPages}
-                onClick={() => setHistoryPage((p) => p + 1)}
-              >
-                Next <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
+          <div className="border-t border-slate-200 bg-slate-100/80 px-3 pb-2">
+            <StagePagination
+              page={historyPage}
+              totalPages={totalPages}
+              total={totalItems}
+              noun="Groups"
+              onPrev={() => setHistoryPage((p) => Math.max(1, p - 1))}
+              onNext={() => setHistoryPage((p) => p + 1)}
+              prevDisabled={historyPage === 1}
+              nextDisabled={historyPage >= totalPages}
+            />
           </div>
         </div>
       ) : (
@@ -680,83 +668,277 @@ export function StageHistoryTab({
       )}
 
       {/* History Detail Dialog */}
-      <Dialog open={!!selectedHistoryItem} onOpenChange={(open) => !open && setSelectedHistoryItem(null)}>
-        <DialogContent className="max-w-6xl! w-full max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-3xl border-none shadow-2xl">
-          <DialogHeader className="p-6 pb-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
-            <div className="flex justify-between items-start">
-              <div>
-                <Badge className="bg-white/15 hover:bg-white/15 text-white border-white/30 text-xs font-black uppercase tracking-widest px-3 py-1 mb-2">
-                  DO No: {selectedHistoryItem?.so_no || selectedHistoryItem?.orderNo || selectedHistoryItem?.order_no || selectedHistoryItem?.order_key || "—"}
-                </Badge>
-                <DialogTitle className="text-2xl font-black uppercase tracking-tight italic">Record Details</DialogTitle>
-                <DialogDescription className="text-blue-100 font-bold mt-1 uppercase text-[10px] tracking-widest">
-                  Comprehensive audit trail
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          <div className="p-6 flex-1 overflow-y-auto space-y-6 bg-slate-50">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search fields or values..."
-                className="pl-9 bg-white border-2 focus:border-blue-400 rounded-xl h-10 shadow-sm"
-                value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value)}
-              />
-            </div>
-
-            {groupedHistoryFields.length > 0 ? (
-              <div className="space-y-5">
-                {groupedHistoryFields.map((group) => (
-                  <div key={group.level} className="border-2 border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                    <div className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200">
-                      <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
-                      <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-700">{group.label}</h3>
-                      <span className="ml-auto text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                        {group.entries.length} {group.entries.length === 1 ? "field" : "fields"}
-                      </span>
-                    </div>
-                    <Table>
-                      <TableHeader className="bg-slate-100/50">
-                        <TableRow>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider w-1/3">Field Name</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Value</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.entries.map(([key, value]) => (
-                          <TableRow key={key} className="hover:bg-blue-50/30 transition-colors border-slate-100">
-                            <TableCell className="font-black text-slate-500 text-[10px] uppercase tracking-tight py-3">
-                              {formatKey(key)}
-                            </TableCell>
-                            <TableCell className="py-3 text-xs font-bold text-slate-800">
-                              {renderValue(value, key)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="border-2 border-slate-200 rounded-2xl bg-white shadow-sm p-8 text-center text-muted-foreground text-sm font-medium">
-                No matching fields found.
-              </div>
-            )}
-          </div>
-          <div className="p-4 bg-white border-t flex justify-end">
-            <Button
-              onClick={() => setSelectedHistoryItem(null)}
-              className="bg-slate-900 hover:bg-black text-white px-8 font-black uppercase italic tracking-tighter"
-            >
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <HistoryDetailDialog
+        item={selectedHistoryItem}
+        onClose={() => setSelectedHistoryItem(null)}
+        groups={groupedHistoryFields as any}
+        search={historySearch}
+        onSearchChange={setHistorySearch}
+        renderValue={renderValue}
+        formatKey={formatKey}
+      />
     </Card>
+  )
+}
+
+// ─── Record Details dialog ────────────────────────────────────────────────
+
+type DetailGroup = { level: number | string; label: string; entries: [string, any][] }
+
+const SECTION_ACCENTS = [
+  { dot: "bg-blue-600", soft: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-200", grad: "from-blue-600 to-blue-600" },
+]
+
+const isEmptyVal = (v: any) => v === null || v === undefined || v === ""
+
+function CopyValueButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button
+      type="button"
+      title="Copy value"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).then(() => {
+          setDone(true)
+          setTimeout(() => setDone(false), 1200)
+        })
+      }}
+      className="absolute right-1.5 top-1.5 rounded p-1 text-slate-300 opacity-0 transition hover:bg-white hover:text-blue-600 group-hover:opacity-100"
+    >
+      {done ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
+function statusTone(v: string) {
+  const t = v.toLowerCase()
+  if (/(approve|pass|complete|done|success|ok|verified|active)/.test(t)) return "bg-emerald-50 text-emerald-700 ring-emerald-200"
+  if (/(reject|fail|cancel|expire|damage|revert)/.test(t)) return "bg-rose-50 text-rose-700 ring-rose-200"
+  if (/(pending|wait|hold|partial)/.test(t)) return "bg-amber-50 text-amber-700 ring-amber-200"
+  return "bg-slate-100 text-slate-700 ring-slate-200"
+}
+
+const HERO_TILES: { label: string; keys: string[]; icon: React.ComponentType<{ className?: string }>; tone: string }[] = [
+  { label: "Customer", keys: ["party_name", "customer_name", "bill_company_name"], icon: User, tone: "" },
+  { label: "Order qty", keys: ["order_quantity", "approved_qty", "actual_qty"], icon: Package, tone: "" },
+  { label: "Rate", keys: ["final_rate", "rate", "rate_per_ltr"], icon: IndianRupee, tone: "" },
+  { label: "Delivery date", keys: ["delivery_date", "end_date"], icon: CalendarDays, tone: "" },
+  { label: "Depot", keys: ["depo_name", "dispatch_from"], icon: Warehouse, tone: "" },
+  { label: "Vehicle", keys: ["truck_no", "vehicle_number"], icon: Truck, tone: "" },
+]
+
+function HistoryDetailDialog({
+  item,
+  onClose,
+  groups,
+  search,
+  onSearchChange,
+  renderValue,
+  formatKey,
+}: {
+  item: any
+  onClose: () => void
+  groups: DetailGroup[]
+  search: string
+  onSearchChange: (v: string) => void
+  renderValue: (value: any, key?: string) => React.ReactNode
+  formatKey: (key: string) => string
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [showEmpty, setShowEmpty] = useState<Record<string, boolean>>({})
+
+  const doNo = item?.so_no || item?.orderNo || item?.order_no || item?.order_key || "—"
+  const all = new Map<string, any>()
+  groups.forEach((g) => g.entries.forEach(([k, v]) => !isEmptyVal(v) && !all.has(k) && all.set(k, v)))
+  const filled = all.size
+  const hero = HERO_TILES.map((t) => {
+    const k = t.keys.find((x) => all.has(x))
+    return k ? { ...t, key: k, value: all.get(k) } : null
+  }).filter(Boolean) as (typeof HERO_TILES[number] & { key: string; value: any })[]
+  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed[String(g.level)])
+
+  return (
+    <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex h-[90vh] w-full max-w-5xl! flex-col gap-0 overflow-hidden rounded-xl border border-slate-200 bg-[#eef4fc] p-0 shadow-2xl">
+        {/* Header */}
+        <DialogHeader className="border-b border-slate-200 bg-white px-6 pb-4 pt-5 text-left">
+          <div className="flex flex-wrap items-center gap-3 pr-8">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-xs">
+              <ClipboardList className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <DialogTitle className="text-xl font-bold tracking-tight text-slate-900">Record Details</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">Complete audit trail for this order, grouped by workflow stage.</DialogDescription>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 font-mono text-xs font-bold text-blue-700">{doNo}</span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                <strong className="text-slate-900">{groups.length}</strong> stages
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                <strong className="text-slate-900">{filled}</strong> data points
+              </span>
+            </div>
+          </div>
+
+          {hero.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+              {hero.map((h) => {
+                const Icon = h.icon
+                return (
+                  <div key={h.label} className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <Icon className="h-3.5 w-3.5 text-blue-600" />
+                      {h.label}
+                    </div>
+                    <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={String(h.value)}>
+                      {renderValue(h.value, h.key)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </DialogHeader>
+
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100/80 px-6 py-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Search fields or values..."
+              className="h-8 border-slate-200 bg-white pl-8 text-xs shadow-2xs"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8 bg-white px-3 text-xs"
+            onClick={() => setCollapsed(allCollapsed ? {} : Object.fromEntries(groups.map((g) => [String(g.level), true])))}
+          >
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </Button>
+        </div>
+
+        {/* Timeline */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {groups.length > 0 ? (
+            <div className="relative space-y-5 pl-10">
+              <div className="absolute bottom-2 left-[15px] top-2 w-px bg-slate-300" />
+              {groups.map((g, i) => {
+                const key = String(g.level)
+                const open = !collapsed[key]
+                const a = SECTION_ACCENTS[i % SECTION_ACCENTS.length]
+                const filledEntries = g.entries.filter(([, v]) => !isEmptyVal(v))
+                const emptyEntries = g.entries.filter(([, v]) => isEmptyVal(v))
+                const byEntry = filledEntries.find(([k, v]) => /(_user|_by)$/.test(k) && typeof v === "string")
+                const atEntry = filledEntries.find(([k]) => /^(actual_\d+|timestamp_\d+|gate_in_at)$/.test(k))
+                return (
+                  <section key={key} className="relative">
+                    <span className={cn("absolute -left-10 top-3 flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white shadow-xs ring-4 ring-[#eef4fc]", a.grad)}>
+                      {i + 1}
+                    </span>
+                    <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xs">
+                      <button
+                        type="button"
+                        onClick={() => setCollapsed((c) => ({ ...c, [key]: open }))}
+                        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 bg-slate-100/80 px-5 py-3 text-left transition hover:bg-slate-100"
+                      >
+                        <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">{g.label}</h3>
+                        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1", a.soft, a.text, a.ring)}>
+                          {filledEntries.length} filled
+                        </span>
+                        {emptyEntries.length > 0 && <span className="text-[11px] font-medium text-slate-400">{emptyEntries.length} empty</span>}
+                        {byEntry && (
+                          <span className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-0.5 pl-0.5 pr-2.5 text-[11px] font-medium text-slate-600">
+                            <span className={cn("flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold text-white", a.grad)}>
+                              {String(byEntry[1]).trim().charAt(0).toUpperCase()}
+                            </span>
+                            {String(byEntry[1])}
+                          </span>
+                        )}
+                        {atEntry && <span className="text-[11px] font-medium text-slate-500">{renderValue(atEntry[1], atEntry[0])}</span>}
+                        <ChevronDown className={cn("ml-auto h-4 w-4 text-slate-400 transition-transform", open && "rotate-180")} />
+                      </button>
+
+                      {open && (
+                        <div className="border-t border-slate-100 p-4">
+                          {filledEntries.length > 0 ? (
+                            <dl className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                              {filledEntries.map(([k, v]) => {
+                                const long = typeof v === "string" && v.length > 52
+                                const isStatus = /status/i.test(k) && typeof v === "string"
+                                const isNum = /(qty|quantity|rate|amount|weight|price|value)/i.test(k) && typeof v !== "string"
+                                return (
+                                  <div
+                                    key={k}
+                                    className={cn(
+                                      "group relative min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 transition hover:border-blue-200 hover:bg-white",
+                                      long && "sm:col-span-2 xl:col-span-3"
+                                    )}
+                                  >
+                                    <dt className="pr-6 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{formatKey(k)}</dt>
+                                    <dd className={cn("mt-0.5 break-words text-sm font-medium text-slate-900", isNum && "font-mono tabular-nums")}>
+                                      {isStatus ? (
+                                        <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1", statusTone(String(v)))}>{String(v)}</span>
+                                      ) : (
+                                        renderValue(v, k)
+                                      )}
+                                    </dd>
+                                    {typeof v !== "object" && <CopyValueButton text={String(v)} />}
+                                  </div>
+                                )
+                              })}
+                            </dl>
+                          ) : (
+                            <p className="py-2 text-center text-xs text-slate-400">No data recorded for this stage.</p>
+                          )}
+
+                          {emptyEntries.length > 0 && (
+                            <div className="mt-3 border-t border-dashed border-slate-200 pt-3">
+                              <button
+                                type="button"
+                                onClick={() => setShowEmpty((s) => ({ ...s, [key]: !s[key] }))}
+                                className="text-[11px] font-semibold text-slate-500 hover:text-blue-600"
+                              >
+                                {showEmpty[key] ? "Hide" : "Show"} {emptyEntries.length} empty field{emptyEntries.length > 1 ? "s" : ""}
+                              </button>
+                              {showEmpty[key] && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {emptyEntries.map(([k]) => (
+                                    <span key={k} className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wide text-slate-400">
+                                      {formatKey(k)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-14 text-center text-sm text-slate-500">
+              <Search className="mx-auto mb-2 h-6 w-6 text-slate-300" />
+              No matching fields found.
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-3">
+          <span className="text-[11px] text-slate-400">Hover a field to copy its value</span>
+          <Button size="sm" className="h-8 bg-blue-600 px-5 text-xs hover:bg-blue-700" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
