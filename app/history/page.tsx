@@ -40,8 +40,8 @@ function HistoryContent() {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Global Audit History</h1>
-          <p className="text-muted-foreground">Track every action across all workflow stages.</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Global Audit History</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Track every action across all workflow stages.</p>
         </div>
         <Button className="gap-2">
           <Download className="h-4 w-4" /> Export logs

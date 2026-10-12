@@ -182,7 +182,7 @@ function CustomerEffectiveDatesContent() {
           >
             <ArrowLeft className="h-4 w-4 mr-1.5" /> Back to Customer Master
           </Button>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
             <Clock className="h-6 w-6 text-blue-600" />
             Effective-Date Versions & History
           </h1>

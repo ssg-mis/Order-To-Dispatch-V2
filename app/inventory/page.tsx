@@ -252,8 +252,8 @@ export default function InventoryPage() {
             <Warehouse className="h-5 w-5" style={{ color: "oklch(0.54 0.22 265)" }} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Inventory</h1>
-            <p className="text-sm text-slate-500">Stock levels by depot and SKU</p>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Inventory</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">Stock levels by depot and SKU</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

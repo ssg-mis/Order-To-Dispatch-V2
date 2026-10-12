@@ -213,9 +213,9 @@ export default function SystemFlowPage() {
         <div className="mb-7">
           <div className="flex items-center gap-3 mb-1">
             <div className="h-7 w-1 rounded-full bg-indigo-500" />
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">System Flow</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">System Flow</h1>
           </div>
-          <p className="ml-4 pl-3 text-sm text-slate-500">
+          <p className="ml-4 pl-3 text-xs sm:text-sm text-muted-foreground">
             End-to-end order lifecycle — from punch to delivery
           </p>
         </div>

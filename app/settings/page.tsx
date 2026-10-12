@@ -685,8 +685,8 @@ export default function SettingsPage() {
               <Settings className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-primary">Settings</h1>
-              <p className="text-muted-foreground text-sm">Manage system configuration and user access</p>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Settings</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground">Manage system configuration and user access</p>
             </div>
           </div>
           <SidebarTrigger />

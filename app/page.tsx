@@ -195,7 +195,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <SidebarTrigger className="-ml-1" />
           <div className="h-5 w-px bg-border mx-1" />
-          <h1 className="text-xl font-black tracking-tight text-slate-900">Dashboard</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Dashboard</h1>
           <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
             style={{ background: "oklch(0.95 0.05 155)", color: "oklch(0.40 0.15 155)" }}>
             <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />Live

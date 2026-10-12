@@ -58,8 +58,8 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-8 p-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-slate-900">Dashboard</h1>
-          <p className="text-slate-500 mt-1 font-medium">Monitoring your order dispatch workflow in real-time</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Monitoring your order dispatch workflow in real-time</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-sm font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">

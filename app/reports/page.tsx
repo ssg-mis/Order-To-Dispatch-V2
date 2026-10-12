@@ -288,7 +288,7 @@ export default function ReportsPage() {
           <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: "oklch(0.42 0.18 265 / 0.12)" }}>
             <BarChart2 className="h-4 w-4" style={{ color: "oklch(0.42 0.18 265)" }} />
           </div>
-          <h1 className="text-xl font-black tracking-tight text-slate-900">Reports &amp; Analytics</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Reports &amp; Analytics</h1>
         </div>
 
         {/* Export & Reports */}

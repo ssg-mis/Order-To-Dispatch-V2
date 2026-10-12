@@ -195,8 +195,8 @@ export default function VariableParametersPage() {
                     <SidebarTrigger className="-ml-1" />
                     <Separator orientation="vertical" className="h-6" />
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Variable Parameters</h1>
-                        <p className="text-sm text-slate-500">Configure and track global rate parameters</p>
+                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Variable Parameters</h1>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Configure and track global rate parameters</p>
                     </div>
                 </div>
 

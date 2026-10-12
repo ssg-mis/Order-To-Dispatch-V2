@@ -293,7 +293,7 @@ export default function OwnerDashboardPage() {
               <Zap className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Executive Dashboard</h1>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Executive Dashboard</h1>
               <div className="flex items-center gap-2 mt-0.5">
                 <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[10px] font-bold px-1.5 py-0">LIVE</Badge>
                 <span className="text-[10px] font-medium text-slate-400">Last sync: {lastUpdated}</span>
