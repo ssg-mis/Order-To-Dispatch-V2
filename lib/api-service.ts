@@ -1841,6 +1841,9 @@ export const ledgerApi = {
   update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: async (id: string | number): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/ledgers/pending'),
+  /** Where a ledger is used (blocks deletion): [{ label, n }] */
+  getUsage: async (id: string | number): Promise<ApiResponse> => request(`/ledgers/${id}/usage`),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/ledgers/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledgers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 

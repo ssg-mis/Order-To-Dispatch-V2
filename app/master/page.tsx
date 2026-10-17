@@ -91,6 +91,7 @@ import { FinishedGoodsForm } from "@/components/masters/forms/FinishedGoodsForm"
 import { MasterFieldChangeConfirmModal, SkuFieldChangeConfirmModal } from "@/components/masters/modals/MasterFieldChangeConfirmModal"
 import { VehicleForm } from "@/components/masters/forms/VehicleForm"
 import { DriverForm } from "@/components/masters/forms/DriverForm"
+import { getVehicleDocFileErrors } from "@/lib/vehicle-doc-validation"
 import { TransportForm } from "@/components/masters/forms/TransportForm"
 import { RawMaterialForm } from "@/components/masters/forms/RawMaterialForm"
 import { SemiFinishedGoodForm } from "@/components/masters/forms/SemiFinishedGoodForm"
@@ -119,6 +120,7 @@ import { VehicleBulkImportModal } from "@/components/masters/modals/vehicle-bulk
 import { DriverBulkImportModal } from "@/components/masters/modals/driver-bulk-import-modal"
 import { TransporterBulkImportModal } from "@/components/masters/modals/transporter-bulk-import-modal"
 import { LedgerGroupBulkImportModal } from "@/components/masters/modals/ledger-group-bulk-import-modal"
+import { LedgerMasterTab } from "@/components/masters/LedgerMasterTab"
 import { StockGroupBulkImportModal } from "@/components/masters/modals/stock-group-bulk-import-modal"
 import { UnitBulkImportModal } from "@/components/masters/modals/unit-bulk-import-modal"
 import { RawMaterialBulkImportModal } from "@/components/masters/modals/raw-material-bulk-import-modal"
@@ -4316,13 +4318,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
       } else if (activeTab === "vehicle_master") {
         // --- Mandatory field validation ---
-        const vErrors: { registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string } = {}
+        const vErrors: Record<string, string> = {}
         if (!vehicleForm.registration_no?.trim()) vErrors.registration_no = 'Registration Number is required'
         if (!vehicleForm.vehicle_type?.trim()) vErrors.vehicle_type = 'Vehicle Type is required'
         if (!vehicleForm.transporter?.trim()) vErrors.transporter = 'Transporter is required'
         // State permit document is compulsory when the permit section applies (GVW > 3000)
         const permitApplies = vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000
         if (permitApplies && !vehicleForm.state_permit_image) vErrors.state_permit_image = 'State Permit document is required'
+        Object.assign(vErrors, { ...getVehicleDocFileErrors(vehicleForm, roadTaxType), ...vErrors })
         // --- Duplicate registration number check (against already-loaded list) ---
         const regNo = vehicleForm.registration_no?.trim().toUpperCase()
         const duplicate = vehicles.find((v: any) =>
@@ -5593,7 +5596,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             if (!open) resetForms()
           }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all" disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.replace('_', ' ')}`}>
+              <Button size="sm" className={`h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all ${activeTab === 'ledgers' ? 'hidden' : ''}`} disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.replace('_', ' ')}`}>
                 <Plus className="h-4 w-4 md:mr-2" />
                 <span className="hidden md:inline">Add {activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
               </Button>
@@ -7241,6 +7244,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 nameKey="group_name"
               />
             </MasterCardWrapper>
+          </TabsContent>
+        )}
+
+        {visibleTabs.includes("ledgers") && (
+          <TabsContent value="ledgers">
+            <LedgerMasterTab isAdminOrSuper={isAdminOrSuper} isReadOnly={isMasterTabReadOnly} canEditExisting={canEditExisting} />
           </TabsContent>
         )}
 

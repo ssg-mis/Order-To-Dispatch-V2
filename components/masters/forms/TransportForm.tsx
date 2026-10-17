@@ -204,7 +204,6 @@ export function TransportForm({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div className="space-y-1.5 min-w-0">
             <Label htmlFor="linked_customer_id" className="text-xs font-semibold text-slate-800">Linked Customer</Label>
-            <p className="text-[11px] text-slate-500 mb-1">If this transporter is also a customer, link them so they don't need a separate ledger.</p>
             <Combobox
               options={customers.map((c: any) => ({ value: String(c.id), label: c.customer_name }))}
               value={transportForm.linked_customer_id ? String(transportForm.linked_customer_id) : ""}
@@ -212,10 +211,11 @@ export function TransportForm({
               placeholder="Select customer (optional)"
               searchPlaceholder="Search customer..."
             />
+            <p className="text-[11px] text-slate-500">If this transporter is also a customer, link them so they don't need a separate ledger.</p>
           </div>
           <div className="space-y-1.5">
             <FileUploadField
-              label="Bilty Copy"
+              label={<Label className="text-xs font-semibold text-slate-800">Bilty Copy</Label>}
               accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
               value={transportForm.bilty_copy_upload || ""}
               helperText="Max file size: 20 MB"

@@ -342,9 +342,12 @@ export function VehicleForm({
                     value={vehicleForm.road_tax_image}
                     helperText="Max file size: 20 MB"
                     uploading={false}
-                    onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "road_tax_image")}
+                    onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "road_tax_image"); setVehicleFormErrors((prev: any) => ({ ...prev, road_tax_image: undefined })) } }}
                     onRemove={() => handleFileRemove("road_tax_image")}
                   />
+                  {vehicleFormErrors.road_tax_image && (
+                    <p className="text-[11px] text-red-500">{vehicleFormErrors.road_tax_image}</p>
+                  )}
                 </div>
               </>
             ) : (
@@ -360,9 +363,12 @@ export function VehicleForm({
                     value={vehicleForm.life_time_tax_image}
                     helperText="Max file size: 20 MB"
                     uploading={false}
-                    onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "life_time_tax_image")}
+                    onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "life_time_tax_image"); setVehicleFormErrors((prev: any) => ({ ...prev, life_time_tax_image: undefined })) } }}
                     onRemove={() => handleFileRemove("life_time_tax_image")}
                   />
+                  {vehicleFormErrors.life_time_tax_image && (
+                    <p className="text-[11px] text-red-500">{vehicleFormErrors.life_time_tax_image}</p>
+                  )}
                 </div>
               </>
             )}
@@ -395,9 +401,12 @@ export function VehicleForm({
               value={vehicleForm.pollution_image}
               helperText="Max file size: 20 MB"
               uploading={false}
-              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "pollution_image")}
+              onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "pollution_image"); setVehicleFormErrors((prev: any) => ({ ...prev, pollution_image: undefined })) } }}
               onRemove={() => handleFileRemove("pollution_image")}
             />
+            {vehicleFormErrors.pollution_image && (
+              <p className="text-[11px] text-red-500">{vehicleFormErrors.pollution_image}</p>
+            )}
           </div>
         </div>
 
@@ -422,9 +431,12 @@ export function VehicleForm({
               value={vehicleForm.insurance_image}
               helperText="Max file size: 20 MB"
               uploading={false}
-              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "insurance_image")}
+              onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "insurance_image"); setVehicleFormErrors((prev: any) => ({ ...prev, insurance_image: undefined })) } }}
               onRemove={() => handleFileRemove("insurance_image")}
             />
+            {vehicleFormErrors.insurance_image && (
+              <p className="text-[11px] text-red-500">{vehicleFormErrors.insurance_image}</p>
+            )}
           </div>
         </div>
 
@@ -449,9 +461,12 @@ export function VehicleForm({
               value={vehicleForm.fitness_image}
               helperText="Max file size: 20 MB"
               uploading={false}
-              onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "fitness_image")}
+              onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "fitness_image"); setVehicleFormErrors((prev: any) => ({ ...prev, fitness_image: undefined })) } }}
               onRemove={() => handleFileRemove("fitness_image")}
             />
+            {vehicleFormErrors.fitness_image && (
+              <p className="text-[11px] text-red-500">{vehicleFormErrors.fitness_image}</p>
+            )}
           </div>
         </div>
       </div>
@@ -535,9 +550,12 @@ export function VehicleForm({
                 value={vehicleForm.national_permit_image}
                 helperText="Max file size: 20 MB"
                 uploading={false}
-                onFilesSelected={(files) => files[0] && handleFileUpload(files[0], "national_permit_image")}
+                onFilesSelected={(files) => { if (files[0]) { handleFileUpload(files[0], "national_permit_image"); setVehicleFormErrors((prev: any) => ({ ...prev, national_permit_image: undefined })) } }}
                 onRemove={() => handleFileRemove("national_permit_image")}
               />
+              {vehicleFormErrors.national_permit_image && (
+                <p className="text-[11px] text-red-500">{vehicleFormErrors.national_permit_image}</p>
+              )}
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@
 
 import { type ComponentType } from "react"
 import {
-  Users, Warehouse, Briefcase, Package, Truck, User, BookOpen, Layers,
+  Users, Warehouse, Briefcase, Package, Truck, User, BookOpen, BookText, Layers,
   Ruler, FlaskConical, Factory, Shield, Calculator, Tag, Fuel, Percent,
   Landmark, Route, Droplet, List,
 } from "lucide-react"
@@ -54,7 +54,7 @@ export const blankPartyParityFields = (): PartyParityFields => ({
 export const ALL_MASTER_TABS = [
   "customers", "depots", "brokers", "salespersons",
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master",
-  "ledger_groups", "stock_groups", "units", "raw_materials", "semi_finished_goods",
+  "ledger_groups", "ledgers", "stock_groups", "units", "raw_materials", "semi_finished_goods",
   "insurance_details", "conversion_formulas", "price_levels", "petrol_pumps", "cd_rules",
   "tds_rules", "oil_tags", "bhada_rates",
   "reference_data"
@@ -66,6 +66,7 @@ export const TAB_META: Record<string, { label: string; icon: ComponentType<{ cla
   brokers: { label: "Brokers", icon: Briefcase, desc: "Manage your broker records and details" },
   salespersons: { label: "Salesperson", icon: Users, desc: "Manage your salesperson records and details" },
   ledger_groups: { label: "Ledger Groups", icon: BookOpen, desc: "Categorize party masters under Ledger Groups" },
+  ledgers: { label: "Ledgers", icon: BookText, desc: "Accounting heads for order charges, fuel stations and default ledgers" },
   stock_groups: { label: "Stock Groups", icon: Layers, desc: "Categorize stock item masters under Stock Groups" },
   units: { label: "Units", icon: Ruler, desc: "Manage units of measurement (UOM)" },
   raw_materials: { label: "Raw Materials", icon: FlaskConical, desc: "Manage your raw material records and details" },
