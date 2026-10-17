@@ -14,9 +14,16 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Truck, Weight, Printer, Download, ChevronLeft, ChevronRight, Calendar as CalendarIconLucide } from "lucide-react"
+import { Truck, Weight, Printer, Download, ChevronLeft, ChevronRight, Calendar as CalendarIconLucide, Pencil, Plus, Search, Clock, Check, ChevronsUpDown, Loader2, Eye, ExternalLink, FileCheck, FileX, FileText, ImageIcon } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { planVehicleApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi } from "@/lib/api-service"
+import { planVehicleApi, customerApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, commonApi, lookupApi, stateApi } from "@/lib/api-service"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { VehicleForm } from "@/components/masters/forms/VehicleForm"
+import { DriverForm } from "@/components/masters/forms/DriverForm"
+import { TransporterMasterDialog } from "@/components/masters/modals/transporter-master-dialog"
+import { getVehicleDocFileErrors } from "@/lib/vehicle-doc-validation"
+import { VehicleEffectiveDatesModalView } from "@/components/vehicle-effective-dates-modal-view"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -34,7 +41,6 @@ import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
   StageActiveChips, StageSortIcon, type StageTotalTone, StageActionBar, StagePagination } from "@/components/stage-list"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { fmtNum } from "@/lib/table-format"
 
 function formatDate(dateStr: string) {
@@ -172,6 +178,20 @@ const PLAN_TOTAL_TONES: Record<string, StageTotalTone> = { qtyToDispatch: "blue"
 const PLAN_RIGHT_COLS = new Set<string>(["partySoDate", "qtyToDispatch"])
 const PLAN_MIN_W: Record<string, string> = { partySoDate: "min-w-[120px]", qtyToDispatch: "min-w-[150px]" }
 
+type DriverApprovalState = 'pending' | 'edit_pending' | 'approved'
+const driverApprovalState = (d: any): DriverApprovalState =>
+  (d.approval_status === 'pending' || d.approvalStatus === 'pending')
+    ? 'pending'
+    : Boolean(d.has_pending_edit || d.hasPendingEdit || d.pending_changes || d.pendingChanges)
+    ? 'edit_pending'
+    : 'approved'
+const DRIVER_BADGE_LABEL: Record<DriverApprovalState, string> = { pending: 'Pending Approval', edit_pending: 'Edit Pending', approved: 'Approved' }
+const DRIVER_BADGE_CLASS: Record<DriverApprovalState, string> = {
+  pending: 'bg-amber-50 text-amber-700 border-amber-300',
+  edit_pending: 'bg-blue-50 text-blue-700 border-blue-300',
+  approved: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+}
+
 export default function PlanVehiclePage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -267,6 +287,7 @@ export default function PlanVehiclePage() {
   const [vehicleMaster, setVehicleMaster] = useState<any[]>([])
   const [driverMaster, setDriverMaster] = useState<any[]>([])
   const [transporterMaster, setTransporterMaster] = useState<any[]>([])
+  const [transporterAll, setTransporterAll] = useState<any[]>([])
   const [driverName, setDriverName] = useState("")
   const [driverData, setDriverData] = useState({
     contact_no: "",
@@ -284,20 +305,420 @@ export default function PlanVehiclePage() {
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
   ), [vehicleMaster])
 
-  const driverOptions = useMemo(() => (
-    driverMaster
-      .filter(d => d.driver_name && d.status === 'Active')
-      .map(d => ({ value: d.driver_name, label: d.driver_name }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
-  ), [driverMaster])
 
-  const transporterOptions = useMemo(() => ([
-    { value: "Company Vehicle", label: "Company Vehicle" },
-    { value: "Party Vehicle", label: "Party Vehicle" },
-    ...transporterMaster
-      .filter(t => t.transporter_name)
-      .map(t => ({ value: t.transporter_name, label: t.transporter_name }))
-  ]), [transporterMaster])
+
+  // Vehicle dropdown & Master Modal state
+  const [vehicleDropdownOpen, setVehicleDropdownOpen] = useState(false)
+  const [vehicleSearchTerm, setVehicleSearchTerm] = useState("")
+  const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false)
+  const [editingVehicle, setEditingVehicle] = useState<any | null>(null)
+  const [isSubmittingVehicleModal, setIsSubmittingVehicleModal] = useState(false)
+  const [roadTaxType, setRoadTaxType] = useState<'expiry' | 'lifetime'>('expiry')
+  const [vehicleEffectiveDatesSection, setVehicleEffectiveDatesSection] = useState<'basic' | 'weights' | 'tax_compliance' | 'permits' | 'gps' | 'documents' | null>(null)
+
+  // Auto-close vehicle dropdown when the page is scrolled vertically
+  useEffect(() => {
+    if (!vehicleDropdownOpen) return
+
+    const handleScroll = (event: Event) => {
+      const target = event.target as HTMLElement | null
+      // Do not close if the user is scrolling inside the vehicle dropdown list itself
+      if (
+        target &&
+        target.closest &&
+        (target.closest('[data-slot="popover-content"]') ||
+          target.closest('[data-radix-popper-content-wrapper]') ||
+          target.closest('[cmdk-list]'))
+      ) {
+        return
+      }
+      setVehicleDropdownOpen(false)
+    }
+
+    window.addEventListener('scroll', handleScroll, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true })
+    }
+  }, [vehicleDropdownOpen])
+
+  const initialVehicleForm = useMemo(() => ({
+    vehicle_master_id: '',
+    registration_no: '',
+    vehicle_type: '',
+    transporter: '',
+    rto: '',
+    rto_id: '',
+    additional_transporter_ids: [] as number[],
+    gps_company: '',
+    gps_api_tracking_link: '',
+    gps_valid_upto: '',
+    gps_type: '',
+    gps_installed_by: '',
+    status: 'Active',
+    rc_image: '',
+    road_tax: '',
+    road_tax_image: '',
+    pollution: '',
+    pollution_image: '',
+    insurance: '',
+    insurance_image: '',
+    fitness: '',
+    fitness_image: '',
+    state_permit: '',
+    state_permit_image: '',
+    state_permit_type: '',
+    national_permit: '',
+    national_permit_image: '',
+    fuel_type: 'Diesel',
+    gvw: '',
+    ulw: '',
+    passing: '',
+    life_time_tax: '',
+    life_time_tax_image: '',
+  }), [])
+
+
+  // Driver dropdown & Master Modal state (mirrors the vehicle dropdown above)
+  const [driverDropdownOpen, setDriverDropdownOpen] = useState(false)
+  const [isDriverModalOpen, setIsDriverModalOpen] = useState(false)
+  const [editingDriver, setEditingDriver] = useState<any | null>(null)
+  const [isSubmittingDriverModal, setIsSubmittingDriverModal] = useState(false)
+  const initialDriverForm = useMemo(() => ({
+    driver_master_id: "", status: "Active", driving_licence_no: "", driving_licence_type: "",
+    valid_upto: "", rto: "", rto_id: null, trans_valid_upto: "", lmv_valid_upto: "",
+    driver_name: "", mobile_no: "", email_id: "", address_line1: "", state: "", pincode: "",
+    aadhaar_no: "", pan_no: "", aadhaar_upload: "", dl_upload: "",
+  }), [])
+  const [driverModalForm, setDriverModalForm] = useState<any>(initialDriverForm)
+
+  const { data: statesData } = useQuery({
+    queryKey: ["master-states"],
+    queryFn: async () => {
+      const res = await stateApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.states || []) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeStates = useMemo(() => (statesData || []).filter((s: any) => s.status === 'Active'), [statesData])
+
+  // Auto-close driver dropdown when the page is scrolled vertically
+  useEffect(() => {
+    if (!driverDropdownOpen) return
+    const handleScroll = (event: Event) => {
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        target.closest &&
+        (target.closest('[data-slot="popover-content"]') ||
+          target.closest('[data-radix-popper-content-wrapper]') ||
+          target.closest('[cmdk-list]'))
+      ) {
+        return
+      }
+      setDriverDropdownOpen(false)
+    }
+    window.addEventListener('scroll', handleScroll, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true })
+    }
+  }, [driverDropdownOpen])
+
+  // Transporter dropdown & Master Modal state (mirrors the vehicle / driver dropdowns)
+  const [transporterDropdownOpen, setTransporterDropdownOpen] = useState(false)
+  const [isTransporterModalOpen, setIsTransporterModalOpen] = useState(false)
+  const [editingTransporter, setEditingTransporter] = useState<any | null>(null)
+
+  // Auto-close transporter dropdown when the page is scrolled vertically
+  useEffect(() => {
+    if (!transporterDropdownOpen) return
+    const handleScroll = (event: Event) => {
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        target.closest &&
+        (target.closest('[data-slot="popover-content"]') ||
+          target.closest('[data-radix-popper-content-wrapper]') ||
+          target.closest('[cmdk-list]'))
+      ) {
+        return
+      }
+      setTransporterDropdownOpen(false)
+    }
+    window.addEventListener('scroll', handleScroll, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true })
+    }
+  }, [transporterDropdownOpen])
+
+  const [vehicleModalForm, setVehicleModalForm] = useState<any>(initialVehicleForm)
+  const [vehicleModalErrors, setVehicleModalErrors] = useState<Record<string, string>>({})
+
+  // RTO Codes for vehicle modal
+  const { data: rtoCodeData } = useQuery({
+    queryKey: ["lookup-rto_code"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll('rto_code', { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeRtoCodes = useMemo(() => (rtoCodeData || []).filter((r: any) => r.status === 'Active'), [rtoCodeData])
+
+  // Sorted vehicle transporters for VehicleForm
+  const sortedVehicleTransporters = useMemo<string[]>(() => {
+    const names: string[] = (transporterMaster || [])
+      .map((t: any) => t.transporter_name?.trim())
+      .filter((name: any): name is string => typeof name === "string" && name.length > 0)
+
+    const sorted = Array.from(new Set<string>(names)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+    )
+
+    const builtIns = ["Company Vehicle", "Party Vehicle"]
+    const rest = sorted.filter((n) => !builtIns.includes(n))
+    return [...builtIns, ...rest]
+  }, [transporterMaster])
+
+  const transporterModalOptions = useMemo(() => transporterMaster || [], [transporterMaster])
+
+  // Filtered vehicles for dropdown
+  const filteredVehicles = useMemo(() => {
+    let list = vehicleMaster.filter(v => v.registration_no && v.status === 'Active')
+    if (vehicleSearchTerm.trim()) {
+      const q = vehicleSearchTerm.trim().toLowerCase()
+      list = list.filter(v =>
+        (v.registration_no || '').toLowerCase().includes(q) ||
+        (v.vehicle_type || '').toLowerCase().includes(q) ||
+        (v.transporter || '').toLowerCase().includes(q)
+      )
+    }
+    return list.sort((a, b) => (a.registration_no || '').localeCompare(b.registration_no || '', undefined, { sensitivity: 'base', numeric: true }))
+  }, [vehicleMaster, vehicleSearchTerm])
+
+  const selectedVehicleObj = useMemo(() => {
+    return vehicleMaster.find(v => v.registration_no === vehicleNumber)
+  }, [vehicleMaster, vehicleNumber])
+
+  // Transporters attached to the selected vehicle in the master: its primary
+  // transporter plus any "additional transporters". null = no vehicle selected
+  // (or still loading), so the full list is offered (transporter-only flow).
+  const [vehicleTransporterNames, setVehicleTransporterNames] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (!selectedVehicleObj?.id) { setVehicleTransporterNames(null); return }
+    let cancelled = false
+    setVehicleTransporterNames(null)
+    vehicleMasterApi.getById(selectedVehicleObj.id).then((res: any) => {
+      if (cancelled) return
+      const full = res?.success && res.data ? res.data : selectedVehicleObj
+      const extraIds = (full.additional_transporter_ids || []).map((id: any) => String(id))
+      const names = [
+        full.transporter || selectedVehicleObj.transporter,
+        ...transporterMaster.filter(t => extraIds.includes(String(t.id))).map(t => t.transporter_name),
+      ].filter((n: any): n is string => typeof n === "string" && n.trim().length > 0)
+      setVehicleTransporterNames(Array.from(new Set(names)))
+    }).catch(() => { if (!cancelled) setVehicleTransporterNames(null) })
+    return () => { cancelled = true }
+  }, [selectedVehicleObj?.id, transporterMaster])
+
+  // Rows for the Transporter dropdown: the two built-in ownership options plus
+  // every Active / pending-approval transporter, limited to the selected
+  // vehicle's attached transporters when a vehicle is chosen.
+  const freightTransporterRows = useMemo(() => {
+    const rows: { name: string; record: any | null }[] = [
+      { name: "Company Vehicle", record: null },
+      { name: "Party Vehicle", record: null },
+      ...transporterAll
+        .filter(t => t.transporter_name && (t.status === 'Active' || t.approval_status === 'pending'))
+        .map(t => ({ name: t.transporter_name as string, record: t })),
+    ]
+    const restricted = vehicleTransporterNames && vehicleTransporterNames.length > 0
+    return rows
+      .filter(r => !restricted || vehicleTransporterNames!.includes(r.name))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
+  }, [transporterAll, vehicleTransporterNames])
+
+  // Subtext under each transporter in the dropdown, same shape as the customer
+  // dropdown: "Contact Person · Mobile · GST · City (ST)". City isn't its own
+  // column, so it is the last comma-separated part of address line 1.
+  const transporterMeta = (t: any): string => {
+    if (!t) return ""
+    const addr1 = String(t.address_line1 || "")
+    const city = addr1 ? (addr1.split(",").pop() || "").trim() : ""
+    const st = activeStates.find((s: any) => String(s.id) === String(t.state_id))
+    const stateShort = st?.short_name || (t.state ? String(t.state).substring(0, 2).toUpperCase() : "")
+    const cityState = [city, stateShort ? `(${stateShort})` : ""].filter(Boolean).join(" ")
+    return [t.contact_person, t.contact_number, t.gstin, cityState].filter(Boolean).join(" · ")
+  }
+
+  const selectedTransporterObj = useMemo(
+    () => transporterAll.find(t => t.transporter_name === freightData.transporterName),
+    [transporterAll, freightData.transporterName]
+  )
+
+  const handleOpenAddVehicleModal = async () => {
+    let nextId = ""
+    try {
+      const res = await commonApi.getNextId('vehicle')
+      if (res?.success && res.data?.nextId) {
+        nextId = res.data.nextId
+      }
+    } catch (err) {
+      console.error("Failed to fetch next vehicle id:", err)
+    }
+
+    setEditingVehicle(null)
+    setVehicleModalForm({
+      ...initialVehicleForm,
+      vehicle_master_id: nextId,
+    })
+    setRoadTaxType('expiry')
+    setVehicleModalErrors({})
+    setVehicleEffectiveDatesSection(null)
+    setIsVehicleModalOpen(true)
+  }
+
+  const handleOpenEditVehicleModal = async (veh: any) => {
+    try {
+      setEditingVehicle(veh)
+      const res = await vehicleMasterApi.getById(veh.id)
+      const fullData = res?.success && res.data ? res.data : veh
+      setVehicleModalForm({
+        ...initialVehicleForm,
+        ...fullData,
+        fuel_type: fullData.fuel_type || 'Diesel',
+        state_permit_type: fullData.state_permit_type || '',
+      })
+      setRoadTaxType(fullData.life_time_tax || fullData.life_time_tax_image ? 'lifetime' : 'expiry')
+      setVehicleModalErrors({})
+      setVehicleEffectiveDatesSection(null)
+      setIsVehicleModalOpen(true)
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to load vehicle details",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleVehicleModalFileUpload = async (file: File, fieldName: string) => {
+    try {
+      const response = await orderApi.uploadFile(file)
+      if (response.success) {
+        setVehicleModalForm((prev: any) => ({ ...prev, [fieldName]: response.data.url }))
+        toast({
+          title: "Upload Successful",
+          description: `${file.name} has been uploaded.`,
+        })
+      } else {
+        toast({
+          title: "Upload Failed",
+          description: response.message || "Failed to upload file",
+          variant: "destructive",
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload file",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleVehicleModalFileRemove = (fieldName: string) => {
+    setVehicleModalForm((prev: any) => ({ ...prev, [fieldName]: '' }))
+  }
+
+  const handleSubmitVehicleModal = async () => {
+    const vErrors: Record<string, string> = {}
+    if (!vehicleModalForm.registration_no?.trim()) vErrors.registration_no = 'Registration Number is required'
+    if (!vehicleModalForm.vehicle_type?.trim()) vErrors.vehicle_type = 'Vehicle Type is required'
+    if (!vehicleModalForm.transporter?.trim()) vErrors.transporter = 'Transporter is required'
+
+    const permitApplies = vehicleModalForm.gvw !== '' && Number(vehicleModalForm.gvw) > 3000
+    if (permitApplies && !vehicleModalForm.state_permit_image) {
+      vErrors.state_permit_image = 'State Permit document is required'
+    }
+
+    Object.assign(vErrors, { ...getVehicleDocFileErrors(vehicleModalForm, roadTaxType), ...vErrors })
+
+    const regNo = vehicleModalForm.registration_no?.trim().toUpperCase()
+    const duplicate = vehicleMaster.find((v: any) =>
+      v.registration_no?.trim().toUpperCase() === regNo &&
+      v.id !== editingVehicle?.id
+    )
+    if (duplicate) {
+      vErrors.registration_no = `Registration Number "${regNo}" already exists (${duplicate.vehicle_master_id || duplicate.registration_no})`
+    }
+
+    if (Object.keys(vErrors).length > 0) {
+      setVehicleModalErrors(vErrors)
+      const errList = Object.values(vErrors).filter(Boolean)
+      toast({
+        title: "Validation Error",
+        description: `Please fill in required fields: ${errList.join(", ")}`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setVehicleModalErrors({})
+    setIsSubmittingVehicleModal(true)
+
+    try {
+      const payload = { ...vehicleModalForm }
+      if (roadTaxType === 'expiry') {
+        payload.life_time_tax = null
+        payload.life_time_tax_image = null
+      } else {
+        payload.road_tax = null
+        payload.road_tax_image = null
+      }
+      const isPermitEnabled = payload.gvw !== '' && Number(payload.gvw) > 3000
+      if (!isPermitEnabled) {
+        payload.state_permit = null
+        payload.state_permit_image = null
+        payload.state_permit_type = null
+        payload.national_permit = null
+        payload.national_permit_image = null
+      }
+      const dateFields = ['rto', 'road_tax', 'life_time_tax', 'pollution', 'insurance', 'fitness', 'state_permit', 'national_permit'] as const
+      dateFields.forEach(f => {
+        if (payload[f] === '') payload[f] = null
+      })
+
+      let res: any
+      if (editingVehicle) {
+        res = await vehicleMasterApi.update(editingVehicle.id, payload)
+      } else {
+        res = await vehicleMasterApi.create(payload)
+      }
+
+      if (res?.success) {
+        toast({
+          title: "Submitted Successfully",
+          description: res.message || (editingVehicle ? "Vehicle edit submitted for approver review" : "Vehicle submitted for approver approval"),
+        })
+        setIsVehicleModalOpen(false)
+        await fetchMasterData()
+      } else {
+        toast({
+          title: "Submission Failed",
+          description: res?.message || "Failed to save vehicle",
+          variant: "destructive"
+        })
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to save vehicle",
+        variant: "destructive"
+      })
+    } finally {
+      setIsSubmittingVehicleModal(false)
+    }
+  }
 
   // Documents must be valid at least 5 days from today. (The old Actual Dispatch
   // page had a TEMP manual override for this baseline tied to backfilling old
@@ -308,12 +729,36 @@ export default function PlanVehiclePage() {
     return d.toISOString().split("T")[0]
   }, [])
 
-  // Interstate detection: does any selected order's delivery address fall outside
-  // the vehicle's registered (RTO) state?
-  const isInterState = useMemo(() => {
-    if (selectedGroups.length === 0 || !vehicleData.rto) return false;
+  // Interstate detection. For each selected order the delivery state is taken
+  // from the address text (any known state name), else from the Customer Master
+  // state; the vehicle state comes from the registration number prefix (the
+  // master's `rto` field is a date). Unknown => treated as National (safe side)
+  // and flagged so the dispatcher can confirm or override.
+  const [customerStateByName, setCustomerStateByName] = useState<Record<string, string>>({})
+  const [routeOverride, setRouteOverride] = useState<"auto" | "national" | "within">("auto")
 
-    const rtoPrefix = vehicleData.rto.substring(0, 2).toUpperCase();
+  useEffect(() => {
+    const missing = Array.from(new Set(selectedGroups.map(g => String(g.customerName || "").trim()).filter(n => n && n !== "—")))
+      .filter(n => customerStateByName[n.toLowerCase()] === undefined)
+    if (missing.length === 0) return
+    let cancelled = false
+    Promise.all(missing.map(async name => {
+      try {
+        const res: any = await customerApi.getAll({ search: name, limit: 5 })
+        const items = res?.success ? (res.data?.customers || (Array.isArray(res.data) ? res.data : [])) : []
+        const m = items.find((c: any) => (c.customer_name || "").toLowerCase() === name.toLowerCase())
+        return [name.toLowerCase(), String(m?.state || "")] as const
+      } catch { return [name.toLowerCase(), ""] as const }
+    })).then(entries => {
+      if (!cancelled) setCustomerStateByName(prev => ({ ...prev, ...Object.fromEntries(entries) }))
+    })
+    return () => { cancelled = true }
+  }, [selectedGroups, customerStateByName])
+
+  const routeInfo = useMemo(() => {
+    const regNo = (vehicleData.registration_no || vehicleNumber || "").replace(/[^A-Za-z0-9]/g, "")
+    if (selectedGroups.length === 0 || !regNo) return { auto: false, unknown: false }
+
     const statePrefixMap: Record<string, string> = {
       "CG": "chhattisgarh", "KA": "karnataka", "MH": "maharashtra", "DL": "delhi",
       "UP": "uttar pradesh", "HR": "haryana", "RJ": "rajasthan", "MP": "madhya pradesh",
@@ -323,23 +768,36 @@ export default function PlanVehiclePage() {
       "HP": "himachal pradesh", "JH": "jharkhand", "GA": "goa", "JK": "jammu",
       "PY": "puducherry", "TR": "tripura", "MZ": "mizoram", "NL": "nagaland",
       "MN": "manipur", "ML": "meghalaya", "SK": "sikkim", "AR": "arunachal",
-    };
+    }
+    const aliases: Record<string, string> = { "chattisgarh": "chhattisgarh", "orissa": "odisha", "uttaranchal": "uttarakhand", "pondicherry": "puducherry" }
+    const stateNames = Array.from(new Set(Object.values(statePrefixMap)))
+    const norm = (t: string) => {
+      let x = (t || "").toLowerCase()
+      Object.entries(aliases).forEach(([k, v]) => { x = x.split(k).join(v) })
+      return x
+    }
 
-    const vehicleState = statePrefixMap[rtoPrefix];
-    if (!vehicleState) return true;
+    const vehicleState = statePrefixMap[regNo.substring(0, 2).toUpperCase()]
+    if (!vehicleState) return { auto: true, unknown: true }
 
-    let hasInterStateOrder = false;
+    let inter = false
+    let unknown = false
     selectedGroups.forEach(group => {
       Object.values(group._ordersMap).forEach((order: any) => {
-        const addr = (order.address || "").toLowerCase();
-        if (!addr.includes(vehicleState)) {
-          hasInterStateOrder = true;
-        }
-      });
-    });
+        const addr = norm(order.address)
+        const found = stateNames.filter(n => addr.includes(n))
+        const custState = norm(customerStateByName[String(group.customerName || "").trim().toLowerCase()] || "")
+        const target = found.length > 0 ? found : stateNames.filter(n => custState.includes(n))
+        if (target.length === 0) { unknown = true; inter = true; return }
+        if (!target.includes(vehicleState)) inter = true
+      })
+    })
+    return { auto: inter, unknown }
+  }, [selectedGroups, vehicleData.registration_no, vehicleNumber, customerStateByName])
 
-    return hasInterStateOrder;
-  }, [selectedGroups, vehicleData.rto]);
+  const isInterState = routeOverride === "auto" ? routeInfo.auto : routeOverride === "national"
+  // Delivery state could not be detected: the dispatcher must pick the route.
+  const routeNeedsConfirm = routeOverride === "auto" && routeInfo.unknown
 
   const handleFileChange = async (field: string, fileNameField: string, file: File | null, type: 'vehicle' | 'freight' = 'vehicle') => {
     if (!file) return
@@ -531,6 +989,133 @@ export default function PlanVehiclePage() {
     fetchDepots();
   }, [user?.depo_access])
 
+  const selectedDriverObj = useMemo(() => {
+    return driverMaster.find(d => d.driver_name === driverName)
+  }, [driverMaster, driverName])
+
+  const applyDriver = (d: any) => {
+    setDriverName(d.driver_name)
+    setDriverData({
+      contact_no: d.mobile_no || "",
+      license_no: d.driving_licence_no || "",
+      license_type: d.driving_licence_type || "",
+      valid_upto: d.valid_upto ? new Date(d.valid_upto).toISOString().split('T')[0] : "",
+      trans_valid_upto: d.trans_valid_upto ? new Date(d.trans_valid_upto).toISOString().split('T')[0] : "",
+      lmv_valid_upto: d.lmv_valid_upto ? new Date(d.lmv_valid_upto).toISOString().split('T')[0] : ""
+    })
+  }
+
+  const clearDriver = () => {
+    setDriverName("")
+    setDriverData({ contact_no: "", license_no: "", license_type: "", valid_upto: "", trans_valid_upto: "", lmv_valid_upto: "" })
+  }
+
+  const handleOpenAddDriverModal = async () => {
+    let nextId = ""
+    try {
+      const res = await commonApi.getNextId('driver')
+      if (res?.success && res.data?.nextId) nextId = res.data.nextId
+    } catch (err) {
+      console.error("Failed to fetch next driver id:", err)
+    }
+    setEditingDriver(null)
+    setDriverModalForm({ ...initialDriverForm, driver_master_id: nextId })
+    setIsDriverModalOpen(true)
+  }
+
+  const handleOpenEditDriverModal = async (drv: any) => {
+    try {
+      setEditingDriver(drv)
+      const res = await driverMasterApi.getById(drv.id)
+      const fullData = res?.success && res.data ? res.data : drv
+      setDriverModalForm({ ...initialDriverForm, ...fullData })
+      setIsDriverModalOpen(true)
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to load driver details",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleDriverModalFileUpload = async (file: File, fieldName: string) => {
+    try {
+      const response = await orderApi.uploadFile(file)
+      if (response.success) {
+        setDriverModalForm((prev: any) => ({ ...prev, [fieldName]: response.data.url }))
+        toast({ title: "Upload Successful", description: `${file.name} has been uploaded.` })
+      } else {
+        toast({ title: "Upload Failed", description: response.message || "Failed to upload file", variant: "destructive" })
+      }
+    } catch (error: any) {
+      toast({ title: "Upload Failed", description: error.message || "Failed to upload file", variant: "destructive" })
+    }
+  }
+
+  const handleDriverModalFileRemove = (fieldName: string) => {
+    setDriverModalForm((prev: any) => ({ ...prev, [fieldName]: '' }))
+  }
+
+  const handleSubmitDriverModal = async () => {
+    const dErrors: string[] = []
+    if (!driverModalForm.driver_name?.trim()) dErrors.push('Driver Name is required')
+    if (!driverModalForm.mobile_no?.trim()) dErrors.push('Mobile Number is required')
+    if (!driverModalForm.driving_licence_no?.trim()) dErrors.push('Driving Licence Number is required')
+    if (dErrors.length > 0) {
+      toast({
+        title: "Validation Error",
+        description: `Please fill in required fields: ${dErrors.join(", ")}`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSubmittingDriverModal(true)
+    try {
+      const res: any = editingDriver
+        ? await driverMasterApi.update(editingDriver.id, driverModalForm)
+        : await driverMasterApi.create(driverModalForm)
+      if (res?.success) {
+        toast({
+          title: "Submitted Successfully",
+          description: res.message || (editingDriver ? "Driver edit submitted for approver review" : "Driver submitted for approver approval"),
+        })
+        setIsDriverModalOpen(false)
+        await fetchMasterData()
+      } else {
+        toast({ title: "Submission Failed", description: res?.message || "Failed to save driver", variant: "destructive" })
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to save driver", variant: "destructive" })
+    } finally {
+      setIsSubmittingDriverModal(false)
+    }
+  }
+
+  const handleOpenAddTransporterModal = () => {
+    setEditingTransporter(null)
+    setIsTransporterModalOpen(true)
+  }
+
+  const handleOpenEditTransporterModal = (t: any) => {
+    setEditingTransporter(t)
+    setIsTransporterModalOpen(true)
+  }
+
+  const selectTransporter = (v: string) => {
+    const isNormal = !['Company Vehicle', 'Party Vehicle'].includes(v);
+    setFreightData(p => ({
+      ...p,
+      transporterName: v,
+      freightRateType: isNormal ? p.freightRateType : "",
+      freightAmount: isNormal ? p.freightAmount : "",
+      cash_bank: isNormal ? p.cash_bank : "",
+      diesel_advance: isNormal ? p.diesel_advance : "",
+      bhada: isNormal ? p.bhada : ""
+    }));
+  }
+
   const availableDepots = useMemo(() => {
     return activeDepots.map(d => d.depot_name);
   }, [activeDepots]);
@@ -545,15 +1130,21 @@ export default function PlanVehiclePage() {
   const fetchMasterData = async () => {
     try {
       const [vRes, tRes] = await Promise.all([
-        vehicleMasterApi.getAll({ all: 'true' }),
-        transportMasterApi.getAll({ all: 'true' })
+        vehicleMasterApi.getAll({ all: 'true', includePending: 'true' }),
+        transportMasterApi.getAll({ all: 'true', includePending: 'true' })
       ]);
       const vehicles = vRes.success ? (vRes.data.vehicles || []) : [];
       if (vRes.success) setVehicleMaster(vehicles);
-      const dRes = await driverMasterApi.getAll({ all: 'true' });
+      const dRes = await driverMasterApi.getAll({ all: 'true', includePending: 'true' });
       const drivers = dRes.success ? (dRes.data.drivers || []) : [];
       if (dRes.success) setDriverMaster(drivers);
-      if (tRes.success) setTransporterMaster(tRes.data.transporters || []);
+      if (tRes.success) {
+        const allTransporters = tRes.data.transporters || [];
+        setTransporterAll(allTransporters);
+        // Pending transporters are listed in the Transporter dropdown only; the
+        // vehicle form pickers keep offering approved ones.
+        setTransporterMaster(allTransporters.filter((t: any) => t.approval_status !== 'pending'));
+      }
       return { vehicles, drivers };
     } catch (error) {
       console.error("Failed to fetch master data:", error);
@@ -741,12 +1332,18 @@ export default function PlanVehiclePage() {
       pollution_end_date: selectedV.fuel_type === 'Electrical' ? "" : (selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : ""),
       permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
       permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
-      fitness: selectedV.fitness_image || p.fitness,
-      insurance: selectedV.insurance_image || p.insurance,
-      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
-      polution: selectedV.pollution_image || p.polution,
-      permit1: selectedV.state_permit_image || p.permit1,
-      permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
+      fitness: selectedV.fitness_image || "",
+      insurance: selectedV.insurance_image || "",
+      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || "",
+      polution: selectedV.pollution_image || "",
+      permit1: selectedV.state_permit_image || "",
+      permit2_out_state: selectedV.national_permit_image || "",
+      fitness_file_name: selectedV.fitness_image ? "fitness_doc" : "",
+      insurance_file_name: selectedV.insurance_image ? "insurance_doc" : "",
+      tax_file_name: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) ? "tax_doc" : "",
+      pollution_file_name: selectedV.pollution_image ? "pollution_doc" : "",
+      permit1_file_name: selectedV.state_permit_image ? "permit1_doc" : "",
+      permit2_file_name: selectedV.national_permit_image ? "permit2_doc" : "",
       gvw: selectedV.gvw || "",
       ulw: selectedV.ulw || "",
     }));
@@ -1083,6 +1680,11 @@ export default function PlanVehiclePage() {
       }
     }
 
+    // Route must be confirmed on every depot once a vehicle is selected.
+    if (vehicleNumber.trim() && routeNeedsConfirm) {
+      validationErrors.push("Delivery state could not be detected. Select the Route (National / Within State) before dispatch.");
+    }
+
     // Client spec: warn the user if any of the selected vehicle's documents have
     // expired. BANARI already gets the full check above; for the other depots
     // this is a warning only (never blocks the plan).
@@ -1101,6 +1703,9 @@ export default function PlanVehiclePage() {
         if (dateVal && String(dateVal) < todayStr) {
           docWarnings.push(`${field.label} has expired (valid up to ${formatDate(String(dateVal))}).`);
         }
+      }
+      if (isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
+        docWarnings.push("National / Other State Permit is missing for an interstate dispatch.");
       }
     }
 
@@ -1532,62 +2137,304 @@ export default function PlanVehiclePage() {
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
                           Vehicle Registration Number {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
                         </Label>
-                        <Combobox
-                          value={vehicleNumber}
-                          onValueChange={(v) => {
-                            setVehicleNumber(v);
-                            const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                            if (selectedV) {
-                              autofillVehicleData(selectedV);
-                            } else if (!v) {
-                              setVehicleData(p => ({
-                                ...p, registration_no: "", vehicle_type: "", rto: "", passing_weight: "",
-                                fitness_end_date: "", insurance_end_date: "", tax_end_date: "", is_lifetime_tax: false,
-                                fuel_type: "", pollution_end_date: "", permit1_end_date: "", permit2_end_date: "",
-                                fitness: "", insurance: "", tax_copy: "", polution: "", permit1: "", permit2_out_state: "",
-                                gvw: "", ulw: ""
-                              }));
-                            }
-                          }}
-                          options={vehicleOptions}
-                          placeholder="Select Vehicle"
-                          searchPlaceholder="Search vehicle..."
-                          emptyText="No vehicle found."
-                          className="h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-black text-sm sm:text-lg focus:border-purple-500 transition-colors uppercase bg-white shadow-sm"
-                        />
+                        <Popover open={vehicleDropdownOpen} onOpenChange={setVehicleDropdownOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={vehicleDropdownOpen}
+                              className={cn(
+                                "h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-bold text-sm sm:text-base focus:border-primary transition-colors uppercase bg-white shadow-sm w-full justify-between",
+                                !vehicleNumber && "text-muted-foreground",
+                                vehicleNumber && "text-slate-900"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 truncate min-w-0 flex-1 text-left">
+                                <span className="truncate">{vehicleNumber || "Select Vehicle"}</span>
+                                {selectedVehicleObj && (
+                                  <Badge variant="outline" className={cn(
+                                    "text-[10px] font-semibold px-1.5 py-0 h-4 normal-case shrink-0",
+                                    (selectedVehicleObj.approval_status === 'pending' || selectedVehicleObj.approvalStatus === 'pending')
+                                      ? "bg-amber-50 text-amber-700 border-amber-300"
+                                      : Boolean(selectedVehicleObj.has_pending_edit || selectedVehicleObj.hasPendingEdit || selectedVehicleObj.pending_changes || selectedVehicleObj.pendingChanges)
+                                      ? "bg-blue-50 text-blue-700 border-blue-300"
+                                      : "bg-emerald-50 text-emerald-700 border-emerald-300"
+                                  )}>
+                                    {(selectedVehicleObj.approval_status === 'pending' || selectedVehicleObj.approvalStatus === 'pending')
+                                      ? 'Pending Approval'
+                                      : Boolean(selectedVehicleObj.has_pending_edit || selectedVehicleObj.hasPendingEdit || selectedVehicleObj.pending_changes || selectedVehicleObj.pendingChanges)
+                                      ? 'Edit Pending'
+                                      : 'Approved'}
+                                  </Badge>
+                                )}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] p-0 shadow-lg border border-slate-200 bg-white rounded-xl overflow-hidden"
+                            style={{ width: 'var(--radix-popover-trigger-width)' }}
+                            align="start"
+                            side="bottom"
+                            sideOffset={4}
+                            avoidCollisions={false}
+                            sticky="always"
+                            hideWhenDetached={true}
+                            updatePositionStrategy="always"
+                            onWheel={(e) => e.stopPropagation()}
+                            onTouchMove={(e) => e.stopPropagation()}
+                          >
+                            <div className="p-2 border-b border-slate-100 bg-slate-50/60">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setVehicleDropdownOpen(false)
+                                  handleOpenAddVehicleModal()
+                                }}
+                                className="w-full justify-center gap-1.5 h-8 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-white border-dashed border-slate-300 bg-white"
+                              >
+                                <Plus className="h-3.5 w-3.5 text-primary" />
+                                <span>Add Vehicle</span>
+                              </Button>
+                            </div>
+
+                            <Command>
+                              <CommandInput placeholder="Search vehicle number, type, transporter..." className="h-9 text-xs" />
+                              <CommandList className="max-h-[280px] overflow-y-auto overscroll-contain">
+                                <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">No vehicle found.</CommandEmpty>
+                                <CommandGroup>
+                                  {vehicleMaster
+                                    .filter(v => v.registration_no && (v.status === 'Active' || v.approval_status === 'pending' || v.approvalStatus === 'pending'))
+                                    .sort((a, b) => (a.registration_no || '').localeCompare(b.registration_no || '', undefined, { sensitivity: 'base', numeric: true }))
+                                    .map((veh) => {
+                                      const isSelected = veh.registration_no === vehicleNumber;
+                                      const isPending = (veh.approval_status === 'pending' || veh.approvalStatus === 'pending');
+                                      const hasPendingEdit = Boolean(veh.has_pending_edit || veh.hasPendingEdit || veh.pending_changes || veh.pendingChanges);
+
+                                      return (
+                                        <CommandItem
+                                          key={veh.id || veh.registration_no}
+                                          value={`${veh.registration_no} ${veh.vehicle_type || ''} ${veh.transporter || ''}`}
+                                          onSelect={() => {
+                                            if (isPending) {
+                                              toast({
+                                                title: "Pending Approval",
+                                                description: `Vehicle ${veh.registration_no} is awaiting approver verification and cannot be assigned yet.`,
+                                                variant: "destructive"
+                                              });
+                                              return;
+                                            }
+                                            if (isSelected) {
+                                              setVehicleNumber("");
+                                              setVehicleData(p => ({
+                                                ...p, registration_no: "", vehicle_type: "", rto: "", passing_weight: "",
+                                                fitness_end_date: "", insurance_end_date: "", tax_end_date: "", is_lifetime_tax: false,
+                                                fuel_type: "", pollution_end_date: "", permit1_end_date: "", permit2_end_date: "",
+                                                fitness: "", insurance: "", tax_copy: "", polution: "", permit1: "", permit2_out_state: "",
+                                                gvw: "", ulw: ""
+                                              }));
+                                            } else {
+                                              setVehicleNumber(veh.registration_no);
+                                              autofillVehicleData(veh);
+                                            }
+                                            setVehicleDropdownOpen(false);
+                                          }}
+                                          className="flex items-center justify-between py-2 px-2.5 cursor-pointer hover:bg-slate-50 aria-selected:bg-slate-100 group"
+                                        >
+                                          <div className="flex items-center gap-2 truncate flex-1 min-w-0 pr-2">
+                                            <Check
+                                              className={cn(
+                                                "h-4 w-4 shrink-0 text-primary",
+                                                isSelected ? "opacity-100" : "opacity-0"
+                                              )}
+                                            />
+                                            <div className="flex flex-col min-w-0">
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className="font-semibold text-xs text-slate-800">{veh.registration_no}</span>
+                                                {isPending ? (
+                                                  <Badge variant="outline" className="text-[9px] font-medium text-amber-700 border-amber-300 bg-amber-50 px-1 py-0 h-3.5 shrink-0">
+                                                    Pending Approval
+                                                  </Badge>
+                                                ) : hasPendingEdit ? (
+                                                  <Badge variant="outline" className="text-[9px] font-medium text-blue-700 border-blue-300 bg-blue-50 px-1 py-0 h-3.5 shrink-0">
+                                                    Edit Pending
+                                                  </Badge>
+                                                ) : (
+                                                  <Badge variant="outline" className="text-[9px] font-medium text-emerald-700 border-emerald-300 bg-emerald-50 px-1 py-0 h-3.5 shrink-0">
+                                                    Approved
+                                                  </Badge>
+                                                )}
+                                              </div>
+                                              {(veh.vehicle_type || veh.transporter || veh.rto) && (
+                                                <span className="text-[10px] text-muted-foreground truncate">
+                                                  {[veh.vehicle_type, veh.transporter, veh.rto].filter(Boolean).join(" • ")}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            title="Edit / Modify Vehicle"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setVehicleDropdownOpen(false);
+                                              handleOpenEditVehicleModal(veh);
+                                            }}
+                                            className="h-6 px-2 text-[11px] font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 rounded gap-1 shrink-0"
+                                          >
+                                            <Pencil className="h-3 w-3" />
+                                            <span>Edit</span>
+                                          </Button>
+                                        </CommandItem>
+                                      );
+                                    })}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
 
                       <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
                           Driver Name <span className="text-slate-400 font-normal normal-case">(Optional)</span>
                         </Label>
-                        <Combobox
-                          value={driverName}
-                          onValueChange={(v) => {
-                            setDriverName(v);
-                            const selectedD = driverMaster.find(d => d.driver_name === v);
-                            if (selectedD) {
-                              setDriverData({
-                                contact_no: selectedD.mobile_no || "",
-                                license_no: selectedD.driving_licence_no || "",
-                                license_type: selectedD.driving_licence_type || "",
-                                valid_upto: selectedD.valid_upto ? new Date(selectedD.valid_upto).toISOString().split('T')[0] : "",
-                                trans_valid_upto: selectedD.trans_valid_upto ? new Date(selectedD.trans_valid_upto).toISOString().split('T')[0] : "",
-                                lmv_valid_upto: selectedD.lmv_valid_upto ? new Date(selectedD.lmv_valid_upto).toISOString().split('T')[0] : ""
-                              });
-                            } else if (!v) {
-                              setDriverData({ contact_no: "", license_no: "", license_type: "", valid_upto: "", trans_valid_upto: "", lmv_valid_upto: "" });
-                            }
-                          }}
-                          options={driverOptions}
-                          placeholder="Select Driver"
-                          searchPlaceholder="Search driver..."
-                          emptyText="No driver found."
-                          className="h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-black text-sm sm:text-lg focus:border-purple-500 transition-colors uppercase bg-white shadow-sm"
-                        />
+                        <Popover open={driverDropdownOpen} onOpenChange={setDriverDropdownOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={driverDropdownOpen}
+                              className={cn(
+                                "h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-bold text-sm sm:text-base focus:border-primary transition-colors uppercase bg-white shadow-sm w-full justify-between",
+                                !driverName && "text-muted-foreground",
+                                driverName && "text-slate-900"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 truncate min-w-0 flex-1 text-left">
+                                <span className="truncate">{driverName || "Select Driver"}</span>
+                                {selectedDriverObj && (() => {
+                                  const st = driverApprovalState(selectedDriverObj)
+                                  return (
+                                    <Badge variant="outline" className={cn("text-[10px] font-semibold px-1.5 py-0 h-4 normal-case shrink-0", DRIVER_BADGE_CLASS[st])}>
+                                      {DRIVER_BADGE_LABEL[st]}
+                                    </Badge>
+                                  )
+                                })()}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] p-0 shadow-lg border border-slate-200 bg-white rounded-xl overflow-hidden"
+                            style={{ width: 'var(--radix-popover-trigger-width)' }}
+                            align="start"
+                            side="bottom"
+                            sideOffset={4}
+                            avoidCollisions={false}
+                            sticky="always"
+                            hideWhenDetached={true}
+                            updatePositionStrategy="always"
+                            onWheel={(e) => e.stopPropagation()}
+                            onTouchMove={(e) => e.stopPropagation()}
+                          >
+                            <div className="p-2 border-b border-slate-100 bg-slate-50/60">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setDriverDropdownOpen(false)
+                                  handleOpenAddDriverModal()
+                                }}
+                                className="w-full justify-center gap-1.5 h-8 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-white border-dashed border-slate-300 bg-white"
+                              >
+                                <Plus className="h-3.5 w-3.5 text-primary" />
+                                <span>Add Driver</span>
+                              </Button>
+                            </div>
+
+                            <Command filter={(value, search) => value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0}>
+                              <CommandInput placeholder="Search driver name, mobile, licence..." className="h-9 text-xs" />
+                              <CommandList className="max-h-[280px] overflow-y-auto overscroll-contain">
+                                <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">No driver found.</CommandEmpty>
+                                <CommandGroup>
+                                  {driverMaster
+                                    .filter(d => d.driver_name && (d.status === 'Active' || d.approval_status === 'pending'))
+                                    .sort((a, b) => (a.driver_name || '').localeCompare(b.driver_name || '', undefined, { sensitivity: 'base', numeric: true }))
+                                    .map((drv) => {
+                                      const isSelected = drv.driver_name === driverName
+                                      const st = driverApprovalState(drv)
+                                      const isPending = st === 'pending'
+
+                                      return (
+                                        <CommandItem
+                                          key={drv.id || drv.driver_name}
+                                          value={`${drv.driver_name} ${drv.mobile_no || ''} ${drv.driving_licence_no || ''}`}
+                                          onSelect={() => {
+                                            if (isPending) {
+                                              toast({
+                                                title: "Pending Approval",
+                                                description: `Driver ${drv.driver_name} is awaiting approver verification and cannot be assigned yet.`,
+                                                variant: "destructive"
+                                              })
+                                              return
+                                            }
+                                            if (isSelected) clearDriver()
+                                            else applyDriver(drv)
+                                            setDriverDropdownOpen(false)
+                                          }}
+                                          className="flex items-center justify-between py-2 px-2.5 cursor-pointer hover:bg-slate-50 aria-selected:bg-slate-100 group"
+                                        >
+                                          <div className="flex items-center gap-2 truncate flex-1 min-w-0 pr-2">
+                                            <Check className={cn("h-4 w-4 shrink-0 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
+                                            <div className="flex flex-col min-w-0">
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className="font-semibold text-xs text-slate-800">{drv.driver_name}</span>
+                                                <Badge variant="outline" className={cn("text-[9px] font-medium px-1 py-0 h-3.5 shrink-0", DRIVER_BADGE_CLASS[st])}>
+                                                  {DRIVER_BADGE_LABEL[st]}
+                                                </Badge>
+                                              </div>
+                                              {(drv.mobile_no || drv.driving_licence_no) && (
+                                                <span className="text-[10px] text-muted-foreground truncate">
+                                                  {[drv.mobile_no, drv.driving_licence_no].filter(Boolean).join(" • ")}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            title="Edit / Modify Driver"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setDriverDropdownOpen(false)
+                                              handleOpenEditDriverModal(drv)
+                                            }}
+                                            className="h-6 px-2 text-[11px] font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 rounded gap-1 shrink-0"
+                                          >
+                                            <Pencil className="h-3 w-3" />
+                                            <span>Edit</span>
+                                          </Button>
+                                        </CommandItem>
+                                      )
+                                    })}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
 
-                      <div className="grid grid-cols-2 min-[380px]:grid-cols-4 gap-2 lg:col-span-2">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-x-4 lg:col-span-2">
+                        <div className="grid grid-cols-2 gap-2">
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Type</p>
                           <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.vehicle_type || '---'}</p>
@@ -1598,7 +2445,7 @@ export default function PlanVehiclePage() {
                         </div>
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
-                          <p className={cn("text-[11px] font-black uppercase leading-none", isOverloaded ? "text-red-600" : "text-purple-600")}>
+                          <p className={cn("text-[11px] font-black uppercase leading-none", isOverloaded ? "text-red-600" : "text-primary")}>
                             {vehicleData.passing_weight || '0.00'} KG
                           </p>
                         </div>
@@ -1606,6 +2453,9 @@ export default function PlanVehiclePage() {
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
                           <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw || '---'} KG</p>
                         </div>
+                        </div>
+                        <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Contact</p>
                           <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{driverData.contact_no || '---'}</p>
@@ -1626,61 +2476,248 @@ export default function PlanVehiclePage() {
                             {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
                           </p>
                         </div>
+                        </div>
+                        {(() => {
+                          const dlUrl: string | null = driverName ? (selectedDriverObj?.dl_upload || null) : null
+                          const dlIsPdf = !!dlUrl && dlUrl.toLowerCase().split('?')[0].endsWith('.pdf')
+                          return (
+                            <div
+                              onClick={() => dlUrl && window.open(dlUrl, "_blank")}
+                              title={dlUrl ? "Click to view Driver Licence" : undefined}
+                              className={cn(
+                                "h-[72px] bg-white border-2 rounded-xl px-3 flex items-center gap-3 shadow-sm",
+                                dlUrl ? "border-slate-100 cursor-pointer hover:border-slate-300 transition-colors" : "border-dashed border-slate-200"
+                              )}
+                            >
+                              <div className="h-12 w-16 shrink-0 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+                                {dlUrl ? (
+                                  dlIsPdf ? (
+                                    <FileText className="h-6 w-6 text-rose-600" />
+                                  ) : (
+                                    <img src={dlUrl} alt="Driver Licence" className="h-full w-full object-cover" />
+                                  )
+                                ) : (
+                                  <ImageIcon className="h-5 w-5 text-slate-300" />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Driver Licence</p>
+                                <p className="text-[11px] font-black text-slate-700 uppercase leading-none truncate">
+                                  {!driverName ? "Select driver" : dlUrl ? (dlIsPdf ? "PDF Document" : "Licence Image") : "Not Uploaded"}
+                                </p>
+                              </div>
+                              {dlUrl && (
+                                <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium shrink-0">
+                                  <Eye className="h-3 w-3 text-primary" /> View <ExternalLink className="h-2.5 w-2.5" />
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })()}
+                        </div>
                       </div>
                     </div>
 
                     <div className="pt-4 border-t border-slate-200">
-                      <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest leading-none">Digital Documents</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {([
-                          { key: 'fitness', fileKey: 'fitness_file_name', dateKey: 'fitness_end_date', label: 'Fitness', applicable: true },
-                          { key: 'insurance', fileKey: 'insurance_file_name', dateKey: 'insurance_end_date', label: 'Insurance', applicable: true },
-                          { key: 'tax_copy', fileKey: 'tax_file_name', dateKey: 'tax_end_date', label: 'Tax Copy', applicable: true },
-                          { key: 'polution', fileKey: 'pollution_file_name', dateKey: 'pollution_end_date', label: 'Pollution', applicable: vehicleData.fuel_type !== 'Electrical' },
-                          { key: 'permit1', fileKey: 'permit1_file_name', dateKey: 'permit1_end_date', label: 'State Permit', applicable: Number(vehicleData.gvw) > 3000 },
-                          { key: 'permit2_out_state', fileKey: 'permit2_file_name', dateKey: 'permit2_end_date', label: 'National / Other State Permit', applicable: isInterState && Number(vehicleData.gvw) > 3000 },
-                        ] as const).map(doc => (
-                          <div key={doc.key} className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 min-w-0",
-                            !doc.applicable && "opacity-40 grayscale bg-slate-50 border-slate-200"
-                          )}>
-                            <span className="text-[10px] font-black text-slate-500 uppercase break-words">
-                              {doc.label} {doc.applicable
-                                ? (selectedDepoTab?.toUpperCase() === 'BANARI' && doc.key !== 'permit2_out_state' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>)
-                                : <span className="text-slate-400 normal-case font-medium">(N/A)</span>}
-                            </span>
-                            <FileUploadField
-                              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                              value={vehicleData[doc.key] && vehicleData[doc.key] !== 'pending' ? vehicleData[doc.key] : null}
-                              fileName={vehicleData[doc.fileKey]}
-                              helperText="Max file size: 20 MB"
-                              uploading={isUploading === doc.key}
-                              buttonText={vehicleData[doc.fileKey] ? 'REPLACE' : 'UPLOAD'}
-                              disabled={!doc.applicable}
-                              onFilesSelected={(files) => handleFileChange(doc.key, doc.fileKey, files[0] || null)}
-                            />
-                            {doc.key === 'tax_copy' && vehicleData.is_lifetime_tax ? (
-                              <div className="h-7 text-[10px] border border-slate-200 rounded-lg px-2 font-bold bg-slate-100 opacity-80 flex items-center text-slate-500" title="Lifetime Tax">LTT</div>
-                            ) : (
-                              <Input
-                                type="date"
-                                className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold bg-white"
-                                min={minDate}
-                                disabled={!doc.applicable}
-                                value={vehicleData[doc.dateKey]}
-                                onChange={(e) => setVehicleData(p => ({ ...p, [doc.dateKey]: e.target.value }))}
-                              />
-                            )}
-                          </div>
-                        ))}
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest leading-none">
+                          Digital Documents<span className="text-slate-400 font-normal lowercase tracking-normal">(Master Derived • View Only)</span>
+                        </p>
+                        {selectedVehicleObj && (
+                          <span className="text-[10px] font-semibold text-slate-500">
+                            Vehicle: <strong className="text-slate-800">{selectedVehicleObj.registration_no}</strong>
+                          </span>
+                        )}
                       </div>
+                      {vehicleNumber.trim() && (
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Route</span>
+                          <Select value={routeOverride} onValueChange={(v) => setRouteOverride(v as "auto" | "national" | "within")}>
+                            <SelectTrigger className="h-8 w-48 text-xs font-bold border-slate-200 bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">Auto ({routeInfo.auto ? "National" : "Within State"})</SelectItem>
+                              <SelectItem value="national">National</SelectItem>
+                              <SelectItem value="within">Within State</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {routeNeedsConfirm && (
+                            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5">
+                              <span className="text-[11px] font-semibold text-amber-700">
+                                Delivery state could not be detected. Is this trip National or Within State?
+                              </span>
+                              <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRouteOverride("national")}>National</Button>
+                              <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRouteOverride("within")}>Within State</Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!vehicleNumber.trim() ? (
+                        <div className="bg-slate-50/70 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center flex flex-col items-center justify-center gap-2">
+                          <div className="h-10 w-10 rounded-full bg-slate-100 border border-slate-200 text-slate-400 flex items-center justify-center shadow-2xs">
+                            <Truck className="h-5 w-5 text-slate-400" />
+                          </div>
+                          <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                            No Vehicle Selected
+                          </p>
+                          <p className="text-[11px] text-slate-500 max-w-sm">
+                            Select a vehicle registration number above to view its master-derived digital documents, certificates, and expiry dates.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {([
+                            { key: 'fitness', fileKey: 'fitness_file_name', dateKey: 'fitness_end_date', label: 'Fitness', applicable: true },
+                            { key: 'insurance', fileKey: 'insurance_file_name', dateKey: 'insurance_end_date', label: 'Insurance', applicable: true },
+                            { key: 'tax_copy', fileKey: 'tax_file_name', dateKey: 'tax_end_date', label: 'Tax Copy', applicable: true },
+                            { key: 'polution', fileKey: 'pollution_file_name', dateKey: 'pollution_end_date', label: 'Pollution', applicable: vehicleData.fuel_type !== 'Electrical' },
+                            { key: 'permit1', fileKey: 'permit1_file_name', dateKey: 'permit1_end_date', label: 'State Permit', applicable: Number(vehicleData.gvw) > 3000 },
+                            { key: 'permit2_out_state', fileKey: 'permit2_file_name', dateKey: 'permit2_end_date', label: 'National / Other State Permit', applicable: !routeNeedsConfirm && isInterState && Number(vehicleData.gvw) > 3000 },
+                          ] as const).map(doc => {
+                            const docUrl = vehicleData[doc.key] && vehicleData[doc.key] !== 'pending' ? vehicleData[doc.key] : null;
+                            const dateVal = vehicleData[doc.dateKey];
+                            const isLifetime = doc.key === 'tax_copy' && vehicleData.is_lifetime_tax;
+                            const todayStr = new Date().toISOString().split("T")[0];
+                            const isExpired = !isLifetime && dateVal && dateVal < todayStr;
+                            const isExpiringSoon = !isLifetime && dateVal && !isExpired && dateVal < minDate;
+                            const isPdf = typeof docUrl === 'string' && docUrl.toLowerCase().split('?')[0].endsWith('.pdf');
+
+                            return (
+                              <div key={doc.key} className={cn(
+                                "bg-white border rounded-xl p-3 flex flex-col justify-between gap-2.5 min-w-0 shadow-xs",
+                                !doc.applicable
+                                  ? "opacity-45 grayscale bg-slate-50 border-slate-200"
+                                  : docUrl
+                                  ? "border-slate-200 hover:border-slate-300 transition-colors"
+                                  : "border-dashed border-slate-300"
+                              )}>
+                                {/* Header: Label + Status Badge */}
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="text-[10px] font-black text-slate-700 uppercase tracking-tight truncate">
+                                    {doc.label}
+                                  </span>
+                                  {!doc.applicable ? (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-slate-100 text-slate-400 border-slate-200 shrink-0 font-medium">
+                                      N/A
+                                    </Badge>
+                                  ) : docUrl ? (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-emerald-50 text-emerald-700 border-emerald-300 shrink-0 font-semibold gap-1">
+                                      <FileCheck className="h-2.5 w-2.5 text-emerald-600" />
+                                      Available
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-amber-50 text-amber-700 border-amber-300 shrink-0 font-medium">
+                                      {selectedDepoTab?.toUpperCase() === 'BANARI' && doc.key !== 'permit2_out_state' ? 'Required' : 'Not Uploaded'}
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                {/* Document Thumbnail / View (VIEW ONLY) */}
+                                <div>
+                                  {!doc.applicable ? (
+                                    <div className="w-full h-32 sm:h-36 rounded-lg border border-slate-200/60 bg-slate-100/50 flex flex-col items-center justify-center gap-1 text-slate-400 p-2">
+                                      <span className="text-xs font-semibold">Not Applicable</span>
+                                    </div>
+                                  ) : docUrl ? (
+                                    isPdf ? (
+                                      <div
+                                        onClick={() => window.open(docUrl, "_blank")}
+                                        className="w-full h-32 sm:h-36 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100/80 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group p-2 shadow-2xs"
+                                        title={`Click to view ${doc.label} PDF`}
+                                      >
+                                        <div className="h-11 w-11 rounded-lg bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                          <FileText className="h-6 w-6" />
+                                        </div>
+                                        <span className="text-xs font-bold text-slate-700">PDF Document</span>
+                                        <span className="text-[10px] text-slate-400 flex items-center gap-1 font-medium">
+                                          <Eye className="h-3 w-3 text-primary" /> Click to open <ExternalLink className="h-2.5 w-2.5" />
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div
+                                        onClick={() => window.open(docUrl, "_blank")}
+                                        className="relative w-full h-32 sm:h-36 rounded-lg overflow-hidden border border-slate-200/90 bg-slate-100/60 flex items-center justify-center p-1.5 cursor-pointer group shadow-2xs hover:shadow-xs transition-all"
+                                        title={`Click to view full ${doc.label} document`}
+                                      >
+                                        <img
+                                          src={docUrl}
+                                          alt={doc.label}
+                                          className="max-w-full max-h-full object-contain rounded shadow-2xs group-hover:scale-105 transition-transform duration-200"
+                                        />
+                                        {/* Hover Overlay */}
+                                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white font-bold text-xs backdrop-blur-[1px] rounded-lg">
+                                          <Eye className="h-4 w-4" />
+                                          <span>View Document</span>
+                                          <ExternalLink className="h-3 w-3 ml-0.5" />
+                                        </div>
+                                        {/* Bottom badge overlay */}
+                                        <div className="absolute bottom-1.5 right-1.5 bg-slate-900/70 text-white rounded px-2 py-0.5 text-[9px] font-semibold flex items-center gap-1 backdrop-blur-xs group-hover:opacity-0 transition-opacity">
+                                          <Eye className="h-2.5 w-2.5" />
+                                          <span>Preview</span>
+                                        </div>
+                                      </div>
+                                    )
+                                  ) : (
+                                    <div className="w-full h-32 sm:h-36 rounded-lg border border-dashed border-amber-300 bg-amber-50/40 flex flex-col items-center justify-center gap-1.5 p-2 text-center">
+                                      <div className="h-10 w-10 rounded-full bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center">
+                                        <FileX className="h-5 w-5" />
+                                      </div>
+                                      <span className="text-xs font-bold text-amber-800 uppercase tracking-wide">No Document</span>
+                                      <span className="text-[10px] font-medium text-amber-700/80">File not uploaded in Vehicle Master</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Validity / Expiry Date (VIEW ONLY) */}
+                                <div className="pt-1 border-t border-slate-100">
+                                  {isLifetime ? (
+                                    <div className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5 text-xs">
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase">Valid Upto:</span>
+                                      <Badge variant="outline" className="bg-slate-200/80 text-slate-700 font-bold text-[10px] px-1.5 py-0 border-slate-300">
+                                        Lifetime (LTT)
+                                      </Badge>
+                                    </div>
+                                  ) : (
+                                    <div className={cn(
+                                      "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs border transition-colors",
+                                      !dateVal ? "bg-slate-50 border-slate-200/80 text-slate-400" :
+                                      isExpired ? "bg-red-50/70 border-red-200 text-red-700" :
+                                      isExpiringSoon ? "bg-amber-50/70 border-amber-200 text-amber-700" :
+                                      "bg-slate-50 border-slate-200/80 text-slate-800"
+                                    )}>
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                        <CalendarIconLucide className="h-3 w-3 text-slate-400 shrink-0" />
+                                        Valid Upto:
+                                      </span>
+                                      <span className="font-bold text-[11px] truncate flex items-center gap-1">
+                                        {dateVal ? formatDate(dateVal) : "—"}
+                                        {isExpired && (
+                                          <span className="text-[9px] font-black uppercase text-red-600 bg-red-100/80 px-1 rounded">
+                                            Expired
+                                          </span>
+                                        )}
+                                        {isExpiringSoon && !isExpired && (
+                                          <span className="text-[9px] font-black uppercase text-amber-600 bg-amber-100/80 px-1 rounded">
+                                            &lt; 5 Days
+                                          </span>
+                                        )}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     <div className="pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Check Status <span className="text-red-500">*</span></Label>
                         <Select value={vehicleData.checkStatus} onValueChange={(v) => setVehicleData(p => ({ ...p, checkStatus: v }))}>
-                          <SelectTrigger className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white">
+                          <SelectTrigger className="h-12 data-[size=default]:h-12 w-full border-2 border-slate-200 rounded-xl font-bold bg-white">
                             <SelectValue placeholder="Status" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1705,26 +2742,133 @@ export default function PlanVehiclePage() {
                     <div className="pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Transporter <span className="text-red-500">*</span></Label>
-                        <Combobox
-                          value={freightData.transporterName}
-                          onValueChange={(v) => {
-                            const isNormal = !['Company Vehicle', 'Party Vehicle'].includes(v);
-                            setFreightData(p => ({
-                              ...p,
-                              transporterName: v,
-                              freightRateType: isNormal ? p.freightRateType : "",
-                              freightAmount: isNormal ? p.freightAmount : "",
-                              cash_bank: isNormal ? p.cash_bank : "",
-                              diesel_advance: isNormal ? p.diesel_advance : "",
-                              bhada: isNormal ? p.bhada : ""
-                            }));
-                          }}
-                          options={transporterOptions}
-                          placeholder="Select Transporter"
-                          searchPlaceholder="Search transporter..."
-                          emptyText="No transporter found."
-                          className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white w-full shadow-sm text-blue-700"
-                        />
+                        <Popover open={transporterDropdownOpen} onOpenChange={setTransporterDropdownOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={transporterDropdownOpen}
+                              className={cn(
+                                "h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-bold text-sm sm:text-base focus:border-primary transition-colors bg-white shadow-sm w-full justify-between",
+                                !freightData.transporterName && "text-muted-foreground",
+                                freightData.transporterName && "text-blue-700"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 truncate min-w-0 flex-1 text-left">
+                                <span className="truncate">{freightData.transporterName || "Select Transporter"}</span>
+                                {selectedTransporterObj && (() => {
+                                  const st = driverApprovalState(selectedTransporterObj)
+                                  return (
+                                    <Badge variant="outline" className={cn("text-[10px] font-semibold px-1.5 py-0 h-4 normal-case shrink-0", DRIVER_BADGE_CLASS[st])}>
+                                      {DRIVER_BADGE_LABEL[st]}
+                                    </Badge>
+                                  )
+                                })()}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] p-0 shadow-lg border border-slate-200 bg-white rounded-xl overflow-hidden"
+                            style={{ width: 'var(--radix-popover-trigger-width)' }}
+                            align="start"
+                            side="bottom"
+                            sideOffset={4}
+                            avoidCollisions={false}
+                            sticky="always"
+                            hideWhenDetached={true}
+                            updatePositionStrategy="always"
+                            onWheel={(e) => e.stopPropagation()}
+                            onTouchMove={(e) => e.stopPropagation()}
+                          >
+                            <div className="p-2 border-b border-slate-100 bg-slate-50/60">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTransporterDropdownOpen(false)
+                                  handleOpenAddTransporterModal()
+                                }}
+                                className="w-full justify-center gap-1.5 h-8 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-white border-dashed border-slate-300 bg-white"
+                              >
+                                <Plus className="h-3.5 w-3.5 text-primary" />
+                                <span>Add Transporter</span>
+                              </Button>
+                            </div>
+
+                            <Command filter={(value, search) => value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0}>
+                              <CommandInput placeholder="Search by name, city, state, GST, mobile or contact person..." className="h-9 text-xs" />
+                              <CommandList className="max-h-[280px] overflow-y-auto overscroll-contain">
+                                <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">No transporter found.</CommandEmpty>
+                                <CommandGroup>
+                                  {freightTransporterRows.map(({ name, record }) => {
+                                    const isSelected = name === freightData.transporterName
+                                    const st = record ? driverApprovalState(record) : null
+                                    const isPending = st === 'pending'
+
+                                    return (
+                                      <CommandItem
+                                        key={record?.id ?? name}
+                                        value={`${name} ${transporterMeta(record)}`}
+                                        onSelect={() => {
+                                          if (isPending) {
+                                            toast({
+                                              title: "Pending Approval",
+                                              description: `Transporter ${name} is awaiting approver verification and cannot be assigned yet.`,
+                                              variant: "destructive"
+                                            })
+                                            return
+                                          }
+                                          selectTransporter(name)
+                                          setTransporterDropdownOpen(false)
+                                        }}
+                                        className="flex items-center justify-between py-2 px-2.5 cursor-pointer hover:bg-slate-50 aria-selected:bg-slate-100 group"
+                                      >
+                                        <div className="flex items-center gap-2 truncate flex-1 min-w-0 pr-2">
+                                          <Check className={cn("h-4 w-4 shrink-0 text-primary", isSelected ? "opacity-100" : "opacity-0")} />
+                                          <div className="flex flex-col min-w-0">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="font-semibold text-xs text-slate-800">{name}</span>
+                                              {st && (
+                                                <Badge variant="outline" className={cn("text-[9px] font-medium px-1 py-0 h-3.5 shrink-0", DRIVER_BADGE_CLASS[st])}>
+                                                  {DRIVER_BADGE_LABEL[st]}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                            {transporterMeta(record) && (
+                                              <span className="text-[10px] text-muted-foreground truncate">
+                                                {transporterMeta(record)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {record && (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            title="Edit / Modify Transporter"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setTransporterDropdownOpen(false)
+                                              handleOpenEditTransporterModal(record)
+                                            }}
+                                            className="h-6 px-2 text-[11px] font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 rounded gap-1 shrink-0"
+                                          >
+                                            <Pencil className="h-3 w-3" />
+                                            <span>Edit</span>
+                                          </Button>
+                                        )}
+                                      </CommandItem>
+                                    )
+                                  })}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">No Plate Image <span className="text-slate-400 font-normal normal-case">(Optional)</span></Label>
@@ -1735,6 +2879,7 @@ export default function PlanVehiclePage() {
                           helperText="Max file size: 20 MB"
                           uploading={isUploading === 'vehicleNoPlateImage'}
                           buttonText={freightData.vehicleNoPlateImage_file_name ? 'REPLACE' : 'UPLOAD'}
+                          triggerClassName="h-12 rounded-xl"
                           onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null, 'freight')}
                         />
                       </div>
@@ -1746,7 +2891,7 @@ export default function PlanVehiclePage() {
                           <div className="space-y-1.5">
                             <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Freight Rate Type <span className="text-red-500">*</span></Label>
                             <Select value={freightData.freightRateType} onValueChange={(v) => setFreightData(p => ({ ...p, freightRateType: v }))}>
-                              <SelectTrigger className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white">
+                              <SelectTrigger className="h-12 data-[size=default]:h-12 w-full border-2 border-slate-200 rounded-xl font-bold bg-white">
                                 <SelectValue placeholder="Select Type" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1762,7 +2907,7 @@ export default function PlanVehiclePage() {
                               </Label>
                               <Input
                                 type="number" step="0.01"
-                                className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white"
+                                className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white"
                                 placeholder="0.00"
                                 value={freightData.freightAmount}
                                 onChange={(e) => setFreightData(p => ({ ...p, freightAmount: e.target.value }))}
@@ -1773,7 +2918,7 @@ export default function PlanVehiclePage() {
                             <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">CD Amount <span className="text-slate-400 font-normal normal-case">(Optional)</span></Label>
                             <Input
                               type="number" step="0.01"
-                              className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white"
+                              className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white"
                               placeholder="0.00"
                               value={freightData.cdAmount}
                               onChange={(e) => setFreightData(p => ({ ...p, cdAmount: e.target.value }))}
@@ -1783,7 +2928,7 @@ export default function PlanVehiclePage() {
                             <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Final Rate <span className="text-slate-400 font-normal normal-case">(Optional)</span></Label>
                             <Input
                               type="number" step="0.01"
-                              className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white"
+                              className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white"
                               placeholder="0.00"
                               value={freightData.finalRate}
                               onChange={(e) => setFreightData(p => ({ ...p, finalRate: e.target.value }))}
@@ -1799,17 +2944,17 @@ export default function PlanVehiclePage() {
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="space-y-1.5">
                               <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Bank</Label>
-                              <Input type="number" step="0.01" className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white" placeholder="0.00"
+                              <Input type="number" step="0.01" className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white" placeholder="0.00"
                                 value={freightData.cash_bank} onChange={(e) => setFreightData(p => ({ ...p, cash_bank: e.target.value }))} />
                             </div>
                             <div className="space-y-1.5">
                               <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Diesel Advance</Label>
-                              <Input type="number" step="0.01" className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white" placeholder="0.00"
+                              <Input type="number" step="0.01" className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white" placeholder="0.00"
                                 value={freightData.diesel_advance} onChange={(e) => setFreightData(p => ({ ...p, diesel_advance: e.target.value }))} />
                             </div>
                             <div className="space-y-1.5">
                               <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Cash Advance</Label>
-                              <Input type="number" step="0.01" className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white" placeholder="0.00"
+                              <Input type="number" step="0.01" className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white" placeholder="0.00"
                                 value={freightData.bhada} onChange={(e) => setFreightData(p => ({ ...p, bhada: e.target.value }))} />
                             </div>
                           </div>
@@ -1832,7 +2977,7 @@ export default function PlanVehiclePage() {
                           </Label>
                           <Input
                             placeholder={selectedDepoTab?.toUpperCase() === 'BANARI' ? "Why is the vehicle being overloaded? (MANDATORY)" : "Why is the vehicle being overloaded? (Optional)"}
-                            className="h-10 border-2 border-red-200 rounded-xl bg-white font-bold text-red-700 placeholder:text-red-300"
+                            className="h-12 border-2 border-red-200 rounded-xl bg-white font-bold text-red-700 placeholder:text-red-300"
                             value={freightData.overloadRemarks}
                             onChange={(e) => setFreightData(p => ({ ...p, overloadRemarks: e.target.value }))}
                           />
@@ -1845,8 +2990,8 @@ export default function PlanVehiclePage() {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-4 md:px-8 pb-8 flex flex-col gap-6 w-full">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full">
+          <DialogFooter className="mt-4 border-t pt-4 px-4 md:px-8 pb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6 w-full">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-3xl">
               <div className="flex-1 space-y-1.5">
                 <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Revert Remarks <span className="text-red-500">*</span></Label>
                 <Input
@@ -1867,7 +3012,7 @@ export default function PlanVehiclePage() {
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full">
+            <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full sm:w-auto shrink-0">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="order-last sm:order-none">Cancel</Button>
               <Button
                 onClick={performPlanVehicleConfirmation}
@@ -1942,6 +3087,134 @@ export default function PlanVehiclePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Vehicle Master Add/Edit Dialog */}
+      <Dialog open={isVehicleModalOpen} onOpenChange={setIsVehicleModalOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col p-0">
+          {vehicleEffectiveDatesSection !== null && editingVehicle?.id ? (
+            <VehicleEffectiveDatesModalView
+              vehicleId={editingVehicle.id}
+              registrationNo={vehicleModalForm.registration_no || ''}
+              vehicleForm={vehicleModalForm}
+              initialSection={vehicleEffectiveDatesSection}
+              transporterOptions={transporterModalOptions}
+              activeRtoCodes={activeRtoCodes}
+              onVehicleUpdated={async (data) => {
+                setVehicleModalForm((prev: any) => ({ ...prev, ...data }));
+                await fetchMasterData();
+              }}
+              onBack={() => setVehicleEffectiveDatesSection(null)}
+            />
+          ) : (
+            <>
+              <DialogHeader className="px-6 py-4 border-b shrink-0 bg-slate-50/60">
+                <div className="flex items-center gap-2.5">
+                  <Truck className="h-5 w-5 text-primary" />
+                  <DialogTitle className="text-base font-bold text-slate-900">
+                    {editingVehicle ? `Edit Vehicle — ${editingVehicle.registration_no}` : "Add New Vehicle"}
+                  </DialogTitle>
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  {editingVehicle
+                    ? "Update vehicle specifications and documents. Changes will be submitted for approver review."
+                    : "Enter details for the new vehicle. It will be submitted for approver approval."}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <VehicleForm
+                  vehicleForm={vehicleModalForm}
+                  setVehicleForm={setVehicleModalForm}
+                  vehicleFormErrors={vehicleModalErrors}
+                  setVehicleFormErrors={setVehicleModalErrors}
+                  roadTaxType={roadTaxType}
+                  setRoadTaxType={setRoadTaxType}
+                  sortedVehicleTransporters={sortedVehicleTransporters}
+                  transporterOptions={transporterModalOptions}
+                  activeRtoCodes={activeRtoCodes}
+                  handleFileUpload={handleVehicleModalFileUpload}
+                  handleFileRemove={handleVehicleModalFileRemove}
+                  editingItem={editingVehicle}
+                  setVehicleEffectiveDatesSection={setVehicleEffectiveDatesSection}
+                />
+              </div>
+
+              <DialogFooter className="px-6 py-3 border-t bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsVehicleModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isSubmittingVehicleModal}
+                  onClick={handleSubmitVehicleModal}
+                >
+                  {isSubmittingVehicleModal ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    editingVehicle ? "Submit Edit for Approval" : "Submit for Approval"
+                  )}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Driver Master Add/Edit Dialog */}
+      <Dialog open={isDriverModalOpen} onOpenChange={setIsDriverModalOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 py-4 border-b shrink-0 bg-slate-50/60">
+            <DialogTitle className="text-base font-bold text-slate-900">
+              {editingDriver ? `Edit Driver — ${editingDriver.driver_name}` : "Add New Driver"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+              {editingDriver
+                ? "Update driver details and documents. Changes will be submitted for approver review."
+                : "Enter details for the new driver. It will be submitted for approver approval."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <DriverForm
+              driverForm={driverModalForm}
+              setDriverForm={setDriverModalForm}
+              activeRtoCodes={activeRtoCodes}
+              activeStates={activeStates}
+              handleFileUpload={handleDriverModalFileUpload}
+              handleFileRemove={handleDriverModalFileRemove}
+              editingItem={null}
+            />
+          </div>
+
+          <DialogFooter className="px-6 py-3 border-t bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+            <Button type="button" variant="outline" onClick={() => setIsDriverModalOpen(false)}>Cancel</Button>
+            <Button type="button" disabled={isSubmittingDriverModal} onClick={handleSubmitDriverModal}>
+              {isSubmittingDriverModal ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                editingDriver ? "Submit Edit for Approval" : "Submit for Approval"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <TransporterMasterDialog
+        open={isTransporterModalOpen}
+        onOpenChange={setIsTransporterModalOpen}
+        editingTransporter={editingTransporter}
+        onSaved={async () => { await fetchMasterData() }}
+      />
     </WorkflowStageShell>
   );
 }
