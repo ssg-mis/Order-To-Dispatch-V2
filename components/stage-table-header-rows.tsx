@@ -17,6 +17,7 @@ import { Calendar as CalendarIcon } from "lucide-react"
 import { StageSortIcon } from "@/components/stage-list"
 import { cn } from "@/lib/utils"
 import { fmtNum } from "@/lib/table-format"
+import { useCanSortColumns } from "@/hooks/use-can-sort-columns"
 import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
 
 export const isRightCol = (col: StageColDef<any>) => col.type === "number" || col.type === "date"
@@ -77,7 +78,8 @@ function SearchCell({ col, table, right = isRightCol(col), extraClass }: { col: 
 }
 
 function HeadingInner({ col, table, right = isRightCol(col) }: { col: StageColDef<any>; table: StageTableState; right?: boolean }) {
-  const sortable = !col.noSort && !!col.accessor
+  const canSort = useCanSortColumns()
+  const sortable = canSort && !col.noSort && !!col.accessor
   return (
     <div className="flex flex-col gap-1.5 w-full">
       <div

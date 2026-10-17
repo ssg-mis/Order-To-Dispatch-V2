@@ -26,6 +26,7 @@ import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
 import { ShellFiltersContext } from "@/components/workflow/shell-filters-context"
+import { useCanSortColumns } from "@/hooks/use-can-sort-columns"
 
 // ─── Card header (title, badge, description, quick search) + toolbar slot ───
 
@@ -290,7 +291,8 @@ export function StageHeadCell<T>({
   width?: string
   align?: "left" | "center" | "right"
 }) {
-  const sortable = !col.noSort && !!col.accessor
+  const canSort = useCanSortColumns()
+  const sortable = canSort && !col.noSort && !!col.accessor
   const filterable = !col.noFilter && !!col.accessor
   const range = table.dateRanges[col.id] || {}
   const isRight = resolveStageAlign(col, align) === "right"

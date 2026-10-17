@@ -61,6 +61,12 @@ interface WorkflowStageShellProps {
    * on mount so its server queries use them.
    */
   persistKey?: string
+  /**
+   * Default true: the last-used Pending / History tab is remembered permanently (per user).
+   * false: the tab is only kept for the current browser session, so a fresh open of the
+   * stage always starts on Pending Tasks.
+   */
+  rememberTab?: boolean
   /** Extra controls shown in the page heading, left of the Pending / History tabs. */
   headerActions?: React.ReactNode
 }
@@ -226,6 +232,7 @@ export function WorkflowStageShell({
   dateLabel,
   groupBySiblingDo = false,
   persistKey,
+  rememberTab = true,
   headerActions,
 }: WorkflowStageShellProps) {
   const [view, patchView] = usePersistedFilters<{
@@ -239,7 +246,7 @@ export function WorkflowStageShell({
   }>(
     persistKey ? `${persistKey}:shell` : null,
     { tab: "pending", search: "", status: "", startDate: "", endDate: "", partyName: "", manualSaudaNo: "" },
-    { permanentKeys: ["tab"] }
+    { permanentKeys: rememberTab ? ["tab"] : [] }
   )
   const { tab, ...filters } = view
 

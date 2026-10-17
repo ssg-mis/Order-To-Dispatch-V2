@@ -22,6 +22,8 @@ import {
 export interface ComboboxOption {
   value: string
   label: string
+  /** Optional muted second line shown under the label in the list (also searchable). */
+  subLabel?: string
 }
 
 interface ComboboxProps {
@@ -70,7 +72,8 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-full p-0"
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        style={{ width: 'var(--radix-popover-trigger-width)' }}
         align="start"
         onWheel={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
@@ -83,7 +86,7 @@ export function Combobox({
               {options.map((option, index) => (
                 <CommandItem
                   key={`${option.value}-${index}`}
-                  value={option.label ? `${option.label} ${option.value}` : option.value}
+                  value={option.label ? `${option.label} ${option.subLabel || ""} ${option.value}` : option.value}
                   onSelect={() => {
                     onValueChange?.(option.value === value ? "" : option.value)
                     setOpen(false)
@@ -95,7 +98,14 @@ export function Combobox({
                       value === option.value ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  {option.label}
+                  {option.subLabel ? (
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{option.label}</span>
+                      <span className="truncate text-xs text-muted-foreground">{option.subLabel}</span>
+                    </div>
+                  ) : (
+                    option.label
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

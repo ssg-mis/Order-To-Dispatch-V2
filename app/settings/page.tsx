@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { userApi, depotApi, brokerApi, salespersonApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -112,6 +113,7 @@ const MASTER_TABS = [
   { key: "vehicle_master", label: "Vehicles" },
   { key: "driver_master", label: "Drivers" },
   { key: "transport_master", label: "Transporters" },
+  { key: "ledgers", label: "Ledgers" },
 ]
 
 const STATUSES = ["active", "inactive"]
@@ -164,6 +166,7 @@ export default function SettingsPage() {
   const [isBrokersLoading, setIsBrokersLoading] = useState(false)
   const [salespersons, setSalespersons] = useState<any[]>([])
   const [isSalespersonsLoading, setIsSalespersonsLoading] = useState(false)
+
 
   // Fetch depots for access control
   useEffect(() => {
@@ -691,6 +694,13 @@ export default function SettingsPage() {
           </div>
           <SidebarTrigger />
         </div>
+      </div>
+
+
+      {/* User Access Management Header */}
+      <div className="pt-2">
+        <h2 className="text-base font-bold text-slate-900">User Access Management</h2>
+        <p className="text-xs text-slate-500">Configure user credentials, roles, and granular page permissions</p>
       </div>
 
       {/* Toolbar: search + actions */}
@@ -1250,6 +1260,30 @@ export default function SettingsPage() {
                   />
                   <Label htmlFor="feature-can_toggle_columns" className="text-sm cursor-pointer font-normal">
                     Can toggle columns
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-can_sort_columns"
+                    checked={!!formData.features.can_sort_columns}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_sort_columns: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_sort_columns" className="text-sm cursor-pointer font-normal">
+                    Can sort columns (ascending / descending)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-gate_in_photos_mandatory"
+                    checked={!!formData.features.gate_in_photos_mandatory}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, gate_in_photos_mandatory: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-gate_in_photos_mandatory" className="text-sm cursor-pointer font-normal">
+                    Vehicle & Driver Photos Compulsory at Gate-In
                   </Label>
                 </div>
               </div>

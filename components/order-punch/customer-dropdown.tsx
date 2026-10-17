@@ -34,7 +34,21 @@ function guessCity(customer: any): string {
   return parts[parts.length - 1]?.trim() || ""
 }
 
-export function buildCustomerDropdownOption(c: any): CustomerDropdownOption {
+export type CustomerApprovalState = "pending" | "edit_pending" | "approved"
+
+export function customerApprovalState(c: any): CustomerApprovalState {
+  if (c.approval_status === "pending") return "pending"
+  if (c.has_pending_edit) return "edit_pending"
+  return "approved"
+}
+
+const APPROVAL_BADGE: Record<CustomerApprovalState, { label: string; className: string }> = {
+  pending: { label: "Pending Approval", className: "text-amber-700 border-amber-300 bg-amber-50" },
+  edit_pending: { label: "Edit Pending", className: "text-blue-700 border-blue-300 bg-blue-50" },
+  approved: { label: "Approved", className: "text-emerald-700 border-emerald-300 bg-emerald-50" },
+}
+
+export function buildCustomerDropdownOption(c: any, showApproval = false): CustomerDropdownOption {
   const city = guessCity(c)
   // Prefer the real GST short state name (states.short_name, joined server-side
   // in customerService.getAllCustomers) over a guessed 2-letter fallback.
@@ -52,7 +66,17 @@ export function buildCustomerDropdownOption(c: any): CustomerDropdownOption {
     label,
     dropdownLabel: (
       <div className="flex flex-col min-w-0 py-0.5 text-left">
-        <span className="font-medium text-slate-800 truncate">{c.customer_name}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="font-medium text-slate-800 truncate">{c.customer_name}</span>
+          {showApproval && (() => {
+            const badge = APPROVAL_BADGE[customerApprovalState(c)]
+            return (
+              <span className={`shrink-0 rounded-full border px-1.5 text-[9px] font-medium leading-4 ${badge.className}`}>
+                {badge.label}
+              </span>
+            )
+          })()}
+        </span>
         {metaParts.length > 0 && (
           <span className="text-xs text-slate-500 truncate">{metaParts.join(" · ")}</span>
         )}
@@ -66,18 +90,20 @@ export async function fetchCustomerDropdownOptions(
   search: string,
   page: number,
   depotId?: number | null,
-  limit = 20
+  limit = 20,
+  opts?: { includePending?: boolean }
 ): Promise<{ options: CustomerDropdownOption[]; hasMore: boolean }> {
   // depot_id is omitted entirely (not passed as undefined) - URLSearchParams
   // stringifies an undefined value as the literal text "undefined", which the
   // backend would then try to parseInt and filter on.
   const params: Record<string, any> = { search, page, limit }
   if (depotId != null) params.depot_id = depotId
+  if (opts?.includePending) params.includePending = "true"
   const res = await customerApi.getAll(params)
   const list = res.success ? (res.data.customers || []) : []
   const total = res.data?.pagination?.total || 0
   return {
-    options: list.map(buildCustomerDropdownOption),
+    options: list.map((c: any) => buildCustomerDropdownOption(c, !!opts?.includePending)),
     hasMore: list.length + (page - 1) * limit < total,
   }
 }
