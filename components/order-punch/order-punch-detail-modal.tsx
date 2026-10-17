@@ -26,6 +26,7 @@ import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { ModifyOrderDialog } from "@/components/order-punch/modify-order-dialog"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { cn } from "@/lib/utils"
 import { formatDate, formatDateTime } from "@/lib/order-punch-format"
 import { fmtNum } from "@/lib/table-format"
@@ -70,6 +71,7 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
   const searchParams = useSearchParams()
   const { toast } = useToast()
   const { isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
+  const canSortColumns = isAdmin || isFeatureEnabled('can_sort_columns')
 
   const [order, setOrder] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -318,7 +320,7 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
                       <SortableTableHead key={col.id} id={col.id} className={cn("whitespace-nowrap px-4", ITEM_COL_WIDTH[col.id], NUMBER_ITEM_COLS.has(col.id) && "text-right")}>
                         <div
                           className={cn("flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 w-full", NUMBER_ITEM_COLS.has(col.id) ? "justify-end" : "justify-start")}
-                          onClick={() => handleSort(col.id)}
+                          onClick={canSortColumns ? () => handleSort(col.id) : undefined}
                         >
                           <span>{col.label}</span>
                           {sort?.field === col.id ? <span className="text-blue-600 text-[10px]">{sort.dir === "asc" ? "▲" : "▼"}</span> : null}
@@ -343,15 +345,18 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
           </div>
         </CardContent>
       </Card>
+
+      {/* Ledger charges of this order (one set, counted once) */}
+      <OrderChargesPanel orderNos={order?.order_no ? [order.order_no] : []} />
       </>
       )}
       </div>
 
       <ModifyOrderDialog
+        order={order}
         open={isModifyOpen}
         onOpenChange={setIsModifyOpen}
-        orderId={orderId}
-        onSuccess={loadDetail}
+        onSaved={loadDetail}
       />
       </DialogContent>
     </Dialog>

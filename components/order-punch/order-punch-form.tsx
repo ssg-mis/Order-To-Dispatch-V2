@@ -11,13 +11,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Calendar } from "@/components/ui/calendar"
+import { resolveStateName, gstSupplyTypeOf } from "@/lib/gst-state"
+import { LedgerChargesEditor, incompleteChargeIndex, validCharges, chargesTotal, type ChargeRow } from "@/components/order-punch/ledger-charges-editor"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
+import { Save, FileUp, Plus, Trash2, CalendarIcon, Pencil } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi, returnApi } from "@/lib/api-service"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
-import { fetchCustomerDropdownOptions } from "@/components/order-punch/customer-dropdown"
+import { fetchCustomerDropdownOptions, customerApprovalState } from "@/components/order-punch/customer-dropdown"
+import { CustomerMasterDialog } from "@/components/masters/modals/customer-master-dialog"
 import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
@@ -290,6 +293,10 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   // Set DO Date to today's date by default
   const [soDate, setSoDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [customerName, setCustomerName] = useState<string>("")
+  // Customer master Add / Edit dialog launched from the Customer Name dropdown
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState<any | null>(null)
+  const [customerListReloadToken, setCustomerListReloadToken] = useState(0)
   const [gst, setGst] = useState<string>("") // New state for GST
   const [contactPerson, setContactPerson] = useState<string>("")
   const [whatsappNo, setWhatsappNo] = useState<string>("")
@@ -331,8 +338,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const [isDeliveryDatePickerOpen, setIsDeliveryDatePickerOpen] = useState(false)
   const [isFuturePeriodDatePickerOpen, setIsFuturePeriodDatePickerOpen] = useState(false)
   const [salespersonName, setSalespersonName] = useState<string>("")
-  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
   const [gstRatePercent, setGstRatePercent] = useState<string>("5")
+  const [chargeRows, setChargeRows] = useState<ChargeRow[]>([])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -718,12 +725,10 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   // Validate Expected Delivery Date is within Start Date to End Date range
   useEffect(() => {
     if (deliveryDate && startDate && endDate && orderPurpose === "week-on-week") {
-      const delivery = new Date(deliveryDate)
-      const start = new Date(startDate)
-      const end = new Date(endDate)
-
-      if (delivery < start || delivery > end) {
-        setDeliveryDateError(`You selected a date not between the start and end date (${startDate} to ${endDate})`)
+      // yyyy-MM-dd strings sort chronologically, and avoid UTC-vs-local midnight drift.
+      const show = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`
+      if (deliveryDate < startDate || deliveryDate > endDate) {
+        setDeliveryDateError(`Pick a date between ${show(startDate)} and ${show(endDate)}`)
       } else {
         setDeliveryDateError("")
       }
@@ -762,6 +767,16 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    const unfinishedCharge = incompleteChargeIndex(chargeRows)
+    if (unfinishedCharge !== -1) {
+      toast({
+        title: "Finish the ledger charge",
+        description: `Additional charge ${unfinishedCharge + 1} needs both a ledger and an amount (or remove it).`,
+        variant: "destructive",
+      })
+      return
+    }
 
     // Customer must be selected/entered before anything else
     const enteredCustomerName = customerType === "existing"
@@ -976,6 +991,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         userId: user?.id || null,
         orderCategory: orderCategory,
         gst: gst || null,
+        charges: validCharges(chargeRows).map((r) => ({ ledgerId: r.ledgerId as number, amount: parseFloat(r.amount) })),
         ...(orderCategory === "Sales Return" || stockReturnActive ? { refInvoiceNo, returnReason } : {}),
       }
 
@@ -1312,8 +1328,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     setAdvanceAmount("")
     setFuturePeriodDate("")
     setOrderPunchRemarks("")
-    setGstSupplyType("INTRA")
     setGstRatePercent("5")
+    setChargeRows([])
     setSoFile(null)
     const fileInput = document.getElementById("soFile") as HTMLInputElement
     if (fileInput) fileInput.value = ""
@@ -1331,21 +1347,18 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
   const billingDepot = billingDepots.find((d: any) =>
     d.depot_name?.toLowerCase() === depoName.toLowerCase()
   ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
+  const billingState = resolveStateName(billingDepot, statesById)
 
   // Customer/shipping state comes from the customer's billing address (customerAddress)
-  const shippingState = extractState(customerAddress || "") || ""
+  // Customer / ship-to state comes from the MASTER: the selected saved address (the default one is the
+  // customer master's own state), falling back to the customer record - never parsed from free text.
+  const pickedShipAddress = customerAddressOptions.find((a: CustomerAddressOption) => a.id === selectedAddressId)
+  const shippingState = pickedShipAddress?.stateName || resolveStateName(selectedCustomerRecord, statesById)
 
-  // Auto-detect Same State vs Other State if both states are determined, but user can toggle manually
-  useEffect(() => {
-    if (billingState && shippingState) {
-      if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-        setGstSupplyType("INTRA")
-      } else {
-        setGstSupplyType("INTER")
-      }
-    }
-  }, [billingState, shippingState])
+  // Same / Other State comes only from the masters; null (a state is missing) means nothing is assumed.
+  const gstSupplyType = gstSupplyTypeOf(billingState, shippingState)
+  // Nothing to detect yet (no customer / depot picked) is not a master-data problem.
+  const gstWaitingFor = !(selectedCustomerRecord) ? "customer" : !(depoName) ? "depot" : null
 
   console.log("[GST DEBUG] depoName:", depoName, "| billingDepot:", billingDepot?.depot_name, "| billingState:", billingState, "| shippingState:", shippingState, "| gstSupplyType:", gstSupplyType)
 
@@ -1364,11 +1377,15 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
     return sum + (rate * nos * qty)
   }, 0)
 
-  const orderCgst = totalTaxable * (halfRate / 100)
-  const orderSgst = totalTaxable * (halfRate / 100)
-  const orderIgst = totalTaxable * (numericGstRate / 100)
-  const totalGstAmount = gstSupplyType === "INTRA" ? (orderCgst + orderSgst) : orderIgst
-  const orderRawTotal = totalTaxable + totalGstAmount
+  const itemsTaxable = totalTaxable
+  const ledgerChargesTotal = chargesTotal(chargeRows)
+  const taxableWithCharges = itemsTaxable + ledgerChargesTotal
+  // Ledger charges add to the taxable value but carry no GST of their own - same rule as Approval of Order.
+  const orderCgst = itemsTaxable * (halfRate / 100)
+  const orderSgst = itemsTaxable * (halfRate / 100)
+  const orderIgst = itemsTaxable * (numericGstRate / 100)
+  const totalGstAmount = gstSupplyType === null ? 0 : gstSupplyType === "INTRA" ? (orderCgst + orderSgst) : orderIgst
+  const orderRawTotal = taxableWithCharges + totalGstAmount
   const orderRoundedTotal = Math.round(orderRawTotal)
   const orderRoundOff = orderRoundedTotal - orderRawTotal
 
@@ -1461,45 +1478,15 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   {orderPurpose === "week-on-week" && (
                     <div className="space-y-2">
                       <Label htmlFor="deliveryDate">Expected Delivery Date</Label>
-                      <Popover open={isDeliveryDatePickerOpen} onOpenChange={setIsDeliveryDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !deliveryDate && "text-muted-foreground",
-                              deliveryDateError && "border-red-500"
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {deliveryDate ? format(new Date(deliveryDate), "PPP") : <span>Pick a date</span>}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={deliveryDate ? new Date(deliveryDate) : undefined}
-                            onSelect={(date) => {
-                              if (date) {
-                                setDeliveryDate(format(date, "yyyy-MM-dd"))
-                                setIsDeliveryDatePickerOpen(false)
-                              }
-                            }}
-                            initialFocus
-                            modifiers={{
-                              inRange: (date) => {
-                                if (!startDate || !endDate) return false
-                                const start = new Date(startDate)
-                                const end = new Date(endDate)
-                                return date >= start && date <= end
-                              }
-                            }}
-                            modifiersClassNames={{
-                              inRange: "bg-blue-100 text-blue-900 hover:bg-blue-200"
-                            }}
-                          />
-                        </PopoverContent>
-                      </Popover>
+                      <Input
+                        id="deliveryDate"
+                        type="date"
+                        value={deliveryDate}
+                        min={startDate || undefined}
+                        max={endDate || undefined}
+                        onChange={(e) => setDeliveryDate(e.target.value)}
+                        className={cn(deliveryDateError && "border-red-500")}
+                      />
                       {deliveryDateError && (
                         <p className="text-xs text-red-600 font-medium">{deliveryDateError}</p>
                       )}
@@ -1509,44 +1496,12 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                   {orderPurpose === "future-period" && (
                     <div className="space-y-2">
                       <Label htmlFor="futurePeriodDate">Future Period Date</Label>
-                      <Popover open={isFuturePeriodDatePickerOpen} onOpenChange={setIsFuturePeriodDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !futurePeriodDate && "text-muted-foreground"
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {futurePeriodDate ? format(new Date(futurePeriodDate), "PPP") : <span>Pick a date</span>}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={futurePeriodDate ? new Date(futurePeriodDate) : undefined}
-                            onSelect={(date) => {
-                              if (date) {
-                                setFuturePeriodDate(format(date, "yyyy-MM-dd"))
-                                setIsFuturePeriodDatePickerOpen(false)
-                              }
-                            }}
-                            initialFocus
-                            modifiers={{
-                              inRange: (date) => {
-                                if (!startDate || !endDate) return false
-                                const start = new Date(startDate)
-                                const end = new Date(endDate)
-                                return date >= start && date <= end
-                              }
-                            }}
-                            modifiersClassNames={{
-                              inRange: "bg-blue-100 text-blue-900 hover:bg-blue-200"
-                            }}
-                          />
-                        </PopoverContent>
-                      </Popover>
+                      <Input
+                        id="futurePeriodDate"
+                        type="date"
+                        value={futurePeriodDate}
+                        onChange={(e) => setFuturePeriodDate(e.target.value)}
+                      />
                       <p className="text-xs text-blue-600 mt-1">
                         ℹ️ This date will be saved for future period delivery
                       </p>
@@ -1640,8 +1595,46 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                       const selectedDepot = depots.find(d => d.depot_name === depoName);
                       // Godown-gated: only customers tagged to the selected Godown, filtered
                       // server-side (not by loading every customer and filtering in the browser).
-                      return fetchCustomerDropdownOptions(search, page, selectedDepot?.id)
+                      return fetchCustomerDropdownOptions(search, page, selectedDepot?.id, 20, { includePending: true })
                     }}
+                    reloadToken={customerListReloadToken}
+                    fixedPosition
+                    onBeforeSelect={(opt: any) => {
+                      if (customerApprovalState(opt.original || {}) === "pending") {
+                        toast({
+                          title: "Pending Approval",
+                          description: `Customer ${opt.original?.customer_name || ""} is awaiting approver verification and cannot be used yet.`,
+                          variant: "destructive",
+                        })
+                        return false
+                      }
+                      return true
+                    }}
+                    headerAction={(close: () => void) => (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { close(); setEditingCustomer(null); setIsCustomerModalOpen(true) }}
+                        className="w-full justify-center gap-1.5 h-8 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-white border-dashed border-slate-300 bg-white"
+                      >
+                        <Plus className="h-3.5 w-3.5 text-primary" />
+                        <span>Add Customer</span>
+                      </Button>
+                    )}
+                    renderItemAction={(opt: any, close: () => void) => (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        title="Edit / Modify Customer"
+                        onClick={() => { close(); setEditingCustomer(opt.original); setIsCustomerModalOpen(true) }}
+                        className="h-6 px-2 text-[11px] font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 rounded gap-1"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit</span>
+                      </Button>
+                    )}
                   />
                 ) : (
                   <Input
@@ -2189,6 +2182,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         <Plus className="h-4 w-4" /> Add Product
                       </Button>
                     </div>
+                    <LedgerChargesEditor rows={chargeRows} onChange={setChargeRows} disabled={isReadOnly} />
                     {products.length > 0 && (
                       <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg">
                         <div className="space-y-0.5">
@@ -2206,7 +2200,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount (₹)</p>
                           <p className="text-sm font-bold text-blue-700">
-                            {fmtNum(totalTaxable, 2)}
+                            {fmtNum(taxableWithCharges, 2)}
                           </p>
                         </div>
                       </div>
@@ -2231,68 +2225,56 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           </div>
                         </div>
                         <div className="p-4 max-w-sm ml-auto space-y-2 text-xs">
-                          {/* State Supply Toggle */}
-                          <div className="flex items-center justify-between bg-slate-100 p-0.5 rounded-lg text-[10px] font-semibold text-slate-600 mb-3">
-                            <button
-                              type="button"
-                              onClick={() => setGstSupplyType("INTRA")}
-                              className={cn(
-                                "flex-1 py-1 rounded text-center transition-all cursor-pointer",
-                                gstSupplyType === "INTRA"
-                                  ? "bg-white text-blue-700 shadow-xs font-bold"
-                                  : "text-slate-500 hover:text-slate-800"
-                              )}
-                            >
-                              Same State
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setGstSupplyType("INTER")}
-                              className={cn(
-                                "flex-1 py-1 rounded text-center transition-all cursor-pointer",
-                                gstSupplyType === "INTER"
-                                  ? "bg-white text-blue-700 shadow-xs font-bold"
-                                  : "text-slate-500 hover:text-slate-800"
-                              )}
-                            >
-                              Other State
-                            </button>
+                          {/* Same / Other State is auto-detected from the Depot and Customer masters */}
+                          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", gstSupplyType === null ? (gstWaitingFor ? "bg-slate-100 text-slate-600" : "bg-red-100 text-red-700") : gstSupplyType === "INTRA" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+  {gstSupplyType === null ? (gstWaitingFor ? `Select ${gstWaitingFor}` : "State unknown") : gstSupplyType === "INTRA" ? "Same State" : "Other State"}
+</span>
+                              <span className="font-medium text-slate-600">
+                                {billingState || "—"} <span className="text-slate-400">→</span> {shippingState || "—"}
+                              </span>
+                            </div>
+                            {(!billingState || !shippingState) && (
+  <p className={cn("mt-1 text-[10px] font-medium", gstWaitingFor ? "text-slate-500" : "text-red-600")}>
+    {gstWaitingFor ? `Select the ${gstWaitingFor} to detect Same / Other State.` : null}
+    {!gstWaitingFor && <>
+    {!billingState ? "Depot" : "Customer"} state is not set in Master (no state, State Master link or GSTIN), so GST cannot be calculated. Update it in Master to see the breakdown.</>}
+</p>
+)}
                           </div>
 
-                          {gstSupplyType === "INTRA" ? (
+                          {gstSupplyType === null ? (
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-black uppercase text-slate-500">CGST / SGST / IGST (₹)</span>
+                              <span className="font-mono font-bold text-slate-400">—</span>
+                            </div>
+                          ) : gstSupplyType === "INTRA" ? (
                             <>
                               <div className="flex justify-between items-center">
                                 <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%) (₹)</span>
-                                <span className="font-mono font-bold text-slate-700">
-                                  {fmtNum(orderCgst, 2)}
-                                </span>
+                                <span className="font-mono font-bold text-slate-700">{fmtNum(orderCgst, 2)}</span>
                               </div>
                               <div className="flex justify-between items-center">
                                 <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%) (₹)</span>
-                                <span className="font-mono font-bold text-slate-700">
-                                  {fmtNum(orderSgst, 2)}
-                                </span>
+                                <span className="font-mono font-bold text-slate-700">{fmtNum(orderSgst, 2)}</span>
                               </div>
                             </>
                           ) : (
                             <div className="flex justify-between items-center">
                               <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
-                              <span className="font-mono font-bold text-slate-700">
-                                {fmtNum(orderIgst, 2)}
-                              </span>
+                              <span className="font-mono font-bold text-slate-700">{fmtNum(orderIgst, 2)}</span>
                             </div>
                           )}
                           <div className="flex justify-between items-center">
                             <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
                             <span className="font-mono font-bold text-slate-500">
-                              {`${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
+                              {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
                             </span>
                           </div>
                           <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
                             <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value (₹)</span>
-                            <span className="font-mono font-black text-blue-700 text-sm">
-                              {fmtNum(orderRoundedTotal, 2)}
-                            </span>
+                            <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtNum(orderRoundedTotal, 2)}</span>
                           </div>
                         </div>
                       </div>
@@ -2480,6 +2462,13 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
           </Button>
         </div>
       </form>
+
+      <CustomerMasterDialog
+        open={isCustomerModalOpen}
+        onOpenChange={setIsCustomerModalOpen}
+        editingCustomer={editingCustomer}
+        onSaved={() => setCustomerListReloadToken(t => t + 1)}
+      />
     </>
   )
 }

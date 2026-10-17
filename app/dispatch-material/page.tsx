@@ -16,7 +16,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Settings2, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Settings2, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Info } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,6 +25,7 @@ import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-se
 import { isStaleWriteError } from "@/lib/stale-write"
 import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -142,9 +143,6 @@ export default function DispatchMaterialPage() {
   const [skus, setSkus] = useState<any[]>([])
   const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false)
   const isSavingTransferRef = useRef(false)
-  const [transportingExpenses, setTransportingExpenses] = useState<Record<string, string>>({})
-  const [gstRates, setGstRates] = useState<Record<string, string>>({})
-  const [isIgst, setIsIgst] = useState<Record<string, boolean>>({})
 
   const getSkuWeight = (productName: string): number => {
     if (!productName || skus.length === 0) return 0
@@ -177,6 +175,128 @@ export default function DispatchMaterialPage() {
     const quantity = typeof qty === 'string' ? parseFloat(qty) || 0 : qty
     return getSkuGrossWeight(productName) * quantity
   }
+
+  const getNosPerMainUom = useCallback((prod: any): number => {
+    const raw = prod?.nos_per_main_uom ?? prod?.nosPerMainUom;
+    if (raw != null && !isNaN(parseFloat(raw)) && parseFloat(raw) > 0) {
+      return parseFloat(raw);
+    }
+    const productName = prod?.productName || prod?.product_name || prod?.sku_name;
+    if (productName && skus.length > 0) {
+      const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim();
+      const norm = normalize(productName);
+      const sku = skus.find((s: any) => s.sku_name?.toUpperCase() === productName.toUpperCase())
+        || skus.find((s: any) => normalize(s.sku_name || '') === norm)
+        || skus.find((s: any) => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) });
+      if (sku?.nos_per_main_uom && parseFloat(sku.nos_per_main_uom) > 0) {
+        return parseFloat(sku.nos_per_main_uom);
+      }
+    }
+    return 1;
+  }, [skus]);
+
+  const getGstRatePercent = useCallback((prod: any): number | null => {
+    const raw = prod?.gst_rate_percent ?? prod?.gstRatePercent;
+    if (raw != null && !isNaN(parseFloat(raw))) {
+      return parseFloat(raw);
+    }
+    const productName = prod?.productName || prod?.product_name || prod?.sku_name;
+    if (productName && skus.length > 0) {
+      const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim();
+      const norm = normalize(productName);
+      const sku = skus.find((s: any) => s.sku_name?.toUpperCase() === productName.toUpperCase())
+        || skus.find((s: any) => normalize(s.sku_name || '') === norm)
+        || skus.find((s: any) => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) });
+      if (sku?.gst_rate != null) return parseFloat(sku.gst_rate);
+      if (sku?.gstRatePercent != null) return parseFloat(sku.gstRatePercent);
+    }
+    return null;
+  }, [skus]);
+
+  const getProductTaxableAmt = useCallback((prod: any, qty: number | string): number => {
+    const quantity = parseFloat(String(qty)) || 0;
+    const rate = parseFloat(prod?.rate) || 0;
+    const nos = getNosPerMainUom(prod);
+    const pct = getGstRatePercent(prod) || 0;
+    const rateWoGst = pct > 0 ? rate / (1 + pct / 100) : rate;
+    return quantity * nos * rateWoGst;
+  }, [getNosPerMainUom, getGstRatePercent]);
+
+  const renderCalculationInfo = (prod: any, qty: number | string) => {
+    const quantity = parseFloat(String(qty)) || 0;
+    const nos = getNosPerMainUom(prod);
+    const rate = parseFloat(prod?.rate) || 0;
+    const pct = getGstRatePercent(prod) || 0;
+    const totalUnits = quantity * nos;
+    const grossTotal = totalUnits * rate;
+    const rateWoGst = pct > 0 ? rate / (1 + pct / 100) : rate;
+    const taxableAmt = totalUnits * rateWoGst;
+    const totalGst = grossTotal - taxableAmt;
+
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex items-center justify-center h-4 w-4 rounded-full text-slate-400 hover:text-blue-600 hover:bg-blue-100 transition-colors ml-1.5 align-middle cursor-pointer"
+            title="Click to view calculation breakdown"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Info className="h-3 w-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-3.5 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-2.5 z-50 text-left" align="end">
+          <div className="flex items-center justify-between border-b pb-2">
+            <span className="font-bold text-slate-900 text-xs truncate max-w-[200px]" title={prod.productName}>{prod.productName || "Product"}</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">GST {pct}%</span>
+          </div>
+          
+          <div className="space-y-1.5 text-slate-600 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Plan Qty:</span>
+              <span className="font-mono font-semibold text-slate-800">{fmtNum(quantity, 4)} {prod.uom || "Box"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Packing Multiplier:</span>
+              <span className="font-mono font-semibold text-slate-800">× {nos} pcs / {prod.uom || "Box"}</span>
+            </div>
+            <div className="flex justify-between font-medium text-blue-700 bg-blue-50/60 px-1.5 py-0.5 rounded">
+              <span>Total Units (Pieces):</span>
+              <span className="font-mono font-bold">{fmtNum(totalUnits, 2)} pcs</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Entered Rate (Gross incl. GST):</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtNum(rate, 2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Total Gross Amount:</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtNum(grossTotal, 2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-dashed pt-1.5">
+              <span className="text-slate-500">Ex-GST Base Rate:</span>
+              <span className="font-mono text-slate-700">₹{rate.toFixed(2)} ÷ {1 + pct/100} = ₹{rateWoGst.toFixed(4)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-200 text-amber-900 font-bold">
+              <span>Taxable Amount:</span>
+              <span className="font-mono text-sm text-amber-700">₹{fmtNum(taxableAmt, 2)}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-500 pt-0.5">
+              <span>GST ({pct}%):</span>
+              <span className="font-mono font-semibold text-slate-700">₹{fmtNum(totalGst, 2)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 text-blue-900 font-bold">
+              <span>Final Line Amount:</span>
+              <span className="font-mono text-blue-700">₹{fmtNum(grossTotal, 2)}</span>
+            </div>
+          </div>
+
+          <div className="border-t pt-2 text-[10px] text-slate-400 italic leading-tight">
+            Formula: (Plan Qty × Nos × Rate) ÷ (1 + GST%)
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  };
 
   const getProductQty = (prod: any) => {
     const rowKey = prod._rowKey
@@ -616,6 +736,13 @@ export default function DispatchMaterialPage() {
     return selectedItems.flatMap(group => group._allProducts || [])
   }, [selectedItems])
 
+  // Ledger charges of the orders in the dialog (one set per order, counted once)
+  const dialogOrderNos = useMemo(
+    () => Array.from(new Set(allProductsFromSelectedGroups.map((p: any) => p.orderNo).filter(Boolean))) as string[],
+    [allProductsFromSelectedGroups]
+  )
+  const dialogCharges = useOrderCharges(dialogOrderNos)
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "—";
     try {
@@ -676,7 +803,6 @@ export default function DispatchMaterialPage() {
         try {
           if (orderId) {
             const tData = dispatchDetails[rowKey]?.transferData;
-            const groupId = selectedItems[0]?._rowKey || 'default';
             const dispatchData = {
               dispatchFrom: deliveryVal,
               dispatchQty: dispatchQty,
@@ -687,9 +813,6 @@ export default function DispatchMaterialPage() {
               shipCompanyName: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
               shipAddress: tData?.shipTo?.address || item.ship_address || null,
               freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0),
-              transportingExpense: parseFloat(transportingExpenses[groupId]) || 0,
-              gstRate: parseFloat(gstRates[groupId] || "5") || 0,
-              isIgst: isIgst[groupId] || false
             };
 
             const response = await dispatchPlanningApi.submit(orderId, dispatchData);
@@ -1077,6 +1200,10 @@ export default function DispatchMaterialPage() {
         rate: order.final_rate || order.rate_of_material || order.rate || order._product?.rate,
         approvalQty: order.approval_qty || order.order_quantity,
         remainingDispatchQty: order.remaining_dispatch_qty !== null ? order.remaining_dispatch_qty : (order.approval_qty || order.order_quantity),
+        nos_per_main_uom: order.nos_per_main_uom || order.nosPerMainUom || order.sku?.nos_per_main_uom || order.sku?.nosPerMainUom,
+        gst_rate_percent: order.gst_rate_percent !== undefined ? order.gst_rate_percent : order.gstRatePercent,
+        depot_gst_state_code: order.depot_gst_state_code || order.depotGstStateCode,
+        customer_gst_state_code: order.customer_gst_state_code || order.customerGstStateCode,
       }
 
       grouped[groupKey]._ordersMap[baseDo]._products.push(productWithMeta)
@@ -1095,7 +1222,8 @@ export default function DispatchMaterialPage() {
       allProds.forEach((p: any) => {
         const qty = parseFloat(p.orderQty) || 0;
         const rate = parseFloat(p.rate) || 0;
-        totalOrderAmount += qty * rate;
+        const nos = getNosPerMainUom(p);
+        totalOrderAmount += qty * nos * rate;
         
         const uom = String(p.uom || "").toUpperCase();
         if (["BOX", "TIN", "CARTON", "PCS", "JAR", "BOTTLE"].some(u => uom.includes(u))) {
@@ -1557,6 +1685,10 @@ export default function DispatchMaterialPage() {
                                     <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.orderType}</p>
                                   </div>
                                   <div>
+                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">DO Date</p>
+                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.partySoDate || "—"}</p>
+                                  </div>
+                                  <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Dates</p>
                                     <p className="text-xs font-bold text-slate-900">S: {formatDate(orderDetails.startDate)} | E: {formatDate(orderDetails.endDate)}</p>
                                   </div>
@@ -1566,7 +1698,7 @@ export default function DispatchMaterialPage() {
                                   </div>
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Transport</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType}</p>
+                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType || orderDetails.type_of_transporting || "—"}</p>
                                   </div>
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Contact Person</p>
@@ -1654,9 +1786,64 @@ export default function DispatchMaterialPage() {
                         <h3 className="text-base sm:text-lg font-bold text-slate-800 flex items-center gap-2 break-words">
                           Consolidated Product List - {custName}
                         </h3>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200 flex items-center gap-1.5 rounded-xl shadow-xs"
+                            >
+                              <Info className="h-3.5 w-3.5 text-blue-600" />
+                              <span>How are things calculated?</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-88 p-4 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-3 z-50 text-left" align="end">
+                            <div className="border-b pb-2 flex items-center justify-between">
+                              <span className="font-bold text-slate-900 text-sm">Calculation Guide</span>
+                              <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-[10px]">Formulas & Rules</Badge>
+                            </div>
+
+                            <div className="space-y-2 text-slate-600 text-[11px] leading-relaxed">
+                              <div>
+                                <span className="font-bold text-slate-800">1. Total Pieces (Packing Multiplier):</span>
+                                <p className="font-mono text-[10px] bg-slate-50 p-1.5 rounded border border-slate-200 text-slate-700 mt-0.5">
+                                  Total Pieces = Plan Qty × Nos per Main UOM
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., 250 Boxes × 12 = 3,000 pcs</span>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">2. Taxable Amount (Base Price):</span>
+                                <p className="text-[10px] text-slate-500 mb-0.5">Entered Rate is Gross (inclusive of GST):</p>
+                                <p className="font-mono text-[10px] bg-amber-50 p-1.5 rounded border border-amber-200 text-amber-800">
+                                  Taxable = (Plan Qty × Nos × Rate) ÷ (1 + GST Rate / 100)
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., (250 × 12 × 135) ÷ 1.05 = ₹3,85,714.29</span>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">3. GST Breakdown:</span>
+                                <p className="text-[10px] text-slate-500 mb-0.5">Decided by Depot vs Customer State Code:</p>
+                                <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-600">
+                                  <li><strong>Same State:</strong> CGST (half) + SGST (half)</li>
+                                  <li><strong>Other State:</strong> IGST (full)</li>
+                                </ul>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">4. Total Order Amount:</span>
+                                <p className="font-mono text-[10px] bg-blue-50 p-1.5 rounded border border-blue-200 text-blue-800">
+                                  Total = Taxable Value + CGST + SGST + Rounding Off
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., ₹3,85,714.29 + ₹9,642.86 + ₹9,642.86 = ₹4,05,000.00</span>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                       <div className="border border-slate-200 rounded-2xl shadow-sm bg-white min-w-0">
-                        <Table className="hidden md:table relative" containerClassName="overflow-y-auto max-h-[400px]">
+                        <Table className="hidden md:table relative">
                           <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
 
                             <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
@@ -1671,7 +1858,7 @@ export default function DispatchMaterialPage() {
                                     const rowKey = p._rowKey;
                                     const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
                                     const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                    return sum + (parseFloat(currentDispatchQty) || 0) * (parseFloat(p.rate) || 0);
+                                    return sum + getProductTaxableAmt(p, currentDispatchQty);
                                   }, 0), 2)}
                               </TableHead>
                             </TableRow>
@@ -1691,7 +1878,30 @@ export default function DispatchMaterialPage() {
                               <TableHead className="px-4 text-right">Approved Qty</TableHead>
                               <TableHead className="px-4 text-right">Remaining Qty</TableHead>
                               <TableHead className="min-w-[120px] px-4 text-right">Plan Qty</TableHead>
-                              <TableHead className="min-w-[140px] px-4 text-right">Taxable Amount (₹)</TableHead>
+                              <TableHead className="min-w-[150px] px-4 text-right">
+                                <div className="inline-flex items-center justify-end gap-1">
+                                  <span>Taxable Amount (₹)</span>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center justify-center h-4 w-4 rounded-full text-slate-400 hover:text-blue-600 hover:bg-blue-100 transition-colors cursor-pointer"
+                                        title="Taxable Amount Formula"
+                                      >
+                                        <Info className="h-3 w-3" />
+                                      </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-72 p-3 shadow-xl border border-blue-200 bg-white text-xs rounded-xl space-y-1.5 z-50 text-left" align="end">
+                                      <div className="font-bold text-slate-800 border-b pb-1 text-xs">Taxable Amount Formula</div>
+                                      <p className="text-[11px] text-slate-600">Rate entered is <strong>GST-inclusive</strong>:</p>
+                                      <p className="font-mono text-[10px] bg-slate-50 p-1.5 rounded border text-slate-700">
+                                        (Plan Qty × Nos × Rate) ÷ (1 + GST%)
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 italic">Click the (i) on any row for its itemized values.</p>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                              </TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1699,7 +1909,7 @@ export default function DispatchMaterialPage() {
                               const rowKey = prod._rowKey;
                               const maxLimit = prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty;
                               const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                              const taxableAmt = (parseFloat(currentDispatchQty) || 0) * (parseFloat(prod.rate) || 0);
+                              const taxableAmt = getProductTaxableAmt(prod, currentDispatchQty);
 
                               return (
                                 <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
@@ -1722,79 +1932,117 @@ export default function DispatchMaterialPage() {
                                     }} />
                                   </TableCell>
                                   <TableCell className="text-sm font-bold text-amber-700 px-4 py-3 text-right font-mono tabular-nums bg-amber-50/30">
-                                    {fmtNum(taxableAmt, 2)}
+                                    <span className="inline-flex items-center justify-end">
+                                      {fmtNum(taxableAmt, 2)}
+                                      {renderCalculationInfo(prod, currentDispatchQty)}
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               );
                             })}
                             <TableRow className="bg-slate-50/50">
-                              <TableCell colSpan={6} className="text-right py-2 pr-4">
-                                <span className="text-xs font-semibold text-slate-600">Transporting Expenses</span>
-                                <span className="text-[10px] font-medium text-slate-400 ml-2">(Max Allowable (₹): 0.00)</span>
-                              </TableCell>
-                              <TableCell className="px-4 py-2">
-                                <Input
-                                  type="number"
-                                  className="h-8 text-sm font-semibold text-right font-mono tabular-nums bg-white"
-                                  placeholder="Enter Amount"
-                                  value={transportingExpenses[selectedItems[0]?._rowKey || 'default'] || ""} 
-                                  onChange={(e) => setTransportingExpenses(prev => ({ ...prev, [selectedItems[0]?._rowKey || 'default']: e.target.value }))} 
-                                />
+                              <TableCell colSpan={7} className="px-4 py-3">
+                                {/* The order's ledger charges: one set per order, shown here; added once only if the order has none yet. */}
+                                <OrderChargesPanel orderNos={Array.from(new Set(allProducts.map((p: any) => p.orderNo).filter(Boolean))) as string[]} />
                               </TableCell>
                             </TableRow>
                           </TableBody>
                           {(() => {
-                            const groupId = selectedItems[0]?._rowKey || 'default';
-                            const rawItemsTaxable = allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
-                              const rowKey = p._rowKey;
+                            // Ticked lines with the quantity being dispatched now
+                            const lines = allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).map((p: any) => {
                               const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                              const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                              return sum + (parseFloat(currentDispatchQty) || 0) * (parseFloat(p.rate) || 0);
-                            }, 0);
-                            const transportExp = parseFloat(transportingExpenses[groupId]) || 0;
-                            const totalTaxable = rawItemsTaxable + transportExp;
-                            
-                            const gstRateStr = gstRates[groupId] || "5";
-                            const gstRate = parseFloat(gstRateStr) || 0;
-                            const isIgstSelected = isIgst[groupId] || false;
-                            
-                            let cgst = 0, sgst = 0, igst = 0;
-                            if (isIgstSelected) {
-                              igst = (totalTaxable * gstRate) / 100;
-                            } else {
-                              cgst = (totalTaxable * gstRate) / 200; // Half of total GST
-                              sgst = (totalTaxable * gstRate) / 200;
-                            }
-                            
+                              const qty = dispatchDetails[p._rowKey]?.qty !== undefined ? dispatchDetails[p._rowKey].qty : maxLimit;
+                              const taxable = getProductTaxableAmt(p, qty);
+                              const pct = getGstRatePercent(p);
+                              return { taxable, pct };
+                            });
+                            const itemsTaxable = lines.reduce((n: number, l: any) => n + l.taxable, 0);
+                            // Ledger charges come from the order (counted once) and carry no GST of their own.
+                            const groupOrderNos = Array.from(new Set(allProducts.map((p: any) => p.orderNo).filter(Boolean))) as string[];
+                            const dialogChargesTotal = groupOrderNos.reduce((n: number, no: string) => n + (dialogCharges.infoByNo[no]?.total || 0), 0);
+                            const totalTaxable = itemsTaxable + dialogChargesTotal;
+
+                            // Same state / other state: depot vs customer GST state, both from the masters.
+                            const first = selectedItems[0] || allProducts[0] || {};
+                            const stateKnown = !!first.depot_gst_state_code && !!first.customer_gst_state_code;
+                            const isIgstSelected = stateKnown && first.depot_gst_state_code !== first.customer_gst_state_code;
+
+                            // GST only on the item amounts, each at its own master rate.
+                            const gstTotal = lines.reduce((n: number, l: any) => n + (l.taxable * (l.pct || 0)) / 100, 0);
+                            const missingRate = lines.some((l: any) => l.pct == null);
+                            const rates = Array.from(new Set(lines.map((l: any) => l.pct ?? 0)));
+                            const uniformRate = rates.length === 1 ? (rates[0] as number) : null;
+                            const cgst = isIgstSelected ? 0 : gstTotal / 2;
+                            const sgst = isIgstSelected ? 0 : gstTotal / 2;
+                            const igst = isIgstSelected ? gstTotal : 0;
+
                             const grandTotal = totalTaxable + cgst + sgst + igst;
                             const roundedTotal = Math.round(grandTotal);
                             const roundingOff = roundedTotal - grandTotal;
+                            const rateTag = (d: number) => (uniformRate == null ? "" : ` @ ${fmtNum(uniformRate / d, 2)}%`);
 
                             return (
                               <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
                                 <TableRow className="border-b border-slate-200 bg-slate-50/50">
                                   <TableCell colSpan={6} className="py-2 pr-4 text-right">
-                                    <div className="flex items-center justify-end gap-5">
-                                      <div className="flex items-center space-x-2">
-                                        <Checkbox 
-                                          id={`igst-${groupId}`} 
-                                          checked={isIgstSelected}
-                                          onCheckedChange={(checked) => setIsIgst(prev => ({ ...prev, [groupId]: !!checked }))}
-                                        />
-                                        <label htmlFor={`igst-${groupId}`} className="text-xs font-semibold text-slate-600 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                                          IGST (Other State)
-                                        </label>
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-xs font-semibold text-slate-500 tracking-wider">GST Rate (%):</span>
-                                        <Input 
-                                          type="number" 
-                                          className="h-8 w-20 text-sm font-semibold text-right font-mono tabular-nums bg-white" 
-                                          placeholder="e.g. 5"
-                                          value={gstRates[groupId] ?? "5"}
-                                          onChange={(e) => setGstRates(prev => ({ ...prev, [groupId]: e.target.value }))}
-                                        />
-                                      </div>
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${stateKnown ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700"}`}>
+                                        {stateKnown ? (isIgstSelected ? "Other state · IGST" : "Same state · CGST + SGST") : "State not set in master · CGST + SGST shown"}
+                                      </span>
+                                      {missingRate && (
+                                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">GST rate missing in SKU master</span>
+                                      )}
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                                            title="View summary calculation details"
+                                          >
+                                            <Info className="h-3 w-3 text-blue-600" />
+                                            <span>Summary Info</span>
+                                          </button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-80 p-3.5 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-2 z-50 text-left" align="end">
+                                          <div className="font-bold text-slate-800 border-b pb-1.5 flex items-center justify-between">
+                                            <span>Summary Calculation</span>
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                              {stateKnown ? (isIgstSelected ? "Inter-State (IGST)" : "Intra-State (CGST+SGST)") : "Intra-State"}
+                                            </span>
+                                          </div>
+                                          <div className="space-y-1.5 text-slate-600 text-[11px]">
+                                            <div className="flex justify-between">
+                                              <span>Total Taxable Value:</span>
+                                              <span className="font-mono font-bold text-slate-800">₹{fmtNum(totalTaxable, 2)}</span>
+                                            </div>
+                                            {!isIgstSelected ? (
+                                              <>
+                                                <div className="flex justify-between">
+                                                  <span>CGST {rateTag(2)}:</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtNum(cgst, 2)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span>SGST {rateTag(2)}:</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtNum(sgst, 2)}</span>
+                                                </div>
+                                              </>
+                                            ) : (
+                                              <div className="flex justify-between">
+                                                <span>IGST {rateTag(1)}:</span>
+                                                <span className="font-mono font-semibold text-slate-700">₹{fmtNum(igst, 2)}</span>
+                                              </div>
+                                            )}
+                                            <div className="flex justify-between">
+                                              <span>Rounding Off:</span>
+                                              <span className="font-mono font-semibold text-slate-600">{roundingOff.toFixed(2)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-200 text-blue-900 font-bold text-xs mt-1">
+                                              <span>Total Order Amount:</span>
+                                              <span className="font-mono text-sm text-blue-700">₹{fmtNum(roundedTotal, 2)}</span>
+                                            </div>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
                                     </div>
                                   </TableCell>
                                   <TableCell className="px-4 py-2" />
@@ -1806,17 +2054,17 @@ export default function DispatchMaterialPage() {
                                 {!isIgstSelected ? (
                                   <>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST ({gstRate / 2}%) (₹):</span></TableCell>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST{rateTag(2)} (₹):</span></TableCell>
                                       <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(cgst, 2)}</TableCell>
                                     </TableRow>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST ({gstRate / 2}%) (₹):</span></TableCell>
+                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST{rateTag(2)} (₹):</span></TableCell>
                                       <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(sgst, 2)}</TableCell>
                                     </TableRow>
                                   </>
                                 ) : (
                                   <TableRow>
-                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST ({gstRate}%) (₹):</span></TableCell>
+                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST{rateTag(1)} (₹):</span></TableCell>
                                     <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(igst, 2)}</TableCell>
                                   </TableRow>
                                 )}

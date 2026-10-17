@@ -195,6 +195,10 @@ export function flattenOrderItemStage(row: any): Record<string, any> {
   if (row.orderConfirmationWithCustomer !== undefined) r.order_confirmation_with_customer = row.orderConfirmationWithCustomer;
   if (row.revertRemarks !== undefined) r.revert_planning_remarks = row.revertRemarks;
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Master-driven GST (Dispatch Planning): the SKU's GST % and the depot/customer GST state codes.
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
   if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
   if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
   if (row.dispatchPlanningUser !== undefined) r.dispatch_planning_user = row.dispatchPlanningUser;
@@ -254,6 +258,10 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   r.actual_1 = dsp.actualAt ?? null;
   r.reason_of_difference_in_weight_if_any_speacefic = dsp.reasonOfWeightDifference ?? null; // legacy name
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Master-driven GST for Dispatch Planning: the SKU's GST % and the depot/customer GST state codes.
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
   // Earlier-gate audit trail — the dispatch slip/voucher printout's
   // Pre-Approve / Approve By block reads these (order_punch_at/_user come
   // through base() already).

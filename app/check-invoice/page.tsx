@@ -34,6 +34,7 @@ import { checkInvoiceApi, skuApi, depotApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { fmtNum, fmtDate } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -1724,6 +1725,8 @@ export default function CheckInvoicePage() {
                   selectedGroups={selectedGroups}
                   selectedProducts={selectedProducts}
                 />
+
+                <OrderChargesPanel orderNos={Array.from(new Set(selectedGroups.flatMap((g: any) => g._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey)).map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, "")).filter(Boolean))) as string[]} />
               </div>
             )}
 

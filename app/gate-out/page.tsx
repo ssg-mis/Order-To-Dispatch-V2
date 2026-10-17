@@ -28,6 +28,7 @@ import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { gateOutApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -1738,6 +1739,8 @@ export default function GateOutPage() {
                   selectedGroups={selectedGroups}
                   selectedProducts={selectedProducts}
                 />
+
+                <OrderChargesPanel orderNos={Array.from(new Set(selectedGroups.flatMap((g: any) => g._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey)).map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, "")).filter(Boolean))) as string[]} />
               </div>
             )}
 

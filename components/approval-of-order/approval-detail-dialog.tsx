@@ -3,17 +3,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Card, CardHeader, CardTitle, CardAction, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ChevronDown, ChevronUp, FileText, ExternalLink, Loader2, Plus, X } from "lucide-react"
-import { approvalApi, ledgerApi } from "@/lib/api-service"
+import { CheckCircle2, ChevronDown, ChevronUp, ClipboardList, ExternalLink, FileText, Loader2, Package, RotateCcw, ShieldCheck, XCircle } from "lucide-react"
+import { approvalApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -60,6 +58,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
     rate: "approve", sku: "approve", credit: "approve", dispatch: "approve", confirm: "approve",
   })
   const [charges, setCharges] = useState<Array<{ ledgerId: number | null; ledgerName: string; amount: string }>>([])
+  const [deselected, setDeselected] = useState<Set<number>>(new Set())
   const [submittingAction, setSubmittingAction] = useState<ApprovalAction | null>(null)
 
   const { data: detail, isLoading } = useQuery({
@@ -72,22 +71,12 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
     staleTime: 0,
   })
 
-  const { data: ledgerOptions } = useQuery({
-    queryKey: ["ledgers-for-approval-charges"],
-    queryFn: async () => {
-      const res = await ledgerApi.getAll({ all: "true" })
-      const items = res.success ? (res.data?.ledgers || (Array.isArray(res.data) ? res.data : [])) : []
-      return items.map((l: any) => ({ id: l.id, name: l.ledger_name || l.ledgerName || l.name || "" })).filter((l: any) => l.name)
-    },
-    enabled: open,
-    staleTime: 5 * 60 * 1000,
-  })
-
   // Reset form state whenever a different order is opened.
   useEffect(() => {
     if (!open) return
     setDetailsExpanded(true)
     setRemarks("")
+    setDeselected(new Set())
     setManualSaudaNo(detail?.order?.manualSaudaNo || "")
     setDispatchFrom(detail?.dispatchFrom || "in-stock")
     setChecklist({ rate: "approve", sku: "approve", credit: "approve", dispatch: "approve", confirm: "approve" })
@@ -99,28 +88,48 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
 
   const tax = detail?.tax
   const items = detail?.items || []
+  // KGF = SKU master net weight per main unit x ordered qty (same rule as the Order Punch form); unknown weight -> null
+  const kgs: (number | null)[] = items.map((it: any) => {
+    const w = Number(it.sku?.skuWeight)
+    const q = Number(it.orderItem?.orderQuantity)
+    return w > 0 && q > 0 ? w * q : null
+  })
+  const totalKgs = kgs.reduce((n: number, k, i) => n + (!deselected.has(items[i]?.orderItem?.id) ? k || 0 : 0), 0)
+  // One rate across all items -> show it next to the tax label (e.g. CGST @ 2.5%); mixed rates -> label only.
+  const gstRates = Array.from(new Set<number>((tax?.itemLines || []).map((l: any) => Number(l.gstPercent) || 0)))
+  const gstRate = gstRates.length === 1 ? gstRates[0] : null
+  const rateTag = (divisor: number) => (gstRate == null ? "" : ` @ ${fmtNum(gstRate / divisor, 2)}%`)
 
   // Live preview combining the server-computed item tax lines with whatever
   // charge rows are currently being edited (not yet saved) - so the totals
   // footer updates as the approver adds/edits a charge, without a round trip.
+  const isSelected = (idx: number) => !deselected.has(items[idx]?.orderItem?.id)
+  const selectedCount = items.filter((_: any, i: number) => isSelected(i)).length
+  const toggleItem = (id: number) =>
+    setDeselected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = () => setDeselected(selectedCount === items.length ? new Set(items.map((it: any) => it.orderItem.id)) : new Set())
+
+  // Totals follow the ticked items; ledger charges belong to the order and always count.
   const previewTotals = useMemo(() => {
     if (!tax) return null
-    const itemsTaxable = (tax.itemLines || []).reduce((s: number, l: any) => s + (l.taxableValue || 0), 0)
+    const lines = (tax.itemLines || []).filter((_: any, i: number) => !deselected.has(items[i]?.orderItem?.id))
+    const sum = (k: string) => lines.reduce((s: number, l: any) => s + (Number(l[k]) || 0), 0)
+    const itemsTaxable = sum("taxableValue")
     const chargesTaxable = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
     const totalTaxableValue = itemsTaxable + chargesTaxable
-    const cgst = tax.cgst || 0
-    const sgst = tax.sgst || 0
-    const igst = tax.igst || 0
+    const cgst = sum("cgst")
+    const sgst = sum("sgst")
+    const igst = sum("igst")
     const preRound = totalTaxableValue + cgst + sgst + igst
     const grandTotal = Math.round(preRound)
     const roundingOff = +(grandTotal - preRound).toFixed(2)
     return { totalTaxableValue, cgst, sgst, igst, roundingOff, grandTotal }
-  }, [tax, charges])
-
-  const addChargeRow = () => setCharges((prev) => [...prev, { ledgerId: null, ledgerName: "", amount: "" }])
-  const removeChargeRow = (idx: number) => setCharges((prev) => prev.filter((_, i) => i !== idx))
-  const updateChargeRow = (idx: number, patch: Partial<{ ledgerId: number | null; ledgerName: string; amount: string }>) =>
-    setCharges((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)))
+  }, [tax, charges, deselected, items])
 
   const handleSubmit = async (action: ApprovalAction) => {
     if (!detail || !orderId) return
@@ -145,13 +154,15 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
         userId: user?.id || null,
       }
 
-      const validCharges = charges
-        .filter((c) => c.ledgerId && Number(c.amount) > 0)
-        .map((c) => ({ ledgerId: c.ledgerId as number, amount: Number(c.amount) }))
-      await approvalApi.setOrderCharges(orderId, validCharges, user?.id || null)
+      // Ledger charges come from Order Punch and are not edited here, so nothing is re-saved.
 
+      const chosen = items.filter((it: any) => !deselected.has(it.orderItem.id))
+      if (chosen.length === 0) {
+        toast({ title: "No item selected", description: "Tick at least one item to continue.", variant: "destructive" })
+        return
+      }
       const results = await Promise.allSettled(
-        items.map((it: any) => approvalApi.submit(it.orderItem.id, approvalData))
+        chosen.map((it: any) => approvalApi.submit(it.orderItem.id, approvalData))
       )
       const failed = results.filter((r) => r.status === "rejected")
       if (failed.length > 0) {
@@ -185,39 +196,54 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
 
   return (
     <Dialog open={open} onOpenChange={(v) => !submittingAction && onOpenChange(v)}>
-      <DialogContent className="flex max-h-[90vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] flex-col overflow-x-hidden overflow-y-auto p-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] sm:max-w-4xl sm:p-6 lg:max-w-6xl">
-        <DialogHeader className="min-w-0 border-b pb-4">
-          <DialogTitle className="break-words text-lg font-bold leading-tight text-slate-900 sm:text-xl">
-            {order?.orderNo || "Order Approval"}
-          </DialogTitle>
-          <DialogDescription className="mt-1.5 text-slate-500">
-            Review order & item details, then Approve, Reject, or send back for Modification.
-          </DialogDescription>
+      <DialogContent className="flex max-h-[92vh] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl lg:max-w-6xl">
+        {/* Header: order number, who it is for, and what it is worth */}
+        <DialogHeader className="min-w-0 flex-row items-center justify-between gap-4 space-y-0 border-b bg-linear-to-r from-primary/10 via-primary/5 to-transparent px-5 py-4 text-left sm:px-6">
+          <div className="flex min-w-0 items-center gap-3.5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/25">
+              <ClipboardList className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <DialogTitle className="break-words text-lg font-extrabold leading-tight tracking-tight text-slate-900 sm:text-xl">
+                {order?.orderNo || "Order Approval"}
+              </DialogTitle>
+              <DialogDescription className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-slate-500">
+                <span className="font-semibold text-slate-700">{customer?.customerName || "Review order & item details"}</span>
+                {order?.orderType && <span className="rounded-full bg-primary/10 px-2 py-px text-[10px] font-bold uppercase tracking-wide text-primary">{order.orderType}</span>}
+                {depot?.depotName && <span>· {depot.depotName}</span>}
+              </DialogDescription>
+            </div>
+          </div>
+          {detail && (
+            <div className="mr-8 hidden shrink-0 text-right sm:block">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Order value</p>
+              <p className="font-mono text-xl font-black tabular-nums text-primary">₹ {fmtMoney(previewTotals?.grandTotal)}</p>
+            </div>
+          )}
         </DialogHeader>
 
         {isLoading || !detail ? (
-          <div className="flex flex-1 items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+          <div className="flex flex-1 items-center justify-center py-20">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
-          <div className="min-w-0 space-y-6">
-            {/* Order details panel - open by default, collapsible */}
-            <Card className="border-slate-200/80 shadow-none bg-slate-50/50">
-              <CardHeader>
-                <CardTitle>Order Details</CardTitle>
-                <CardAction>
-                  <button
-                    type="button"
-                    onClick={() => setDetailsExpanded((v) => !v)}
-                    className="text-slate-400 hover:text-slate-600"
-                    aria-label={detailsExpanded ? "Collapse order details" : "Expand order details"}
-                  >
-                    {detailsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-                </CardAction>
-              </CardHeader>
+          <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {/* Order details - collapsible */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <button
+                type="button"
+                onClick={() => setDetailsExpanded((v) => !v)}
+                className="flex w-full items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-left"
+                aria-label={detailsExpanded ? "Collapse order details" : "Expand order details"}
+              >
+                <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><FileText className="h-3.5 w-3.5" /></span>
+                  Order Details
+                </span>
+                {detailsExpanded ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+              </button>
               {detailsExpanded && (
-                <CardContent className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3.5 p-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
                   <Field label="Customer Name" value={customer?.customerName} />
                   <Field label="Dispatch From (Depot)" value={depot?.depotName} />
                   <Field label="Delivery Purpose" value={order?.deliveryPurpose} />
@@ -234,9 +260,9 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                   <Field label="Advance Amount (₹)" value={fmtMoney(order?.advanceAmount)} />
                   <Field label="Broker" value={broker?.brokerName || "—"} />
                   <div>
-                    <p className="text-xs text-muted-foreground">Dispatch From</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dispatch From</p>
                     <Select value={dispatchFrom} onValueChange={setDispatchFrom}>
-                      <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="mt-1 h-9 w-full bg-white text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="in-stock">In Stock</SelectItem>
                         <SelectItem value="production">Production</SelectItem>
@@ -244,178 +270,121 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                     </Select>
                   </div>
                   <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Manual Sauda No.</p>
-                    <Input value={manualSaudaNo} onChange={(e) => setManualSaudaNo(e.target.value)} className="mt-1 h-8 text-xs" placeholder="Enter manual sauda no..." />
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Manual Sauda No.</p>
+                    <Input value={manualSaudaNo} onChange={(e) => setManualSaudaNo(e.target.value)} className="mt-1 h-9 bg-white text-sm" placeholder="Enter manual sauda no..." />
                   </div>
-                  <div className="col-span-2 sm:col-span-3 lg:col-span-4">
-                    <p className="text-xs text-muted-foreground">Order Punch Remarks</p>
-                    <p className="font-medium">{order?.orderPunchRemarks || "—"}</p>
+                  <div className="col-span-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Order Punch Remarks</p>
+                    <p className="mt-0.5 font-medium text-slate-900">{order?.orderPunchRemarks || "—"}</p>
                   </div>
                   {order?.uploadSo && (
                     <div className="col-span-2">
-                      <p className="text-xs text-muted-foreground">PO Copy Attachment</p>
-                      <a href={order.uploadSo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">PO Copy Attachment</p>
+                      <a href={order.uploadSo} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-1 font-medium text-primary hover:underline">
                         <FileText className="h-3.5 w-3.5" /> View Attachment <ExternalLink className="h-3 w-3" />
                       </a>
                     </div>
                   )}
-                </CardContent>
-              )}
-            </Card>
-
-            {/* Item-level table with sticky header */}
-            <Card className="border border-slate-200/80 shadow-none overflow-hidden bg-slate-50/50">
-              <CardHeader className="p-4 sm:p-5 border-b border-slate-200/80 bg-slate-50/80">
-                <CardTitle className="text-base font-bold">Item Details</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="max-h-64 overflow-y-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-slate-100/70 border-b">
-                      {items.length > 0 && (
-                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
-                          <TableCell className="px-4 font-black text-slate-900">Total ({items.length})</TableCell>
-                          <TableCell className="px-4" />
-                          <TableCell className="px-4" />
-                          <TableCell className="px-4" />
-                          <TableCell className="px-4" />
-                          <TableCell className="px-4 text-right font-mono tabular-nums">
-                            {fmtNum(items.reduce((a: number, _it: any, i: number) => a + (Number(tax?.itemLines?.[i]?.taxableValue) || 0), 0), 2)}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      <TableRow>
-                        <TableHead className="px-4">Product / SKU</TableHead>
-                        <TableHead className="px-4">Oil Type</TableHead>
-                        <TableHead className="px-4">UOM</TableHead>
-                        <TableHead className="px-4 text-right">Qty</TableHead>
-                        <TableHead className="px-4 text-right">Rate (₹)</TableHead>
-                        <TableHead className="px-4 text-right">Amount (₹)</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((it: any, idx: number) => {
-                        const line = tax?.itemLines?.[idx]
-                        return (
-                          <TableRow key={it.orderItem.id}>
-                            <TableCell className="px-4 font-medium">{it.sku?.skuName || it.orderItem?.oilType || "—"}</TableCell>
-                            <TableCell className="px-4">{it.orderItem?.oilType || "—"}</TableCell>
-                            <TableCell className="px-4">{it.orderItem?.uom || "—"}</TableCell>
-                            <TableCell className="px-4 text-right font-mono tabular-nums">
-                              {it.orderItem?.orderQuantity != null && it.orderItem?.orderQuantity !== "" ? fmtNum(Number(it.orderItem.orderQuantity), 3) : "—"}
-                            </TableCell>
-                            <TableCell className="px-4 text-right font-mono tabular-nums">{fmtMoney(line?.rate)}</TableCell>
-                            <TableCell className="px-4 text-right font-mono tabular-nums font-bold">{fmtMoney(line?.taxableValue)}</TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </section>
 
-            {/* Invoice-style detail view */}
-            <Card className="border border-slate-200/80 shadow-none overflow-hidden bg-slate-50/50">
-              <CardHeader className="p-4 sm:p-5 border-b border-slate-200/80 bg-slate-50/80">
-                <CardTitle className="text-base font-bold">Invoice Details</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader className="bg-slate-100/70 border-b">
-                    <TableRow>
-                      <TableHead className="px-4">Description</TableHead>
-                      <TableHead className="px-4 text-right">Taxable Value (₹)</TableHead>
-                      <TableHead className="px-4 text-right">GST (%)</TableHead>
-                      <TableHead className="w-8 px-4" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(tax?.itemLines || []).map((line: any, idx: number) => (
-                      <TableRow key={`item-${idx}`}>
-                        <TableCell className="px-4 font-medium">{items[idx]?.sku?.skuName || items[idx]?.orderItem?.oilType || "—"}</TableCell>
-                        <TableCell className="px-4 text-right font-mono tabular-nums font-bold">{fmtMoney(line.taxableValue)}</TableCell>
-                        <TableCell className="px-4 text-right font-mono tabular-nums">
-                          {line.gstPercent ? fmtNum(Number(line.gstPercent), 2) : "—"}
-                        </TableCell>
-                        <TableCell className="px-4" />
-                      </TableRow>
-                    ))}
+            {/* Items, ledger charges and totals - each item is shown once */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Package className="h-3.5 w-3.5" /></span>
+                  Order Items &amp; Invoice
+                </span>
+                <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+                  {selectedCount === items.length ? `${items.length} item${items.length === 1 ? "" : "s"}` : `${selectedCount} of ${items.length} items`}{totalKgs > 0 ? ` · ${fmtNum(totalKgs, 3)} KGF` : ""}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-primary/5 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                      <th className="w-10 py-2.5 pl-4 pr-0">
+                        <Checkbox
+                          checked={selectedCount === items.length ? true : selectedCount === 0 ? false : "indeterminate"}
+                          onCheckedChange={toggleAll}
+                          aria-label="Select all items"
+                        />
+                      </th>
+                      <th className="px-3 py-2.5 text-left">Product / SKU</th>
+                      <th className="px-3 py-2.5 text-right">Qty<span className="ml-1 inline-block w-10" /></th>
+                      <th className="px-3 py-2.5 text-right">KGF</th>
+                      <th className="px-3 py-2.5 text-right">Rate (₹)</th>
+                      <th className="px-3 py-2.5 text-right">GST (%)</th>
+                      <th className="px-3 py-2.5 text-right">GST Amt (₹)</th>
+                      <th className="px-4 py-2.5 text-right">Taxable Value (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it: any, idx: number) => {
+                      const line = tax?.itemLines?.[idx]
+                      return (
+                        <tr key={it.orderItem.id} className={`h-11 border-b border-slate-100 even:bg-slate-50/60 hover:bg-primary/5 ${isSelected(idx) ? "" : "opacity-45"}`}>
+                          <td className="w-10 pl-4 pr-0">
+                            <Checkbox
+                              checked={isSelected(idx)}
+                              onCheckedChange={() => toggleItem(it.orderItem.id)}
+                              aria-label={`Select ${it.sku?.skuName || "item"}`}
+                            />
+                          </td>
+                          <td className="px-3 font-semibold text-slate-900">{it.sku?.skuName || it.orderItem?.oilType || "—"}</td>
+                          <td className="px-3 text-right font-mono tabular-nums">
+                            {it.orderItem?.orderQuantity != null && it.orderItem?.orderQuantity !== "" ? fmtNum(Number(it.orderItem.orderQuantity), 3) : "—"}
+                            {(it.sku?.mainUom || it.orderItem?.uom) && <span className="ml-1 inline-block w-10 text-left font-sans text-xs text-slate-500">{it.sku?.mainUom || it.orderItem?.uom}</span>}
+                          </td>
+                          <td className="px-3 text-right font-mono font-semibold tabular-nums text-slate-800">{kgs[idx] != null ? fmtNum(kgs[idx] as number, 3) : "—"}</td>
+                          <td className="px-3 text-right font-mono tabular-nums">{fmtMoney(line?.rate)}</td>
+                          <td className="px-3 text-right font-mono tabular-nums text-slate-600">{fmtNum(Number(line?.gstPercent) || 0, 2)}</td>
+                          <td className="px-3 text-right font-mono tabular-nums text-slate-800">{fmtMoney((line?.cgst || 0) + (line?.sgst || 0) + (line?.igst || 0))}</td>
+                          <td className="px-4 text-right font-mono font-bold tabular-nums text-slate-900">{fmtMoney(line?.taxableValue)}</td>
+                        </tr>
+                      )
+                    })}
                     {charges.map((c, idx) => (
-                      <TableRow key={`charge-${idx}`} className="bg-slate-50/60">
-                        <TableCell className="px-4">
-                          <Select
-                            value={c.ledgerId ? String(c.ledgerId) : ""}
-                            onValueChange={(v) => {
-                              const opt = (ledgerOptions || []).find((l: any) => String(l.id) === v)
-                              updateChargeRow(idx, { ledgerId: opt?.id ?? null, ledgerName: opt?.name ?? "" })
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select ledger (e.g. Transporting Expenses)" /></SelectTrigger>
-                            <SelectContent>
-                              {(ledgerOptions || []).map((l: any) => (
-                                <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="px-4 text-right">
-                          <Input
-                            type="number"
-                            value={c.amount}
-                            onChange={(e) => updateChargeRow(idx, { amount: e.target.value })}
-                            className="h-8 w-28 text-right text-xs ml-auto"
-                            placeholder="0.00"
-                          />
-                        </TableCell>
-                        <TableCell className="px-4 text-right text-xs text-slate-400">—</TableCell>
-                        <TableCell className="px-4">
-                          <button type="button" onClick={() => removeChargeRow(idx)} className="text-slate-400 hover:text-red-600">
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </TableCell>
-                      </TableRow>
+                      <tr key={`charge-${idx}`} className="h-11 border-b border-amber-100 bg-amber-50/70">
+                        {/* Read-only: charges are entered at Order Punch and only shown here. */}
+                        <td colSpan={7} className="px-4 font-medium text-slate-800">
+                          {c.ledgerName || `Ledger ${c.ledgerId ?? ""}`}
+                          <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">Ledger charge · no GST</span>
+                        </td>
+                        <td className="px-4 text-right font-mono font-bold tabular-nums text-slate-900">{fmtMoney(Number(c.amount) || 0)}</td>
+                      </tr>
                     ))}
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={4} className="px-4 py-2">
-                        <Button type="button" variant="outline" size="sm" onClick={addChargeRow} className="h-7 text-[11px]">
-                          <Plus className="mr-1 h-3 w-3" /> Add Charge (e.g. Transporting Expenses)
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                  <TableFooter>
-                    <TotalFooterRow label="Total Taxable Value (₹)" value={previewTotals?.totalTaxableValue} />
-                    {/* CGST+SGST and IGST are mutually exclusive (intra-state vs inter-state) —
-                        only the applicable one is rendered at all, never both. */}
+                  </tbody>
+                  <tfoot>
+                    <SumRow label="Total Taxable Value (₹)" value={previewTotals?.totalTaxableValue} />
                     {tax?.isInterState ? (
-                      <TotalFooterRow label="IGST (₹)" value={previewTotals?.igst} />
+                      <SumRow label={`IGST${rateTag(1)} (₹)`} value={previewTotals?.igst} />
                     ) : (
                       <>
-                        <TotalFooterRow label="CGST (₹)" value={previewTotals?.cgst} />
-                        <TotalFooterRow label="SGST (₹)" value={previewTotals?.sgst} />
+                        <SumRow label={`CGST${rateTag(2)} (₹)`} value={previewTotals?.cgst} />
+                        <SumRow label={`SGST${rateTag(2)} (₹)`} value={previewTotals?.sgst} />
                       </>
                     )}
-                    <TotalFooterRow label="Rounding Off (₹)" value={previewTotals?.roundingOff} />
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={4} className="p-0">
-                        <div className="flex items-center justify-between px-4 py-3 text-sm font-black text-slate-900 border-t border-slate-200">
-                          <span>Total Order Amount (₹)</span>
-                          <span className="font-mono tabular-nums">{fmtMoney(previewTotals?.grandTotal)}</span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  </TableFooter>
-                </Table>
-              </CardContent>
-            </Card>
+                    <SumRow label="Rounding Off (₹)" value={previewTotals?.roundingOff} />
+                    <tr className="border-t border-primary/20 bg-primary/10">
+                      <td colSpan={7} className="px-4 py-3 text-right text-sm font-extrabold uppercase tracking-wide text-primary">Total Order Amount (₹)</td>
+                      <td className="px-4 py-3 text-right text-base font-extrabold tabular-nums text-primary">{fmtNum(previewTotals?.grandTotal || 0, 2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
 
-            {/* Six-point verification (unchanged, minus the old "Overall Status" item — replaced by the 3 buttons below) */}
-            <Card className="border-slate-200/80 shadow-none bg-slate-50/50">
-              <CardHeader>
-                <CardTitle>Verification</CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {/* Verification */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ShieldCheck className="h-3.5 w-3.5" /></span>
+                  Verification
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
                 {CHECK_ITEMS.map((item) => (
                   <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white p-3">
                     <Label className="text-sm font-medium">{item.label}</Label>
@@ -435,12 +404,12 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                     </RadioGroup>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </section>
 
             {/* Remarks */}
-            <div>
-              <Label className="mb-1.5 flex items-center gap-1 text-sm font-semibold text-slate-700">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <Label className="mb-1.5 flex items-center gap-1 text-sm font-bold text-slate-900">
                 Remarks
                 <span className="text-[10px] font-bold uppercase text-red-500">(required for Reject / Modify)</span>
               </Label>
@@ -448,38 +417,38 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
                 placeholder="Enter remarks..."
-                className="min-h-20 text-sm"
+                className="min-h-20 bg-white text-sm"
               />
-            </div>
+            </section>
           </div>
         )}
 
-        <DialogFooter className="mt-4 border-t pt-4">
+        <DialogFooter className="border-t bg-white px-5 py-3 sm:px-6">
           <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
             <Button
               onClick={() => handleSubmit("reject")}
-              disabled={!!submittingAction || isReadOnly || isLoading}
+              disabled={!!submittingAction || isReadOnly || isLoading || selectedCount === 0}
               variant="destructive"
-              className="w-full sm:w-auto"
+              className="w-full gap-1.5 sm:w-auto"
             >
-              {submittingAction === "reject" && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submittingAction === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
               Reject
             </Button>
             <Button
               onClick={() => handleSubmit("modify")}
-              disabled={!!submittingAction || isReadOnly || isLoading}
+              disabled={!!submittingAction || isReadOnly || isLoading || selectedCount === 0}
               variant="outline"
-              className="w-full border-2 border-amber-500 text-amber-600 hover:bg-amber-50 sm:w-auto"
+              className="w-full gap-1.5 border-2 border-amber-500 text-amber-600 hover:bg-amber-50 sm:w-auto"
             >
-              {submittingAction === "modify" && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submittingAction === "modify" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
               Modify
             </Button>
             <Button
               onClick={() => handleSubmit("approve")}
-              disabled={!!submittingAction || isReadOnly || isLoading}
-              className="w-full sm:w-auto"
+              disabled={!!submittingAction || isReadOnly || isLoading || selectedCount === 0}
+              className="w-full gap-1.5 sm:w-auto"
             >
-              {submittingAction === "approve" && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submittingAction === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Approve
             </Button>
           </div>
@@ -491,18 +460,18 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
 
 function Field({ label, value }: { label: string; value: any }) {
   return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="break-words font-medium">{value || "—"}</p>
+    <div className="min-w-0">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 break-words font-semibold text-slate-900">{value || "—"}</p>
     </div>
   )
 }
 
-function TotalFooterRow({ label, value }: { label: string; value: number | null | undefined }) {
+function SumRow({ label, value }: { label: string; value: number | null | undefined }) {
   return (
-    <TableRow className="hover:bg-transparent">
-      <TableCell colSpan={2} className="px-4 text-xs text-slate-600">{label}</TableCell>
-      <TableCell colSpan={2} className="px-4 text-right text-xs font-mono tabular-nums font-semibold text-slate-900">{fmtMoney(value)}</TableCell>
-    </TableRow>
+    <tr className="border-t border-slate-100 bg-slate-50/60">
+      <td colSpan={7} className="px-4 py-2 text-right text-xs text-slate-500">{label}</td>
+      <td className="px-4 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">{fmtNum(Number(value) || 0, 2)}</td>
+    </tr>
   )
 }

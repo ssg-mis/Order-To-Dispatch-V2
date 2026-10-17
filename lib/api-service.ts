@@ -67,6 +67,8 @@ export interface OrderItem {
 }
 
 export interface CreateOrderRequest {
+  /** Extra taxable ledger lines (e.g. Transporting Expenses): [{ ledgerId, amount }] */
+  charges?: { ledgerId: number; amount: number }[];
   customerId: number;
   orderType: 'regular' | 'pre-approval';
   depotId?: number;
@@ -231,11 +233,24 @@ export const orderApi = {
     });
   },
 
+  /** Ledger charges of an order (single source) + whether it was already invoiced, looked up by DO number. */
+  getChargesByNo: async (orderNo: string): Promise<ApiResponse> => {
+    return request(`/orders/charges-by-no?order_no=${encodeURIComponent(orderNo)}`);
+  },
+
+  /** Set the ledger charges of an order that has none yet (refused if it already has charges or is invoiced). */
+  initCharges: async (id: number, charges: { ledgerId: number; amount: number }[]): Promise<ApiResponse> => {
+    return request(`/orders/${id}/charges`, {
+      method: 'POST',
+      body: JSON.stringify({ charges }),
+    });
+  },
+
   /** Order Punch Modify: replace the order's line items. items: [{ id?, sku_id, order_quantity, rate_of_material }] */
-  updateItems: async (id: number, items: any[]): Promise<ApiResponse> => {
+  updateItems: async (id: number, items?: any[], charges?: any[]): Promise<ApiResponse> => {
     return request(`/orders/${id}/items`, {
       method: 'PUT',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, charges }),
     });
   },
 
@@ -633,8 +648,17 @@ export const gateInApi = {
   }): Promise<ApiResponse> =>
     request('/gate-in/submit', { method: 'POST', body: JSON.stringify(data) }),
 
+  revertToPlanVehicle: (orderKey: string, remarks: string): Promise<ApiResponse> =>
+    request('/gate-in/revert', { method: 'POST', body: JSON.stringify({ orderKey, remarks }) }),
+
   check: (orderKey: string): Promise<ApiResponse> =>
     request(`/gate-in/check?order_key=${encodeURIComponent(orderKey)}`),
+
+  getSettings: (): Promise<ApiResponse> =>
+    request('/gate-in/settings'),
+
+  updateSettings: (data: { photos_mandatory: boolean }): Promise<ApiResponse> =>
+    request('/gate-in/settings', { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 export const draftApi = {

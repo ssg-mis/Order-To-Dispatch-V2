@@ -34,6 +34,7 @@ import { makeInvoiceApi, orderApi, skuApi, depotApi, petrolPumpApi, insuranceDet
 import { Combobox } from "@/components/ui/combobox"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
 import { fmtNum, fmtDate } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -64,10 +65,12 @@ function extractState(addr: string): string | null {
   return null
 }
 
-function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
+function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, chargesBillable = 0 }: {
   selectedGroups: any[]
   selectedProducts: string[]
   productCdData: Record<string, { isCd: string; cdAmount: string }>
+  /** Ledger charges still to be billed (an order's charges ride on its FIRST invoice only). No GST on them. */
+  chargesBillable?: number
 }) {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
@@ -122,7 +125,7 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
     igst = Math.round(totalTaxable * 0.05 * 100) / 100
   }
 
-  const rawTotal = totalTaxable + cgst + sgst + igst
+  const rawTotal = totalTaxable + chargesBillable + cgst + sgst + igst
   const invoiceTotal = Math.round(rawTotal)
   const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
 
@@ -132,6 +135,12 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
       <div className="p-4 max-w-sm ml-auto space-y-2">
+        {chargesBillable > 0 && (
+          <div className="flex justify-between items-center text-xs">
+            <span className="font-black uppercase text-slate-500 text-[10px]">Ledger Charges (no GST)</span>
+            <span className="font-mono font-bold text-slate-700">₹{chargesBillable.toFixed(2)}</span>
+          </div>
+        )}
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
           <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
@@ -278,6 +287,22 @@ export default function MakeInvoicePage() {
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+
+  // Ledger charges: one set per order, billed ONCE (on the order's first invoice).
+  const invoiceOrderNos = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedGroups
+            .flatMap((g: any) => g._allProducts || [])
+            .filter((p: any) => selectedProducts.includes(p._rowKey))
+            .map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, ""))
+            .filter((n: string) => n && n !== "—")
+        )
+      ) as string[],
+    [selectedGroups, selectedProducts]
+  )
+  const invoiceCharges = useOrderCharges(invoiceOrderNos)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
 
@@ -771,12 +796,15 @@ export default function MakeInvoicePage() {
       });
     });
 
+    // ledger charges ride on the order's first invoice only
+    totalBillAmount += invoiceCharges.billableTotal;
+
     setInvoiceData(prev => ({
       ...prev,
       qty: totalQty.toString(),
       billAmount: totalBillAmount.toFixed(2)
     }));
-  }, [selectedProducts, isDialogOpen, selectedGroups, productCdData]);
+  }, [selectedProducts, isDialogOpen, selectedGroups, productCdData, invoiceCharges.billableTotal]);
 
   const handlePrint = () => {
     const group = selectedGroups[0]
@@ -2017,7 +2045,10 @@ export default function MakeInvoicePage() {
                   selectedGroups={selectedGroups}
                   selectedProducts={selectedProducts}
                   productCdData={productCdData}
+                  chargesBillable={invoiceCharges.billableTotal}
                 />
+
+                <OrderChargesPanel orderNos={invoiceOrderNos} />
 
                 {/* 3. Invoice Form */}
                 <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">

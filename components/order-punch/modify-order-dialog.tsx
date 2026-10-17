@@ -33,7 +33,8 @@ import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { cn } from "@/lib/utils"
 import { fmtNum } from "@/lib/table-format"
-import { extractState } from "@/components/order-punch/order-punch-form"
+import { resolveStateName, gstSupplyTypeOf } from "@/lib/gst-state"
+import { LedgerChargesEditor, incompleteChargeIndex, validCharges, chargesTotal, newChargeRow, type ChargeRow } from "@/components/order-punch/ledger-charges-editor"
 import { FileText, MapPin, Receipt, Loader2, Plus, Trash2 } from "lucide-react"
 
 interface ModifyOrderDialogProps {
@@ -75,18 +76,25 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
   const newKey = () => Math.random().toString(36).slice(2, 10)
   const normalizeItems = (rows: ItemRow[]) => JSON.stringify(rows.map((r) => ({ id: r.id ?? null, skuId: r.skuId ?? null, qty: String(r.qty), rate: String(r.rate) })))
   const itemsChanged = itemRows.length > 0 && normalizeItems(itemRows) !== originalItems
+  const [chargeRows, setChargeRows] = useState<ChargeRow[]>([])
+  const [originalCharges, setOriginalCharges] = useState("")
+  const normalizeCharges = (rows: ChargeRow[]) => JSON.stringify(validCharges(rows).map((r) => [r.ledgerId, String(parseFloat(r.amount))]))
+  const chargesChanged = normalizeCharges(chargeRows) !== originalCharges
+
+  const statesById = useStatesMap()
+  const { addresses: addressOptions, hasMultiple: hasMultipleAddresses } = useCustomerAddresses(customerRecord?.id ?? null, statesById)
 
   // GST breakdown (indicative, same maths as Add Order): taxable = rate x nos-per-main-uom x qty.
   const [gstRatePercent, setGstRatePercent] = useState("5")
-  const [gstSupplyType, setGstSupplyType] = useState<"INTRA" | "INTER">("INTRA")
   const skuOf = (skuId?: number) => skuList.find((s: any) => s.id === skuId)
-  const billingState = depotRecord?.state || ""
-  const shippingState = extractState(customerAddress || "") || ""
-  useEffect(() => {
-    if (billingState && shippingState) {
-      setGstSupplyType(billingState.trim().toLowerCase() === shippingState.trim().toLowerCase() ? "INTRA" : "INTER")
-    }
-  }, [billingState, shippingState])
+  const billingState = resolveStateName(depotRecord, statesById)
+  // ship-to state from the MASTER (selected saved address, else the customer record) - not parsed from text
+  const pickedShipAddress = addressOptions.find((a: CustomerAddressOption) => a.id === selectedAddressId)
+  const shippingState = pickedShipAddress?.stateName || resolveStateName(customerRecord, statesById)
+  // Same / Other State comes only from the masters; null (a state is missing) means nothing is assumed.
+  const gstSupplyType = gstSupplyTypeOf(billingState, shippingState)
+  // Nothing to detect yet (no customer / depot picked) is not a master-data problem.
+  const gstWaitingFor = !(customerRecord) ? "customer" : !(depotRecord) ? "depot" : null
   const numericGstRate = parseFloat(gstRatePercent) || 0
   const halfRate = numericGstRate / 2
   const totalQty = itemRows.reduce((n, r) => n + (parseFloat(r.qty) || 0), 0)
@@ -95,16 +103,16 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
     (n, r) => n + (parseFloat(r.rate) || 0) * (parseFloat(skuOf(r.skuId)?.nos_per_main_uom) || 0) * (parseFloat(r.qty) || 0),
     0
   )
+  const taxableWithCharges = totalTaxable + chargesTotal(chargeRows)
+  // Ledger charges add to the taxable value but carry no GST of their own - same rule as Approval of Order.
   const orderCgst = totalTaxable * (halfRate / 100)
   const orderSgst = totalTaxable * (halfRate / 100)
   const orderIgst = totalTaxable * (numericGstRate / 100)
-  const totalGstAmount = gstSupplyType === "INTRA" ? orderCgst + orderSgst : orderIgst
-  const orderRawTotal = totalTaxable + totalGstAmount
+  const totalGstAmount = gstSupplyType === null ? 0 : gstSupplyType === "INTRA" ? orderCgst + orderSgst : orderIgst
+  const orderRawTotal = taxableWithCharges + totalGstAmount
   const orderRoundedTotal = Math.round(orderRawTotal)
   const orderRoundOff = orderRoundedTotal - orderRawTotal
 
-  const statesById = useStatesMap()
-  const { addresses: addressOptions, hasMultiple: hasMultipleAddresses } = useCustomerAddresses(customerRecord?.id ?? null, statesById)
 
   // Initialize every field from the order whenever the dialog opens.
   useEffect(() => {
@@ -135,6 +143,14 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
     }))
     setItemRows(rows)
     setOriginalItems(normalizeItems(rows))
+    const cRows: ChargeRow[] = (order.charges || []).map((c: any) => ({
+      key: newChargeRow().key,
+      ledgerId: c.ledger_id,
+      ledgerName: c.ledger_name || "",
+      amount: c.amount != null ? String(parseFloat(c.amount)) : "",
+    }))
+    setChargeRows(cRows)
+    setOriginalCharges(normalizeCharges(cRows))
 
     if (order.depot_id) {
       setDepotRecord({ id: order.depot_id, depot_name: order.depot_name })
@@ -201,6 +217,11 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
       toast({ title: "Customer required", description: "Please select a customer.", variant: "destructive" })
       return
     }
+    const unfinishedCharge = incompleteChargeIndex(chargeRows)
+    if (unfinishedCharge !== -1) {
+      toast({ title: "Finish the ledger charge", description: `Additional charge ${unfinishedCharge + 1} needs both a ledger and an amount (or remove it).`, variant: "destructive" })
+      return
+    }
     // Item changes are validated and saved first; they send the order back for re-approval.
     if (itemsChanged) {
       for (const [i, r] of itemRows.entries()) {
@@ -211,13 +232,23 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
     }
     setIsSaving(true)
     try {
+      const chargesPayload = validCharges(chargeRows).map((r) => ({ ledgerId: r.ledgerId, amount: parseFloat(r.amount) }))
+      if (!itemsChanged && chargesChanged) {
+        // ledger charges only: replace them, nothing else is touched
+        const chRes = await orderApi.updateItems(order.id, undefined, chargesPayload)
+        if (!chRes?.success) {
+          toast({ title: "Charges not saved", description: chRes?.message || "Could not update the ledger charges.", variant: "destructive" })
+          setIsSaving(false)
+          return
+        }
+      }
       if (itemsChanged) {
         const itemRes = await orderApi.updateItems(order.id, itemRows.map((r) => ({
           id: r.id,
           sku_id: r.skuId,
           order_quantity: parseFloat(r.qty),
           rate_of_material: parseFloat(r.rate),
-        })))
+        })), chargesChanged ? chargesPayload : undefined)
         if (!itemRes?.success) {
           toast({ title: "Items not saved", description: itemRes?.message || "Could not update the items.", variant: "destructive" })
           setIsSaving(false)
@@ -565,6 +596,8 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
               Add item
             </Button>
 
+            <LedgerChargesEditor rows={chargeRows} onChange={setChargeRows} />
+
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
               <div className="space-y-0.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Order Weight (KG)</p>
@@ -576,7 +609,7 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
               </div>
               <div className="space-y-0.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Taxable Amount (₹)</p>
-                <p className="text-sm font-bold text-blue-700">{fmtNum(totalTaxable, 2)}</p>
+                <p className="text-sm font-bold text-blue-700">{fmtNum(taxableWithCharges, 2)}</p>
               </div>
             </div>
 
@@ -599,45 +632,55 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
                 </div>
               </div>
               <div className="ml-auto max-w-sm space-y-2 p-4 text-xs">
-                <div className="mb-3 flex items-center justify-between rounded-lg bg-slate-100 p-0.5 text-[10px] font-semibold text-slate-600">
-                  {(["INTRA", "INTER"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setGstSupplyType(t)}
-                      className={cn(
-                        "flex-1 cursor-pointer rounded py-1 text-center transition-all",
-                        gstSupplyType === t ? "bg-white font-bold text-blue-700 shadow-xs" : "text-slate-500 hover:text-slate-800"
-                      )}
-                    >
-                      {t === "INTRA" ? "Same State" : "Other State"}
-                    </button>
-                  ))}
+                {/* Same / Other State is auto-detected from the Depot and Customer masters */}
+                <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", gstSupplyType === null ? (gstWaitingFor ? "bg-slate-100 text-slate-600" : "bg-red-100 text-red-700") : gstSupplyType === "INTRA" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+  {gstSupplyType === null ? (gstWaitingFor ? `Select ${gstWaitingFor}` : "State unknown") : gstSupplyType === "INTRA" ? "Same State" : "Other State"}
+</span>
+                    <span className="font-medium text-slate-600">
+                      {billingState || "—"} <span className="text-slate-400">→</span> {shippingState || "—"}
+                    </span>
+                  </div>
+                  {(!billingState || !shippingState) && (
+  <p className={cn("mt-1 text-[10px] font-medium", gstWaitingFor ? "text-slate-500" : "text-red-600")}>
+    {gstWaitingFor ? `Select the ${gstWaitingFor} to detect Same / Other State.` : null}
+    {!gstWaitingFor && <>
+    {!billingState ? "Depot" : "Customer"} state is not set in Master (no state, State Master link or GSTIN), so GST cannot be calculated. Update it in Master to see the breakdown.</>}
+</p>
+)}
                 </div>
-                {gstSupplyType === "INTRA" ? (
+                {gstSupplyType === null ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-500">CGST / SGST / IGST (₹)</span>
+                    <span className="font-mono font-bold text-slate-400">—</span>
+                  </div>
+                ) : gstSupplyType === "INTRA" ? (
                   <>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-slate-500">CGST ({halfRate.toFixed(1)}%) (₹)</span>
+                    <div className="flex justify-between items-center">
+                      <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%) (₹)</span>
                       <span className="font-mono font-bold text-slate-700">{fmtNum(orderCgst, 2)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-slate-500">SGST ({halfRate.toFixed(1)}%) (₹)</span>
+                    <div className="flex justify-between items-center">
+                      <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%) (₹)</span>
                       <span className="font-mono font-bold text-slate-700">{fmtNum(orderSgst, 2)}</span>
                     </div>
                   </>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-slate-500">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
                     <span className="font-mono font-bold text-slate-700">{fmtNum(orderIgst, 2)}</span>
                   </div>
                 )}
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase text-slate-500">Round Off (₹)</span>
-                  <span className="font-mono font-bold text-slate-500">{`${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}</span>
+                <div className="flex justify-between items-center">
+                  <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
+                  <span className="font-mono font-bold text-slate-500">
+                    {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
+                  </span>
                 </div>
-                <div className="mt-1 flex items-center justify-between border-t border-slate-200 pt-2">
-                  <span className="text-[11px] font-black uppercase text-slate-800">Total Order Value (₹)</span>
-                  <span className="font-mono text-sm font-black text-blue-700">{fmtNum(orderRoundedTotal, 2)}</span>
+                <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
+                  <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value (₹)</span>
+                  <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtNum(orderRoundedTotal, 2)}</span>
                 </div>
               </div>
             </div>

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useState, useMemo, useCallback } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -446,6 +447,8 @@ export default function FinalInvoicePage() {
                   </div>
                 </div>
               </div>
+
+              <OrderChargesPanel orderNos={selectedRow?.order_no ? [String(selectedRow.order_no)] : []} />
 
               {/* Uploads */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">

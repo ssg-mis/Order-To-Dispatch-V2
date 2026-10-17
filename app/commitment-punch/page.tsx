@@ -95,6 +95,7 @@ type SkuRow = {
 
 type LedgerRow = {
   id: string
+  ledgerId?: number
   ledgerName: string
   amount: string
 }
@@ -126,7 +127,7 @@ const PAGE_COLUMNS = [
   { id: "commitment_no", label: "Commitment No." },
   { id: "commitment_date", label: "Date" },
   { id: "party_name", label: "Customer Name" },
-  { id: "dispatch_from", label: "Dispatch from" },
+  { id: "dispatch_from", label: "Dispatch From (Depot)" },
   { id: "oil_type", label: "Oil Type" },
   { id: "rate", label: "Rate (PMT)" },
   { id: "quantity", label: "Qty (MT)" },
@@ -147,6 +148,7 @@ const fmtNum = (v: unknown, d = 4) => Number(v ?? 0).toFixed(d)
 export default function CommitmentPunchPage() {
   const { toast } = useToast()
   const { user, isAdmin, isFeatureEnabled } = useAuth()
+  const canSortColumns = isAdmin || isFeatureEnabled('can_sort_columns')
 
   // ── Pending table state ─────────────────────────────────────
   const [pendingList, setPendingList] = useState<PendingCommitment[]>([])
@@ -412,16 +414,22 @@ export default function CommitmentPunchPage() {
     }
   }
 
-  // Auto-fill Start Date to today and End Date to +7 when Process dialog opens
+  // Start Date defaults to today and End Date to +7 days. Set when the Process dialog is opened
+  // (see openProcessForCommitment) and again here as a safety net, so both dates are always filled.
+  const localISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  const defaultProcessDates = () => {
+    const start = new Date()
+    const end = new Date()
+    end.setDate(end.getDate() + 7)
+    return { start: localISO(start), end: localISO(end) }
+  }
   useEffect(() => {
-    if (isProcessOpen && !processStartDate) {
-      const today = new Date().toISOString().split("T")[0]
-      const end = new Date()
-      end.setDate(end.getDate() + 7)
-      const endDate = end.toISOString().split("T")[0]
-      setProcessStartDate(today)
-      setProcessEndDate(endDate)
+    if (isProcessOpen && (!processStartDate || !processEndDate)) {
+      const { start, end } = defaultProcessDates()
+      setProcessStartDate(processStartDate || start)
+      setProcessEndDate(end)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProcessOpen])
 
   // ── Customer / Broker / Salesperson fetch callbacks ─────────
@@ -502,6 +510,7 @@ export default function CommitmentPunchPage() {
       const res = await ledgerApi.getAll({ search, page, limit: 50 })
       const items = res.success ? (res.data.ledgers || (Array.isArray(res.data) ? res.data : [])) : []
       const options = items
+        .filter((l: any) => !l.status || l.status === "Active")
         .map((l: any) => {
           const n = l.ledger_name || l.ledgerName || l.name || ""
           return { value: n, label: n, original: l }
@@ -727,19 +736,35 @@ export default function CommitmentPunchPage() {
     setSalespersonName("")
   }
 
+  // Every validation problem in ONE toast (a bulleted list) so the user can fix them all in one go.
+  const showProblems = (problems: string[], title = "Please fix the following") => {
+    toast({
+      title: problems.length > 1 ? `${title} (${problems.length})` : title,
+      description: (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {problems.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      ),
+      variant: "destructive",
+      duration: Math.min(3000 + problems.length * 1000, 8000), // more problems -> more time to read
+    })
+  }
+
   // ── Submit Add Commitment ───────────────────────────────────
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!partyName) { toast({ title: "Validation Error", description: "Customer name is required.", variant: "destructive" }); return }
-    if (!commitmentDate) { toast({ title: "Validation Error", description: "Commitment date is required.", variant: "destructive" }); return }
-    if (orderThrough === "Broker" && !brokerName) { toast({ title: "Validation Error", description: "Broker name is required.", variant: "destructive" }); return }
-    if (orderThrough === "Salesperson" && !salespersonName) { toast({ title: "Validation Error", description: "Salesperson is required.", variant: "destructive" }); return }
+    const problems: string[] = []
+    if (!partyName) problems.push("Customer name is required.")
+    if (!commitmentDate) problems.push("Commitment date is required.")
+    if (orderThrough === "Broker" && !brokerName) problems.push("Broker name is required.")
+    if (orderThrough === "Salesperson" && !salespersonName) problems.push("Salesperson is required.")
     // Client spec: the user must upload the Commitment PDF (when creating).
-    if (!isEditMode && !pdfFile) { toast({ title: "Validation Error", description: "Commitment PDF is required.", variant: "destructive" }); return }
-    // Oil row validation only applies when creating — edits don't change oil details
-    if (!isEditMode && rows.some(r => !r.oil_type || !r.quantity || !r.rate)) {
-      toast({ title: "Validation Error", description: "Fill Oil Type, Quantity and Rate for all rows.", variant: "destructive" }); return
-    }
+    if (!isEditMode && !pdfFile) problems.push("Commitment PDF is required.")
+    // Oil row validation only applies when creating - edits don't change oil details
+    if (!isEditMode && rows.some(r => !r.oil_type || !r.quantity || !r.rate)) problems.push("Fill Oil Type, Quantity and Rate for all rows.")
+    if (problems.length) { showProblems(problems); return }
 
     setIsSubmitting(true)
     try {
@@ -932,6 +957,9 @@ export default function CommitmentPunchPage() {
       setSalespersonName("")
     }
 
+    const { start, end } = defaultProcessDates()
+    setProcessStartDate(start)
+    setProcessEndDate(end)
     setIsProcessOpen(true)
   }
 
@@ -964,25 +992,24 @@ export default function CommitmentPunchPage() {
 
   // ── Submit Process ──────────────────────────────────────────
   const handleProcessSubmit = async () => {
-    if (!processPoNo) { toast({ title: "Validation Error", description: "PO No. is required.", variant: "destructive" }); return }
-    if (!processPoDate) { toast({ title: "Validation Error", description: "PO Date is required.", variant: "destructive" }); return }
-    if (skuRows.some(r => !r.sku || !r.qty || !r.rate)) {
-      toast({ title: "Validation Error", description: "Fill SKU, Qty and Rate for all rows.", variant: "destructive" }); return
-    }
+    const problems: string[] = []
+    if (!processPoNo) problems.push("PO No. is required.")
+    if (!processPoDate) problems.push("PO Date is required.")
+    if (skuRows.some(r => !r.sku || !r.qty || !r.rate)) problems.push("Fill SKU, Qty and Rate for all rows.")
 
     // MT Validation
     const totalReqMt = skuRows.reduce((sum, r) => sum + (r.mt || 0), 0)
     const selectedCm = pendingList.find(p => selectedIds.has(p.id))
     const remainingMt = selectedCm ? (selectedCm.remaining_qty ?? selectedCm.quantity) : 0
-
     if (totalReqMt > remainingMt + 0.0001) {
-      toast({
-        title: "Validation Error",
-        description: `Total weight (${totalReqMt.toFixed(4)} MT) exceeds remaining balance (${remainingMt.toFixed(4)} MT).`,
-        variant: "destructive"
-      });
-      return
+      problems.push(`Total weight (${totalReqMt.toFixed(4)} MT) exceeds remaining balance (${remainingMt.toFixed(4)} MT).`)
     }
+
+    const unfinishedLedger = ledgerRows.findIndex(r => (r.ledgerName || r.amount) && (!r.ledgerId || !(parseFloat(r.amount) > 0)))
+    if (unfinishedLedger !== -1) {
+      problems.push(`Additional ledger ${unfinishedLedger + 1} needs a ledger picked from the list and an amount (or remove it).`)
+    }
+    if (problems.length) { showProblems(problems); return }
 
     setIsProcessing(true)
     try {
@@ -1053,6 +1080,12 @@ export default function CommitmentPunchPage() {
 
       const orderThroughMap: Record<string, string> = { direct: "Direct", broker: "Broker", salesperson: "Salesperson" }
 
+      // Ledger charges belong to ONE order: they are sent with the first order raised and never again.
+      const ledgerCharges = ledgerRows
+        .filter(r => r.ledgerId && (parseFloat(r.amount) || 0) > 0)
+        .map(r => ({ ledgerId: r.ledgerId as number, amount: parseFloat(r.amount) }))
+      let chargesPending = ledgerCharges.length > 0
+
       for (const id of ids) {
         // For each selected commitment, submit each SKU row as a separate detail record
         for (const skuRow of skuRows) {
@@ -1089,9 +1122,12 @@ export default function CommitmentPunchPage() {
             remarks: processRemarks || null,
             orderCategory: processOrderCategory,
             userId: user?.id || null, // Track acting user's login id (stamps order_punch_user)
+            ...(chargesPending ? { charges: ledgerCharges } : {}),
           }
+          const sentCharges = chargesPending
           const res = await commitmentPunchApi.processCommitment(id, payload)
           if (res.success) {
+            if (sentCharges) chargesPending = false
             successCount++
             if (res.data?.order_no) generatedOrderNos.push(res.data.order_no)
           } else {
@@ -1101,7 +1137,7 @@ export default function CommitmentPunchPage() {
       }
 
       if (errorMsgs.length > 0) {
-        toast({ title: "Partial Error", description: errorMsgs[0], variant: "destructive" })
+        showProblems(Array.from(new Set(errorMsgs)), "Some orders could not be created")
       } else {
         const orderList = generatedOrderNos.length > 0 ? ` Orders: ${generatedOrderNos.join(", ")}` : ""
         toast({ title: "✅ Processed!", description: `${successCount} order(s) created.${orderList}` })
@@ -1299,7 +1335,7 @@ export default function CommitmentPunchPage() {
     commitment_no: "min-w-[140px] w-[140px]",
     commitment_date: "min-w-[115px] w-[115px]",
     party_name: "min-w-[240px]",
-    dispatch_from: "min-w-[120px] w-[120px]",
+    dispatch_from: "min-w-[190px] w-[190px]",
     oil_type: "min-w-[110px] w-[110px]",
     rate: "min-w-[135px] w-[135px]",
     quantity: "min-w-[120px] w-[120px]",
@@ -1579,7 +1615,7 @@ export default function CommitmentPunchPage() {
                 <TableRow>
                   <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                     {orderedVisibleCols.map(col => {
-                      const sf = COL_SORT_FIELD[col.id]
+                      const sf = canSortColumns ? COL_SORT_FIELD[col.id] : undefined
                       const isRight = RIGHT_ALIGN_COLS.includes(col.id)
                       const isCenter = CENTER_ALIGN_COLS.includes(col.id)
 
@@ -2132,6 +2168,10 @@ export default function CommitmentPunchPage() {
                     <p className="font-semibold text-slate-800 mt-1.5">{c.party_name || "—"}</p>
                   </div>
                   <div>
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">DO Date</p>
+                    <p className="font-semibold text-slate-800 mt-1.5">{c.commitment_date ? new Date(c.commitment_date).toLocaleDateString("en-GB") : "—"}</p>
+                  </div>
+                  <div>
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Oil Type</p>
                     <p className="font-semibold text-slate-800 mt-1.5">{c.oil_type || "—"}</p>
                   </div>
@@ -2243,7 +2283,7 @@ export default function CommitmentPunchPage() {
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {processFuturePeriodDate
-                          ? format(new Date(processFuturePeriodDate), "PPP")
+                          ? format(new Date(processFuturePeriodDate), "dd-MM-yyyy")
                           : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
@@ -2296,9 +2336,9 @@ export default function CommitmentPunchPage() {
                     setProcessStartDate(val)
                     setProcessDeliveryDateError("")
                     if (val) {
-                      const d = new Date(val)
+                      const d = new Date(`${val}T00:00:00`)
                       d.setDate(d.getDate() + 7)
-                      setProcessEndDate(d.toISOString().split("T")[0])
+                      setProcessEndDate(localISO(d))
                     } else {
                       setProcessEndDate("")
                     }
@@ -2331,7 +2371,7 @@ export default function CommitmentPunchPage() {
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {processActualDeliveryDate
-                        ? format(new Date(processActualDeliveryDate), "PPP")
+                        ? format(new Date(processActualDeliveryDate), "dd-MM-yyyy")
                         : <span>Pick a date</span>}
                     </Button>
                   </PopoverTrigger>
@@ -2810,6 +2850,9 @@ export default function CommitmentPunchPage() {
                               fetchOptions={fetchLedgerOptions}
                               value={lRow.ledgerName}
                               onValueChange={(val) => updateLedgerRow(lRow.id, "ledgerName", val)}
+                              onSelectOption={(opt: any) => {
+                                if (opt?.original) setLedgerRows(prev => prev.map(r => (r.id === lRow.id ? { ...r, ledgerId: opt.original.id, ledgerName: opt.value } : r)))
+                              }}
                               placeholder="Select or Search Ledger"
                               searchPlaceholder="Search ledgers..."
                               className="h-8 text-xs bg-white border-slate-200"

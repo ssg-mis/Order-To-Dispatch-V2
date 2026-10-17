@@ -390,9 +390,9 @@ export default function OrderPunchListPage() {
         </CardContent>
       </Card>
 
-      {/* Add Order - same dialog footprint as Commitment Punch's Add Commitment dialog */}
+      {/* Add Order - same dialog footprint as the Plan Vehicle dialog */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="w-[95vw] min-h-[580px] max-h-[90vh] overflow-y-auto p-4 sm:p-6" style={{ maxWidth: '1250px' }}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:w-[95vw] sm:!max-w-[95vw] max-h-[95dvh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Add Order</DialogTitle>
             <DialogDescription>Create a new order with customer and product details.</DialogDescription>
