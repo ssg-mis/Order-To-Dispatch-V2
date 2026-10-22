@@ -36,6 +36,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination } from "@/components/stage-list"
@@ -492,8 +493,8 @@ export default function GateOutPage() {
         id: order.id,
         specificOrderNo: doNumber,
         productName: order.product_name,
-        rate: (parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1),
-        amount: ((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) * (parseFloat(order.actual_qty_dispatch) || 0),
+        rate: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0),
+        amount: ((((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0)) * (parseFloat(order.actual_qty_dispatch) || 0),
         invoiceNo: order.invoice_no,
         invoiceDate: order.invoice_date,
         billAmount: order.bill_amount,
@@ -1567,21 +1568,12 @@ export default function GateOutPage() {
                                       {fmtNum(parseFloat(product.actualQty) || 0, 4)}
                                     </TableCell>
                                     <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                            {product.rate ? product.rate.toFixed(2) : "—"}
-                                          </span>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                          <div className="space-y-1.5">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate (₹)</p>
-                                            <p className="text-sm font-black text-blue-700 leading-none">
-                                              {product.freight_rate ? `${product.freight_rate}` : "No Freight Rate Available"}
-                                            </p>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
+                                      <RateInclusiveTaxPopover
+                                        product={product}
+                                        cdAmount={product.cd_amount || product.cdAmount}
+                                        displayRate={product.rate}
+                                        align="end"
+                                      />
                                     </TableCell>
                                     <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
                                       {product.rate ? (product.rate / 1.05).toFixed(2) : "—"}
@@ -1668,19 +1660,14 @@ export default function GateOutPage() {
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes) (₹)</p>
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">{product.rate ? product.rate.toFixed(2) : "—"}</p>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                          <div className="space-y-1.5">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate (₹)</p>
-                                            <p className="text-sm font-black text-blue-700 leading-none">
-                                              {product.freight_rate ? `${product.freight_rate}` : "No Freight Rate Available"}
-                                            </p>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
+                                      <div className="mt-1">
+                                        <RateInclusiveTaxPopover
+                                          product={product}
+                                          cdAmount={product.cd_amount || product.cdAmount}
+                                          displayRate={product.rate}
+                                          align="center"
+                                        />
+                                      </div>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
