@@ -111,6 +111,8 @@ function base(row: any): Record<string, any> {
   r.upload_copy = o.uploadCopy ?? null;
   r.gst = o.gst ?? null;
 
+  r.cd_amount = dsp.cdAmount != null ? Number(dsp.cdAmount) : (row.cdAmount != null ? Number(row.cdAmount) : null);
+  r.cdAmount = r.cd_amount;
   // Customer / depot / broker / salesperson
   r.customer_name = c.customerName ?? null;
   r.party_name = c.customerName ?? null; // legacy name
