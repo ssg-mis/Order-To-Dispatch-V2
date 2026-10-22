@@ -44,6 +44,7 @@ import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
 const INDIAN_STATES = [
@@ -1824,26 +1825,19 @@ export default function MakeInvoicePage() {
                             <span className="text-xs font-bold text-slate-700 font-mono tabular-nums">{fmtNum(product.qtyToDispatch || 0, 4)}</span>
                           </TableCell>
                           <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                  {(() => {
-                                    const originalRate = Number(product.rate) || 0;
-                                    const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
-                                    const adjustedRate = originalRate - cdAmt;
-                                    return adjustedRate ? adjustedRate.toFixed(2) : "—";
-                                  })()}
-                                </span>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                <div className="space-y-1.5">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                  <p className="text-sm font-black text-blue-700 leading-none">
-                                    {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
-                                  </p>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
+                            {(() => {
+                              const originalRate = Number(product.rate) || 0;
+                              const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
+                              const adjustedRate = originalRate - cdAmt;
+                              return (
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={cdAmt}
+                                  displayRate={adjustedRate}
+                                  align="end"
+                                />
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
@@ -1938,21 +1932,14 @@ export default function MakeInvoicePage() {
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">
-                                    {adjustedRate ? adjustedRate.toFixed(2) : "—"}
-                                  </p>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <div className="mt-1">
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={productCdData[product.id]?.isCd === 'yes' ? productCdData[product.id]?.cdAmount : 0}
+                                  displayRate={adjustedRate}
+                                  align="center"
+                                />
+                              </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
