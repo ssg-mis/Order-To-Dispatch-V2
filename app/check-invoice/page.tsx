@@ -43,6 +43,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination } from "@/components/stage-list"
@@ -427,8 +428,9 @@ export default function CheckInvoicePage() {
         id: order.id,
         specificOrderNo: doNumber,
         productName: order.product_name,
-        rate: ((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0),
-        amount: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) * (parseFloat(order.actual_qty_dispatch || order.actual_qty || order.qty) || 0),
+        // (punch rate × nos per main UOM) + freight − CD, all per main UOM and tax inclusive.
+        rate: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0),
+        amount: ((((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0)) * (parseFloat(order.actual_qty_dispatch || order.actual_qty || order.qty) || 0),
         invoiceNo: order.invoice_no,
         invoiceDate: order.invoice_date,
         billAmount: order.bill_amount,
@@ -1501,7 +1503,10 @@ export default function CheckInvoicePage() {
                     <TableBody>
                       {selectedGroups.flatMap(g => g._allProducts).map((product: any) => {
                         const originalRate = Number(product.rate) || 0;
-                        const rateWoGst = parseFloat((originalRate / 1.05).toFixed(2));
+                        const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0);
+                        // product.rate is already net of the Make Invoice CD (see the mapping above).
+                        const netRateIncTaxes = originalRate;
+                        const rateWoGst = parseFloat((netRateIncTaxes / 1.05).toFixed(2));
                         const qty = parseFloat(product.actualQty) || 0;
                         const taxableAmount = rateWoGst * qty;
 
@@ -1539,24 +1544,15 @@ export default function CheckInvoicePage() {
                               {fmtNum(product.actualQty || 0, 4)}
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                    {originalRate ? originalRate.toFixed(2) : "—"}
-                                  </span>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <RateInclusiveTaxPopover
+                                product={product}
+                                cdAmount={cdAmt}
+                                displayRate={netRateIncTaxes}
+                                align="end"
+                              />
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              {originalRate ? rateWoGst.toFixed(2) : "—"}
+                              {netRateIncTaxes ? rateWoGst.toFixed(2) : "—"}
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {taxableAmount ? taxableAmount.toFixed(2) : "—"}
@@ -1605,7 +1601,9 @@ export default function CheckInvoicePage() {
                     {selectedGroups.flatMap(g => g._allProducts).map((product: any) => {
                       const selected = selectedProducts.includes(product._rowKey)
                       const originalRate = Number(product.rate) || 0
-                      const rateWoGst = parseFloat((originalRate / 1.05).toFixed(2))
+                      const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0)
+                      const netRateIncTaxes = originalRate // already net of CD, see the mapping above
+                      const rateWoGst = parseFloat((netRateIncTaxes / 1.05).toFixed(2))
                       const qty = parseFloat(product.actualQty) || 0
                       const taxableAmount = rateWoGst * qty
 
@@ -1651,26 +1649,19 @@ export default function CheckInvoicePage() {
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <p className="mt-1 cursor-pointer font-mono tabular-nums font-bold text-slate-700">
-                                    {originalRate ? fmtNum(originalRate, 2) : "—"}
-                                  </p>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `Freight Rate (₹): ${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <div className="mt-1">
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={cdAmt}
+                                  displayRate={netRateIncTaxes}
+                                  align="center"
+                                />
+                              </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
                               <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
-                                {originalRate ? fmtNum(originalRate / 1.05, 2) : "—"}
+                                {netRateIncTaxes ? fmtNum(netRateIncTaxes / 1.05, 2) : "—"}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
