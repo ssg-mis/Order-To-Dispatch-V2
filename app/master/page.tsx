@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Combobox } from "@/components/ui/combobox"
+import { MasterTabPicker } from "@/components/master-tab-picker"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
@@ -6878,26 +6879,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
       <Tabs value={activeTab} className="w-full space-y-6" onValueChange={setActiveTab}>
         <div className="flex items-center">
-          <Select value={activeTab} onValueChange={setActiveTab}>
-            <SelectTrigger className="w-full sm:w-72 h-12 rounded-xl bg-white shadow-sm border-slate-200 px-4 font-medium data-[state=open]:ring-2 data-[state=open]:ring-primary/20">
-              <SelectValue placeholder="Select master" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl max-h-[300px]">
-              {visibleTabs.map((tab) => {
-                const meta = TAB_META[tab]
-                if (!meta) return null
-                const Icon = meta.icon
-                return (
-                  <SelectItem key={tab} value={tab} className="rounded-lg cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Icon className="h-3.5 w-3.5 text-slate-500" />
-                      {meta.label}
-                    </span>
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
+          <MasterTabPicker tabs={visibleTabs} meta={TAB_META} value={activeTab} onChange={setActiveTab} />
         </div>
 
 

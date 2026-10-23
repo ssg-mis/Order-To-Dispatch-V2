@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  BookText, Check, Download, FileSpreadsheet, Loader2, Pencil, Plus, Search, SortAsc, SortDesc, Trash2, X,
+  ArrowLeft, BookText, Check, Clock, Download, FileSpreadsheet, Loader2, Pencil, Plus, Search, SortAsc, SortDesc, Trash2, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,10 @@ import { useToast } from "@/hooks/use-toast"
 import { ledgerApi, ledgerGroupApi } from "@/lib/api-service"
 import { MasterCardWrapper } from "@/components/masters/MasterCardWrapper"
 import { LedgerBulkImportModal } from "@/components/masters/modals/ledger-bulk-import-modal"
+import { MasterFieldChangeConfirmModal } from "@/components/masters/modals/MasterFieldChangeConfirmModal"
+import { LedgerEffectiveDatesModalView } from "@/components/ledger-effective-dates-modal-view"
+import { LedgerSectionalHistoryTable } from "@/components/ledger-sectional-history-table"
+import { MasterEditHistoryTable } from "@/components/master-edit-history-table"
 import { cn } from "@/lib/utils"
 
 /**
@@ -51,6 +55,21 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState<any>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+
+  // Field-change trigger + audit trail (mirrors Ledger Group Master): editing an existing ledger's
+  // Name / Group / Status asks for confirmation, then opens the effective-dated version view.
+  const [effectiveDatesOpen, setEffectiveDatesOpen] = useState(false)
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [targetField, setTargetField] = useState<string | null>(null)
+  const [pendingFieldChange, setPendingFieldChange] = useState<{
+    fieldName: string
+    section: string
+    applyChange: () => void
+  } | null>(null)
+  const attemptChange = (fieldName: string, applyChange: () => void) => {
+    if (editing?.id) setPendingFieldChange({ fieldName, section: "basic", applyChange })
+    else applyChange()
+  }
 
   const [deleting, setDeleting] = useState<any>(null)
   const [deleteUsage, setDeleteUsage] = useState<{ label: string; n: number }[] | null>(null)
@@ -124,11 +143,13 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
 
   // ---- add / edit --------------------------------------------------------------------------
   const openAdd = () => {
+    setEffectiveDatesOpen(false)
     setEditing(null)
     setForm(EMPTY_FORM)
     setDialogOpen(true)
   }
   const openEdit = (l: any) => {
+    setEffectiveDatesOpen(false)
     setEditing(l)
     setForm({ ledger_name: l.ledger_name || "", ledger_group_id: l.ledger_group_id != null ? String(l.ledger_group_id) : "", status: l.status || "Active" })
     setDialogOpen(true)
@@ -420,16 +441,72 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
       </MasterCardWrapper>
 
       {/* Add / Edit */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit Ledger" : "Add Ledger"}</DialogTitle>
-            <DialogDescription>
-              {editing ? "Change the name, group or status." : "The ledger code is generated automatically."}
-              {!isAdminOrSuper && " Your change goes to an admin for approval."}
-            </DialogDescription>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) { setEffectiveDatesOpen(false); setAuditOpen(false) } }}>
+        <DialogContent className="w-[95vw] min-h-[580px] max-h-[90vh] overflow-y-auto" style={{ maxWidth: '1250px' }}>
+          {auditOpen && editing?.id ? (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                    <Clock className="h-4 w-4 text-blue-600" />
+                    Audit Trail Log History
+                  </h2>
+                  <p className="mt-0.5 text-xs font-medium text-slate-500">
+                    Record: <span className="font-bold text-slate-800">{editing.ledger_name || `#${editing.id}`}</span> (ledgers)
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs font-semibold" onClick={() => setAuditOpen(false)}>
+                  <ArrowLeft className="h-3 w-3 text-slate-500" />
+                  Back to Form
+                </Button>
+              </div>
+              <div className="min-h-[360px] rounded-xl border border-slate-200 bg-white p-4">
+                <MasterEditHistoryTable masterType="ledgers" recordId={editing.id} />
+              </div>
+            </div>
+          ) : effectiveDatesOpen && editing?.id ? (
+            <LedgerEffectiveDatesModalView
+              ledgerId={editing.id}
+              ledgerName={editing.ledger_name}
+              ledgerForm={{ ledger_name: form.ledger_name, ledger_group_id: form.ledger_group_id, status: form.status }}
+              ledgerGroupOptions={groups}
+              targetFieldName={targetField || undefined}
+              onBack={() => setEffectiveDatesOpen(false)}
+              onLedgerUpdated={(data: any) => {
+                setEditing(data)
+                setForm({ ledger_name: data.ledger_name || "", ledger_group_id: data.ledger_group_id != null ? String(data.ledger_group_id) : "", status: data.status || "Active" })
+                refreshAll()
+              }}
+            />
+          ) : (
+          <>
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div>
+              <DialogTitle>{editing ? "Edit Ledger" : "Add Ledger"}</DialogTitle>
+              <DialogDescription>
+                {editing ? "Change the name, group or status." : "The ledger code is generated automatically."}
+                {!isAdminOrSuper && " Your change goes to an admin for approval."}
+              </DialogDescription>
+            </div>
+            {editing?.id && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mr-6 flex h-7 items-center gap-1.5 border-slate-300 px-2.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-100"
+                onClick={() => setAuditOpen(true)}
+              >
+                <Clock className="h-3.5 w-3.5 text-blue-600" />
+                <span>Audit Trail Log</span>
+              </Button>
+            )}
           </DialogHeader>
           <div className="space-y-4 py-1">
+            {editing && (
+              <div className="flex justify-end">
+                <LedgerSectionalHistoryTable ledgerId={editing.id} onOpenView={() => setEffectiveDatesOpen(true)} />
+              </div>
+            )}
             {editing && (
               <div className="space-y-1.5">
                 <Label>Ledger Code</Label>
@@ -440,14 +517,14 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
               <Label htmlFor="ledger_name">
                 Ledger Name <span className="text-red-500">*</span>
               </Label>
-              <Input id="ledger_name" autoFocus placeholder="e.g. Transporting Expenses" value={form.ledger_name} onChange={(e) => setForm({ ...form, ledger_name: e.target.value })} />
+              <Input id="ledger_name" autoFocus placeholder="e.g. Transporting Expenses" value={form.ledger_name} onChange={(e) => { const v = e.target.value; attemptChange("Ledger Name", () => setForm((f: any) => ({ ...f, ledger_name: v }))) }} />
               {nameTaken(form.ledger_name) && <p className="text-xs font-medium text-red-600">A ledger with this name already exists.</p>}
             </div>
             <div className="space-y-1.5">
               <Label>
                 Ledger Group <span className="text-red-500">*</span>
               </Label>
-              <Select value={form.ledger_group_id} onValueChange={(v) => setForm({ ...form, ledger_group_id: v })}>
+              <Select value={form.ledger_group_id} onValueChange={(v) => attemptChange("Ledger Group", () => setForm((f: any) => ({ ...f, ledger_group_id: v })))}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select group" />
                 </SelectTrigger>
@@ -463,7 +540,7 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
             </div>
             <div className="space-y-1.5">
               <Label>Status</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+              <Select value={form.status} onValueChange={(v) => attemptChange("Status", () => setForm((f: any) => ({ ...f, status: v })))}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -483,8 +560,20 @@ export function LedgerMasterTab({ isAdminOrSuper, isReadOnly, canEditExisting }:
               {editing ? "Save Changes" : "Create Ledger"}
             </Button>
           </DialogFooter>
+          </>
+          )}
         </DialogContent>
       </Dialog>
+
+      <MasterFieldChangeConfirmModal
+        pendingFieldChangeConfirm={pendingFieldChange}
+        setPendingFieldChangeConfirm={setPendingFieldChange}
+        entityName="ledger"
+        onConfirmEffectiveDates={(_section, fieldName) => {
+          setEffectiveDatesOpen(true)
+          setTargetField(fieldName)
+        }}
+      />
 
       {/* Delete */}
       <Dialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
