@@ -36,7 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
-import { customerApi, masterHistoryApi, depotApi, lookupApi, orderApi, ledgerGroupApi } from "@/lib/api-service"
+import { customerApi, masterHistoryApi, depotApi, lookupApi, orderApi, ledgerGroupApi, stateApi } from "@/lib/api-service"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
 
@@ -98,6 +98,20 @@ export function CustomerEffectiveDatesModalView({
   const godownDepots = useMemo(
     () => (godownsData || []).filter((d: any) => d.status === "Active"),
     [godownsData]
+  )
+
+  // Fetch active states for Mailing section dropdown
+  const { data: statesData } = useQuery({
+    queryKey: ["states-for-customer-mailing-history"],
+    queryFn: async () => {
+      const res = await stateApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res?.success ? res.data?.states || res.data || [] : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeStates = useMemo(
+    () => (Array.isArray(statesData) ? statesData : []).filter((s: any) => s.status === "Active"),
+    [statesData]
   )
 
   // Fetch bank names for Bank section dropdown
@@ -334,8 +348,9 @@ export function CustomerEffectiveDatesModalView({
         customer_name: latest.customerName || latest.customer_name || customerForm?.customer_name || customerName || "",
         address_line_1: latest.addressLine1 || latest.address_line_1 || customerForm?.address_line_1 || "",
         address_line_2: latest.addressLine2 || latest.address_line_2 || customerForm?.address_line_2 || "",
+        state_id: latest.stateId || latest.state_id || customerForm?.state_id || null,
+        state: latest.stateName || latest.state_name || latest.state || customerForm?.state || "",
         pincode: latest.pincode || customerForm?.pincode || "",
-        state: latest.stateName || latest.state || customerForm?.state || "",
         country: latest.country || "India",
       })
     } else if (activeSection === "gst") {
@@ -437,8 +452,9 @@ export function CustomerEffectiveDatesModalView({
           customer_name: latest.customerName || latest.customer_name || customerName || customerForm?.customer_name || "",
           address_line_1: latest.addressLine1 || latest.address_line_1 || customerForm?.address_line_1 || "",
           address_line_2: latest.addressLine2 || latest.address_line_2 || customerForm?.address_line_2 || "",
+          state_id: latest.stateId || latest.state_id || customerForm?.state_id || null,
+          state: latest.stateName || latest.state_name || latest.state || customerForm?.state || "",
           pincode: latest.pincode || customerForm?.pincode || "",
-          state: latest.stateName || latest.state || customerForm?.state || "",
           country: latest.country || "India",
         })
       } else if (activeSection === "gst") {
@@ -615,6 +631,8 @@ export function CustomerEffectiveDatesModalView({
       await customerApi.addSectionHistory(customerId, {
         section: activeSection,
         ...newVersionForm,
+        stateId: newVersionForm.state_id ? Number(newVersionForm.state_id) : (newVersionForm.stateId ? Number(newVersionForm.stateId) : null),
+        state_id: newVersionForm.state_id ? Number(newVersionForm.state_id) : (newVersionForm.stateId ? Number(newVersionForm.stateId) : null),
       })
       toast({
         title: "Version Added Successfully",
@@ -1039,6 +1057,25 @@ export function CustomerEffectiveDatesModalView({
                     placeholder="Street / Office Address"
                     value={newVersionForm.address_line_1 || ""}
                     onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">State</Label>
+                  <Combobox
+                    options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+                    value={newVersionForm.state_id ? String(newVersionForm.state_id) : ""}
+                    onValueChange={(val) => {
+                      const selected = activeStates.find((s: any) => String(s.id) === val)
+                      setNewVersionForm({
+                        ...newVersionForm,
+                        state_id: val ? parseInt(val, 10) : null,
+                        state: selected?.state_name || "",
+                        stateName: selected?.state_name || "",
+                      })
+                    }}
+                    placeholder="Select state"
+                    searchPlaceholder="Search state..."
+                    className="h-8 bg-white text-xs"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1649,6 +1686,10 @@ export function CustomerEffectiveDatesModalView({
                   if (activeSection === "bank") {
                     formState.bank_accounts = parseBankAccountsFromRow(row)
                   }
+                  if (activeSection === "mailing") {
+                    formState.state_id = row.stateId || row.state_id || null
+                    formState.state = row.stateName || row.state_name || row.state || ""
+                  }
                   setNewVersionForm(formState)
                   setEditingVersion({ ids: row.allIds || [], wefDate: itemDateStr })
                   setIsAdding(true)
@@ -1718,20 +1759,23 @@ export function CustomerEffectiveDatesModalView({
                       )
                     })()}
 
-                    {activeSection === "mailing" && (
-                      <>
-                        <td className="py-2 px-3 border-r border-slate-200 font-medium text-slate-900">
-                          {row.addressLine1 || row.address_line_1 || "—"}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-700">
-                          {row.stateName || row.state_name || "—"}
-                        </td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-600">India</td>
-                        <td className="py-2 px-3 border-r border-slate-200 text-slate-600 font-mono">
-                          {row.pincode || "—"}
-                        </td>
-                      </>
-                    )}
+                    {activeSection === "mailing" && (() => {
+                      const stateVal = row.stateName || row.state_name || row.state || activeStates.find((s: any) => String(s.id) === String(row.stateId || row.state_id))?.state_name || "—"
+                      return (
+                        <>
+                          <td className="py-2 px-3 border-r border-slate-200 font-medium text-slate-900">
+                            {row.addressLine1 || row.address_line_1 || "—"}
+                          </td>
+                          <td className="py-2 px-3 border-r border-slate-200 text-slate-700 font-medium">
+                            {stateVal}
+                          </td>
+                          <td className="py-2 px-3 border-r border-slate-200 text-slate-600">India</td>
+                          <td className="py-2 px-3 border-r border-slate-200 text-slate-600 font-mono">
+                            {row.pincode || "—"}
+                          </td>
+                        </>
+                      )
+                    })()}
 
                     {activeSection === "gst" && (
                       <>

@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PageHeader } from "@/components/page-header"
 import { customerApi, stateApi } from "@/lib/api-service"
+import { Combobox } from "@/components/ui/combobox"
 import { useToast } from "@/hooks/use-toast"
 
 type SectionType = "mailing" | "gst" | "msme" | "fssai"
@@ -53,10 +54,10 @@ function CustomerEffectiveDatesContent() {
   // Fetch active states for state names if needed
   const { data: statesRes } = useQuery({
     queryKey: ["states"],
-    queryFn: () => stateApi.getAll(),
+    queryFn: () => stateApi.getAll({ page: 1, limit: 1000, all: "true" }),
     staleTime: 5 * 60 * 1000,
   })
-  const activeStates = (statesRes as any)?.data || []
+  const activeStates = (statesRes as any)?.data?.states || (statesRes as any)?.data || []
 
   // Fetch history data for active section
   const { data: historyData, isLoading, refetch } = useQuery({
@@ -131,6 +132,8 @@ function CustomerEffectiveDatesContent() {
       await customerApi.addSectionHistory(customerId, {
         section: activeSection,
         ...newVersionForm,
+        stateId: newVersionForm.state_id ? Number(newVersionForm.state_id) : (newVersionForm.stateId ? Number(newVersionForm.stateId) : null),
+        state_id: newVersionForm.state_id ? Number(newVersionForm.state_id) : (newVersionForm.stateId ? Number(newVersionForm.stateId) : null),
       })
       toast({
         title: "Version Added Successfully",
@@ -343,6 +346,25 @@ function CustomerEffectiveDatesContent() {
                         placeholder="Street / Office Address"
                         value={newVersionForm.address_line_1 || ""}
                         onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-700">State</Label>
+                      <Combobox
+                        options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+                        value={newVersionForm.state_id ? String(newVersionForm.state_id) : ""}
+                        onValueChange={(val) => {
+                          const selected = activeStates.find((s: any) => String(s.id) === val)
+                          setNewVersionForm({
+                            ...newVersionForm,
+                            state_id: val ? parseInt(val, 10) : null,
+                            state: selected?.state_name || "",
+                            stateName: selected?.state_name || "",
+                          })
+                        }}
+                        placeholder="Select state"
+                        searchPlaceholder="Search state..."
+                        className="h-9 bg-white text-xs"
                       />
                     </div>
                     <div className="space-y-1.5">
