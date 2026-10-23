@@ -11,6 +11,9 @@ import { FileUploadField } from "@/components/file-upload-field"
 import { Truck, Scale, ShieldCheck, FileText, Satellite, Image as ImageIcon, Lock, Info } from "lucide-react"
 import { STATUS_OPTIONS } from "../types"
 import { VehicleSectionalHistoryTable } from "@/components/vehicle-sectional-history-table"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { VehicleAvgTareLink } from "@/components/vehicle-avg-tare-link"
+import { useVehicleTareStats } from "@/hooks/use-vehicle-tare-stats"
 
 type VehicleSectionType = "basic" | "weights" | "tax_compliance" | "permits" | "gps" | "documents"
 
@@ -56,6 +59,14 @@ export function VehicleForm({
   setVehicleEffectiveDatesSection,
 }: VehicleFormProps) {
   const handleOpenEffectiveDatesView = useScrollRestoration();
+
+  // Passing = GVW - ULW until the vehicle has recorded trips; from then on GVW - average tare.
+  const { data: tareStats } = useVehicleTareStats(editingItem?.id)
+  const avgTare = tareStats && tareStats.count > 0 ? Number(tareStats.avgTare) || 0 : 0
+  const gvwNum = vehicleForm.gvw !== '' && vehicleForm.gvw != null ? Number(vehicleForm.gvw) : null
+  const passingDisplay =
+    gvwNum != null && avgTare > 0 ? String(gvwNum - avgTare) : vehicleForm.passing
+  const passingBasis = avgTare > 0 ? `GVW − avg tare (${tareStats!.count} trip${tareStats!.count > 1 ? 's' : ''})` : 'GVW − ULW (no trips yet)'
 
   const attemptChange = (fieldName: string, section: VehicleSectionType, applyChange: () => void) => {
     if (handleVehicleFieldChangeAttempt) {
@@ -248,9 +259,9 @@ export function VehicleForm({
       {/* 2. Weights */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <SectionHeader title="Weights" section="weights" icon={Scale} />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <div className={`grid grid-cols-1 gap-3.5 ${editingItem?.id ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
           <div className="space-y-1.5">
-            <Label htmlFor="gvw" className="text-xs font-semibold text-slate-800">GVW (KGS)</Label>
+            <Label htmlFor="gvw" className="flex h-6 items-center text-xs font-semibold text-slate-800">GVW (KGS)</Label>
             <Input
               id="gvw"
               type="number"
@@ -276,7 +287,7 @@ export function VehicleForm({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="ulw" className="text-xs font-semibold text-slate-800">ULW (KGS)</Label>
+            <Label htmlFor="ulw" className="flex h-6 items-center text-xs font-semibold text-slate-800">ULW (KGS)</Label>
             <Input
               id="ulw"
               type="number"
@@ -294,12 +305,23 @@ export function VehicleForm({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="passing" className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+            <Label htmlFor="passing" className="flex h-6 items-center gap-1.5 text-xs font-semibold text-slate-800">
               Passing (KGS)
               <AutoCalculatedBadge />
+              {editingItem?.id && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="text-slate-400 hover:text-blue-600" aria-label="How passing is calculated">
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{passingBasis}</TooltipContent>
+                </Tooltip>
+              )}
             </Label>
-            <Input id="passing" type="number" value={vehicleForm.passing} readOnly className="bg-slate-100 text-xs font-medium cursor-not-allowed" placeholder="Auto" />
+            <Input id="passing" type="number" value={passingDisplay} readOnly className="bg-slate-100 text-xs font-medium cursor-not-allowed" placeholder="Auto" />
           </div>
+          {editingItem?.id && <VehicleAvgTareLink vehicleId={editingItem.id} vehicleNo={editingItem.registration_no} />}
         </div>
       </div>
 
