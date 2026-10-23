@@ -181,9 +181,12 @@ export const orderApi = {
     });
   },
 
-  uploadFile: async (file: File): Promise<ApiResponse<{ url: string }>> => {
+  // `original` (optional): untouched file when `file` was already compressed client-side;
+  // the backend keeps it in S3 (under originals/) so it can be retrieved later.
+  uploadFile: async (file: File, original?: File): Promise<ApiResponse<{ url: string; original_url?: string }>> => {
     const formData = new FormData();
     formData.append('file', file);
+    if (original && original !== file) formData.append('original', original);
 
     return request(API_ENDPOINTS.orders.upload, {
       method: 'POST',
@@ -217,6 +220,8 @@ export const orderApi = {
     end_date?: string;
     depot_id?: number;
     customer_id?: number;
+    page?: number;
+    limit?: number;
   }): Promise<ApiResponse> => {
     return request(`/orders/punch-list${buildQuery(params)}`);
   },
@@ -479,6 +484,10 @@ export const actualDispatchApi = {
     do_date_to?: string;
   }): Promise<ApiResponse> => {
     return adaptList(await request(`/actual-dispatch/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
+  },
+
+  getVehicleTareStats: async (vehicleId: number | string): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/vehicle-tare/${vehicleId}`);
   },
 
   getHistory: async (params?: {

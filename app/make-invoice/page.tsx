@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { matchesSearch } from "@/lib/search-utils"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
@@ -30,41 +30,24 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { makeInvoiceApi, orderApi, skuApi, depotApi, petrolPumpApi, insuranceDetailApi } from "@/lib/api-service"
+import { makeInvoiceApi, orderApi, skuApi, petrolPumpApi, insuranceDetailApi } from "@/lib/api-service"
 import { Combobox } from "@/components/ui/combobox"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
 import { fmtNum, fmtDate } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
-import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 
 function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, chargesBillable = 0 }: {
   selectedGroups: any[]
@@ -76,59 +59,19 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf((Number(p.rate) || 0) - (productCdData[p.id]?.isCd === "yes" ? parseFloat(productCdData[p.id]?.cdAmount || "0") : 0), parseFloat(p.qtyToDispatch) || 0, p),
+    product: p,
+  }))
+  // GST % per product and the same-state / other-state split come from the masters, carried from Dispatch Planning.
   const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const cd = productCdData[p.id]?.isCd === "yes" ? parseFloat(productCdData[p.id]?.cdAmount || "0") : 0
-    const rateWoGst = parseFloat(((rate - cd) / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.qtyToDispatch) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + chargesBillable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + chargesBillable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
@@ -142,27 +85,16 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
             <span className="font-mono font-bold text-slate-700">₹{chargesBillable.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${invoiceTotal.toFixed(2)}`}</span>
         </div>
       </div>
     </div>
@@ -175,7 +107,7 @@ export default function MakeInvoicePage() {
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
+  const [pendingPage, setPendingPage] = useState(1)
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -361,6 +293,29 @@ export default function MakeInvoicePage() {
   const handleFileUpload = async (file: File, keyName: string = 'invoiceFile', fileNameKey: string = 'invoiceFileName') => {
     if (!file) return;
 
+    // 1. File Size Validation (Max 20 MB)
+    const MAX_SIZE_BYTES = 20 * 1024 * 1024;
+    if (file.size > MAX_SIZE_BYTES) {
+      toast({
+        title: "File Too Large",
+        description: `Selected file is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Maximum allowed size is 20 MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 2. File Type Validation (PDF & Images only)
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif'];
+    const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    if (!allowedExtensions.includes(ext) && !file.type.startsWith('image/')) {
+      toast({
+        title: "Unsupported File Format",
+        description: `Only PDF and image files (JPG, PNG, WEBP, etc.) are supported.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsUploadingObj(prev => ({ ...prev, [keyName]: true }));
     try {
       const response = await orderApi.uploadFile(file);
@@ -387,19 +342,16 @@ export default function MakeInvoicePage() {
     }
   };
 
-  // Pending query with infinite pagination
+  // Pending query (numbered pages)
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["make-invoice-pending", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["make-invoice-pending", filterValues, pendingPage],
+    queryFn: async () => {
       const response = await makeInvoiceApi.getPending({
-        page: pageParam,
+        page: pendingPage,
         limit: 20,
         search: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
@@ -407,24 +359,16 @@ export default function MakeInvoicePage() {
         do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
-      return response.success ? response.data : { invoices: [], pagination: { total: 0 } };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.invoices?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
+      return response.success ? response.data : { invoices: [], pagination: { total: 0, totalPages: 1 } };
     },
   });
 
-  const pendingOrders = useMemo(() => {
-    return pendingData?.pages.flatMap((page) => page.invoices) || [];
-  }, [pendingData]);
+  const pendingOrders: any[] = useMemo(() => pendingData?.invoices || [], [pendingData]);
+  const pendingTotalPages: number = pendingData?.pagination?.totalPages || 1;
+  const pendingTotal: number = pendingData?.pagination?.total ?? pendingOrders.length;
 
-  useEffect(() => {
-    if (pendingInView && hasNextPending) {
-      fetchNextPending();
-    }
-  }, [pendingInView, hasNextPending, fetchNextPending]);
+  // New filters narrow the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1) }, [filterValues]);
 
   /* Filter Logic */
 
@@ -536,7 +480,14 @@ export default function MakeInvoicePage() {
         reasonForDiff: order.reason_of_difference_in_weight_if_any_speacefic,
         reason_of_difference_in_weight_if_any_speacefic: order.reason_of_difference_in_weight_if_any_speacefic,
         bilty_no: order.bilty_no,
-        processid: order.processid || null
+        processid: order.processid || null,
+        driver_advance_cash: order.driver_advance_cash ?? order.advance_bhada_cash ?? null,
+        driver_advance_bank: order.driver_advance_bank ?? order.advance_bhada_bank ?? null,
+        diesel_amount: order.diesel_amount ?? order.advance_bhada_diesel_advance ?? null,
+        petrol_pump_name: order.petrol_pump_name ?? null,
+        advance_bhada_cash: order.advance_bhada_cash ?? null,
+        advance_bhada_bank: order.advance_bhada_bank ?? null,
+        advance_bhada_diesel_advance: order.advance_bhada_diesel_advance ?? null,
       }
 
       grouped[groupKey]._ordersMap[orderKey]._products.push(product)
@@ -706,11 +657,11 @@ export default function MakeInvoicePage() {
     }
   }
 
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    // Collect and consolidate selected party groups BY COMPANY
-    const targetGroups = displayRows.filter(r => selectedItems.includes(r._rowKey))
+  const handleOpenDialog = (targetGroup?: any) => {
+    const targetGroups = targetGroup
+      ? [targetGroup]
+      : displayRows.filter(r => selectedItems.includes(r._rowKey))
+    if (targetGroups.length === 0) return
     if (targetGroups.length > 0) {
       // Consolidate targetGroups by company
       const consolidatedMap: { [key: string]: any } = {}
@@ -744,13 +695,37 @@ export default function MakeInvoicePage() {
         }
       })
       
+      setSelectedItems(targetGroups.map(g => g._rowKey))
       setSelectedGroups(Object.values(consolidatedMap))
       
       // Select all products for all selected groups by default
       const allProdKeys = targetGroups.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
       setSelectedProducts(allProdKeys)
 
-      // Reset form
+      // Pre-fill advances from previous stages (Actual Dispatch / Plan Vehicle)
+      const allProds = targetGroups.flatMap(g => g._allProducts || [])
+      const foundCash = allProds.find((p: any) => p.driver_advance_cash != null || p.advance_bhada_cash != null)
+      const prefillCash = foundCash
+        ? String(foundCash.driver_advance_cash ?? foundCash.advance_bhada_cash ?? "")
+        : ""
+
+      const foundBank = allProds.find((p: any) => p.driver_advance_bank != null || p.advance_bhada_bank != null)
+      const prefillBank = foundBank
+        ? String(foundBank.driver_advance_bank ?? foundBank.advance_bhada_bank ?? "")
+        : ""
+
+      const foundDiesel = allProds.find((p: any) => p.diesel_amount != null || p.advance_bhada_diesel_advance != null)
+      const prefillDiesel = foundDiesel
+        ? String(foundDiesel.diesel_amount ?? foundDiesel.advance_bhada_diesel_advance ?? "")
+        : ""
+
+      const foundPump = allProds.find((p: any) => p.petrol_pump_name)
+      const prefillPetrolPump = foundPump?.petrol_pump_name || ""
+
+      const foundIns = allProds.find((p: any) => p.insurance_details)
+      const prefillInsurance = foundIns?.insurance_details || ""
+
+      // Pre-fill form (values can still be freely edited before confirmation)
       setInvoiceData({
         invoiceNo: "",
         invoiceDate: new Date().toISOString().split('T')[0],
@@ -758,13 +733,13 @@ export default function MakeInvoicePage() {
         billAmount: "",
         invoiceFile: "",
         invoiceFileName: "",
-        driverAdvanceCash: "",
-        driverAdvanceBank: "",
+        driverAdvanceCash: prefillCash,
+        driverAdvanceBank: prefillBank,
         dieselParchiFile: "",
         dieselParchiFileName: "",
-        petrolPumpName: "",
-        dieselAmount: "",
-        insuranceDetails: "",
+        petrolPumpName: prefillPetrolPump,
+        dieselAmount: prefillDiesel,
+        insuranceDetails: prefillInsurance,
       })
       setInvoiceType("independent")
 
@@ -896,6 +871,7 @@ export default function MakeInvoicePage() {
     if (selectedGroups.length === 0) validationErrors.push("No order selected for invoice generation");
     if (!invoiceData.invoiceNo) validationErrors.push("Invoice Number is missing");
     if (!invoiceData.invoiceFile) validationErrors.push("Invoice Copy is not uploaded");
+    if (!invoiceData.dieselParchiFile) validationErrors.push("Diesel Parchi is not uploaded");
 
     if (validationErrors.length > 0) {
       toast({
@@ -1102,21 +1078,8 @@ export default function MakeInvoicePage() {
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <StageActionBar>
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Create Invoice ({selectedItems.length})
-          </Button>
-
-                </StageActionBar>
-
         {/* Main Table (Grouped) */}
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Invoice Queue"
             shown={sortedDisplayRows.length}
@@ -1166,9 +1129,6 @@ export default function MakeInvoicePage() {
           <Table>
             <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 text-left align-top py-2.5 px-4">
-                  <Checkbox checked={sortedDisplayRows.length > 0 && sortedDisplayRows.every(r => selectedItems.includes(r._rowKey))} onCheckedChange={toggleSelectAll} />
-                </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {tableCols.map(col => (
                     <StageHeadCell key={col.id} col={col} table={table} align={isRightCol(col.id) ? "right" : "left"} />
@@ -1179,20 +1139,19 @@ export default function MakeInvoicePage() {
             <TableBody>
               {sortedDisplayRows.length > 0 && (
                 <StageTotalsRow
-                  columns={[{ id: "__select", label: "" }, ...tableCols]}
+                  columns={tableCols}
                   totals={table.totals}
                   count={sortedDisplayRows.length}
                   labelColumnId={tableCols[0]?.id}
                   unit=""
                   format={(n, id) => n.toFixed(NUM_DECIMALS[id] ?? 4)}
                   tones={{ actual_qty_dispatch: "blue" }}
-                  align={Object.fromEntries([["__select", "center" as const], ...tableCols.map(c => [c.id, isRightCol(c.id) ? "right" as const : "left" as const])])}
+                  align={Object.fromEntries(tableCols.map(c => [c.id, isRightCol(c.id) ? "right" as const : "left" as const]))}
                 />
               )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {orderedVisible.map(id => (
                       <TableCell key={id} className="px-4 text-left py-4">
                         <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", id === "status" ? "h-5 w-24" : id === "products" ? "w-32" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-32" : id === "orderNo" || id === "processid" ? "w-24" : "w-20")} />
@@ -1202,10 +1161,11 @@ export default function MakeInvoicePage() {
                 ))
               ) : sortedDisplayRows.length > 0 ? (
                 sortedDisplayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""}>
-                    <TableCell className="px-4 text-left">
-                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
+                  <TableRow
+                    key={group._rowKey}
+                    className="cursor-pointer transition-colors hover:bg-blue-50/50 select-none"
+                    onClick={() => handleOpenDialog(group)}
+                  >
                     {orderedVisible.map(id => {
                       if (id === "partySoDate") return <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{group.partySoDate}</TableCell>
                       if (id === "actual1Date") {
@@ -1282,7 +1242,7 @@ export default function MakeInvoicePage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={1 + orderedVisible.length} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={orderedVisible.length} className="text-center py-8 text-muted-foreground">
                     {displayRows.length > 0 ? "No matching records found for the applied filters" : "No orders pending for invoice creation"}
                     {displayRows.length > 0 && (
                       <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
@@ -1306,11 +1266,11 @@ export default function MakeInvoicePage() {
             ) : sortedDisplayRows.length > 0 ? (
               sortedDisplayRows.map((group) => {
                 const display = buildInvoiceGroupDisplay(group)
-                const selected = selectedItems.includes(group._rowKey)
                 return (
                   <div
                     key={group._rowKey}
-                    className={cn("rounded-lg border bg-white p-4 shadow-sm", selected && "border-blue-200 bg-blue-50")}
+                    className="rounded-lg border bg-white p-4 shadow-sm cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-colors"
+                    onClick={() => handleOpenDialog(group)}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1321,7 +1281,6 @@ export default function MakeInvoicePage() {
                         </div>
                         <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>
                       </div>
-                      <Checkbox checked={selected} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </div>
 
                     <div className="mt-3">
@@ -1415,14 +1374,16 @@ export default function MakeInvoicePage() {
               </div>
             )}
           </div>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingTotalPages}
+            total={pendingTotal}
+            noun="Invoices"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || pendingOrders.length === 0}
+            nextDisabled={pendingOrders.length === 0 || pendingPage >= pendingTotalPages}
+          />
           </CardContent>
         </Card>
       </div>
@@ -1700,11 +1661,7 @@ export default function MakeInvoicePage() {
                         <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 text-left h-10 text-xs font-black text-slate-900 uppercase tracking-wider">Total ({selectedProducts.length})</TableHead>
                         <TableHead className="px-4 h-10" />
-                        <TableHead className="px-4 text-right h-10 font-mono tabular-nums font-black text-blue-700">
-                          {selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => sum + (productCdData[p.id]?.isCd === 'yes' ? (parseFloat(productCdData[p.id]?.cdAmount || '0') || 0) : 0), 0).toFixed(2)}
-                        </TableHead>
+                        <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 text-right h-10 font-mono tabular-nums font-black text-blue-700">
                           {(() => {
                             const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
@@ -1722,16 +1679,15 @@ export default function MakeInvoicePage() {
                         <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 text-right h-10 font-mono tabular-nums font-black text-blue-700">
-                          {selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => {
-                              const originalRate = Number(p.rate) || 0;
-                              const cdAmt = productCdData[p.id]?.isCd === 'yes' ? parseFloat(productCdData[p.id]?.cdAmount || '0') : 0;
-                              const adjustedRate = originalRate - cdAmt;
-                              const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2));
-                              const qty = parseFloat(p.qtyToDispatch) || 0;
-                              return sum + (rateWoGst * qty);
-                            }, 0).toFixed(2)}
+                          {(() => {
+                            const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .map(p => {
+                                const cdAmt = productCdData[p.id]?.isCd === 'yes' ? parseFloat(productCdData[p.id]?.cdAmount || '0') : 0;
+                                return { rate: (Number(p.rate) || 0) - cdAmt, qty: parseFloat(p.qtyToDispatch) || 0, product: p };
+                              }));
+                            return total === null ? "—" : total.toFixed(2);
+                          })()}
                         </TableHead>
                       </TableRow>
                       <TableRow>
@@ -1754,7 +1710,7 @@ export default function MakeInvoicePage() {
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Weight (KGS)</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty Dispatch</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]"><RateWithoutGstHeading /></TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1844,7 +1800,7 @@ export default function MakeInvoicePage() {
                               const originalRate = Number(product.rate) || 0;
                               const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
                               const adjustedRate = originalRate - cdAmt;
-                              return adjustedRate ? (adjustedRate / 1.05).toFixed(2) : "—";
+                              return rateWithoutGstText(adjustedRate, product);
                             })()}
                           </TableCell>
                           <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
@@ -1852,9 +1808,8 @@ export default function MakeInvoicePage() {
                               const originalRate = Number(product.rate) || 0;
                               const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
                               const adjustedRate = originalRate - cdAmt;
-                              const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2));
                               const qty = parseFloat(product.qtyToDispatch) || 0;
-                              const taxableAmount = rateWoGst * qty;
+                              const taxableAmount = taxableOf(adjustedRate, qty, product);
                               return taxableAmount ? taxableAmount.toFixed(2) : "—";
                             })()}
                           </TableCell>
@@ -1885,9 +1840,8 @@ export default function MakeInvoicePage() {
                       const originalRate = Number(product.rate) || 0
                       const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
                       const adjustedRate = originalRate - cdAmt
-                      const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2))
                       const qty = parseFloat(product.qtyToDispatch) || 0
-                      const taxableAmount = rateWoGst * qty
+                      const taxableAmount = taxableOf(adjustedRate, qty, product)
 
                       return (
                         <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
@@ -1942,9 +1896,9 @@ export default function MakeInvoicePage() {
                               </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
                               <p className="mt-1 font-mono font-bold text-slate-700">
-                                {adjustedRate ? (adjustedRate / 1.05).toFixed(2) : "—"}
+                                {rateWithoutGstText(adjustedRate, product)}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
@@ -2067,6 +2021,7 @@ export default function MakeInvoicePage() {
                       <FileUploadField
                         label={<Label>Upload Invoice Copy <span className="text-red-500">*</span></Label>}
                         accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                        helperText="Supported: PDF, JPG, PNG, WEBP · Max size: 20 MB"
                         value={invoiceData.invoiceFile}
                         fileName={invoiceData.invoiceFileName}
                         uploading={isUploadingObj['invoiceFile'] || false}
@@ -2088,22 +2043,28 @@ export default function MakeInvoicePage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                     <div className="space-y-2">
-                      <Label>Driver Advance (Cash)</Label>
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Driver Advance (Cash)
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
                       <Input
                         type="number"
-                        className="h-10"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
                         value={invoiceData.driverAdvanceCash}
-                        onChange={(e) => setInvoiceData({ ...invoiceData, driverAdvanceCash: e.target.value })}
+                        readOnly
                         placeholder="0.00"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Driver Advance (Bank)</Label>
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Driver Advance (Bank)
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
                       <Input
                         type="number"
-                        className="h-10"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
                         value={invoiceData.driverAdvanceBank}
-                        onChange={(e) => setInvoiceData({ ...invoiceData, driverAdvanceBank: e.target.value })}
+                        readOnly
                         placeholder="0.00"
                       />
                     </div>
@@ -2122,23 +2083,29 @@ export default function MakeInvoicePage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Diesel Amount</Label>
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Diesel Amount
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
                       <Input
                         type="number"
-                        className="h-10"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
                         value={invoiceData.dieselAmount}
-                        onChange={(e) => setInvoiceData({ ...invoiceData, dieselAmount: e.target.value })}
+                        readOnly
                         placeholder="0.00"
                       />
                     </div>
                     <div className="space-y-2">
                       <FileUploadField
-                        label={<Label>Upload Diesel Parchi</Label>}
+                        label={<Label>Upload Diesel Parchi <span className="text-red-500">*</span></Label>}
                         accept="image/*,.jpg,.jpeg,.png,.webp,.pdf"
+                        helperText="Supported: PDF, JPG, PNG, WEBP · Max size: 20 MB"
+                        value={invoiceData.dieselParchiFile}
                         fileName={invoiceData.dieselParchiFileName}
                         uploading={isUploadingObj['dieselParchiFile'] || false}
                         buttonText={invoiceData.dieselParchiFileName ? 'REPLACE' : 'UPLOAD'}
                         onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'dieselParchiFile', 'dieselParchiFileName')}
+                        onRemove={() => setInvoiceData(p => ({ ...p, dieselParchiFile: "", dieselParchiFileName: "" }))}
                         capture="environment"
                       />
                     </div>
@@ -2169,27 +2136,26 @@ export default function MakeInvoicePage() {
               </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handlePrint}
-                className="w-full sm:w-auto gap-2"
-                title="Print Invoice Data Sheet"
-              >
-                <Printer className="h-4 w-4" />
-                Print Data
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || !invoiceData.invoiceNo || isReadOnly}
-                className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-                title={isReadOnly ? "View Only Access" : "Generate Invoice"}
-              >
-                {isProcessing ? "Processing..." : "Generate Invoice"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                // Cancel stays inert while a submit is running (it used to be a disabled button).
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    variant: "outline",
+                    label: <><Printer className="h-4 w-4" />Print Data</>,
+                    title: "Print Invoice Data Sheet",
+                    onClick: handlePrint,
+                  },
+                  {
+                    label: isProcessing ? "Processing..." : "Generate Invoice",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || !invoiceData.invoiceNo || isReadOnly,
+                    title: isReadOnly ? "View Only Access" : "Generate Invoice",
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

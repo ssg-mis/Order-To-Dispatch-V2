@@ -113,7 +113,6 @@ function base(row: any): Record<string, any> {
 
   r.cd_amount = dsp.cdAmount != null ? Number(dsp.cdAmount) : (row.cdAmount != null ? Number(row.cdAmount) : null);
   r.cdAmount = r.cd_amount;
-  // Customer / depot / broker / salesperson
   r.customer_name = c.customerName ?? null;
   r.party_name = c.customerName ?? null; // legacy name
   r.depo_name = d.depotName ?? null;
@@ -130,6 +129,8 @@ function base(row: any): Record<string, any> {
   r.nos_per_main_uom = s.nosPerMainUom ?? null;
   r.oil_type = oi.oilType ?? null;
   r.uom = oi.uom ?? s.mainUom ?? null;
+  r.sku_gross_weight = s.grossWeight ?? null; // per-unit packed weight of the SKU
+  r.sku_unit_weight = s.skuWeight ?? null; // per-unit net weight of the SKU
   r.alternate_uom = oi.alternateUom ?? s.alternateUom ?? null;
   r.order_quantity = oi.orderQuantity ?? null;
   r.approval_qty = oi.approvedQty ?? null;
@@ -260,6 +261,10 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   r.actual_1 = dsp.actualAt ?? null;
   r.reason_of_difference_in_weight_if_any_speacefic = dsp.reasonOfWeightDifference ?? null; // legacy name
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Status column on the Actual Dispatch list: gate-in done / draft saved for this DO.
+  if (row.actualCompletionSeconds !== undefined) r.actual_completion_seconds = row.actualCompletionSeconds != null ? Number(row.actualCompletionSeconds) : null;
+  if (row.hasGateIn !== undefined) r.has_gate_in = !!row.hasGateIn;
+  if (row.hasDraft !== undefined) r.has_draft = !!row.hasDraft;
   // Master-driven GST for Dispatch Planning: the SKU's GST % and the depot/customer GST state codes.
   if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
   if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
@@ -317,11 +322,21 @@ export function flattenSecurityStage(row: any): Record<string, any> {
   return r;
 }
 
+// Master-driven GST carried from Dispatch Planning onwards: the SKU's GST % (frozen on the order line) and
+// the depot / customer GST state codes, which decide CGST + SGST (same state) vs IGST (other state).
+function applyMasterGst(r: Record<string, any>, row: any) {
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
+}
+
 // Make/Check Invoice: submit key = invoices id.
 export function flattenInvoiceStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
   const inv = row.invoice || {};
+  const vp = row.vehiclePlanning || {};
   r.id = inv.id ?? null;
   r.invoice_id = inv.id ?? null;
   r.dispatch_id = dsp.id ?? null;
@@ -343,12 +358,26 @@ export function flattenInvoiceStage(row: any): Record<string, any> {
   r.actual_5 = inv.madeAt ?? null;
   r.planned_6 = inv.plannedCheckedAt ?? null;
   r.actual_6 = inv.checkedAt ?? null;
+
+  // Advance bhada & diesel prefill: from Invoice (if already made) or fallback to Actual Dispatch / Plan Vehicle
+  r.driver_advance_cash = inv.driverAdvanceCash ?? dsp.advanceBhadaCash ?? vp.advanceBhadaCash ?? null;
+  r.driver_advance_bank = inv.driverAdvanceBank ?? dsp.advanceBhadaBank ?? vp.advanceBhadaBank ?? null;
+  r.diesel_amount = inv.dieselAmount ?? dsp.advanceBhadaDieselAdvance ?? vp.advanceBhadaDieselAdvance ?? null;
+  r.petrol_pump_name = inv.petrolPumpName ?? null;
+  r.diesel_parchi_file = inv.dieselParchiFile ?? null;
+  r.insurance_details = inv.insuranceDetails ?? null;
+
+  r.advance_bhada_cash = dsp.advanceBhadaCash ?? vp.advanceBhadaCash ?? null;
+  r.advance_bhada_bank = dsp.advanceBhadaBank ?? vp.advanceBhadaBank ?? null;
+  r.advance_bhada_diesel_advance = dsp.advanceBhadaDieselAdvance ?? vp.advanceBhadaDieselAdvance ?? null;
+
   return r;
 }
 
 // Gate Out: submit key = gate_outs id.
 export function flattenGateOutStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
   const g = row.gateOut || {};
   const inv = row.invoice || {};
