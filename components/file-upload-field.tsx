@@ -12,6 +12,7 @@ type UploadValue = string | string[] | null | undefined
 type FileUploadFieldProps = {
   label?: React.ReactNode
   helperText?: React.ReactNode
+  dropzoneHint?: React.ReactNode
   accept?: string
   multiple?: boolean
   disabled?: boolean
@@ -56,6 +57,7 @@ function isImageSource(source: string, accept?: string) {
 export function FileUploadField({
   label,
   helperText,
+  dropzoneHint,
   accept,
   multiple,
   disabled,
@@ -142,6 +144,11 @@ export function FileUploadField({
                 ? `${uploadedNames.length} file${uploadedNames.length > 1 ? "s" : ""} selected`
                 : uploadedNames[0] || placeholder}
             </p>
+            {dropzoneHint && !hasSelection && !uploading && (
+              <p className="mt-1 text-[10px] font-medium text-slate-400">
+                {dropzoneHint}
+              </p>
+            )}
           </div>
         </button>
       ) : (
