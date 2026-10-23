@@ -32,7 +32,7 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { stageColumnChips } from "@/components/stage-list-extras"
 import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
 
@@ -372,7 +372,7 @@ export default function ReachVehiclePage() {
           </Button>
                 </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Loads"
             shown={table.rows.length}
@@ -736,17 +736,18 @@ export default function ReachVehiclePage() {
               )}
             </div>
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-transparent flex flex-col sm:flex-row gap-3">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-11 sm:h-10">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || isReadOnly}
-                className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
-              >
-                {isProcessing ? "Processing..." : "Confirm & Save"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 pt-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    label: isProcessing ? "Processing..." : "Confirm & Save",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || isReadOnly,
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

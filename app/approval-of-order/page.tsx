@@ -238,7 +238,7 @@ export default function ApprovalOfOrderPage() {
 
   const tableContent = (
     <div className="space-y-4">
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
         <StageListHeader
           title={activeTab === "pending" ? "Approval List" : "Approval History"}
           shown={displayRows.length}

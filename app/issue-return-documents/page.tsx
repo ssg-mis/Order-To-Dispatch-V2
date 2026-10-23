@@ -1,11 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
-import { StageActionBar } from "@/components/stage-list"
+import { StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -82,6 +82,8 @@ export default function IssueReturnDocumentsPage() {
   const [filterValues, setFilterValues] = useState({
     status: "", startDate: "", endDate: "", partyName: "", search: "", manualSaudaNo: "",
   })
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [form, setForm] = useState(emptyForm())
@@ -95,24 +97,29 @@ export default function IssueReturnDocumentsPage() {
     end_date: filterValues.endDate || undefined,
   }
 
+  // Filters or the tab changing narrows/changes the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1); setHistoryPage(1) }, [filterValues, activeTab])
+
   const { data: pendingData, isLoading: isPendingLoading } = useQuery({
-    queryKey: ["return-credit-notes-pending", filterValues],
+    queryKey: ["return-credit-notes-pending", filterValues, pendingPage],
     queryFn: async () => {
-      const res = await returnApi.getPendingCreditNotes({ ...filters, limit: 100 })
+      const res = await returnApi.getPendingCreditNotes({ ...filters, page: pendingPage, limit: 25 })
       return res.success ? res.data : { returns: [], pagination: { total: 0 } }
     },
   })
   const pending: any[] = pendingData?.returns || []
 
   const { data: historyData, isLoading: isHistoryLoading } = useQuery({
-    queryKey: ["return-credit-notes-history", filterValues],
+    queryKey: ["return-credit-notes-history", filterValues, historyPage],
     enabled: activeTab === "history",
     queryFn: async () => {
-      const res = await returnApi.getCreditNoteHistory({ ...filters, limit: 100 })
+      const res = await returnApi.getCreditNoteHistory({ ...filters, page: historyPage, limit: 25 })
       return res.success ? res.data : { returns: [], pagination: { total: 0 } }
     },
   })
   const history: any[] = historyData?.returns || []
+  const pendingTotalPages = pendingData?.pagination?.totalPages || 1
+  const historyTotalPages = historyData?.pagination?.totalPages || 1
 
   const selected = useMemo(() => pending.find((r) => r.gate.id === selectedId), [pending, selectedId])
 
@@ -224,7 +231,7 @@ export default function IssueReturnDocumentsPage() {
       partyNames={[]}
       title="Stage 19: Issue Documents Against Returned Stock"
       description="Customer debit note and our credit note against the original invoice."
-      pendingCount={pending.length}
+      pendingCount={pendingData?.pagination?.total ?? pending.length}
       historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={false}
@@ -236,6 +243,7 @@ export default function IssueReturnDocumentsPage() {
       searchPlaceholder="Search DO / Customer / Invoice..."
       isHistoryLoading={isHistoryLoading}
       historyContent={
+        <>
         <StageDataCard
           storageKey="issue-return-documents-history"
           title="Credit Notes Issued"
@@ -247,6 +255,18 @@ export default function IssueReturnDocumentsPage() {
           emptyText="No credit notes issued yet."
           format={(n, id) => (id === "cn_amount" ? n.toFixed(2) : fmtQty(n))}
         />
+        <StagePagination
+          sticky
+          page={historyPage}
+          totalPages={historyTotalPages}
+          total={historyData?.pagination?.total ?? history.length}
+          noun="Items"
+          onPrev={() => setHistoryPage((p) => Math.max(1, p - 1))}
+          onNext={() => setHistoryPage((p) => p + 1)}
+          prevDisabled={historyPage === 1 || history.length === 0}
+          nextDisabled={history.length === 0 || historyPage >= historyTotalPages}
+        />
+        </>
       }
     >
       <div className="space-y-4">
@@ -276,6 +296,17 @@ export default function IssueReturnDocumentsPage() {
           format={fmtQty}
         />
 
+        <StagePagination
+          sticky
+          page={pendingPage}
+          totalPages={pendingTotalPages}
+          total={pendingData?.pagination?.total ?? pending.length}
+          noun="Items"
+          onPrev={() => setPendingPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPendingPage((p) => p + 1)}
+          prevDisabled={pendingPage === 1 || pending.length === 0}
+          nextDisabled={pending.length === 0 || pendingPage >= pendingTotalPages}
+        />
       </div>
 
       {/* Credit Note dialog */}
@@ -461,12 +492,22 @@ export default function IssueReturnDocumentsPage() {
               </div>
             )}
 
-            <DialogFooter className="-mx-3 -mb-3 mt-8 gap-2 border-t bg-gray-50 px-3 py-4 pt-4 sm:-mx-6 sm:-mb-6 sm:gap-0 sm:px-6">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">Cancel</Button>
-              <Button onClick={handleSubmit} disabled={!canSave} className="w-full min-w-[150px] bg-blue-600 hover:bg-blue-700 sm:w-auto">
-                {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isProcessing ? "Processing..." : "Issue Documents"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[{
+                  label: (
+                    <>
+                      {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {isProcessing ? "Processing..." : "Issue Documents"}
+                    </>
+                  ),
+                  onClick: handleSubmit,
+                  disabled: !canSave,
+                  className: "min-w-[150px] bg-blue-600 hover:bg-blue-700",
+                }]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

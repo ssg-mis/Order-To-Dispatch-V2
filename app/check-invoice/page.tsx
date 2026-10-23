@@ -30,7 +30,7 @@ import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, Arrow
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { checkInvoiceApi, skuApi, depotApi } from "@/lib/api-service"
+import { checkInvoiceApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -44,28 +44,12 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGst, rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination } from "@/components/stage-list"
-
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 
 function InvoiceSummary({ selectedGroups, selectedProducts }: {
   selectedGroups: any[]
@@ -74,58 +58,19 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf(Number(p.rate) || 0, parseFloat(p.actualQty) || 0, p),
+    product: p,
+  }))
+  // GST % per product and the same-state / other-state split come from the masters, carried from Dispatch Planning.
   const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
@@ -133,27 +78,16 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
       <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${invoiceTotal.toFixed(2)}`}</span>
         </div>
       </div>
     </div>
@@ -827,7 +761,7 @@ export default function CheckInvoicePage() {
                 </StageActionBar>
 
         {/* Main Table (Grouped) */}
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Invoices List"
             shown={table.rows.length}
@@ -1464,14 +1398,12 @@ export default function CheckInvoicePage() {
                         <TableCell className="px-4" />
                         <TableCell className="px-4" />
                         <TableCell className="px-4 text-right font-mono tabular-nums">
-                          {fmtNum(selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => {
-                              const r = Number(p.rate) || 0;
-                              const rateWoGst = parseFloat((r / 1.05).toFixed(2));
-                              const q = parseFloat(p.actualQty) || 0;
-                              return sum + (rateWoGst * q);
-                            }, 0), 2)}
+                          {(() => {
+                            const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .map(p => ({ rate: Number(p.rate) || 0, qty: parseFloat(p.actualQty) || 0, product: p })));
+                            return total === null ? "—" : fmtNum(total, 2);
+                          })()}
                         </TableCell>
                         <TableCell colSpan={3} className="px-4" />
                       </TableRow>
@@ -1493,7 +1425,7 @@ export default function CheckInvoicePage() {
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Weight (KGS)</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]"><RateWithoutGstHeading /></TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
                         <TableHead className="px-4 text-left h-10 whitespace-nowrap">Invoice No</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Invoice Date</TableHead>
@@ -1506,9 +1438,9 @@ export default function CheckInvoicePage() {
                         const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0);
                         // product.rate is already net of the Make Invoice CD (see the mapping above).
                         const netRateIncTaxes = originalRate;
-                        const rateWoGst = parseFloat((netRateIncTaxes / 1.05).toFixed(2));
+                        const rateWoGst = rateWithoutGst(netRateIncTaxes, product);
                         const qty = parseFloat(product.actualQty) || 0;
-                        const taxableAmount = rateWoGst * qty;
+                        const taxableAmount = rateWoGst === null ? null : rateWoGst * qty;
 
                         return (
                           <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
@@ -1552,7 +1484,7 @@ export default function CheckInvoicePage() {
                               />
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              {netRateIncTaxes ? rateWoGst.toFixed(2) : "—"}
+                              {netRateIncTaxes && rateWoGst !== null ? rateWoGst.toFixed(2) : "—"}
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {taxableAmount ? taxableAmount.toFixed(2) : "—"}
@@ -1603,9 +1535,9 @@ export default function CheckInvoicePage() {
                       const originalRate = Number(product.rate) || 0
                       const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0)
                       const netRateIncTaxes = originalRate // already net of CD, see the mapping above
-                      const rateWoGst = parseFloat((netRateIncTaxes / 1.05).toFixed(2))
+                      const rateWoGst = rateWithoutGst(netRateIncTaxes, product)
                       const qty = parseFloat(product.actualQty) || 0
-                      const taxableAmount = rateWoGst * qty
+                      const taxableAmount = rateWoGst === null ? null : rateWoGst * qty
 
                       return (
                         <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
@@ -1659,9 +1591,9 @@ export default function CheckInvoicePage() {
                               </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
                               <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
-                                {netRateIncTaxes ? fmtNum(netRateIncTaxes / 1.05, 2) : "—"}
+                                {rateWithoutGstText(netRateIncTaxes, product, (n) => fmtNum(n, 2))}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
@@ -1773,13 +1705,18 @@ export default function CheckInvoicePage() {
             </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                {viewOnly ? "Close" : "Cancel"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                // Cancel stays inert while a submit is running (it used to be a disabled button).
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                cancelLabel={viewOnly ? "Close" : "Cancel"}
+                actions={[
+                  {
+                    variant: "outline",
+                    label: <><Printer className="h-4 w-4" />Print Data</>,
+                    title: "Print Verification Sheet",
+                    onClick: () => {
                   const group = selectedGroups[0]
                   if (!group) return
                   const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
@@ -1836,23 +1773,16 @@ export default function CheckInvoicePage() {
                   `
                   const win = window.open('', '_blank')
                   if (win) { win.document.write(printContent); win.document.close(); win.focus(); win.print() }
-                }}
-                className="w-full sm:w-auto gap-2"
-                title="Print Verification Sheet"
-              >
-                <Printer className="h-4 w-4" />
-                Print Data
-              </Button>
-              {!viewOnly && (
-                <Button
-                  onClick={handleSubmit}
-                  disabled={isProcessing || !checkData.status || isReadOnly}
-                  className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-                  title={isReadOnly ? "View Only Access" : "Complete Verification"}
-                >
-                  {isProcessing ? "Processing..." : "Complete Verification"}
-                </Button>
-              )}
+                },
+                  },
+                  ...(!viewOnly ? [{
+                    label: isProcessing ? "Processing..." : "Complete Verification",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || !checkData.status || isReadOnly,
+                    title: isReadOnly ? "View Only Access" : "Complete Verification",
+                  }] : []),
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

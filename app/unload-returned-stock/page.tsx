@@ -5,7 +5,7 @@ import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { StageActionBar } from "@/components/stage-list"
+import { StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -21,6 +21,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Boxes, Info, Loader2, PackageOpen, Scale } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
+
+const PAGE_SIZE = 25
 
 const today = () => new Date().toISOString().split("T")[0]
 const num = (v: any) => parseFloat(v) || 0
@@ -103,6 +105,8 @@ export default function UnloadReturnedStockPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [isUploadingSlip, setIsUploadingSlip] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
 
   const filters = {
     search: filterValues.search || undefined,
@@ -111,24 +115,31 @@ export default function UnloadReturnedStockPage() {
     end_date: filterValues.endDate || undefined,
   }
 
+  // Filters or a tab switch change the result set, so each tab goes back to page 1.
+  useEffect(() => { setPendingPage(1); setHistoryPage(1) }, [filterValues, activeTab])
+
   const { data: pendingData, isLoading: isPendingLoading } = useQuery({
-    queryKey: ["return-unloading-pending", filterValues],
+    queryKey: ["return-unloading-pending", filterValues, pendingPage],
     queryFn: async () => {
-      const res = await returnApi.getPendingUnloadings({ ...filters, limit: 100 })
+      const res = await returnApi.getPendingUnloadings({ ...filters, page: pendingPage, limit: PAGE_SIZE })
       return res.success ? res.data : { returns: [] }
     },
   })
   const pending: any[] = pendingData?.returns || []
+  const pendingTotalPages: number = pendingData?.pagination?.totalPages || 1
+  const pendingTotal: number = pendingData?.pagination?.total ?? pending.length
 
   const { data: historyData, isLoading: isHistoryLoading } = useQuery({
-    queryKey: ["return-unloading-history", filterValues],
+    queryKey: ["return-unloading-history", filterValues, historyPage],
     enabled: activeTab === "history",
     queryFn: async () => {
-      const res = await returnApi.getUnloadingHistory({ ...filters, limit: 100 })
+      const res = await returnApi.getUnloadingHistory({ ...filters, page: historyPage, limit: PAGE_SIZE })
       return res.success ? res.data : { returns: [] }
     },
   })
   const history: any[] = historyData?.returns || []
+  const historyTotalPages: number = historyData?.pagination?.totalPages || 1
+  const historyTotal: number = historyData?.pagination?.total ?? history.length
 
   const { data: depots = [] } = useQuery({
     queryKey: ["depots-all"],
@@ -313,7 +324,7 @@ export default function UnloadReturnedStockPage() {
       partyNames={[]}
       title="Stage 18: Unload Returned Stock"
       description="Receive, weigh, check and restock returned stock."
-      pendingCount={pending.length}
+      pendingCount={pendingTotal}
       historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={false}
@@ -325,18 +336,31 @@ export default function UnloadReturnedStockPage() {
       searchPlaceholder="Search DO / Customer / Invoice..."
       isHistoryLoading={isHistoryLoading}
       historyContent={
-        <StageDataCard
-          storageKey="unload-returned-stock-history"
-          title="Returned Stock Received"
-          description="Returned stock unloaded, weighed and restocked."
-          rows={history}
-          columns={HISTORY_COLUMNS}
-          rowKey={(r: any) => r.gate.id}
-          loading={isHistoryLoading}
-          emptyText="No returned stock received yet."
-          selects={[{ id: "depot", allLabel: "All Depots", getValue: (r: any) => r.restockDepotName }]}
-          format={fmtN}
-        />
+        <>
+          <StageDataCard
+            storageKey="unload-returned-stock-history"
+            title="Returned Stock Received"
+            description="Returned stock unloaded, weighed and restocked."
+            rows={history}
+            columns={HISTORY_COLUMNS}
+            rowKey={(r: any) => r.gate.id}
+            loading={isHistoryLoading}
+            emptyText="No returned stock received yet."
+            selects={[{ id: "depot", allLabel: "All Depots", getValue: (r: any) => r.restockDepotName }]}
+            format={fmtN}
+          />
+          <StagePagination
+            sticky
+            page={historyPage}
+            totalPages={historyTotalPages}
+            total={historyTotal}
+            noun="Items"
+            onPrev={() => setHistoryPage(p => Math.max(1, p - 1))}
+            onNext={() => setHistoryPage(p => p + 1)}
+            prevDisabled={historyPage === 1 || history.length === 0}
+            nextDisabled={history.length === 0 || historyPage >= historyTotalPages}
+          />
+        </>
       }
     >
       <div className="space-y-4">
@@ -364,6 +388,18 @@ export default function UnloadReturnedStockPage() {
           }}
           rowClassName={(r: any) => (selectedId === r.gate.id ? "bg-blue-50/50" : undefined)}
           format={fmtN}
+        />
+
+        <StagePagination
+          sticky
+          page={pendingPage}
+          totalPages={pendingTotalPages}
+          total={pendingTotal}
+          noun="Items"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1 || pending.length === 0}
+          nextDisabled={pending.length === 0 || pendingPage >= pendingTotalPages}
         />
       </div>
 
@@ -558,12 +594,22 @@ export default function UnloadReturnedStockPage() {
               </div>
             )}
 
-            <DialogFooter className="-mx-3 -mb-3 mt-8 gap-2 border-t bg-gray-50 px-3 py-4 pt-4 sm:-mx-6 sm:-mb-6 sm:gap-0 sm:px-6">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">Cancel</Button>
-              <Button onClick={handleSubmit} disabled={!canSave} className="w-full min-w-[150px] bg-blue-600 hover:bg-blue-700 sm:w-auto">
-                {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isProcessing ? "Processing..." : "Confirm Receipt"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[{
+                  label: (
+                    <>
+                      {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {isProcessing ? "Processing..." : "Confirm Receipt"}
+                    </>
+                  ),
+                  onClick: handleSubmit,
+                  disabled: !canSave,
+                  className: "min-w-[150px] bg-blue-600 hover:bg-blue-700",
+                }]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

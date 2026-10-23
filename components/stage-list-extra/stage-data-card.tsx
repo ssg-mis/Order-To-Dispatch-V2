@@ -220,7 +220,7 @@ export function StageDataCard<T>({
   const showColumnsMenu = isAdmin || isFeatureEnabled("can_toggle_columns")
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+    <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
       <StageListHeader
         title={title}
         shown={table.rows.length}

@@ -25,7 +25,7 @@ import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { gateOutApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
+import { gateOutApi, orderApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
@@ -37,9 +37,12 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { StageTableHeaderRows, bodyCellClass } from "@/components/stage-table-header-rows"
 import { fmtNum, fmtDate } from "@/lib/table-format"
 
@@ -94,25 +97,6 @@ async function compressImageForUpload(file: File): Promise<File> {
   return new File([blob], `${cleanName}.jpg`, { type: "image/jpeg", lastModified: Date.now() })
 }
 
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
-
 function InvoiceSummary({ selectedGroups, selectedProducts }: {
   selectedGroups: any[]
   selectedProducts: string[]
@@ -120,58 +104,19 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf(Number(p.rate) || 0, parseFloat(p.actualQty) || 0, p),
+    product: p,
+  }))
+  // GST % per product and the same-state / other-state split come from the masters, carried from Dispatch Planning.
   const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
@@ -181,29 +126,18 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
       <div className="p-4 max-w-sm ml-auto space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
+          <span className="font-mono font-bold text-slate-700">{totalTaxable === null ? "—" : `₹${totalTaxable.toFixed(2)}`}</span>
         </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${invoiceTotal.toFixed(2)}`}</span>
         </div>
       </div>
     </div>
@@ -908,7 +842,7 @@ export default function GateOutPage() {
                 </StageActionBar>
 
         {/* Main Card View (Grouped) */}
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Gate Out List"
             shown={table.rows.length}
@@ -1500,7 +1434,7 @@ export default function GateOutPage() {
                                   <TableCell />
                                   <TableCell />
                                   <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">
-                                    {fmtNum(allProducts.reduce((sum: number, p: any) => sum + (parseFloat(((p.rate || 0) / 1.05).toFixed(2)) * (parseFloat(p.actualQty) || 0)), 0), 2)}
+                                    {(() => { const total = sumTaxable(allProducts.map((p: any) => ({ rate: p.rate || 0, qty: parseFloat(p.actualQty) || 0, product: p }))); return total === null ? "—" : fmtNum(total, 2); })()}
                                   </TableCell>
                                   <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">
                                     {fmtNum(allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0), 2)}
@@ -1524,7 +1458,7 @@ export default function GateOutPage() {
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Weight (KGS)</TableHead>
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Actual Qty Dispatch</TableHead>
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
-                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Rate (₹)</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]"><RateWithoutGstHeading /></TableHead>
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Taxable Amount (₹)</TableHead>
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Amount (₹)</TableHead>
                                   <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-left">Invoice No</TableHead>
@@ -1576,10 +1510,10 @@ export default function GateOutPage() {
                                       />
                                     </TableCell>
                                     <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
-                                      {product.rate ? (product.rate / 1.05).toFixed(2) : "—"}
+                                      {rateWithoutGstText(product.rate || 0, product)}
                                     </TableCell>
                                     <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
-                                      {(() => { const t = parseFloat(((product.rate || 0) / 1.05).toFixed(2)) * (parseFloat(product.actualQty) || 0); return t ? t.toFixed(2) : "—"; })()}
+                                      {(() => { const t = taxableOf(product.rate || 0, parseFloat(product.actualQty) || 0, product); return t ? t.toFixed(2) : "—"; })()}
                                     </TableCell>
                                     <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
                                       {product.amount ? product.amount.toFixed(2) : "—"}
@@ -1670,12 +1604,12 @@ export default function GateOutPage() {
                                       </div>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.rate ? (product.rate / 1.05).toFixed(2) : "—"}</p>
+                                      <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{rateWithoutGstText(product.rate || 0, product)}</p>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount (₹)</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{(() => { const t = parseFloat(((product.rate || 0) / 1.05).toFixed(2)) * (parseFloat(product.actualQty) || 0); return t ? t.toFixed(2) : "—"; })()}</p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{(() => { const t = taxableOf(product.rate || 0, parseFloat(product.actualQty) || 0, product); return t ? t.toFixed(2) : "—"; })()}</p>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Amount (₹)</p>
@@ -1777,17 +1711,18 @@ export default function GateOutPage() {
               </div>
             </div>
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-3">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-11 sm:h-10">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || isReadOnly}
-                className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
-              >
-                {isProcessing ? "Processing..." : "Complete Gate Out"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    label: isProcessing ? "Processing..." : "Complete Gate Out",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || isReadOnly,
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

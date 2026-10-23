@@ -39,7 +39,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
-  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone, StagePagination } from "@/components/stage-list"
+  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone, StagePagination, StageDecisionFooter, StageActionFooter } from "@/components/stage-list"
 
 // Formatted display strings ("1,234.50", "₹1,234.50", "—") -> number.
 const parseDisplayNumber = (v: unknown): number => {
@@ -1372,7 +1372,7 @@ export default function DispatchMaterialPage() {
         </div>
       )}
 
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
         <StageListHeader
           title="Dispatch Planning List"
           shown={sortedDisplayRows.length}
@@ -1853,6 +1853,7 @@ export default function DispatchMaterialPage() {
                               <TableHead className="px-4" />
                               <TableHead className="px-4" />
                               <TableHead className="px-4" />
+                              <TableHead className="px-4" />
                               <TableHead className="px-4 text-right font-mono tabular-nums font-bold text-amber-700">
                                 {fmtNum(allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
                                     const rowKey = p._rowKey;
@@ -1878,6 +1879,7 @@ export default function DispatchMaterialPage() {
                               <TableHead className="px-4 text-right">Approved Qty</TableHead>
                               <TableHead className="px-4 text-right">Remaining Qty</TableHead>
                               <TableHead className="min-w-[120px] px-4 text-right">Plan Qty</TableHead>
+                              <TableHead className="w-28 px-4 text-center">Transfer</TableHead>
                               <TableHead className="min-w-[150px] px-4 text-right">
                                 <div className="inline-flex items-center justify-end gap-1">
                                   <span>Taxable Amount (₹)</span>
@@ -1910,6 +1912,7 @@ export default function DispatchMaterialPage() {
                               const maxLimit = prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty;
                               const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
                               const taxableAmt = getProductTaxableAmt(prod, currentDispatchQty);
+                              const currentTransfer = dispatchDetails[rowKey]?.transfer || prod.transfer || "no";
 
                               return (
                                 <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
@@ -1931,6 +1934,51 @@ export default function DispatchMaterialPage() {
                                       setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], qty: val.toString() } }));
                                     }} />
                                   </TableCell>
+                                  <TableCell className="px-4 py-3 text-center">
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <Select
+                                        value={currentTransfer}
+                                        onValueChange={(val) => {
+                                          setDispatchDetails((prev) => {
+                                            const existing = prev[rowKey] || {};
+                                            const transferData = existing.transferData || {
+                                              billTo: { company: prod.bill_company_name || "", address: prod.bill_address || "" },
+                                              shipTo: { company: prod.ship_company_name || "", address: prod.ship_address || "" },
+                                              freightRate: prod.freight_rate?.toString() || "0.00"
+                                            };
+                                            return { ...prev, [rowKey]: { ...existing, transfer: val, transferData } };
+                                          });
+                                          if (val === "yes") {
+                                            setCurrentTransferRowKey(rowKey);
+                                            setIsTransferPopupOpen(true);
+                                          }
+                                        }}
+                                      >
+                                        <SelectTrigger className="h-8 w-20 text-xs font-semibold rounded-lg border-slate-200 bg-white">
+                                          <SelectValue placeholder="No" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="no" className="text-xs">No</SelectItem>
+                                          <SelectItem value="yes" className="text-xs">Yes</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                      {currentTransfer === "yes" && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-8 w-8 rounded-lg text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shrink-0 cursor-pointer"
+                                          title="Edit Transfer Details"
+                                          onClick={() => {
+                                            setCurrentTransferRowKey(rowKey);
+                                            setIsTransferPopupOpen(true);
+                                          }}
+                                        >
+                                          <Settings2 className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
                                   <TableCell className="text-sm font-bold text-amber-700 px-4 py-3 text-right font-mono tabular-nums bg-amber-50/30">
                                     <span className="inline-flex items-center justify-end">
                                       {fmtNum(taxableAmt, 2)}
@@ -1941,7 +1989,7 @@ export default function DispatchMaterialPage() {
                               );
                             })}
                             <TableRow className="bg-slate-50/50">
-                              <TableCell colSpan={7} className="px-4 py-3">
+                              <TableCell colSpan={8} className="px-4 py-3">
                                 {/* The order's ledger charges: one set per order, shown here; added once only if the order has none yet. */}
                                 <OrderChargesPanel orderNos={Array.from(new Set(allProducts.map((p: any) => p.orderNo).filter(Boolean))) as string[]} />
                               </TableCell>
@@ -1984,7 +2032,7 @@ export default function DispatchMaterialPage() {
                             return (
                               <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
                                 <TableRow className="border-b border-slate-200 bg-slate-50/50">
-                                  <TableCell colSpan={6} className="py-2 pr-4 text-right">
+                                  <TableCell colSpan={7} className="py-2 pr-4 text-right">
                                     <div className="flex flex-wrap items-center justify-end gap-2">
                                       <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${stateKnown ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700"}`}>
                                         {stateKnown ? (isIgstSelected ? "Other state · IGST" : "Same state · CGST + SGST") : "State not set in master · CGST + SGST shown"}
@@ -2048,32 +2096,32 @@ export default function DispatchMaterialPage() {
                                   <TableCell className="px-4 py-2" />
                                 </TableRow>
                                 <TableRow>
-                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value (₹):</span></TableCell>
+                                  <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value (₹):</span></TableCell>
                                   <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-bold text-slate-800">{fmtNum(totalTaxable, 2)}</TableCell>
                                 </TableRow>
                                 {!isIgstSelected ? (
                                   <>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST{rateTag(2)} (₹):</span></TableCell>
+                                      <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST{rateTag(2)} (₹):</span></TableCell>
                                       <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(cgst, 2)}</TableCell>
                                     </TableRow>
                                     <TableRow>
-                                      <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST{rateTag(2)} (₹):</span></TableCell>
+                                      <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST{rateTag(2)} (₹):</span></TableCell>
                                       <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(sgst, 2)}</TableCell>
                                     </TableRow>
                                   </>
                                 ) : (
                                   <TableRow>
-                                    <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST{rateTag(1)} (₹):</span></TableCell>
+                                    <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST{rateTag(1)} (₹):</span></TableCell>
                                     <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(igst, 2)}</TableCell>
                                   </TableRow>
                                 )}
                                 <TableRow>
-                                  <TableCell colSpan={6} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off (₹):</span></TableCell>
+                                  <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off (₹):</span></TableCell>
                                   <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{roundingOff.toFixed(2)}</TableCell>
                                 </TableRow>
                                 <TableRow className="bg-blue-50/50">
-                                  <TableCell colSpan={6} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount (₹):</span></TableCell>
+                                  <TableCell colSpan={7} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount (₹):</span></TableCell>
                                   <TableCell className="px-4 py-3 text-right font-mono tabular-nums text-base font-bold text-blue-700">{fmtNum(roundedTotal, 2)}</TableCell>
                                 </TableRow>
                               </tfoot>
@@ -2202,42 +2250,32 @@ export default function DispatchMaterialPage() {
             </div>
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-1 sm:px-8 pb-4 sm:pb-8 flex flex-col gap-4 sm:flex-col w-full">
-            <div className="flex flex-col sm:flex-row sm:items-end gap-3 w-full">
-              <div className="flex-1 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Remarks <span className="text-red-500">*</span></Label>
-                <Input
-                  className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white focus:border-red-400 transition-colors"
-                  placeholder="Enter reason for reverting or cancelling..."
-                  value={revertRemarks}
-                  onChange={(e) => setRevertRemarks(e.target.value)}
-                />
-              </div>
-              {role === 'super_admin' && (
-                <Button
-                  variant="outline"
-                  onClick={handleCancel}
-                  disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                  className="w-full sm:w-auto font-black uppercase tracking-tight whitespace-normal sm:whitespace-nowrap border-2 border-red-600 text-red-600 hover:bg-red-50"
-                >
-                  {isProcessing ? "Processing..." : `Cancel Order (${dialogSelectedProducts.length})`}
-                </Button>
-              )}
-              <Button
-                variant="destructive"
-                onClick={handleRevert}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                className="w-full sm:w-auto font-black uppercase tracking-tight whitespace-normal sm:whitespace-nowrap"
-              >
-                {isProcessing ? "Processing..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-              <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700">
-                {isProcessing ? "Processing..." : `Proceed to Plan Vehicle (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              remarksPlaceholder="Enter reason for reverting or cancelling..."
+              revertActions={[
+                ...(role === 'super_admin'
+                  ? [{
+                      label: isProcessing ? "Processing..." : `Cancel Order (${dialogSelectedProducts.length})`,
+                      onClick: handleCancel,
+                      disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                    }]
+                  : []),
+                {
+                  label: isProcessing ? "Processing..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`,
+                  onClick: handleRevert,
+                  disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                },
+              ]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Processing..." : `Proceed to Plan Vehicle (${dialogSelectedProducts.length})`,
+                onClick: handleBulkDispatch,
+                disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2255,21 +2293,21 @@ export default function DispatchMaterialPage() {
           isSavingTransferRef.current = false;
         }
       }}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto p-3 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Transfer Details</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto p-4 sm:p-6 rounded-2xl">
+          <DialogHeader className="pb-2 border-b border-slate-100">
+            <DialogTitle className="text-xl font-bold text-slate-900">Transfer Details</DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
               Provide Bill-to and Ship-to details for the material transfer.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 py-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 py-4">
             {/* Bill To Column */}
             <div className="space-y-4">
-              <h3 className="font-bold text-blue-800 border-b pb-1 uppercase text-sm">Bill To</h3>
+              <h3 className="font-bold text-blue-800 border-b pb-1 uppercase text-xs tracking-wider">BILL TO</h3>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Company Name <span className="text-red-500">*</span></Label>
+                  <Label className="text-xs font-bold text-slate-700">Company Name <span className="text-red-500">*</span></Label>
                   <AsyncCombobox
                     placeholder="Select Company"
                     searchPlaceholder="Search customers..."
@@ -2315,7 +2353,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2332,14 +2370,14 @@ export default function DispatchMaterialPage() {
                         };
                       });
                     }}
-                    className="h-9 text-xs"
+                    className="h-10 text-xs rounded-xl"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Address</Label>
+                  <Label className="text-xs font-bold text-slate-700">Address</Label>
                   <Input
                     placeholder="Enter Address"
-                    className="h-9 text-xs font-medium"
+                    className="h-10 text-xs font-medium rounded-xl border-slate-200"
                     value={
                       currentTransferRowKey
                         ? (dispatchDetails[currentTransferRowKey]?.transferData?.billTo?.address ||
@@ -2351,7 +2389,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2367,15 +2405,51 @@ export default function DispatchMaterialPage() {
                     }}
                   />
                 </div>
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-xs font-bold text-slate-700">Freight Rate <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0.00"
+                    className="h-10 text-sm font-bold rounded-xl border-slate-200 max-w-[200px]"
+                    value={
+                      currentTransferRowKey
+                        ? (dispatchDetails[currentTransferRowKey]?.transferData?.freightRate ??
+                          allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey)?.freight_rate?.toString() ?? "0.00")
+                        : "0.00"
+                    }
+                    onChange={(e) => {
+                      if (!currentTransferRowKey) return;
+                      let val = e.target.value;
+                      if (Number(val) < 0) val = "0";
+                      const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
+                        billTo: { company: "", address: "" },
+                        shipTo: { company: "", address: "" },
+                        freightRate: "0.00"
+                      };
+                      setDispatchDetails(prev => {
+                        const rowKey = currentTransferRowKey!;
+                        const rowDetail = prev[rowKey] || { qty: "0" };
+                        return {
+                          ...prev,
+                          [rowKey]: {
+                            ...rowDetail,
+                            transferData: { ...prevData, freightRate: val }
+                          }
+                        };
+                      });
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
             {/* Ship To Column */}
             <div className="space-y-4">
-              <h3 className="font-bold text-green-800 border-b pb-1 uppercase text-sm">Ship To</h3>
+              <h3 className="font-bold text-green-800 border-b pb-1 uppercase text-xs tracking-wider">SHIP TO</h3>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Company Name <span className="text-red-500">*</span></Label>
+                  <Label className="text-xs font-bold text-slate-700">Company Name <span className="text-red-500">*</span></Label>
                   <AsyncCombobox
                     placeholder="Select Company"
                     searchPlaceholder="Search customers..."
@@ -2421,7 +2495,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2438,14 +2512,14 @@ export default function DispatchMaterialPage() {
                         };
                       });
                     }}
-                    className="h-9 text-xs"
+                    className="h-10 text-xs rounded-xl"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Address</Label>
+                  <Label className="text-xs font-bold text-slate-700">Address</Label>
                   <Input
                     placeholder="Enter Address"
-                    className="h-9 text-xs font-medium"
+                    className="h-10 text-xs font-medium rounded-xl border-slate-200"
                     value={
                       currentTransferRowKey
                         ? (dispatchDetails[currentTransferRowKey]?.transferData?.shipTo?.address ||
@@ -2457,7 +2531,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2477,67 +2551,66 @@ export default function DispatchMaterialPage() {
             </div>
           </div>
 
-          <div className="px-0 sm:px-8 pb-4">
-            <div className="space-y-1.5 max-w-xs">
-              <Label className="text-xs font-bold">Freight Rate <span className="text-red-500">*</span></Label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="0.00"
-                className="h-10 text-sm font-bold border-2 focus:border-blue-400"
-                value={
-                  currentTransferRowKey
-                    ? (dispatchDetails[currentTransferRowKey]?.transferData?.freightRate ||
-                      allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey)?.freight_rate?.toString() || "")
-                    : ""
+          <DialogFooter className="mt-6 border-t border-slate-100 pt-4 flex flex-row items-center justify-end gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 px-5 rounded-xl border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+              onClick={() => {
+                if (currentTransferRowKey) {
+                  setDispatchDetails(prev => ({
+                    ...prev,
+                    [currentTransferRowKey]: { ...prev[currentTransferRowKey], transfer: "no" }
+                  }));
                 }
-                onChange={(e) => {
-                  if (!currentTransferRowKey) return;
-                  let val = e.target.value;
-                  if (Number(val) < 0) val = "0";
-                  const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
-                    billTo: { company: "", address: "" },
-                    shipTo: { company: "", address: "" },
-                    freightRate: ""
-                  };
+                setIsTransferPopupOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="h-9 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+              onClick={() => {
+                const data = currentTransferRowKey ? dispatchDetails[currentTransferRowKey]?.transferData : null;
+                const currentProd = allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey);
+                const billCompany = data?.billTo?.company || currentProd?.bill_company_name;
+                const shipCompany = data?.shipTo?.company || currentProd?.ship_company_name;
+                const freightRate = data?.freightRate !== undefined ? data.freightRate : (currentProd?.freight_rate?.toString() || "0.00");
+
+                if (!billCompany || !shipCompany || freightRate === "") {
+                  toast({ title: "Validation Error", description: "Bill-To Company, Ship-To Company, and Freight Rate are mandatory.", variant: "destructive" });
+                  return;
+                }
+
+                // Ensure transfer is confirmed as yes and saved
+                if (currentTransferRowKey) {
                   setDispatchDetails(prev => {
-                    const rowKey = currentTransferRowKey!;
-                    const rowDetail = prev[rowKey] || { qty: "0" };
+                    const rowDetail = prev[currentTransferRowKey] || { qty: "0" };
                     return {
                       ...prev,
-                      [rowKey]: {
+                      [currentTransferRowKey]: {
                         ...rowDetail,
-                        transferData: { ...prevData, freightRate: val }
+                        transfer: "yes",
+                        transferData: {
+                          billTo: {
+                            company: billCompany,
+                            address: data?.billTo?.address || currentProd?.bill_address || ""
+                          },
+                          shipTo: {
+                            company: shipCompany,
+                            address: data?.shipTo?.address || currentProd?.ship_address || ""
+                          },
+                          freightRate: freightRate
+                        }
                       }
                     };
                   });
-                }}
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="mt-6 border-t pt-4 gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => {
-              if (currentTransferRowKey) {
-                setDispatchDetails(prev => ({
-                  ...prev,
-                  [currentTransferRowKey]: { ...prev[currentTransferRowKey], transfer: "no" }
-                }));
-              }
-              setIsTransferPopupOpen(false);
-            }} className="w-full sm:w-auto">Cancel</Button>
-            <Button
-              onClick={() => {
-                // Validation
-                const data = currentTransferRowKey ? dispatchDetails[currentTransferRowKey]?.transferData : null;
-                if (!data || !data.billTo.company || !data.shipTo.company || data.freightRate === "") {
-                  toast({ title: "Validation Error", description: "Companies and Freight Rate (>=0) are mandatory.", variant: "destructive" });
-                  return;
                 }
+
                 isSavingTransferRef.current = true;
                 setIsTransferPopupOpen(false);
               }}
-              className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
             >
               OK
             </Button>

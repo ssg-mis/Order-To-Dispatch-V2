@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon, StageActionBar } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon, StageActionBar, StagePagination, StageDecisionFooter } from "@/components/stage-list"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -257,11 +257,22 @@ export default function SecurityApprovalPage() {
     setPendingPage(1);
   }, [filterValues]);
 
+  const MAX_UPLOAD_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
+
   const handleFileUpload = (file: File, type: 'bilty' | 'front' | 'back' | 'loaded') => {
     if (!file) return;
+
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      toast({
+        title: "File too large",
+        description: `"${file.name}" is larger than 15 MB. Please select a file up to 15 MB.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
     const preview = URL.createObjectURL(file);
     if (type === 'bilty') {
-      const preview = URL.createObjectURL(file);
       setUploadData(p => { if (p.biltyImagePreview) URL.revokeObjectURL(p.biltyImagePreview); return { ...p, biltyImage: file, biltyImageName: file.name, biltyImagePreview: preview }; });
     } else if (type === 'front') {
       setUploadData(p => { if (p.frontImagePreview) URL.revokeObjectURL(p.frontImagePreview); return { ...p, frontImage: file, frontImagePreview: preview, frontImageName: file.name }; });
@@ -293,7 +304,7 @@ export default function SecurityApprovalPage() {
     // refetchPending and refetchHistory are already initiated by the queryKey dependency on filterValues
   }, [])
 
-  const handleBulkSubmit = async () => {
+  const handleBulkSubmit = async (verdict: "APPROVE" | "REJECT") => {
     if (selectedGroups.length === 0) return
 
     // Submit only selected products across all groups
@@ -310,16 +321,7 @@ export default function SecurityApprovalPage() {
       return
     }
 
-    if (!uploadData.verdict) {
-      toast({
-        title: "Error",
-        description: "Please select a Security Verdict",
-        variant: "destructive"
-      })
-      return
-    }
-
-    if (uploadData.verdict === "REJECT" && !uploadData.remarks?.trim()) {
+    if (verdict === "REJECT" && !uploadData.remarks?.trim()) {
       toast({
         title: "Error",
         description: "Please provide a reason for rejecting via the Revert Remarks field",
@@ -357,9 +359,9 @@ export default function SecurityApprovalPage() {
               frontImage: frontImageUrl,
               backImage: backImageUrl,
               loadedVehicleImage: loadedImageUrl,
-              verdictStatus: uploadData.verdict, // Adding verdict to API
+              verdictStatus: verdict, // Adding verdict to API
               userId: user?.id || null, // Track acting user's login id
-              remarks: uploadData.verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
+              remarks: verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
             };
 
             console.log('[SECURITY] Submitting approval for ID:', recordId, submitData);
@@ -802,27 +804,15 @@ export default function SecurityApprovalPage() {
 
 
 
-  const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
-    )
-  }
-
-  const toggleSelectAll = () => {
-    const enabledRows = sortedDisplayRows.filter(r => !r.isDisabled)
-    if (selectedItems.length === enabledRows.length && enabledRows.length > 0) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems(enabledRows.map(r => r._rowKey))
+  // Clicking a row opens the security verification dialog for that order.
+  const handleOpenDialog = (group: any) => {
+    if (!group) return
+    if (group.isDisabled) {
+      toast({ title: "Not dispatched yet", description: "This order can be processed once its dispatch is confirmed.", variant: "destructive" })
+      return
     }
-  }
 
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
+    const targets = [group]
     if (targets.length > 0) {
       setSelectedGroups(targets)
       // Select all products for all selected groups by default
@@ -898,19 +888,8 @@ export default function SecurityApprovalPage() {
       }
     >
       <div className="space-y-4">
-        <StageActionBar>
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 shadow-md transition-all active:scale-95"
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            Process Security ({selectedItems.length})
-          </Button>
 
-                </StageActionBar>
-
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Security Approvals"
             shown={sortedDisplayRows.length}
@@ -963,14 +942,6 @@ export default function SecurityApprovalPage() {
           <Table>
             <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 text-left align-top py-2.5 px-4">
-                  <div className="mt-8 flex justify-start">
-                    <Checkbox
-                      checked={sortedDisplayRows.length > 0 && selectedItems.length === sortedDisplayRows.filter(r => !r.isDisabled).length && sortedDisplayRows.filter(r => !r.isDisabled).length > 0}
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  </div>
-                </TableHead>
                 <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...extraColIds]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {[...tableCols.slice(0, -1)].map(col => (
                     <StageHeadCell key={col.id} col={col} table={table} align={colAlign(col.id)} width={colAlign(col.id) === "right" ? "min-w-[125px]" : undefined} />
@@ -982,20 +953,19 @@ export default function SecurityApprovalPage() {
             <TableBody>
               {sortedDisplayRows.length > 0 && (
                 <StageTotalsRow
-                  columns={[{ id: "__select", label: "" }, ...tableCols]}
+                  columns={[...tableCols]}
                   totals={table.totals}
                   count={sortedDisplayRows.length}
                   labelColumnId={tableCols[0]?.id}
                   unit=""
                   format={(n) => n.toFixed(4)}
                   tones={{ actual_qty_dispatch: "blue" }}
-                  align={Object.fromEntries([...tableCols.map(c => [c.id, colAlign(c.id)]), ["__select", "center" as const]])}
+                  align={Object.fromEntries(tableCols.map(c => [c.id, colAlign(c.id)]))}
                 />
               )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {tableCols.map(c => (
                       <TableCell key={c.id} className="p-4"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
                     ))}
@@ -1003,10 +973,11 @@ export default function SecurityApprovalPage() {
                 ))
               ) : sortedDisplayRows.length > 0 ? (
                 sortedDisplayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={cn("hover:bg-blue-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : "")}>
-                    <TableCell className="text-left px-4 py-4">
-                      <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
+                  <TableRow
+                    key={group._rowKey}
+                    onClick={() => handleOpenDialog(group)}
+                    className={cn("hover:bg-blue-50/30 transition-colors", group.isDisabled ? "cursor-not-allowed opacity-70" : "cursor-pointer")}
+                  >
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
                     {extraColIds.map(colId => {
                       return (
@@ -1030,7 +1001,7 @@ export default function SecurityApprovalPage() {
                 ))
               ) : (
                   <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + extraColIds.length} className="text-center py-20">
+                  <TableCell colSpan={orderedVisibleCols.length + 1 + extraColIds.length} className="text-center py-20">
                     <div className="flex flex-col items-center gap-2">
                       <ShieldAlert className="w-12 h-12 text-slate-200" />
                       <p className="text-slate-400 font-black uppercase tracking-widest text-xs">{displayRows.length > 0 ? "No matching vehicles for the applied filters" : "No vehicles pending for security check"}</p>
@@ -1044,39 +1015,16 @@ export default function SecurityApprovalPage() {
             </TableBody>
           </Table>
           </div>
-          <div className="hidden md:block">
-          {/* Pending Pagination Footer */}
-          <div className="px-6 py-4 border-t bg-slate-50/50 flex items-center justify-between ">
-            <div className="text-xs text-slate-500 font-medium tracking-tight">
-              Showing <span className="text-slate-900">{(pendingPage - 1) * 10 + 1}</span> to <span className="text-slate-900">{Math.min(pendingPage * 10, pendingResult?.pagination?.total || 0)}</span> of <span className="text-slate-900">{pendingResult?.pagination?.total || 0}</span> orders
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-                disabled={pendingPage === 1 || isPendingLoading}
-                className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center px-2">
-                <span className="text-xs font-semibold text-slate-900">Page {pendingPage}</span>
-                <span className="text-[10px] text-slate-400 font-medium mx-1">of</span>
-                <span className="text-xs font-semibold text-slate-900">{pendingResult?.pagination?.totalPages || 1}</span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => p + 1)}
-                disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1) || isPendingLoading}
-                className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingResult?.pagination?.totalPages || 1}
+            total={pendingResult?.pagination?.total || 0}
+            noun="Orders"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || isPendingLoading}
+            nextDisabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1) || isPendingLoading}
+          />
           </CardContent>
         </Card>
 
@@ -1092,18 +1040,16 @@ export default function SecurityApprovalPage() {
             ))
           ) : sortedDisplayRows.length > 0 ? (
             sortedDisplayRows.map((group) => (
-              <Card key={group._rowKey} className={cn("p-4 border-2 transition-all relative overflow-hidden", selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-lg" : "border-slate-100 bg-white shadow-sm")}>
+              <Card
+                key={group._rowKey}
+                onClick={() => handleOpenDialog(group)}
+                className={cn("p-4 border-2 transition-all relative overflow-hidden border-slate-100 bg-white shadow-sm", group.isDisabled ? "cursor-not-allowed opacity-70" : "cursor-pointer active:scale-[0.99]")}
+              >
                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{group.partySoDate}</span>
-                      <Checkbox 
-                        disabled={group.isDisabled} 
-                        checked={selectedItems.includes(group._rowKey)} 
-                        onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        className="h-5 w-5 border-2 border-blue-200 data-[state=checked]:bg-blue-600"
-                      />
                     </div>
                     
                     <div className="space-y-1">
@@ -1190,12 +1136,6 @@ export default function SecurityApprovalPage() {
             </div>
           )}
 
-          {/* Mobile Pagination */}
-          <div className="flex items-center justify-between px-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1}>Prev</Button>
-            <span className="text-xs font-black text-slate-500 uppercase">Page {pendingPage} of {pendingResult?.pagination?.totalPages || 1}</span>
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}>Next</Button>
-          </div>
         </div>
       </div>
 
@@ -1464,10 +1404,17 @@ export default function SecurityApprovalPage() {
                                   <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
                                     <TableCell className="w-12 px-4"></TableCell>
                                     <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({orderProducts.length})</TableCell>
-                                    <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700 min-w-[120px]">
+                                    <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
                                       {fmtNum(orderProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch || p.actualQty) || 0), 0))}
                                     </TableCell>
-                                    <TableCell className="px-4"></TableCell>
+                                    <TableCell className="w-[110px] min-w-[110px] px-4 text-center"></TableCell>
+                                    <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => {
+                                        const perUnit = Number(p.sku_gross_weight) > 0 ? Number(p.sku_gross_weight) : (Number(p.sku_unit_weight) || 0)
+                                        return sum + perUnit * (Number(p.actual_qty_dispatch || p.actualQty) || 0)
+                                      }, 0))}
+                                    </TableCell>
+                                    <TableCell className="w-[200px] min-w-[200px] px-4 text-left"></TableCell>
                                   </TableRow>
                                   <TableRow>
                                     <TableHead className="w-12 text-left h-10 px-4">
@@ -1484,8 +1431,10 @@ export default function SecurityApprovalPage() {
                                       />
                                     </TableHead>
                                     <TableHead className="px-4 text-left h-10">Product Info</TableHead>
-                                    <TableHead className="px-4 text-right h-10 min-w-[120px]">Qty (MT)</TableHead>
-                                    <TableHead className="px-4 text-left h-10">Status</TableHead>
+                                    <TableHead className="w-[170px] min-w-[170px] px-4 text-right h-10">Actual Qty Dispatch</TableHead>
+                                    <TableHead className="w-[110px] min-w-[110px] px-4 text-center h-10">UOM</TableHead>
+                                    <TableHead className="w-[170px] min-w-[170px] px-4 text-right h-10">Gross Weight (kg)</TableHead>
+                                    <TableHead className="w-[200px] min-w-[200px] px-4 text-left h-10">Status</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1509,10 +1458,19 @@ export default function SecurityApprovalPage() {
                                           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{product.specificOrderNo}</span>
                                         </div>
                                       </TableCell>
-                                      <TableCell className="text-right px-4 py-2 font-mono tabular-nums text-xs font-semibold text-blue-700 min-w-[120px]">
+                                      <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
                                         {fmtNum(product.actual_qty_dispatch || product.actualQty || 0)}
                                       </TableCell>
-                                      <TableCell className="text-left px-4 py-2">
+                                      <TableCell className="w-[110px] min-w-[110px] px-4 text-center py-2 text-xs font-semibold text-slate-600 uppercase">
+                                        {product.uom || "—"}
+                                      </TableCell>
+                                      <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
+                                        {(() => {
+                                          const perUnit = Number(product.sku_gross_weight) > 0 ? Number(product.sku_gross_weight) : (Number(product.sku_unit_weight) || 0)
+                                          return fmtNum(perUnit * (Number(product.actual_qty_dispatch || product.actualQty) || 0))
+                                        })()}
+                                      </TableCell>
+                                      <TableCell className="w-[200px] min-w-[200px] px-4 text-left py-2">
                                         {product.security_guard_status === 'REJECT' ? (
                                           <Badge variant="destructive" className="font-black text-[8px] uppercase">REJECTED BY SECURITY</Badge>
                                         ) : product.actual_1 == null ? (
@@ -1550,7 +1508,7 @@ export default function SecurityApprovalPage() {
                                   <div className="flex-1 space-y-1">
                                     <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center gap-2">
                                       <span className="text-xs font-black text-slate-800 uppercase leading-tight break-words">{product.productName}</span>
-                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Qty (MT): {fmtNum(product.actual_qty_dispatch || 0)}</Badge>
+                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Actual Qty Dispatch: {fmtNum(product.actual_qty_dispatch || 0)} {product.uom || ""}</Badge>
                                     </div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{product.specificOrderNo}</p>
                                     {product.security_guard_status === 'REJECT' ? (
@@ -1591,7 +1549,7 @@ export default function SecurityApprovalPage() {
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-6 space-y-6 shadow-sm">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 items-start">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 items-start">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Bilty/GR No</Label>
                       <Input
@@ -1615,6 +1573,9 @@ export default function SecurityApprovalPage() {
                         <span className="truncate text-xs font-bold text-slate-500 uppercase tracking-wide flex-1">
                           {isUploading === 'bilty' ? 'Uploading…' : uploadData.biltyImageName || 'SCAN COPY — Choose file'}
                         </span>
+                        {!uploadData.biltyImageName && (
+                          <span className="shrink-0 text-[10px] font-semibold text-slate-400">PDF, JPG • Max 15 MB</span>
+                        )}
                         {uploadData.biltyImageName && (
                           <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Uploaded</span>
                         )}
@@ -1644,34 +1605,9 @@ export default function SecurityApprovalPage() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Security Verdict <span className="text-red-500">*</span></Label>
-                      <Select value={uploadData.verdict} onValueChange={(v) => {
-                        setUploadData(p => ({ ...p, verdict: v, remarks: v === "APPROVE" ? "" : p.remarks }))
-                      }}>
-                        <SelectTrigger className={cn("h-11 w-full border rounded-xl px-4 font-bold text-sm uppercase transition-all", uploadData.verdict === "APPROVE" ? "border-green-200 bg-green-50 text-green-700" : uploadData.verdict === "REJECT" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white")}>
-                          <SelectValue placeholder="Verdict" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="APPROVE" className="font-bold text-green-700 uppercase">APPROVE GATEPASS</SelectItem>
-                          <SelectItem value="REJECT" className="font-bold text-red-700 uppercase">REJECT & REVERT</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
 
 
-                  {uploadData.verdict === "REJECT" && (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
-                      <Label className="text-[10px] font-black uppercase text-red-600 tracking-widest ml-1">Reason for Rejection <span className="text-red-500">*</span></Label>
-                      <textarea
-                        placeholder="Explain why this load is rejected..."
-                        className="w-full h-24 border-2 border-red-200 bg-red-50/50 rounded-2xl p-4 font-medium text-sm text-slate-700 focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all resize-none"
-                        value={uploadData.remarks || ""}
-                        onChange={(e) => setUploadData(p => ({ ...p, remarks: e.target.value }))}
-                      />
-                    </div>
-                  )}
 
                   <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -1708,6 +1644,7 @@ export default function SecurityApprovalPage() {
                           fileName={uploadData.frontImageName ? [uploadData.frontImageName] : []}
                           variant="dropzone"
                           placeholder="Front photo"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
                           triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
                           uploading={isUploading === 'front'}
                           buttonText="Front Image"
@@ -1727,6 +1664,7 @@ export default function SecurityApprovalPage() {
                           fileName={uploadData.backImageName ? [uploadData.backImageName] : []}
                           variant="dropzone"
                           placeholder="Back photo"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
                           triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
                           uploading={isUploading === 'back'}
                           buttonText="Back Image"
@@ -1746,6 +1684,7 @@ export default function SecurityApprovalPage() {
                           fileName={uploadData.loadedImageName ? [uploadData.loadedImageName] : []}
                           variant="dropzone"
                           placeholder="Loaded vehicle"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
                           triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
                           uploading={isUploading === 'loaded'}
                           buttonText="Loaded Image"
@@ -1764,37 +1703,26 @@ export default function SecurityApprovalPage() {
             </div>
           )}
 
-          <DialogFooter className="mt-8 border-t p-4 md:p-8 bg-slate-50/50">
-            <div className="flex flex-col gap-2 w-full">
-              {/* Buttons row */}
-              <div className="flex flex-col sm:flex-row gap-4 items-center justify-end w-full">
-                <Button variant="ghost" className="font-bold text-slate-500 uppercase text-xs order-last sm:order-none h-11 sm:h-10" onClick={() => setIsDialogOpen(false)}>Cancel Action</Button>
-                <Button
-                  onClick={handleBulkSubmit}
-                  disabled={isProcessing || selectedProducts.length === 0 || isReadOnly || !uploadData.verdict}
-                  className={cn(
-                    "h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none transition-colors text-white",
-                    uploadData.verdict === "REJECT"
-                      ? "bg-red-600 hover:bg-red-700"
-                      : "bg-blue-600 hover:bg-blue-700"
-                  )}
-                >
-                  {isProcessing
-                    ? "WAIT..."
-                    : uploadData.verdict === "APPROVE"
-                      ? `AUTHORIZE GATEPASS (${selectedProducts.length})`
-                      : uploadData.verdict === "REJECT"
-                        ? `REJECT & REVERT (${selectedProducts.length})`
-                        : `SELECT A VERDICT FIRST`}
-                </Button>
-              </div>
-              {/* Stage hint — below buttons row */}
-              {uploadData.verdict && !isProcessing && (
-                <p className={cn("text-[10px] font-medium tracking-wide text-right", uploadData.verdict === "APPROVE" ? "text-blue-400" : "text-slate-400")}>
-                  {uploadData.verdict === "APPROVE" ? "✓ Next: Make Invoice (Proforma)" : "⚠ Returns to: Actual Dispatch"}
-                </p>
-              )}
-            </div>
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={uploadData.remarks || ""}
+              onRemarksChange={(v) => setUploadData(p => ({ ...p, remarks: v }))}
+              remarksPlaceholder="Enter reason for rejecting..."
+              disabled={isReadOnly}
+              revertActions={[{
+                label: isProcessing ? "Wait..." : `Reject & Revert (${selectedProducts.length})`,
+                onClick: () => handleBulkSubmit("REJECT"),
+                disabled: isProcessing || selectedProducts.length === 0 || isReadOnly || !uploadData.remarks?.trim(),
+                title: "Rejects this load and returns it to Actual Dispatch",
+              }]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Wait..." : `Approve (${selectedProducts.length})`,
+                onClick: () => handleBulkSubmit("APPROVE"),
+                disabled: isProcessing || selectedProducts.length === 0 || isReadOnly,
+                title: "Approves the gatepass and sends this load to Make Invoice (Proforma)",
+              }}
+            />
           </DialogFooter>
 
 

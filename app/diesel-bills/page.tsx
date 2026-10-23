@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StageDataCard, type StageDataCol } from "@/components/stage-list-extra/stage-data-card"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { StageActionBar } from "@/components/stage-list"
+import { StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -112,24 +112,38 @@ export default function DieselBillsPage() {
     end_date: filterValues.endDate || undefined,
   }
 
+  const PAGE_SIZE = 25
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
+
+  // A new filter or tab narrows/changes the result set, so go back to page 1.
+  useEffect(() => {
+    setPendingPage(1)
+    setHistoryPage(1)
+  }, [filterValues, activeTab])
+
   const { data: pendingData, isLoading: isPendingLoading } = useQuery({
-    queryKey: ["diesel-bills-pending", filterValues],
+    queryKey: ["diesel-bills-pending", filterValues, pendingPage],
     queryFn: async () => {
-      const res = await dieselBillApi.getPending({ ...filters, limit: 100 })
-      return res.success ? res.data : { bills: [], pagination: { total: 0 } }
+      const res = await dieselBillApi.getPending({ ...filters, page: pendingPage, limit: PAGE_SIZE })
+      return res.success ? res.data : { bills: [], pagination: { total: 0, totalPages: 1 } }
     },
   })
   const pending: any[] = pendingData?.bills || []
+  const pendingTotal: number = pendingData?.pagination?.total ?? pending.length
+  const pendingTotalPages: number = pendingData?.pagination?.totalPages || 1
 
   const { data: historyData, isLoading: isHistoryLoading } = useQuery({
-    queryKey: ["diesel-bills-history", filterValues],
+    queryKey: ["diesel-bills-history", filterValues, historyPage],
     enabled: activeTab === "history",
     queryFn: async () => {
-      const res = await dieselBillApi.getHistory({ ...filters, limit: 100 })
-      return res.success ? res.data : { bills: [], pagination: { total: 0 } }
+      const res = await dieselBillApi.getHistory({ ...filters, page: historyPage, limit: PAGE_SIZE })
+      return res.success ? res.data : { bills: [], pagination: { total: 0, totalPages: 1 } }
     },
   })
   const history: any[] = historyData?.bills || []
+  const historyTotal: number = historyData?.pagination?.total ?? history.length
+  const historyTotalPages: number = historyData?.pagination?.totalPages || 1
 
   const { data: access } = useQuery({
     queryKey: ["diesel-bills-access"],
@@ -267,7 +281,7 @@ export default function DieselBillsPage() {
       partyNames={[]}
       title="Stage 21: Diesel Bills"
       description="Planned vs actual diesel and ledger posting."
-      pendingCount={pending.length}
+      pendingCount={pendingTotal}
       historyData={[]}
       onFilterChange={setFilterValues}
       showStatusFilter={false}
@@ -279,6 +293,7 @@ export default function DieselBillsPage() {
       searchPlaceholder="Search DO / Customer / Invoice / Fuel station..."
       isHistoryLoading={isHistoryLoading}
       historyContent={
+        <>
         <StageDataCard
           storageKey="diesel-bills-history"
           title="Approved Diesel Bills"
@@ -292,6 +307,18 @@ export default function DieselBillsPage() {
           onRowClick={(b: any) => setOpenId(b.id)}
           format={(n) => n.toFixed(2)}
         />
+        <StagePagination
+          sticky
+          page={historyPage}
+          totalPages={historyTotalPages}
+          total={historyTotal}
+          noun="Bills"
+          onPrev={() => setHistoryPage((p) => Math.max(1, p - 1))}
+          onNext={() => setHistoryPage((p) => p + 1)}
+          prevDisabled={historyPage === 1 || history.length === 0}
+          nextDisabled={history.length === 0 || historyPage >= historyTotalPages}
+        />
+        </>
       }
     >
       <div className="space-y-4">
@@ -318,6 +345,17 @@ export default function DieselBillsPage() {
           }}
           rowClassName={(b: any) => (selectedId === b.id ? "bg-blue-50/50" : undefined)}
           format={(n) => n.toFixed(2)}
+        />
+        <StagePagination
+          sticky
+          page={pendingPage}
+          totalPages={pendingTotalPages}
+          total={pendingTotal}
+          noun="Bills"
+          onPrev={() => setPendingPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPendingPage((p) => p + 1)}
+          prevDisabled={pendingPage === 1 || pending.length === 0}
+          nextDisabled={pending.length === 0 || pendingPage >= pendingTotalPages}
         />
       </div>
 
@@ -547,20 +585,36 @@ export default function DieselBillsPage() {
               </div>
             )}
 
-            <DialogFooter className="-mx-3 -mb-3 mt-8 gap-2 border-t bg-gray-50 px-3 py-4 pt-4 sm:-mx-6 sm:-mb-6 sm:gap-2 sm:px-6">
-              <Button variant="outline" onClick={() => setOpenId(null)} disabled={isProcessing} className="w-full sm:w-auto">Close</Button>
-              {detail && !locked && (
-                <Button onClick={handleSave} disabled={isProcessing || isReadOnly || form.actual === ""} className="w-full min-w-[150px] bg-blue-600 hover:bg-blue-700 sm:w-auto">
-                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Save Diesel Bill
-                </Button>
-              )}
-              {detail && !locked && bill.status === "Submitted" && canApprove && (
-                <Button onClick={handleApprove} disabled={isProcessing || isReadOnly} className="w-full min-w-[150px] bg-emerald-600 hover:bg-emerald-700 sm:w-auto">
-                  <BadgeCheck className="mr-2 h-4 w-4" />
-                  Approve &amp; Lock
-                </Button>
-              )}
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setOpenId(null)}
+                cancelLabel="Close"
+                cancelDisabled={isProcessing}
+                actions={[
+                  ...(detail && !locked ? [{
+                    label: (
+                      <>
+                        {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Save Diesel Bill
+                      </>
+                    ),
+                    onClick: handleSave,
+                    disabled: isProcessing || isReadOnly || form.actual === "",
+                    className: "min-w-[150px] bg-blue-600 hover:bg-blue-700",
+                  }] : []),
+                  ...(detail && !locked && bill.status === "Submitted" && canApprove ? [{
+                    label: (
+                      <>
+                        <BadgeCheck className="mr-2 h-4 w-4" />
+                        Approve &amp; Lock
+                      </>
+                    ),
+                    onClick: handleApprove,
+                    disabled: isProcessing || isReadOnly,
+                    className: "min-w-[150px] bg-emerald-600 hover:bg-emerald-700",
+                  }] : []),
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

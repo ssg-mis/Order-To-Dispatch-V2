@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageSortIcon, StageActionBar } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageSortIcon, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { stageColumnChips } from "@/components/stage-list-extras"
 import { StageTableHeaderRows, bodyCellClass } from "@/components/stage-table-header-rows"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
@@ -33,9 +33,8 @@ import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { damageAdjustmentApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtNum, fmtDate } from "@/lib/table-format"
@@ -112,7 +111,7 @@ export default function DamageAdjustmentPage() {
   const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
   const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
   const setDamageFilter = (v: "ALL" | "DAMAGED" | "NONE") => patchListView({ damageFilter: v })
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
+  const [pendingPage, setPendingPage] = useState(1)
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -163,19 +162,16 @@ export default function DamageAdjustmentPage() {
   const [isUploading, setIsUploading] = useState<boolean>(false)
   const [adjustmentData, setAdjustmentData] = useState<SettlementDocs>(EMPTY_SETTLEMENT_DOCS)
 
-  // Pending query with infinite pagination
+  // Pending query with page-based pagination
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["damage-adjustment-pending", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["damage-adjustment-pending", filterValues, pendingPage],
+    queryFn: async () => {
       const response = await damageAdjustmentApi.getPending({
-        page: pageParam,
+        page: pendingPage,
         limit: 20,
         search: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
@@ -183,24 +179,16 @@ export default function DamageAdjustmentPage() {
         do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
-      return response.success ? response.data : { orders: [], pagination: { total: 0 } };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.orders?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
+      return response.success ? response.data : { orders: [], pagination: { total: 0, totalPages: 1 } };
     },
   });
 
-  const pendingOrders = useMemo(() => {
-    return pendingData?.pages.flatMap((page) => page.orders) || [];
-  }, [pendingData]);
+  const pendingOrders: any[] = useMemo(() => pendingData?.orders || [], [pendingData]);
+  const pendingTotalPages: number = pendingData?.pagination?.totalPages || 1
+  const pendingTotal: number = pendingData?.pagination?.total ?? pendingOrders.length
 
-  useEffect(() => {
-    if (pendingInView && hasNextPending) {
-      fetchNextPending();
-    }
-  }, [pendingInView, hasNextPending, fetchNextPending]);
+  // A new filter narrows the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1) }, [filterValues])
 
   const uploadSelectedFile = async (file: File) => {
     setIsUploading(true);
@@ -622,7 +610,7 @@ export default function DamageAdjustmentPage() {
           </Button>
                 </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Damage Adjustments"
             shown={table.rows.length}
@@ -860,26 +848,20 @@ export default function DamageAdjustmentPage() {
               )}
             </Card>
           )}
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
         </div>
 
           </CardContent>
         </Card>
-          <div ref={pendingEndRef} className="hidden md:flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingTotalPages}
+            total={pendingTotal}
+            noun="Items"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || pendingOrders.length === 0}
+            nextDisabled={pendingOrders.length === 0 || pendingPage >= pendingTotalPages}
+          />
 
       </div>
 
@@ -1149,19 +1131,19 @@ export default function DamageAdjustmentPage() {
               </div>
             )}
 
-            <DialogFooter className="mt-6 border-t pt-4">
-              <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-11 sm:h-10">Cancel</Button>
-                <Button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={isProcessing || isReadOnly || !settlementComplete(computeSettlement(selectedGroup?._allProducts?.filter((p: any) => selectedProducts.includes(p._rowKey)) ?? []), adjustmentData)}
-                  className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
-                >
-                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
-                  Complete Adjustment
-                </Button>
-              </div>
+            <DialogFooter className="mt-6 w-full border-t pt-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                // Cancel stays inert while a submit is running (it used to be a disabled button).
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    label: <>{isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}Complete Adjustment</>,
+                    onClick: handleSubmit,
+                    disabled: isProcessing || isReadOnly || !settlementComplete(computeSettlement(selectedGroup?._allProducts?.filter((p: any) => selectedProducts.includes(p._rowKey)) ?? []), adjustmentData),
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

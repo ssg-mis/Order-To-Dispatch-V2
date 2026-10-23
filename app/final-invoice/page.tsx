@@ -17,7 +17,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionHead } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionHead, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { Printer, CheckCircle, FileText, Receipt, ExternalLink } from "lucide-react"
 import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -48,7 +48,17 @@ function FinalInvoiceTable({
   isHistory,
   renderCell,
   renderActions,
+  page,
+  totalPages,
+  total,
+  onPrev,
+  onNext,
 }: {
+  page: number
+  totalPages: number
+  total: number
+  onPrev: () => void
+  onNext: () => void
   storageKey: string
   title: string
   description: string
@@ -94,7 +104,7 @@ function FinalInvoiceTable({
   }
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+    <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
       <StageListHeader
         title={title}
         shown={table.rows.length}
@@ -172,10 +182,23 @@ function FinalInvoiceTable({
             </TableBody>
           </Table>
         </div>
+        <StagePagination
+          sticky
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          noun="Items"
+          onPrev={onPrev}
+          onNext={onNext}
+          prevDisabled={page <= 1}
+          nextDisabled={page >= totalPages}
+        />
       </CardContent>
     </Card>
   )
 }
+
+const PAGE_SIZE = 25
 
 export default function FinalInvoicePage() {
   const queryClient = useQueryClient()
@@ -193,23 +216,34 @@ export default function FinalInvoicePage() {
     eWayBillFileName: "",
   })
 
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
+
   // Fetch pending
   const { data: pendingRes, isLoading: pendingLoading, refetch: refetchPending } = useQuery({
-    queryKey: ["final-invoice-pending"],
-    queryFn: () => finalInvoiceApi.getPending({ limit: 100 }),
+    queryKey: ["final-invoice-pending", pendingPage],
+    queryFn: () => finalInvoiceApi.getPending({ page: pendingPage, limit: PAGE_SIZE }),
     staleTime: 30 * 1000,
   })
 
   // Fetch history
   const { data: historyRes, isLoading: historyLoading } = useQuery({
-    queryKey: ["final-invoice-history"],
-    queryFn: () => finalInvoiceApi.getHistory({ limit: 100 }),
+    queryKey: ["final-invoice-history", historyPage],
+    queryFn: () => finalInvoiceApi.getHistory({ page: historyPage, limit: PAGE_SIZE }),
     staleTime: 30 * 1000,
   })
 
   const pendingRows: any[] = pendingRes?.data?.rows || []
   const historyRows: any[] = historyRes?.data?.rows || []
   const customerNames = Array.from(new Set(pendingRows.map((r: any) => r.customer_name || "Unknown")))
+
+  // If the last row of a page is submitted, that page empties — step back instead of stranding the user.
+  React.useEffect(() => {
+    if (!pendingLoading && pendingPage > 1 && pendingRows.length === 0) setPendingPage(p => p - 1)
+  }, [pendingLoading, pendingPage, pendingRows.length])
+  React.useEffect(() => {
+    if (!historyLoading && historyPage > 1 && historyRows.length === 0) setHistoryPage(p => p - 1)
+  }, [historyLoading, historyPage, historyRows.length])
 
   const handleOpenDialog = (row: any) => {
     setSelectedRow(row)
@@ -376,6 +410,11 @@ export default function FinalInvoicePage() {
                 description="Invoices with final documents already submitted"
                 rows={historyRows}
                 isHistory
+                page={historyPage}
+                totalPages={historyRes?.data?.pagination?.totalPages || 1}
+                total={historyRes?.data?.pagination?.total ?? historyRows.length}
+                onPrev={() => setHistoryPage(p => Math.max(1, p - 1))}
+                onNext={() => setHistoryPage(p => p + 1)}
                 renderCell={renderCell}
                 renderActions={renderActions}
               />
@@ -401,6 +440,11 @@ export default function FinalInvoicePage() {
               description="Invoices awaiting eInvoice / eWay Bill upload"
               rows={pendingRows}
               isHistory={false}
+              page={pendingPage}
+              totalPages={pendingRes?.data?.pagination?.totalPages || 1}
+              total={pendingRes?.data?.pagination?.total ?? pendingRows.length}
+              onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+              onNext={() => setPendingPage(p => p + 1)}
               renderCell={renderCell}
               renderActions={renderActions}
             />
@@ -507,25 +551,24 @@ export default function FinalInvoicePage() {
             </div>
           )}
 
-          <DialogFooter className="px-6 py-4 bg-white border-t border-slate-100 flex flex-row sm:justify-end gap-2">
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="font-bold">
-              Cancel
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => selectedRow && handlePrint(selectedRow)}
-              className="gap-2 font-bold"
-            >
-              <Printer className="h-4 w-4" /> Print
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isProcessing || !formData.eInvoiceFileName || !formData.eWayBillFileName}
-              className="bg-blue-600 hover:bg-blue-700 gap-2 font-bold shadow-md shadow-blue-500/20"
-            >
-              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              {isProcessing ? "Submitting..." : "Submit Documents"}
-            </Button>
+          <DialogFooter className="w-full border-t bg-slate-50/50 px-6 py-4 sm:flex-col sm:justify-start">
+            <StageActionFooter
+              // Cancel stays inert while a submit is running (it used to be a disabled button).
+              onCancel={() => setIsDialogOpen(false)}
+              cancelDisabled={isProcessing}
+              actions={[
+                {
+                  variant: "outline",
+                  label: <><Printer className="h-4 w-4" /> Print</>,
+                  onClick: () => selectedRow && handlePrint(selectedRow),
+                },
+                {
+                  label: <>{isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}{isProcessing ? "Submitting..." : "Submit Documents"}</>,
+                  onClick: handleSubmit,
+                  disabled: isProcessing || !formData.eInvoiceFileName || !formData.eWayBillFileName,
+                },
+              ]}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

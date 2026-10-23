@@ -8,7 +8,7 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageDivider, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { StageTotalsRowLead, stageColumnChips } from "@/components/stage-list-extras"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -29,8 +29,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BarChart3, CheckCircle, ChevronDown, FileText, IndianRupee, Loader2, ReceiptText, ShieldAlert, ShieldCheck } from "lucide-react"
 import { collectionApi } from "@/lib/api-service"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useInView } from "react-intersection-observer"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
 
@@ -154,8 +153,10 @@ export default function CollectionPage() {
   const setHistoryEntry = (v: "all" | "receipts" | "disputes" | "cleared") => patchHistView({ historyEntry: v })
   const setHistorySearch = (v: string) => patchHistView({ historySearch: v })
   const setHistoryStatus = (v: string) => patchHistView({ historyStatus: v })
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
-  const { ref: historyEndRef, inView: historyInView } = useInView()
+  const PENDING_PAGE_SIZE = 20
+  const HISTORY_PAGE_SIZE = 25
+  const [pendingPage, setPendingPage] = useState(1)
+  const [historyPage, setHistoryPage] = useState(1)
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -194,17 +195,14 @@ export default function CollectionPage() {
   // ---- Pending / receivable list ----
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["collections-pending", filterValues, view],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["collections-pending", filterValues, view, pendingPage],
+    queryFn: async () => {
       const response = await collectionApi.getPending({
-        page: pageParam,
-        limit: 20,
+        page: pendingPage,
+        limit: PENDING_PAGE_SIZE,
         view,
         ...commonFilters,
         do_date_from: filterValues.startDate || undefined,
@@ -212,34 +210,24 @@ export default function CollectionPage() {
       })
       return response.success ? response.data : { invoices: [], pagination: { total: 0 } }
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.invoices?.length || 0), 0)
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
-    },
   })
 
-  const pendingInvoices = useMemo(() => pendingData?.pages.flatMap((page) => page.invoices) || [], [pendingData])
-  const summary = pendingData?.pages?.[0]?.summary
-
-  useEffect(() => {
-    if (pendingInView && hasNextPending) fetchNextPending()
-  }, [pendingInView, hasNextPending, fetchNextPending])
+  const pendingInvoices = useMemo(() => pendingData?.invoices || [], [pendingData])
+  const summary = pendingData?.summary
+  const pendingTotal: number = pendingData?.pagination?.total || 0
+  const pendingTotalPages = Math.max(1, Math.ceil(pendingTotal / PENDING_PAGE_SIZE))
 
   // ---- History ----
   const {
     data: historyData,
-    fetchNextPage: fetchNextHistory,
-    hasNextPage: hasNextHistory,
-    isFetchingNextPage: isFetchingNextHistory,
     isLoading: isHistoryLoading,
-  } = useInfiniteQuery({
-    queryKey: ["collections-history", filterValues, historyEntry],
+  } = useQuery({
+    queryKey: ["collections-history", filterValues, historyEntry, historyPage],
     enabled: activeTab === "history",
-    queryFn: async ({ pageParam = 1 }) => {
+    queryFn: async () => {
       const response = await collectionApi.getHistory({
-        page: pageParam,
-        limit: 25,
+        page: historyPage,
+        limit: HISTORY_PAGE_SIZE,
         ...commonFilters,
         from: filterValues.startDate || undefined,
         to: filterValues.endDate || undefined,
@@ -247,17 +235,14 @@ export default function CollectionPage() {
       })
       return response.success ? response.data : { entries: [], pagination: { total: 0 } }
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.entries?.length || 0), 0)
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined
-    },
   })
-  const historyEntries = useMemo(() => historyData?.pages.flatMap((p) => p.entries) || [], [historyData])
+  const historyEntries = useMemo(() => historyData?.entries || [], [historyData])
+  const historyTotal: number = historyData?.pagination?.total || 0
+  const historyTotalPages = Math.max(1, Math.ceil(historyTotal / HISTORY_PAGE_SIZE))
 
-  useEffect(() => {
-    if (historyInView && hasNextHistory) fetchNextHistory()
-  }, [historyInView, hasNextHistory, fetchNextHistory])
+  // A new filter / view / tab changes the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1) }, [filterValues, view])
+  useEffect(() => { setHistoryPage(1) }, [filterValues, historyEntry, activeTab])
 
   // ---- Selected invoice + master-driven TDS / CD suggestion ----
   const selectedInvoice = pendingInvoices.find((inv: any) => inv.id === selectedItems[0])
@@ -557,7 +542,7 @@ export default function CollectionPage() {
       isHistoryLoading={isHistoryLoading}
       historyContent={
         <div className="space-y-3">
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Collection History"
             shown={historyTable.rows.length}
@@ -643,14 +628,16 @@ export default function CollectionPage() {
               </TableBody>
             </Table>
           </div>
-          <div ref={historyEndRef} className="py-2 flex justify-center">
-            {isFetchingNextHistory && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
+          <StagePagination
+            page={historyPage}
+            totalPages={historyTotalPages}
+            total={historyTotal}
+            noun="Entries"
+            onPrev={() => setHistoryPage(p => Math.max(1, p - 1))}
+            onNext={() => setHistoryPage(p => p + 1)}
+            prevDisabled={historyPage === 1 || isHistoryLoading}
+            nextDisabled={historyPage >= historyTotalPages || isHistoryLoading}
+          />
           </CardContent>
         </Card>
         </div>
@@ -720,7 +707,7 @@ export default function CollectionPage() {
             </Button>
         </StageActionBar>
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Collections List"
             shown={pendingTable.rows.length}
@@ -819,14 +806,16 @@ export default function CollectionPage() {
               </TableBody>
             </Table>
           </div>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingTotalPages}
+            total={pendingTotal}
+            noun="Invoices"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || isPendingLoading}
+            nextDisabled={pendingPage >= pendingTotalPages || isPendingLoading}
+          />
           </CardContent>
         </Card>
       </div>
@@ -1180,18 +1169,22 @@ export default function CollectionPage() {
               </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={!canSave}
-                className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-              >
-                {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isProcessing ? "Processing..." : "Save Receipt"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[{
+                  label: (
+                    <>
+                      {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {isProcessing ? "Processing..." : "Save Receipt"}
+                    </>
+                  ),
+                  onClick: handleSubmit,
+                  disabled: !canSave,
+                  className: "bg-blue-600 hover:bg-blue-700 min-w-[150px]",
+                }]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>
@@ -1343,10 +1336,8 @@ export default function CollectionPage() {
               )}
             </div>
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setReceiptsFor(null)} className="w-full sm:w-auto">
-                Close
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter onCancel={() => setReceiptsFor(null)} cancelLabel="Close" actions={[]} />
             </DialogFooter>
           </div>
         </DialogContent>
@@ -1414,18 +1405,22 @@ export default function CollectionPage() {
               </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setDisputeFor(null)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleDispute}
-                disabled={isProcessing || !disputeRemarks.trim()}
-                className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-              >
-                {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isProcessing ? "Processing..." : disputeFor?.collection_status === "Disputed" ? "Resolve Dispute" : "Mark Disputed"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setDisputeFor(null)}
+                cancelDisabled={isProcessing}
+                actions={[{
+                  label: (
+                    <>
+                      {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {isProcessing ? "Processing..." : disputeFor?.collection_status === "Disputed" ? "Resolve Dispute" : "Mark Disputed"}
+                    </>
+                  ),
+                  onClick: handleDispute,
+                  disabled: isProcessing || !disputeRemarks.trim(),
+                  className: "bg-blue-600 hover:bg-blue-700 min-w-[150px]",
+                }]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

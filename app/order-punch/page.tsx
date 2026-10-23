@@ -41,6 +41,7 @@ import {
   StageDivider,
   StageActiveChips,
   StageSortIcon,
+  StagePagination,
 } from "@/components/stage-list"
 
 const STAGE_KEY = "order-punch"
@@ -86,6 +87,9 @@ export default function OrderPunchListPage() {
 
   const [rows, setRows] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
   // Session-scoped (survive refresh, cleared on a new session): search, DO date, customer and
   // depot narrow data, so none are permanent (no layout keys here).
   const [listView, patchListView] = usePersistedFilters(STAGE_KEY, {
@@ -110,14 +114,23 @@ export default function OrderPunchListPage() {
       const res = await orderApi.getPunchList({
         search: searchQuery || undefined,
         do_date: doDateFilter || undefined,
+        page,
+        limit: 50,
       })
-      if (res.success) setRows(res.data?.orders || [])
+      if (res.success) {
+        setRows(res.data?.orders || [])
+        setTotalPages(res.data?.pagination?.totalPages || 1)
+        setTotal(res.data?.pagination?.total ?? (res.data?.orders || []).length)
+      }
     } catch {
       toast({ title: "Error", description: "Failed to load the Order Punch list.", variant: "destructive" })
     } finally {
       setIsLoading(false)
     }
-  }, [searchQuery, doDateFilter, toast])
+  }, [searchQuery, doDateFilter, page, toast])
+
+  // A new search/date narrows the result set, so go back to page 1.
+  useEffect(() => { setPage(1) }, [searchQuery, doDateFilter])
 
   useEffect(() => { loadList() }, [loadList])
 
@@ -237,7 +250,7 @@ export default function OrderPunchListPage() {
       </div>
 
       {/* ── DO List Table ── */}
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
         <StageListHeader
           title="Order Punch List"
           shown={sortedRows.length}
@@ -387,6 +400,17 @@ export default function OrderPunchListPage() {
               </TableBody>
             </Table>
           </div>
+          <StagePagination
+            sticky
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            noun="Orders"
+            onPrev={() => setPage(p => Math.max(1, p - 1))}
+            onNext={() => setPage(p => p + 1)}
+            prevDisabled={page === 1 || rows.length === 0}
+            nextDisabled={rows.length === 0 || page >= totalPages}
+          />
         </CardContent>
       </Card>
 

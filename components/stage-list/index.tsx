@@ -557,7 +557,12 @@ export function StagePagination({
   onNext,
   prevDisabled,
   nextDisabled,
+  sticky = true,
+  mobileAction,
 }: {
+  sticky?: boolean
+  /** Rendered inside the fixed bar, above Previous/Next, on mobile only (e.g. the stage's main action button). */
+  mobileAction?: React.ReactNode
   page: number
   totalPages: number
   total: number
@@ -567,21 +572,207 @@ export function StagePagination({
   prevDisabled?: boolean
   nextDisabled?: boolean
 }) {
-  return (
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-100/80 px-4 py-2.5 text-xs shadow-xs">
+  // When `sticky`, the bar is pinned to the bottom of the viewport, aligned to the
+  // page's <main> (so it never covers the sidebar). An in-flow spacer of the same
+  // height keeps the last table rows from hiding underneath it.
+  const spacerRef = React.useRef<HTMLDivElement>(null)
+  const [frame, setFrame] = React.useState<{ left: number; width: number } | null>(null)
+
+  React.useEffect(() => {
+    if (!sticky) return
+    const main = spacerRef.current?.closest("main")
+    if (!main) return
+    const measure = () => {
+      const r = main.getBoundingClientRect()
+      setFrame({ left: r.left, width: r.width })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(main)
+    window.addEventListener("resize", measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [sticky])
+
+  const bar = (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-1 text-xs shadow-xs ${sticky ? "bg-slate-100 shadow-md" : "mt-3 bg-slate-100/80"}`}
+    >
       <div className="font-medium text-slate-500">
         Page <strong className="text-slate-800">{page}</strong> of <strong className="text-slate-800">{totalPages}</strong>
         <span className="mx-2 text-slate-300">|</span>
         <strong className="text-slate-800">{total}</strong> {noun}
       </div>
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white" disabled={prevDisabled ?? page <= 1} onClick={onPrev}>
+        <Button variant="outline" size="sm" className="h-7 px-3 text-xs bg-white" disabled={prevDisabled ?? page <= 1} onClick={onPrev}>
           Previous
         </Button>
-        <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white" disabled={nextDisabled ?? page >= totalPages} onClick={onNext}>
+        <Button variant="outline" size="sm" className="h-7 px-3 text-xs bg-white" disabled={nextDisabled ?? page >= totalPages} onClick={onNext}>
           Next
         </Button>
       </div>
+    </div>
+  )
+
+  if (!sticky) return bar
+  return (
+    <>
+      <div ref={spacerRef} className={`mt-2 ${mobileAction ? "h-10 max-md:h-24" : "h-10"}`} aria-hidden />
+      {frame && (
+        <div
+          className="fixed bottom-0 z-30 px-3 py-1 border-t border-slate-200"
+          style={{ left: frame.left, width: frame.width, background: "oklch(0.97 0.012 245)" }}
+        >
+          {mobileAction && <div className="pb-1 md:hidden">{mobileAction}</div>}
+          {bar}
+        </div>
+      )}
+    </>
+  )
+}
+
+export interface StageFooterAction {
+  label: React.ReactNode
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+  /** Extra classes merged into the button (e.g. an emerald "Approve & Lock"). When given on a StageActionFooter action, the default blue primary style is not applied. */
+  className?: string
+}
+
+/**
+ * Standard bottom bar of every stage dialog that can send the work back (Revert Remarks + revert buttons).
+ * Layout, identical everywhere: Revert Remarks input on the left (takes the free width); on the right, on one
+ * baseline and one height: the revert button(s), a divider, optional extra actions (e.g. Save Draft), Cancel,
+ * and the primary confirm. Wraps to stacked rows on small screens.
+ */
+export function StageDecisionFooter({
+  remarks,
+  onRemarksChange,
+  remarksPlaceholder = "Enter reason for reverting...",
+  disabled,
+  revertActions,
+  extraActions = [],
+  onCancel,
+  cancelLabel = "Cancel",
+  cancelDisabled,
+  approve,
+}: {
+  remarks: string
+  onRemarksChange: (value: string) => void
+  remarksPlaceholder?: string
+  disabled?: boolean
+  /** Revert buttons. The last one is destructive red; earlier ones are amber outline. */
+  revertActions: StageFooterAction[]
+  /** Neutral actions shown next to Cancel (e.g. Save Draft). */
+  extraActions?: StageFooterAction[]
+  onCancel: () => void
+  cancelLabel?: string
+  cancelDisabled?: boolean
+  approve: StageFooterAction
+}) {
+  return (
+    <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-end lg:gap-6">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <Label className="ml-1 text-[10px] font-black uppercase tracking-tighter text-red-500">
+          Revert Remarks <span className="text-red-500">*</span>
+        </Label>
+        <Input
+          className="h-10 w-full rounded-lg border-2 border-red-200 bg-white font-medium transition-colors focus:border-red-400"
+          disabled={disabled}
+          placeholder={remarksPlaceholder}
+          value={remarks}
+          onChange={(e) => onRemarksChange(e.target.value)}
+        />
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:shrink-0 lg:flex-nowrap">
+        {revertActions.map((r, i) => {
+          const isLast = i === revertActions.length - 1
+          return (
+            <Button
+              key={i}
+              variant={isLast ? "destructive" : "outline"}
+              onClick={r.onClick}
+              disabled={r.disabled}
+              title={r.title}
+              className={cn(
+                "h-10 px-5 font-black uppercase tracking-tight",
+                !isLast && "border-amber-500 text-amber-600 hover:bg-amber-50"
+              )}
+            >
+              {r.label}
+            </Button>
+          )
+        })}
+        <div className="hidden h-8 w-px bg-slate-300 sm:block" aria-hidden />
+        <div className="flex flex-wrap items-center gap-3">
+          {extraActions.map((x, i) => (
+            <Button
+              key={i}
+              variant="outline"
+              onClick={x.onClick}
+              disabled={x.disabled}
+              title={x.title}
+              className="h-10 border-amber-300 font-semibold text-amber-700 hover:bg-amber-50"
+            >
+              {x.label}
+            </Button>
+          ))}
+          <Button variant="outline" onClick={onCancel} disabled={cancelDisabled} className="h-10">
+            {cancelLabel}
+          </Button>
+          <Button
+            onClick={approve.onClick}
+            disabled={approve.disabled}
+            title={approve.title}
+            className={cn("h-10 bg-blue-600 px-6 font-black hover:bg-blue-700", approve.className)}
+          >
+            {approve.label}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Standard bottom bar of every other stage dialog (no revert): actions grouped on the right on one baseline
+ * and one height, Cancel first and the primary action last. Pass any secondary actions before the primary one.
+ */
+export function StageActionFooter({
+  onCancel,
+  cancelLabel = "Cancel",
+  cancelDisabled,
+  actions,
+}: {
+  onCancel: () => void
+  cancelLabel?: string
+  cancelDisabled?: boolean
+  /** Secondary actions first, the primary (blue) action LAST. */
+  actions: (StageFooterAction & { variant?: "default" | "destructive" | "outline" })[]
+}) {
+  return (
+    <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+      <Button variant="outline" onClick={onCancel} disabled={cancelDisabled} className="h-10">
+        {cancelLabel}
+      </Button>
+      {actions.map((a, i) => {
+        const isPrimary = i === actions.length - 1 && !a.variant && !a.className
+        return (
+          <Button
+            key={i}
+            variant={a.variant ?? "default"}
+            onClick={a.onClick}
+            disabled={a.disabled}
+            title={a.title}
+            className={cn("h-10 px-6 font-black", isPrimary && "bg-blue-600 hover:bg-blue-700", a.className)}
+          >
+            {a.label}
+          </Button>
+        )
+      })}
     </div>
   )
 }

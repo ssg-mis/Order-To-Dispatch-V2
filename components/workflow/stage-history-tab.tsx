@@ -296,7 +296,7 @@ export function StageHistoryTab({
   const totalItems = data?.pagination?.total || 0
 
   return (
-    <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+    <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
       <StageListHeader
         title="Stage History"
         shown={table.rows.length}
@@ -650,7 +650,7 @@ export function StageHistoryTab({
           </div>
 
           {/* Footer Navigation */}
-          <div className="border-t border-slate-200 bg-slate-100/80 px-3 pb-2">
+          <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-slate-100 px-3 pb-2">
             <StagePagination
               page={historyPage}
               totalPages={totalPages}

@@ -149,7 +149,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
           <div className="flex min-h-screen w-full">
             <AppSidebar />
             <main
-              className="flex-1 overflow-y-auto overflow-x-hidden"
+              className="min-w-0 flex-1 overflow-x-clip"
               style={{ background: "oklch(0.97 0.012 245)" }}
             >
               {children}

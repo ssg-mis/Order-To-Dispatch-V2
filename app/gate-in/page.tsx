@@ -1,6 +1,7 @@
 "use client"
 
-import { useRef, useState, useMemo, useCallback, useEffect } from "react"
+import { useVehicleTareStats } from "@/hooks/use-vehicle-tare-stats"
+import { useState, useMemo, useCallback, useEffect, useId } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -15,23 +16,18 @@ import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer, Download, Calendar as CalendarIconLucide } from "lucide-react"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu"
-import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { Camera, Image as ImageIcon, CheckCircle2, Loader2, Truck, X, Printer, Download } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
-import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
-import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
-  StageActiveChips, StageSortIcon, type StageTotalTone, StagePagination } from "@/components/stage-list"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+  StageActiveChips, type StageTotalTone, StagePagination, StageDecisionFooter } from "@/components/stage-list"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
 import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { fmtNum, fmtDateTime } from "@/lib/table-format"
 
@@ -46,13 +42,23 @@ function formatDate(dateStr: string) {
   }
 }
 
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
+const ALLOWED_IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|heic|heif)$/i
+const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+const MAX_UPLOAD_FILE_BYTES = 15 * 1024 * 1024
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
 
 async function compressImageForUpload(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file
 
-  const bitmap = await createImageBitmap(file)
+  // Browsers that can't decode the format (e.g. HEIC outside Safari) upload the original file.
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(file)
+  } catch {
+    return file
+  }
   const canvas = document.createElement("canvas")
 
   const context = canvas.getContext("2d")
@@ -101,7 +107,6 @@ async function compressImageForUpload(file: File): Promise<File> {
 
 interface ImageUploadCardProps {
   label: string
-  capture?: "environment" | "user" // optional camera hint
   value: string
   fileName: string
   isUploading: boolean
@@ -110,8 +115,9 @@ interface ImageUploadCardProps {
   onClear: () => void
 }
 
-function ImageUploadCard({ label, capture, value, fileName, isUploading, required, onFile, onClear }: ImageUploadCardProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+function ImageUploadCard({ label, value, fileName, isUploading, required, onFile, onClear }: ImageUploadCardProps) {
+  const inputId = useId()
+  const cameraInputId = useId()
 
   return (
     <div className="flex flex-col items-center gap-3 bg-slate-50 border-2 border-dashed border-slate-200 hover:border-blue-300 rounded-2xl p-4 transition-colors">
@@ -133,43 +139,85 @@ function ImageUploadCard({ label, capture, value, fileName, isUploading, require
             type="button"
             onClick={onClear}
             className="absolute top-1 right-1 bg-red-500 text-white rounded-full h-6 w-6 flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+            title="Remove image"
           >
             <X className="h-3 w-3" />
           </button>
           <p className="text-[10px] text-slate-500 font-semibold mt-1 text-center truncate">{fileName}</p>
         </div>
       ) : (
-        <button
-          type="button"
-          disabled={isUploading}
-          onClick={() => inputRef.current?.click()}
-          className="flex flex-col items-center gap-2 w-full h-40 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500"
+        <div
+          className={cn(
+            "flex w-full h-40 gap-2",
+            isUploading && "pointer-events-none opacity-50"
+          )}
         >
           {isUploading ? (
-            <Loader2 className="h-8 w-8 animate-spin" />
+            <div className="flex flex-1 items-center justify-center rounded-xl border-2 border-slate-200 bg-white text-slate-400">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
           ) : (
             <>
-              <Camera className="h-8 w-8" />
-              <span className="text-xs font-bold">Tap to open camera</span>
-              <span className="text-[10px] font-medium text-slate-400">or choose from gallery</span>
+              {/* Camera: only on touch devices. `capture` forces the camera on mobile
+                  (the plain image picker often shows gallery only). */}
+              <label
+                htmlFor={cameraInputId}
+                className="hidden [@media(pointer:coarse)]:flex flex-1 flex-col items-center gap-2 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500 cursor-pointer select-none"
+              >
+                <Camera className="h-8 w-8" />
+                <span className="text-xs font-bold text-slate-600">Take Photo</span>
+                <span className="text-[10px] font-medium text-slate-400">Open camera</span>
+              </label>
+
+              {/* Gallery on mobile / File Explorer on desktop */}
+              <label
+                htmlFor={inputId}
+                className="flex flex-1 flex-col items-center gap-2 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500 cursor-pointer select-none"
+              >
+                <ImageIcon className="h-8 w-8 hidden [@media(pointer:coarse)]:block" />
+                <Camera className="h-8 w-8 [@media(pointer:coarse)]:hidden" />
+                <span className="text-xs font-bold text-slate-600">
+                  <span className="[@media(pointer:coarse)]:hidden">Click to choose file</span>
+                  <span className="hidden [@media(pointer:coarse)]:inline">Gallery</span>
+                </span>
+                <span className="text-[10px] font-medium text-slate-400 [@media(pointer:coarse)]:hidden">
+                  Opens file manager
+                </span>
+                <span className="text-[10px] font-medium text-slate-400">JPG, PNG, WEBP, HEIC · Max 15 MB</span>
+                <span className="text-[10px] font-medium text-slate-400 hidden [@media(pointer:coarse)]:block">
+                  Choose existing photo
+                </span>
+              </label>
             </>
           )}
-        </button>
-      )}
 
-      {/* Hidden file input — capture attribute opens camera on mobile */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture={capture}
-        className="hidden"
-        onChange={e => {
-          const file = e.target.files?.[0]
-          if (file) onFile(file)
-          e.target.value = "" // allow re-selecting same file
-        }}
-      />
+          <input
+            id={cameraInputId}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            capture="environment"
+            disabled={isUploading}
+            className="sr-only"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) onFile(file)
+              e.target.value = ""
+            }}
+          />
+          <input
+            id={inputId}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            disabled={isUploading}
+            className="sr-only"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) onFile(file)
+              e.target.value = "" // allow re-selecting same file
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -262,12 +310,10 @@ const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
 const DATE_COL_IDS = new Set<ColId>(["partySoDate", "startDate", "endDate", "deliveryDate"])
 const BOOL_COL_IDS = new Set<ColId>(["advanceTaken", "isBroker"])
 const NUMBER_COL_IDS = new Set<ColId>(["ratePer15Kg", "ratePerLtr", "rateOfMaterial", "rate", "orderQty", "altQty", "approvalQty", "qtyToDispatch", "totalWithGst", "advanceAmount"])
-const GATE_RIGHT_COLS = new Set<string>([...DATE_COL_IDS, ...NUMBER_COL_IDS, "saved_at", "products"])
 const GATE_DECIMALS: Record<string, number> = {
   ratePer15Kg: 2, ratePerLtr: 2, rateOfMaterial: 2, rate: 2, totalWithGst: 2, advanceAmount: 2,
   orderQty: 4, altQty: 4, approvalQty: 4, qtyToDispatch: 4, products: 0,
 }
-const gateMinW = (id: string) => (GATE_RIGHT_COLS.has(id) ? "min-w-[130px]" : "")
 const TOTAL_COL_TONES: Record<string, StageTotalTone> = {
   altQty: "blue",
   totalWithGst: "emerald", advanceAmount: "emerald",
@@ -344,6 +390,14 @@ export default function GateInPage() {
 
   // Vehicle master state
   const [vehicleData, setVehicleData] = useState<any>(null)
+  // Same payload limit as Plan Vehicle / Actual Dispatch: GVW - average tare (ULW on the first trip).
+  const { data: gateInTareStats } = useVehicleTareStats(vehicleData?.id)
+  const gateInPassing = useMemo(() => {
+    const gvw = Number(vehicleData?.gvw) || 0
+    const avg = gateInTareStats && gateInTareStats.count > 0 ? Number(gateInTareStats.avgTare) || 0 : 0
+    const baseTare = avg > 0 ? avg : Number(vehicleData?.ulw) || 0
+    return gvw > 0 && baseTare > 0 ? (gvw - baseTare).toFixed(2) : vehicleData?.passing
+  }, [vehicleData, gateInTareStats])
   const [isLoadingVehicle, setIsLoadingVehicle] = useState(false)
 
   // Image state
@@ -371,12 +425,12 @@ export default function GateInPage() {
   const [editableDriver, setEditableDriver] = useState("")
 
   useEffect(() => {
-    vehicleMasterApi.getAll({ all: "true" }).then(res => {
+    vehicleMasterApi.getAll({ all: "true" }).then((res: any) => {
       const data = res?.data?.vehicles || res?.vehicles || res?.data || res;
       setVehicleMasterList(Array.isArray(data) ? data : [])
     }).catch(() => setVehicleMasterList([]))
     
-    driverMasterApi.getAll({ all: "true" }).then(res => {
+    driverMasterApi.getAll({ all: "true" }).then((res: any) => {
       const data = res?.data?.drivers || res?.drivers || res?.data || res;
       setDriverMasterList(Array.isArray(data) ? data : [])
     }).catch(() => setDriverMasterList([]))
@@ -527,7 +581,6 @@ export default function GateInPage() {
 
   const table = useStageTable<GateGroup>({ rows: allGroups, columns: GATE_TABLE_COLUMNS, baseFilter, persistKey: "gate-in" })
   const groupedPendingRecords = table.rows
-  const filteredRecords = useMemo(() => groupedPendingRecords.flatMap(g => g.records), [groupedPendingRecords])
 
   const activeFiltersCount =
     (vehicleFilter !== "ALL" ? 1 : 0) + (driverFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) +
@@ -544,10 +597,6 @@ export default function GateInPage() {
       .map(id => PAGE_COLUMNS.find(c => c.id === id))
       .filter((c): c is typeof PAGE_COLUMNS[number] => !!c && visibleColumns.includes(c.id as ColId)),
     [columnOrder, visibleColumns]
-  )
-  const totalsColumns = useMemo<StageColDef<GateGroup>[]>(
-    () => [{ id: "__sel", label: "" }, ...orderedVisibleCols.map(c => GATE_TABLE_COLUMNS.find(t => t.id === c.id)!)],
-    [orderedVisibleCols]
   )
   const handleColumnReorder = useCallback((newVisibleOrder: string[]) => {
     const hiddenCols = columnOrder.filter(id => !visibleColumns.includes(id as ColId))
@@ -613,6 +662,15 @@ export default function GateInPage() {
     setName: (n: string) => void,
     setFile: (f: File | null) => void
   ) => {
+    // HEIC from iPhones/Windows often has an empty MIME type, so fall back to the extension.
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type) && !ALLOWED_IMAGE_EXTENSIONS.test(file.name)) {
+      toast({ title: "Invalid file type", description: "Only JPG, PNG, WEBP or HEIC images are allowed.", variant: "destructive" })
+      return
+    }
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      toast({ title: "File too large", description: "Maximum file size is 15 MB.", variant: "destructive" })
+      return
+    }
     if (currentPreview.startsWith("blob:")) URL.revokeObjectURL(currentPreview)
     const previewUrl = URL.createObjectURL(file)
     setPreview(previewUrl)
@@ -638,7 +696,7 @@ export default function GateInPage() {
     setUploadingField(fieldKey)
     try {
       const uploadFile = await compressImageForUpload(file)
-      const res = await orderApi.uploadFile(uploadFile)
+      const res = await orderApi.uploadFile(uploadFile, file)
       if (res.success) {
         return res.data.url
       } else {
@@ -926,7 +984,7 @@ const buildSlipParties = () => {
       }
     >
       <div className="space-y-4">
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Gate In List"
             shown={groupedPendingRecords.length}
@@ -1157,7 +1215,7 @@ const buildSlipParties = () => {
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <Button type="button" variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
-                    <Printer className="mr-2 h-4 w-4" /> Print Slip
+                    <Printer className="mr-2 h-4 w-4" /> Print Gatepass
                   </Button>
                   <Button type="button" onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700 text-white">
                     <Download className="mr-2 h-4 w-4" /> Download PDF
@@ -1367,7 +1425,7 @@ const buildSlipParties = () => {
                           { label: "Transporter", value: vehicleData.transporter },
                           { label: "GVW", value: vehicleData.gvw },
                           { label: "ULW", value: vehicleData.ulw },
-                          { label: "Passing", value: vehicleData.passing },
+                          { label: "Passing", value: gateInPassing },
                           // { 
                           //   label: "Total Product Gross Weight", 
                           //   value: getDraftField(selectedRecord, "totalPackingWeight") !== "—" 
@@ -1434,7 +1492,6 @@ const buildSlipParties = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <ImageUploadCard
                       label="Front Vehicle Image"
-                      capture="environment"
                       value={frontVehicleImage}
                       fileName={frontVehicleFileName}
                       isUploading={uploadingField === "front"}
@@ -1444,7 +1501,6 @@ const buildSlipParties = () => {
                     />
                     <ImageUploadCard
                       label="Back Vehicle Image"
-                      capture="environment"
                       value={backVehicleImage}
                       fileName={backVehicleFileName}
                       isUploading={uploadingField === "back"}
@@ -1454,7 +1510,6 @@ const buildSlipParties = () => {
                     />
                     <ImageUploadCard
                       label="Driver Photo"
-                      capture="environment"
                       value={driverPhoto}
                       fileName={driverPhotoFileName}
                       isUploading={uploadingField === "driver"}
@@ -1464,7 +1519,6 @@ const buildSlipParties = () => {
                     />
                     <ImageUploadCard
                       label="Vehicle Gate Pass"
-                      capture="environment"
                       value={gatepassPhoto}
                       fileName={gatepassPhotoFileName}
                       isUploading={uploadingField === "gatepass"}
@@ -1474,7 +1528,7 @@ const buildSlipParties = () => {
                     />
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-3">
-                    On mobile, tapping a card opens your camera directly. On desktop, it opens the file picker.{" "}
+                    On mobile, tapping a card lets you open the camera to take a photo or choose from gallery. On desktop, it opens the file manager.{" "}
                     {isPhotosMandatory ? (
                       <span className="font-bold text-amber-700">
                         All 4 photos are compulsory for your user account and required before confirming Gate In.
@@ -1482,7 +1536,7 @@ const buildSlipParties = () => {
                     ) : (
                       <span>All images are optional but recommended for complete gate-in records.</span>
                     )}{" "}
-                    Images are compressed and uploaded only when you confirm gate-in.
+                    Allowed file types: JPG, PNG, WEBP, HEIC (iPhone). Max file size: 15 MB per photo. Images are compressed and uploaded only when you confirm gate-in.
                   </p>
                 </div>
 
@@ -1490,41 +1544,28 @@ const buildSlipParties = () => {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-8 pb-8 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full lg:w-auto lg:flex-1 lg:max-w-xl lg:mr-auto">
-              <div className="flex-1 space-y-1.5 min-w-0">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Revert Remarks <span className="text-red-500">*</span></Label>
-                <Input
-                  className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white"
-                  disabled={isReadOnly}
-                  placeholder="Enter reason for reverting to Plan Vehicle..."
-                  value={revertRemarks}
-                  onChange={(e) => setRevertRemarks(e.target.value)}
-                />
-              </div>
-              <Button
-                variant="destructive"
-                onClick={handleRevert}
-                disabled={isProcessing || isReadOnly || !revertRemarks.trim()}
-                className="font-black uppercase tracking-tight h-10 px-6"
-              >
-                {isProcessing ? "Wait..." : "Revert to Plan Vehicle"}
-              </Button>
-            </div>
-            <div className="flex gap-3 w-full lg:w-auto justify-end">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-              <Button
-              onClick={handleSubmit}
-              disabled={isProcessing || isReadOnly}
-              className="bg-emerald-600 hover:bg-emerald-700 font-bold"
-            >
-              {isProcessing ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...</>
-              ) : (
-                <><CheckCircle2 className="h-4 w-4 mr-2" /> Confirm Gate In</>
-              )}
-            </Button>
-            </div>
+          <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              remarksPlaceholder="Enter reason for reverting to Plan Vehicle..."
+              disabled={isReadOnly}
+              revertActions={[{
+                label: isProcessing ? "Wait..." : "Revert to Plan Vehicle",
+                onClick: handleRevert,
+                disabled: isProcessing || isReadOnly || !revertRemarks.trim(),
+              }]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...</>
+                ) : (
+                  <><CheckCircle2 className="h-4 w-4 mr-2" /> Confirm Gate In</>
+                ),
+                onClick: handleSubmit,
+                disabled: isProcessing || isReadOnly,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

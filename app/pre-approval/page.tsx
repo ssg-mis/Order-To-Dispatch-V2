@@ -62,7 +62,7 @@ import {
   StageDivider,
   StageActiveChips,
   StageSortIcon,
-  type StageTotalTone, StageActionBar, StagePagination } from "@/components/stage-list"
+  type StageTotalTone, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { fmtNum } from "@/lib/table-format"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
@@ -2679,56 +2679,57 @@ export default function PreApprovalPage() {
 
 
 
-                <DialogFooter className="gap-3 border-t pt-4 sm:justify-between">
-                  {/* SKU Price List Button */}
-
-                  <div className="grid w-full grid-cols-1 gap-3 sm:flex sm:justify-end">
-                    <Button variant="outline" className="w-full sm:w-auto" onClick={() => {
+                <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 sm:flex-col sm:justify-start">
+                  <StageActionFooter
+                    onCancel={() => {
                       setIsBulkDialogOpen(false)
                       setSelectedProductRows([])
                       setQtyValidationErrors({})
                       setRateValidationErrors({})
                       setQtyInfoNotices({})
-                    }}>Cancel</Button>
-                    <Button
-                      onClick={() => {
-                        // Filter to only selected products
-                        const selectedProducts = allProductsFromSelectedOrders.filter(p => selectedProductRows.includes(p._rowKey))
-                        const itemsToApprove = selectedProducts.map(prod => ({
-                          _product: prod,
-                          _rowKey: prod._rowKey,
-                          _displayDo: prod._originalOrderId,
-                          customerName: prod._orderData.customerName,
-                          orderType: prod._orderData.orderType
-                        }))
+                    }}
+                    actions={[
+                      {
+                        label: (
+                          <>
+                            {isApproving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isApproving ? "Processing..." : `Submit ${selectedProductRows.length} Product(s)`}
+                          </>
+                        ),
+                        onClick: () => {
+                          // Filter to only selected products
+                          const selectedProducts = allProductsFromSelectedOrders.filter(p => selectedProductRows.includes(p._rowKey))
+                          const itemsToApprove = selectedProducts.map(prod => ({
+                            _product: prod,
+                            _rowKey: prod._rowKey,
+                            _displayDo: prod._originalOrderId,
+                            customerName: prod._orderData.customerName,
+                            orderType: prod._orderData.orderType
+                          }))
 
-                        // For Stock Transfer DOs: collect IDs of products in the same DO
-                        // that were NOT selected. These will be auto-closed by the backend
-                        // so they don't remain stuck in the pending list.
-                        const skipIds: number[] = allProductsFromSelectedOrders
-                          .filter(p =>
-                            !selectedProductRows.includes(p._rowKey) &&
-                            !p._isNew &&
-                            (p?.order_category || p?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER"
-                          )
-                          .map(p => p.id)
-                          .filter(Boolean)
+                          // For Stock Transfer DOs: collect IDs of products in the same DO
+                          // that were NOT selected. These will be auto-closed by the backend
+                          // so they don't remain stuck in the pending list.
+                          const skipIds: number[] = allProductsFromSelectedOrders
+                            .filter(p =>
+                              !selectedProductRows.includes(p._rowKey) &&
+                              !p._isNew &&
+                              (p?.order_category || p?._orderData?.orderCategory || "").toUpperCase() === "STOCK TRANSFER"
+                            )
+                            .map(p => p.id)
+                            .filter(Boolean)
 
-                        handleApproveWithAdditions(itemsToApprove, skipIds)
-                      }}
-                      disabled={
-                        isReadOnly ||
-                        isApproving ||
-                        selectedProductRows.length === 0 ||
-                        Object.keys(qtyValidationErrors).length > 0 ||
-                        Object.keys(rateValidationErrors).length > 0
-                      }
-                      className="w-full min-w-0 h-11 bg-blue-600 font-bold shadow-lg sm:w-auto"
-                    >
-                      {isApproving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {isApproving ? "Processing..." : `Submit ${selectedProductRows.length} Product(s)`}
-                    </Button>
-                  </div>
+                          handleApproveWithAdditions(itemsToApprove, skipIds)
+                        },
+                        disabled:
+                          isReadOnly ||
+                          isApproving ||
+                          selectedProductRows.length === 0 ||
+                          Object.keys(qtyValidationErrors).length > 0 ||
+                          Object.keys(rateValidationErrors).length > 0,
+                      },
+                    ]}
+                  />
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -2736,7 +2737,7 @@ export default function PreApprovalPage() {
 
         <div className="flex gap-6 items-start">
           <div className="flex-1 space-y-4 overflow-hidden">
-            <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+            <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
               <StageListHeader
                 title="Pre-Approval List"
                 shown={sortedDisplayRows.length}

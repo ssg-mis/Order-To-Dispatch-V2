@@ -38,7 +38,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StagePagination } from "@/components/stage-list"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { Calendar } from "@/components/ui/calendar"
@@ -153,6 +153,9 @@ export default function CommitmentPunchPage() {
   // ── Pending table state ─────────────────────────────────────
   const [pendingList, setPendingList] = useState<PendingCommitment[]>([])
   const [isLoadingPending, setIsLoadingPending] = useState(false)
+  const [pendingPage, setPendingPage] = useState(1)
+  const [pendingTotalPages, setPendingTotalPages] = useState(1)
+  const [pendingTotal, setPendingTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   // Status + sort are remembered permanently (per user); oil/customer/searches/dates survive a
   // refresh but reset on a new session - see usePersistedFilters. Refresh button only reloads data.
@@ -383,16 +386,23 @@ export default function CommitmentPunchPage() {
       const res = await commitmentPunchApi.getPending({
         search: searchQuery || undefined,
         commitment_date: commitmentDateFilter || undefined,
+        page: pendingPage,
+        limit: 50,
       })
       if (res.success) {
         setPendingList(res.data?.commitments || [])
+        setPendingTotalPages(res.data?.pagination?.totalPages || 1)
+        setPendingTotal(res.data?.pagination?.total ?? (res.data?.commitments || []).length)
       }
     } catch {
       toast({ title: "Error", description: "Failed to load pending commitments.", variant: "destructive" })
     } finally {
       setIsLoadingPending(false)
     }
-  }, [searchQuery, commitmentDateFilter, toast])
+  }, [searchQuery, commitmentDateFilter, pendingPage, toast])
+
+  // A new search/date narrows the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1) }, [searchQuery, commitmentDateFilter])
 
   useEffect(() => { loadPending() }, [loadPending])
 
@@ -1442,7 +1452,7 @@ export default function CommitmentPunchPage() {
       </div>
 
       {/* ── Pending Commitments Table ── */}
-      <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 min-h-[60vh] stage-card">
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 min-h-[60vh] stage-card">
         <StageListHeader
           title="Commitments List"
           shown={sortedPendingList.length}
@@ -1811,6 +1821,17 @@ export default function CommitmentPunchPage() {
               ))
             )}
           </div>
+          <StagePagination
+            sticky
+            page={pendingPage}
+            totalPages={pendingTotalPages}
+            total={pendingTotal}
+            noun="Commitments"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || pendingList.length === 0}
+            nextDisabled={pendingList.length === 0 || pendingPage >= pendingTotalPages}
+          />
         </CardContent>
       </Card>
 

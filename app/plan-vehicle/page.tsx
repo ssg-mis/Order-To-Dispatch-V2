@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Truck, Weight, Printer, Download, ChevronLeft, ChevronRight, Calendar as CalendarIconLucide, Pencil, Plus, Search, Clock, Check, ChevronsUpDown, Loader2, Eye, ExternalLink, FileCheck, FileX, FileText, ImageIcon } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { planVehicleApi, customerApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, commonApi, lookupApi, stateApi } from "@/lib/api-service"
+import { planVehicleApi, actualDispatchApi, customerApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, commonApi, lookupApi, stateApi } from "@/lib/api-service"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { VehicleForm } from "@/components/masters/forms/VehicleForm"
@@ -39,7 +39,7 @@ import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
   StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
-  StageActiveChips, StageSortIcon, type StageTotalTone, StageActionBar, StagePagination } from "@/components/stage-list"
+  StageActiveChips, StageSortIcon, type StageTotalTone, StageActionBar, StagePagination, StageDecisionFooter, StageActionFooter } from "@/components/stage-list"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { fmtNum } from "@/lib/table-format"
 
@@ -1166,6 +1166,30 @@ export default function PlanVehiclePage() {
       .reduce((total, prod) => total + calculateGrossWeight(prod.productName, prod.qtyToDispatch), 0)
   }, [selectedGroups, dialogSelectedProducts, skus])
 
+  // Payload limit for the overload check: passing weight = GVW - baseline tare, where the
+  // baseline is the average tare recorded on this vehicle's earlier dispatches (its ULW on
+  // the first trip). Display/check only: the saved passingWeight stays the master value.
+  const [vehicleTareStats, setVehicleTareStats] = useState<{ avgTare: number | null; count: number } | null>(null)
+  const selectedVehicleId = useMemo(
+    () => vehicleMaster.find(v => v.registration_no === vehicleData.registration_no)?.id,
+    [vehicleMaster, vehicleData.registration_no],
+  )
+  useEffect(() => {
+    if (!selectedVehicleId) { setVehicleTareStats(null); return }
+    let cancelled = false
+    actualDispatchApi.getVehicleTareStats(selectedVehicleId).then((res: any) => {
+      if (!cancelled && res?.success) setVehicleTareStats({ avgTare: res.data?.avgTare ?? null, count: res.data?.count ?? 0 })
+    }).catch(() => { if (!cancelled) setVehicleTareStats(null) })
+    return () => { cancelled = true }
+  }, [selectedVehicleId])
+  const effectivePassing = useMemo(() => {
+    const gvw = Number(vehicleData.gvw) || 0
+    const avg = vehicleTareStats && vehicleTareStats.count > 0 ? Number(vehicleTareStats.avgTare) || 0 : 0
+    const baseTare = avg > 0 ? avg : Number(vehicleData.ulw) || 0
+    if (gvw > 0 && baseTare > 0) return gvw - baseTare
+    return parseFloat(vehicleData.passing_weight) || 0
+  }, [vehicleData.gvw, vehicleData.ulw, vehicleData.passing_weight, vehicleTareStats])
+
   const filteredPendingOrders = pendingOrders.filter((order: any) => {
     let matches = true
 
@@ -1516,7 +1540,8 @@ export default function PlanVehiclePage() {
         permit2OutStateImage: vehicleData.permit2_out_state || undefined,
         permit2EndDate: vehicleData.permit2_end_date || undefined,
 
-        passingWeight: numOrUndef(vehicleData.passing_weight),
+        // Snapshot of the payload limit used for this plan (GVW - baseline tare), so later stages show the same number.
+        passingWeight: effectivePassing > 0 ? effectivePassing : numOrUndef(vehicleData.passing_weight),
         vehicleOverloadRemarks: freightData.overloadRemarks || undefined,
 
         freightRateType: freightData.freightRateType || undefined,
@@ -1668,7 +1693,7 @@ export default function PlanVehiclePage() {
           }
         }
 
-        const passingWt = parseFloat(vehicleData.passing_weight) || 0;
+        const passingWt = effectivePassing;
         const isOverloaded = passingWt > 0 && totalPackingWeightFromSku > passingWt;
         if (isOverloaded && !freightData.overloadRemarks.trim()) {
           validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
@@ -1806,7 +1831,7 @@ export default function PlanVehiclePage() {
     }
   };
 
-  const passingWt = parseFloat(vehicleData.passing_weight) || 0;
+  const passingWt = effectivePassing;
   const isOverloaded = passingWt > 0 && totalPackingWeightFromSku > passingWt;
 
   return (
@@ -1880,7 +1905,7 @@ export default function PlanVehiclePage() {
           </div>
         )}
 
-        <Card className="border border-slate-200/80 shadow-xs overflow-hidden py-0 gap-0 stage-card">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Vehicle Planning List"
             shown={tableRows.length}
@@ -2446,12 +2471,24 @@ export default function PlanVehiclePage() {
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
                           <p className={cn("text-[11px] font-black uppercase leading-none", isOverloaded ? "text-red-600" : "text-primary")}>
-                            {vehicleData.passing_weight || '0.00'} KG
+                            {passingWt > 0 ? passingWt.toFixed(2) : '0.00'} KG
                           </p>
                         </div>
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
                           <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw || '---'} KG</p>
+                        </div>
+                        <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                          <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">ULW</p>
+                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.ulw || '---'} KG</p>
+                        </div>
+                        <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                          <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Avg Tare Wt</p>
+                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
+                            {vehicleTareStats && vehicleTareStats.count > 0
+                              ? <>{Number(vehicleTareStats.avgTare).toFixed(2)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
+                              : <>--- <span className="text-[9px] font-semibold text-slate-400 normal-case">{vehicleData.registration_no ? '(first trip, ULW used)' : ''}</span></>}
+                          </p>
                         </div>
                         </div>
                         <div className="space-y-2">
@@ -2990,38 +3027,24 @@ export default function PlanVehiclePage() {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-4 md:px-8 pb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6 w-full">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-3xl">
-              <div className="flex-1 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Revert Remarks <span className="text-red-500">*</span></Label>
-                <Input
-                  className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white"
-                  disabled={isReadOnly}
-                  placeholder="Enter reason for reverting to Dispatch Planning..."
-                  value={revertRemarks}
-                  onChange={(e) => setRevertRemarks(e.target.value)}
-                />
-              </div>
-              <Button
-                variant="destructive"
-                onClick={handleRevert}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                className="font-black uppercase tracking-tight h-10 px-6"
-              >
-                {isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full sm:w-auto shrink-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="order-last sm:order-none">Cancel</Button>
-              <Button
-                onClick={performPlanVehicleConfirmation}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly}
-                className="h-11 sm:h-10 font-black bg-blue-600 hover:bg-blue-700"
-              >
-                {isProcessing ? "Wait..." : `Confirm (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
+          <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              remarksPlaceholder="Enter reason for reverting to Dispatch Planning..."
+              disabled={isReadOnly}
+              revertActions={[{
+                label: isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`,
+                onClick: handleRevert,
+                disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+              }]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Wait..." : `Confirm (${dialogSelectedProducts.length})`,
+                onClick: performPlanVehicleConfirmation,
+                disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -3074,16 +3097,22 @@ export default function PlanVehiclePage() {
             ))}
           </div>
 
-          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-3 mt-4">
-            <Button variant="outline" onClick={closeSlipDialog} className="sm:order-first">Close</Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
-                <Printer className="mr-2 h-4 w-4" /> Print Gate Pass
-              </Button>
-              <Button onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700">
-                <Download className="mr-2 h-4 w-4" /> Download Gate Pass
-              </Button>
-            </div>
+          <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 sm:flex-col sm:justify-start">
+            <StageActionFooter
+              onCancel={closeSlipDialog}
+              cancelLabel="Close"
+              actions={[
+                {
+                  label: <><Printer className="mr-2 h-4 w-4" /> Print Gate Pass</>,
+                  onClick: handlePrintSlip,
+                  variant: "outline",
+                },
+                {
+                  label: <><Download className="mr-2 h-4 w-4" /> Download Gate Pass</>,
+                  onClick: handleDownloadSlip,
+                },
+              ]}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -3139,28 +3168,24 @@ export default function PlanVehiclePage() {
                 />
               </div>
 
-              <DialogFooter className="px-6 py-3 border-t bg-slate-50 flex items-center justify-end gap-2 shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsVehicleModalOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  disabled={isSubmittingVehicleModal}
-                  onClick={handleSubmitVehicleModal}
-                >
-                  {isSubmittingVehicleModal ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    editingVehicle ? "Submit Edit for Approval" : "Submit for Approval"
-                  )}
-                </Button>
+              <DialogFooter className="w-full shrink-0 border-t bg-slate-50/50 px-6 py-3 sm:flex-col sm:justify-start">
+                <StageActionFooter
+                  onCancel={() => setIsVehicleModalOpen(false)}
+                  actions={[
+                    {
+                      label: isSubmittingVehicleModal ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        editingVehicle ? "Submit Edit for Approval" : "Submit for Approval"
+                      ),
+                      onClick: handleSubmitVehicleModal,
+                      disabled: isSubmittingVehicleModal,
+                    },
+                  ]}
+                />
               </DialogFooter>
             </>
           )}
@@ -3193,18 +3218,24 @@ export default function PlanVehiclePage() {
             />
           </div>
 
-          <DialogFooter className="px-6 py-3 border-t bg-slate-50 flex items-center justify-end gap-2 shrink-0">
-            <Button type="button" variant="outline" onClick={() => setIsDriverModalOpen(false)}>Cancel</Button>
-            <Button type="button" disabled={isSubmittingDriverModal} onClick={handleSubmitDriverModal}>
-              {isSubmittingDriverModal ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                editingDriver ? "Submit Edit for Approval" : "Submit for Approval"
-              )}
-            </Button>
+          <DialogFooter className="w-full shrink-0 border-t bg-slate-50/50 px-6 py-3 sm:flex-col sm:justify-start">
+            <StageActionFooter
+              onCancel={() => setIsDriverModalOpen(false)}
+              actions={[
+                {
+                  label: isSubmittingDriverModal ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    editingDriver ? "Submit Edit for Approval" : "Submit for Approval"
+                  ),
+                  onClick: handleSubmitDriverModal,
+                  disabled: isSubmittingDriverModal,
+                },
+              ]}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
