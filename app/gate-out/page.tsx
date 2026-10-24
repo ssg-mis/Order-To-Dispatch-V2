@@ -123,7 +123,7 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Invoice Summary</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
           <span className="font-mono font-bold text-slate-700">{totalTaxable === null ? "—" : `₹${totalTaxable.toFixed(2)}`}</span>

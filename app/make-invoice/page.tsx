@@ -92,7 +92,8 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
+      {/* pr-6 matches the Taxable Amount column's right padding so both right edges line up. */}
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
         {chargesBillable > 0 && (
           <div className="flex justify-between items-center text-xs">
             <span className="font-black uppercase text-slate-500 text-[10px]">Ledger Charges (no GST)</span>
@@ -1687,7 +1688,7 @@ export default function MakeInvoicePage() {
                         <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 h-10" />
                         <TableHead className="px-4 h-10" />
-                        <TableHead className="px-4 text-right h-10 font-mono tabular-nums font-black text-blue-700">
+                        <TableHead className="pl-4 pr-6 text-right h-10 font-mono tabular-nums font-black text-blue-700">
                           {(() => {
                             const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
@@ -1720,7 +1721,7 @@ export default function MakeInvoicePage() {
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty Dispatch</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
                         <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]"><RateWithoutGstHeading /></TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
+                        <TableHead className="pl-4 pr-6 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1812,7 +1813,7 @@ export default function MakeInvoicePage() {
                               return rateWithoutGstText(adjustedRate, product);
                             })()}
                           </TableCell>
-                          <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                          <TableCell className="pl-4 pr-6 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
                               const originalRate = Number(product.rate) || 0;
                               const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
