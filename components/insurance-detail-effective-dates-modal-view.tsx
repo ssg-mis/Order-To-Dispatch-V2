@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
+import { MultiCombobox } from "@/components/ui/multi-combobox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { masterHistoryApi, insuranceDetailApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
@@ -379,7 +379,7 @@ export function InsuranceDetailEffectiveDatesModalView({
   const filteredCustomers = customerOptions.filter((c: any) => c.customer_name?.toLowerCase().includes(customerSearch.toLowerCase()))
 
   return (
-    <div className="space-y-4 text-slate-800">
+    <div className="space-y-4 text-slate-800 w-full min-w-0 max-w-full">
       <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
@@ -559,32 +559,17 @@ export function InsuranceDetailEffectiveDatesModalView({
             {newVersionForm.owner_type === "Customer" && (
               <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
                 <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Linked Customers</Label>
-                <div className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-2">
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                    <Input
-                      className="h-8 pl-8 text-xs"
-                      placeholder="Search customers..."
-                      value={customerSearch}
-                      onChange={(e) => setCustomerSearch(e.target.value)}
-                    />
-                  </div>
-                  <div className="max-h-40 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1">
-                    {filteredCustomers.length === 0 ? (
-                      <p className="text-[11px] text-slate-400 text-center py-3 col-span-2">No customer found.</p>
-                    ) : (
-                      filteredCustomers.map((c: any) => {
-                        const checked = (newVersionForm.customer_ids || []).includes(c.id)
-                        return (
-                          <label key={c.id} className="flex items-center gap-2 text-xs cursor-pointer select-none px-1.5 py-1 rounded hover:bg-slate-50">
-                            <Checkbox checked={checked} onCheckedChange={() => toggleLinkedCustomer(c.id)} />
-                            <span className="text-slate-700 truncate">{c.customer_name}</span>
-                          </label>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
+                <MultiCombobox
+                  options={customerOptions.map((c: any) => ({ value: String(c.id), label: c.customer_name }))}
+                  values={(newVersionForm.customer_ids || []).map(String)}
+                  onValuesChange={(vals) =>
+                    setNewVersionForm((prev: any) => ({ ...prev, customer_ids: vals.map((v) => Number(v)) }))
+                  }
+                  placeholder="Select customers"
+                  searchPlaceholder="Search customers..."
+                  emptyText="No customer found."
+                  className="h-9 text-xs bg-white rounded-lg border-slate-200 shadow-xs"
+                />
               </div>
             )}
           </div>
@@ -626,7 +611,7 @@ export function InsuranceDetailEffectiveDatesModalView({
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200 overflow-x-auto shadow-2xs bg-white min-h-[280px]">
+        <div className="rounded-lg border border-slate-200 overflow-x-auto w-full max-w-full shadow-2xs bg-white min-h-[280px]">
           <table className="w-full text-xs text-left border-collapse">
             <thead>
               <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
@@ -634,7 +619,7 @@ export function InsuranceDetailEffectiveDatesModalView({
                   Applicable From (W.E.F)
                 </th>
                 {visibleColumns.map((label) => (
-                  <th key={label} className={`py-2.5 px-3 border-r border-slate-300 whitespace-nowrap ${isDateLabel(label) ? "text-right" : ""}`}>{label}</th>
+                  <th key={label} className={`py-2.5 px-2 border-r border-slate-300 min-w-[90px] ${isDateLabel(label) ? "text-right" : ""}`}>{label}</th>
                 ))}
                 <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Actions</th>
@@ -666,7 +651,7 @@ export function InsuranceDetailEffectiveDatesModalView({
                     </td>
 
                     {visibleColumns.map((label) => (
-                      <td key={label} className={`py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium ${isDateLabel(label) ? "text-right" : ""}`}>
+                      <td key={label} className={`py-2.5 px-2 border-r border-slate-200 text-slate-700 font-medium break-words ${isDateLabel(label) ? "text-right" : ""}`}>
                         {dispVal(getSnapshotValue(version, label))}
                       </td>
                     ))}
