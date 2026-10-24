@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -49,7 +50,7 @@ import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
 import { rateWithoutGst, rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
-import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StagePagination, StageActionFooter, StageDecisionFooter } from "@/components/stage-list"
 
 function InvoiceSummary({ selectedGroups, selectedProducts }: {
   selectedGroups: any[]
@@ -77,7 +78,8 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
+      {/* pr-6 matches the Taxable Amount column's right padding so both right edges line up. */}
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
         <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
@@ -241,13 +243,14 @@ export default function CheckInvoicePage() {
   }, [skuDetailsData])
 
   // Selection & Dialog State
-  const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([]) // Changed to array for multi-group support
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   // View-only mode: opened for issued/reverted records that are awaiting re-issue
   // from Make Invoice. Details are visible but verification cannot be completed.
   const [viewOnly, setViewOnly] = useState(false)
+  // "Are you sure?" step before a Verified verdict is submitted.
+  const [confirmVerifyOpen, setConfirmVerifyOpen] = useState(false)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]) // State to manage expanded sections
 
   const [checkData, setCheckData] = useState({
@@ -298,13 +301,15 @@ export default function CheckInvoicePage() {
 
     filteredPendingOrders.forEach((order: any) => {
       const invoiceNo = order.invoice_no || "No Invoice"
+      // Same key the backend paginates on: invoices without a number must not merge into one group.
+      const groupKey = order.invoice_no || `No Invoice #${order.invoice_id ?? order.id}`
       const partyName = (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer")
       const rawDoNumber = order.so_no || order.soNo || "—"
       const doNumber = rawDoNumber.replace(/(?<=\d)[A-Z].*$/, "")
 
-      if (!grouped[invoiceNo]) {
-        grouped[invoiceNo] = {
-          _rowKey: invoiceNo,
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = {
+          _rowKey: groupKey,
           customerName: partyName,
           invoiceNo: invoiceNo,
           doNumberList: new Set<string>(),
@@ -314,7 +319,7 @@ export default function CheckInvoicePage() {
         }
       }
 
-      const group = grouped[invoiceNo]
+      const group = grouped[groupKey]
       group.doNumberList.add(doNumber)
 
       const orderKey = doNumber;
@@ -512,46 +517,20 @@ export default function CheckInvoicePage() {
   }
 
 
-  const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
-    )
-  }
-
-  // Issued/reverted records are awaiting re-issue from Make Invoice and cannot be
-  // verified, so they are excluded from selection (view-only via the eye action).
-  const selectableRows = useMemo(() => table.rows.filter((r: any) => !r.isReverted), [table.rows])
-  const allSelectableChecked = selectableRows.length > 0 && selectableRows.every((r: any) => selectedItems.includes(r._rowKey))
-
-  const toggleSelectAll = () => {
-    if (allSelectableChecked) {
-      const ids = new Set(selectableRows.map((r: any) => r._rowKey))
-      setSelectedItems(prev => prev.filter(k => !ids.has(k)))
-    } else {
-      setSelectedItems(prev => Array.from(new Set([...prev, ...selectableRows.map((r: any) => r._rowKey)])))
+  // Row click opens the verify dialog for that invoice. Issued/reverted records are
+  // awaiting re-issue from Make Invoice and cannot be verified, so they open view-only.
+  const handleRowClick = (group: any) => {
+    if (group.isReverted) {
+      handleViewGroup(group)
+      return
     }
-  }
-
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    // Get all selected groups
-    const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
-    if (targets.length > 0) {
-      setViewOnly(false)
-      setSelectedGroups(targets)
-      // Select all products by default from all selected groups
-      const allProdKeys = targets.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
-      setSelectedProducts(allProdKeys)
-
-      // Reset form
-      setCheckData({ status: "", remarks: "" })
-      setExpandedOrders([]) // Reset expanded state
-
-      setIsDialogOpen(true)
-    }
+    setViewOnly(false)
+    setSelectedGroups([group])
+    // Select all products by default
+    setSelectedProducts(group._allProducts.map((p: any) => p._rowKey))
+    setCheckData({ status: "", remarks: "" })
+    setExpandedOrders([])
+    setIsDialogOpen(true)
   }
 
   // Open the details dialog in read-only mode for an issued/reverted record.
@@ -566,17 +545,11 @@ export default function CheckInvoicePage() {
     setIsDialogOpen(true)
   }
 
-  const handleSubmit = async () => {
-    if (selectedGroups.length === 0 || !checkData.status) {
-      toast({
-        title: "Validation Error",
-        description: "Please select verification status.",
-        variant: "destructive"
-      })
-      return
-    }
+  // "Verified" moves the invoice forward; "Issue" sends it back to Make Invoice and needs remarks.
+  const handleSubmit = async (verdict: "Verified" | "Issue") => {
+    if (selectedGroups.length === 0) return
 
-    if (checkData.status === "Issue" && !checkData.remarks) {
+    if (verdict === "Issue" && !checkData.remarks.trim()) {
       toast({
         title: "Validation Error",
         description: "Remarks are mandatory when reporting an issue.",
@@ -606,8 +579,8 @@ export default function CheckInvoicePage() {
 
       for (const product of productsToSubmit) {
         const submitData = {
-          status: checkData.status,
-          remarks: checkData.remarks,
+          status: verdict,
+          remarks: checkData.remarks.trim(),
           userId: user?.id || null // Track acting user's login id
         };
 
@@ -628,8 +601,10 @@ export default function CheckInvoicePage() {
 
       if (successfulSubmissions.length > 0) {
         toast({
-          title: "Invoices Verified",
-          description: `Successfully verified ${successfulSubmissions.length} items.`,
+          title: verdict === "Issue" ? "Issue Reported" : "Invoices Verified",
+          description: verdict === "Issue"
+            ? `${successfulSubmissions.length} items sent back to Make Invoice.`
+            : `Successfully verified ${successfulSubmissions.length} items.`,
         })
 
         await refetchPending();
@@ -640,7 +615,6 @@ export default function CheckInvoicePage() {
         queryClient.invalidateQueries({ queryKey: ["make-invoice-pending"] });
 
         setIsDialogOpen(false)
-        setSelectedItems([])
       }
 
       // Stale-write conflicts: the row was already processed/moved by another user.
@@ -747,19 +721,6 @@ export default function CheckInvoicePage() {
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <StageActionBar>
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
-          >
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Verify Invoice ({selectedItems.length})
-          </Button>
-
-                </StageActionBar>
-
         {/* Main Table (Grouped) */}
         <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
@@ -811,9 +772,6 @@ export default function CheckInvoicePage() {
           <Table>
             <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 px-4 text-left align-middle">
-                  <Checkbox checked={allSelectableChecked} onCheckedChange={toggleSelectAll} />
-                </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                   {orderedCols.map(col => (
                     <StageHeadCell key={col.id} col={col} table={table} align={isRightCol(col.id) ? "right" : "left"} />
@@ -823,19 +781,18 @@ export default function CheckInvoicePage() {
             </TableHeader>
             <TableBody>
               <StageTotalsRow
-                columns={[{ id: "__sel", label: "" }, ...orderedCols]}
+                columns={orderedCols}
                 totals={table.totals}
                 count={table.rows.length}
                 labelColumnId={orderedCols[0]?.id}
                 unit=""
                 format={(n, id) => fmtNum(n, NUM_DECIMALS[id] ?? 2)}
                 tones={{ products: "blue", actual_qty_dispatch: "purple", bill_amount: "emerald" }}
-                align={Object.fromEntries([["__sel", "left"],...orderedCols.map(c => [c.id, isRightCol(c.id) ? "right" : "left"])]) as Record<string, "center" | "left" | "right">}
+                align={Object.fromEntries(orderedCols.map(c => [c.id, isRightCol(c.id) ? "right" : "left"])) as Record<string, "center" | "left" | "right">}
               />
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {orderedVisible.map(id => (
                       <TableCell key={id} className={cn("px-4 py-4", isRightCol(id) ? "text-right" : "text-left")}>
                         <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", isRightCol(id) && "ml-auto",id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-16" : id === "orderNo" || id === "processid" || id === "invoiceNo" || id === "vehicleNo" || id === "actual1Date" ? "w-24" : "w-20")} />
@@ -847,26 +804,10 @@ export default function CheckInvoicePage() {
                 table.rows.map((group) => (
                   <TableRow
                     key={group._rowKey}
-                    className={`${selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""} ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
+                    onClick={() => handleRowClick(group)}
+                    title={group.isReverted ? "Awaiting re-issue from Make Invoice — click to view details" : "Click to verify invoice"}
+                    className={`cursor-pointer hover:bg-slate-50 ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
                   >
-                    <TableCell className="px-4 text-left">
-                      {group.isReverted ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-amber-600 hover:bg-amber-100"
-                          onClick={() => handleViewGroup(group)}
-                          title="Awaiting re-issue from Make Invoice — view details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Checkbox
-                          checked={selectedItems.includes(group._rowKey)}
-                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        />
-                      )}
-                    </TableCell>
                     {orderedVisible.map(id => {
                       if (id === "partySoDate") return <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{group.partySoDate}</TableCell>
                       if (id === "orderNo") return (
@@ -892,7 +833,7 @@ export default function CheckInvoicePage() {
                       if (id === "invoiceNo") return (
                         <TableCell key={id} className="px-4 text-left text-xs font-medium">
                           {group._allProducts?.[0]?.invoice_copy ? (
-                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
+                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
                           ) : group.invoiceNo}
                         </TableCell>
                       )
@@ -930,7 +871,7 @@ export default function CheckInvoicePage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={1 + orderedVisible.length} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={orderedVisible.length} className="text-center py-8 text-muted-foreground">
                     {displayRows.length > 0 ? (
                       <div className="flex flex-col items-center gap-1">
                         <p className="font-medium text-slate-500">No matching records found for the filters</p>
@@ -956,13 +897,12 @@ export default function CheckInvoicePage() {
             ) : table.rows.length > 0 ? (
               table.rows.map((group) => {
                 const display = buildCheckInvoiceDisplay(group)
-                const selected = selectedItems.includes(group._rowKey)
                 return (
                   <div
                     key={group._rowKey}
+                    onClick={() => handleRowClick(group)}
                     className={cn(
-                      "rounded-lg border bg-white p-4 shadow-sm",
-                      selected && "border-blue-200 bg-blue-50",
+                      "cursor-pointer rounded-lg border bg-white p-4 shadow-sm active:bg-slate-50",
                       group.isReverted && "opacity-60 bg-amber-50/40"
                     )}
                   >
@@ -977,22 +917,6 @@ export default function CheckInvoicePage() {
                         )}
                         {visibleColumns.includes("partySoDate") && <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>}
                       </div>
-                      {group.isReverted ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 text-amber-600 hover:bg-amber-100"
-                          onClick={() => handleViewGroup(group)}
-                          title="Awaiting re-issue from Make Invoice — view details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Checkbox
-                          checked={selected}
-                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        />
-                      )}
                     </div>
 
                     {visibleColumns.includes("customerName") && (
@@ -1007,7 +931,7 @@ export default function CheckInvoicePage() {
                         <div className="rounded-md bg-slate-50 p-2">
                           <p className="text-[10px] font-black uppercase text-slate-400">Invoice No.</p>
                           {display.invoiceCopy ? (
-                            <a href={display.invoiceCopy} target="_blank" rel="noopener noreferrer" className="mt-1 block font-bold text-blue-600 underline break-words">
+                            <a href={display.invoiceCopy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-1 block font-bold text-blue-600 underline break-words">
                               {display.invoiceNo}
                             </a>
                           ) : (
@@ -1376,11 +1300,23 @@ export default function CheckInvoicePage() {
 
                 {/* 2. Unified Product Table */}
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                  <Table className="hidden md:table">
+                  <Table className="hidden md:table table-fixed" containerClassName="overflow-x-hidden">
+                    {/* Fixed column widths so Product Info doesn't swallow the row and the numeric columns sit evenly. */}
+                    <colgroup>
+                      <col style={{ width: 48 }} />
+                      <col style={{ width: "22%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col />
+                    </colgroup>
                     <TableHeader className="bg-slate-50">
                       <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
                         <TableCell className="px-4" />
                         <TableCell className="px-4 text-left font-black text-slate-900">Total ({selectedProducts.length})</TableCell>
+                        <TableCell className="px-4" />
                         <TableCell className="px-4 text-right font-mono tabular-nums">
                           {(() => {
                             const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
@@ -1397,7 +1333,7 @@ export default function CheckInvoicePage() {
                         <TableCell className="px-4" />
                         <TableCell className="px-4" />
                         <TableCell className="px-4" />
-                        <TableCell className="px-4 text-right font-mono tabular-nums">
+                        <TableCell className="pl-4 pr-6 text-right font-mono tabular-nums">
                           {(() => {
                             const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
@@ -1405,7 +1341,6 @@ export default function CheckInvoicePage() {
                             return total === null ? "—" : fmtNum(total, 2);
                           })()}
                         </TableCell>
-                        <TableCell colSpan={3} className="px-4" />
                       </TableRow>
                       <TableRow>
                         <TableHead className="w-12 px-4 text-left h-10">
@@ -1422,14 +1357,12 @@ export default function CheckInvoicePage() {
                           />
                         </TableHead>
                         <TableHead className="px-4 text-left h-10">Product Info</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Weight (KGS)</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]"><RateWithoutGstHeading /></TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
-                        <TableHead className="px-4 text-left h-10 whitespace-nowrap">Invoice No</TableHead>
-                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Invoice Date</TableHead>
-                        <TableHead className="px-4 text-left h-10 whitespace-nowrap">Truck No</TableHead>
+                        <TableHead className="px-4 text-left h-10 whitespace-normal">HSN Code</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Weight (KGS)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Actual Qty</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Rate Inc. Taxes (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal"><RateWithoutGstHeading /></TableHead>
+                        <TableHead className="pl-4 pr-6 text-right h-10 whitespace-normal">Taxable Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1463,6 +1396,9 @@ export default function CheckInvoicePage() {
                                 <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                               </div>
                             </TableCell>
+                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {product.hsn_code || "—"}
+                            </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {(() => {
                                 const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
@@ -1486,23 +1422,8 @@ export default function CheckInvoicePage() {
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {netRateIncTaxes && rateWoGst !== null ? rateWoGst.toFixed(2) : "—"}
                             </TableCell>
-                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                            <TableCell className="pl-4 pr-6 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {taxableAmount ? taxableAmount.toFixed(2) : "—"}
-                            </TableCell>
-                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-green-700">
-                              {product.invoice_copy ? (
-                                <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline">
-                                  {product.invoiceNo || "View Invoice"}
-                                </a>
-                              ) : (
-                                <span>{product.invoiceNo || "—"}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="px-4 py-2 text-right text-xs font-black font-mono tabular-nums whitespace-nowrap">
-                              {fmtDate(product.invoiceDate)}
-                            </TableCell>
-                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-slate-700">
-                              {(product.truckNo || "—").toUpperCase()}
                             </TableCell>
                           </TableRow>
                         );
@@ -1564,6 +1485,10 @@ export default function CheckInvoicePage() {
 
                           <div className="grid grid-cols-2 gap-3 text-xs">
                             <div className="rounded-md bg-slate-50 p-2">
+                              <p className="text-[10px] font-black uppercase text-slate-400">HSN Code</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{product.hsn_code || "—"}</p>
+                            </div>
+                            <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
                               <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
                                 {(() => {
@@ -1599,24 +1524,6 @@ export default function CheckInvoicePage() {
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
                               <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtNum(taxableAmount, 2) : "—"}</p>
-                            </div>
-                            <div className="rounded-md bg-green-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-green-700">Invoice No</p>
-                              {product.invoice_copy ? (
-                                <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="mt-1 block font-bold text-green-700 underline break-words">
-                                  {product.invoiceNo || "View Invoice"}
-                                </a>
-                              ) : (
-                                <p className="mt-1 font-bold text-green-700 break-words">{product.invoiceNo || "—"}</p>
-                              )}
-                            </div>
-                            <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Invoice Date</p>
-                              <p className="mt-1 font-bold">{product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}</p>
-                            </div>
-                            <div className="rounded-md bg-slate-50 p-2 col-span-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Truck No</p>
-                              <p className="mt-1 font-bold">{(product.truckNo || "—").toUpperCase()}</p>
                             </div>
                           </div>
                         </div>
@@ -1671,52 +1578,11 @@ export default function CheckInvoicePage() {
                   </div>
                 )}
               </div>
-            ) : (
-            <div className="mt-8 space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                <CheckCircle className="h-4 w-4 text-blue-600" />
-                Final Verification Logic
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label>Verification Status <span className="text-red-500">*</span></Label>
-                  <Select value={checkData.status} onValueChange={(val) => setCheckData({ ...checkData, status: val })}>
-                    <SelectTrigger className="h-10 border-2 focus:ring-2 focus:ring-blue-500 transition-all font-bold tracking-tight bg-white">
-                      <SelectValue placeholder="Select Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Verified" className="font-bold text-green-600">Verified</SelectItem>
-                      <SelectItem value="Issue" className="font-bold text-red-600">Issue</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Remarks {checkData.status === "Issue" && <span className="text-red-500">*</span>}</Label>
-                  <Textarea
-                    value={checkData.remarks}
-                    onChange={(e) => setCheckData({ ...checkData, remarks: e.target.value })}
-                    placeholder="Enter verification remarks..."
-                    className="h-[38px] min-h-[38px]"
-                  />
-                </div>
-              </div>
-            </div>
-            )}
+            ) : null}
 
             <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
-              <StageActionFooter
-                // Cancel stays inert while a submit is running (it used to be a disabled button).
-                onCancel={() => setIsDialogOpen(false)}
-                cancelDisabled={isProcessing}
-                cancelLabel={viewOnly ? "Close" : "Cancel"}
-                actions={[
-                  {
-                    variant: "outline",
-                    label: <><Printer className="h-4 w-4" />Print Data</>,
-                    title: "Print Verification Sheet",
-                    onClick: () => {
+              {(() => {
+                const handlePrintData = () => {
                   const group = selectedGroups[0]
                   if (!group) return
                   const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
@@ -1773,20 +1639,80 @@ export default function CheckInvoicePage() {
                   `
                   const win = window.open('', '_blank')
                   if (win) { win.document.write(printContent); win.document.close(); win.focus(); win.print() }
-                },
-                  },
-                  ...(!viewOnly ? [{
-                    label: isProcessing ? "Processing..." : "Complete Verification",
-                    onClick: handleSubmit,
-                    disabled: isProcessing || !checkData.status || isReadOnly,
-                    title: isReadOnly ? "View Only Access" : "Complete Verification",
-                  }] : []),
-                ]}
-              />
+                }
+
+                const printAction = {
+                  label: <><Printer className="h-4 w-4" />Print Data</>,
+                  title: "Print Verification Sheet",
+                  onClick: handlePrintData,
+                }
+
+                // Issued/reverted records are view-only: just Print + Close.
+                if (viewOnly) {
+                  return (
+                    <StageActionFooter
+                      onCancel={() => setIsDialogOpen(false)}
+                      cancelLabel="Close"
+                      actions={[{ ...printAction, variant: "outline" as const }]}
+                    />
+                  )
+                }
+
+                // Same footer as the other stages that can send work back: remarks on the left,
+                // Issue (back to Make Invoice, remarks mandatory) and Verified (moves forward) on the right.
+                return (
+                  <StageDecisionFooter
+                    remarks={checkData.remarks}
+                    onRemarksChange={(v) => setCheckData({ ...checkData, remarks: v })}
+                    remarksLabel="Remarks"
+                    remarksRequired={false}
+                    remarksPlaceholder="Enter remarks..."
+                    disabled={isProcessing || isReadOnly}
+                    revertActions={[{
+                      label: "Issue",
+                      onClick: () => handleSubmit("Issue"),
+                      disabled: isProcessing || isReadOnly || !checkData.remarks.trim(),
+                      title: isReadOnly ? "View Only Access" : !checkData.remarks.trim() ? "Remarks are required to report an issue" : "Report issue — sends back to Make Invoice",
+                    }]}
+                    extraActions={[printAction]}
+                    onCancel={() => setIsDialogOpen(false)}
+                    cancelDisabled={isProcessing}
+                    approve={{
+                      label: isProcessing ? "Processing..." : "Verified",
+                      onClick: () => setConfirmVerifyOpen(true),
+                      disabled: isProcessing || isReadOnly,
+                      title: isReadOnly ? "View Only Access" : "Mark as verified and move forward",
+                    }}
+                  />
+                )
+              })()}
             </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={confirmVerifyOpen} onOpenChange={setConfirmVerifyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Invoice Verification</AlertDialogTitle>
+            <AlertDialogDescription>
+              Invoice <span className="font-bold text-slate-800">{selectedGroups[0]?.invoiceNo}</span> ({selectedProducts.length} item{selectedProducts.length === 1 ? "" : "s"}) will be marked as verified and moved to the next stage. Please make sure all details are correct, as this cannot be undone from here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Review Again</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() => {
+                setConfirmVerifyOpen(false)
+                handleSubmit("Verified")
+              }}
+            >
+              Confirm & Verify
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </WorkflowStageShell>
   )
 }
