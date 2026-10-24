@@ -7838,8 +7838,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <TabsContent value="insurance_details">
             <MasterCardWrapper
               icon={Shield}
-              title="Vehicle Insurance"
-              description="Manage vehicle policy details"
+              title="Insurance Details"
+              description="Marine Cargo Insurance | Open Policy"
               isAdminOrSuper={isAdminOrSuper}
               subTab={insuranceDetailSubTab}
               setSubTab={setInsuranceDetailSubTab}
