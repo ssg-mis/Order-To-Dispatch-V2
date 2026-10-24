@@ -328,6 +328,7 @@ function applyMasterGst(r: Record<string, any>, row: any) {
   if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
   if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
   if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
+  if (row.hsnCode !== undefined) r.hsn_code = row.hsnCode;
 }
 
 // Make/Check Invoice: submit key = invoices id.
