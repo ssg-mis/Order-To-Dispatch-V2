@@ -18,12 +18,13 @@ import { useColumnOrder } from "@/hooks/use-column-order"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionHead, StagePagination, StageActionFooter } from "@/components/stage-list"
-import { Printer, CheckCircle, FileText, Receipt, ExternalLink } from "lucide-react"
+import { Printer, CheckCircle, FileText, Receipt, ExternalLink, Package } from "lucide-react"
 import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtDate } from "@/lib/table-format"
+import { cn } from "@/lib/utils"
 
 const FINAL_INVOICE_COLS: StageColDef<any>[] = [
   { id: "customer_name", label: "Customer", accessor: (r) => r.customer_name || "" },
@@ -48,12 +49,14 @@ function FinalInvoiceTable({
   isHistory,
   renderCell,
   renderActions,
+  onRowClick,
   page,
   totalPages,
   total,
   onPrev,
   onNext,
 }: {
+  onRowClick: (row: any) => void
   page: number
   totalPages: number
   total: number
@@ -173,9 +176,15 @@ function FinalInvoiceTable({
                 </TableRow>
               ) : (
                 table.rows.map((row, idx) => (
-                  <TableRow key={row.invoice_id || idx} className="hover:bg-slate-50 transition-colors">
+                  <TableRow
+                    key={row.invoice_ids?.join("-") || row.invoice_id || idx}
+                    onClick={() => onRowClick(row)}
+                    title="Click to view details"
+                    className="cursor-pointer hover:bg-slate-50 transition-colors"
+                  >
                     {orderedCols.map((col) => renderCell(row, col.id))}
-                    <TableCell className="px-4 text-left">{renderActions(row, isHistory)}</TableCell>
+                    {/* Buttons inside the row must not also trigger the row click. */}
+                    <TableCell className="px-4 text-left" onClick={(e) => e.stopPropagation()}>{renderActions(row, isHistory)}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -198,6 +207,16 @@ function FinalInvoiceTable({
   )
 }
 
+/** Label + value tile used in the details modal. */
+function DetailTile({ label, children, highlight = false }: { label: string; children: React.ReactNode; highlight?: boolean }) {
+  return (
+    <div className={cn("rounded-xl border p-3.5", highlight ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-slate-50/60")}>
+      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+      <div className="break-words text-sm font-bold text-slate-800">{children}</div>
+    </div>
+  )
+}
+
 const PAGE_SIZE = 25
 
 export default function FinalInvoicePage() {
@@ -208,6 +227,7 @@ export default function FinalInvoicePage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedRow, setSelectedRow] = useState<any>(null)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [viewOnly, setViewOnly] = useState(false)
   const [isUploading, setIsUploading] = useState<Record<string, boolean>>({})
   const [formData, setFormData] = useState({
     eInvoiceFile: "",
@@ -245,11 +265,15 @@ export default function FinalInvoicePage() {
     if (!historyLoading && historyPage > 1 && historyRows.length === 0) setHistoryPage(p => p - 1)
   }, [historyLoading, historyPage, historyRows.length])
 
-  const handleOpenDialog = (row: any) => {
+  const openDetails = (row: any, readOnly: boolean) => {
     setSelectedRow(row)
+    setViewOnly(readOnly)
     setFormData({ eInvoiceFile: "", eInvoiceFileName: "", eWayBillFile: "", eWayBillFileName: "" })
     setIsDialogOpen(true)
   }
+  // Pending rows open the upload modal; history rows (already finalized) open the same details read-only.
+  const handleOpenDialog = (row: any) => openDetails(row, false)
+  const handleViewDetails = (row: any) => openDetails(row, true)
 
   const handleFileUpload = async (file: File, fileKey: string, nameKey: string) => {
     setIsUploading(prev => ({ ...prev, [fileKey]: true }))
@@ -276,6 +300,8 @@ export default function FinalInvoicePage() {
         eInvoiceFile: formData.eInvoiceFile || null,
         eWayBillFile: formData.eWayBillFile || null,
         userId: user?.id || null,
+        // One list row = one invoice: the documents apply to every product line of it.
+        invoiceIds: selectedRow.invoice_ids,
       })
       if (result.success) {
         toast({ title: "Final Invoice Submitted!", description: "eInvoice and eWay Bill saved successfully." })
@@ -341,7 +367,7 @@ export default function FinalInvoicePage() {
         return <TableCell key={colId} className="px-4 text-right font-semibold font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtNum(row.bill_amount || 0, 2)}</TableCell>
       case "documents":
         return (
-          <TableCell key={colId} className="px-4 text-left">
+          <TableCell key={colId} className="px-4 text-left" onClick={(e) => e.stopPropagation()}>
             <div className="flex gap-2">
               {row.invoice_copy && (
                 <a href={row.invoice_copy} target="_blank" rel="noopener noreferrer">
@@ -417,6 +443,7 @@ export default function FinalInvoicePage() {
                 onNext={() => setHistoryPage(p => p + 1)}
                 renderCell={renderCell}
                 renderActions={renderActions}
+                onRowClick={handleViewDetails}
               />
             )}
           </div>
@@ -447,54 +474,102 @@ export default function FinalInvoicePage() {
               onNext={() => setPendingPage(p => p + 1)}
               renderCell={renderCell}
               renderActions={renderActions}
+              onRowClick={handleOpenDialog}
             />
           )}
         </div>
       </WorkflowStageShell>
       {/* Upload Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-4xl p-0 overflow-hidden bg-slate-50 border-0 shadow-2xl rounded-2xl">
-          <DialogHeader className="px-6 py-5 bg-white border-b border-slate-100">
-            <DialogTitle className="text-lg font-black flex items-center gap-3 text-slate-800">
-              <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
-                <Receipt className="h-5 w-5" />
-              </div>
-              Upload Final Documents
+        {/* Same dialog size and layout as the earlier stages (Check Invoice, Gate Out, ...). */}
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-x-hidden overflow-y-auto p-0 [overflow-wrap:anywhere]">
+          <div className="p-3 sm:p-6">
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 break-words">
+              {viewOnly ? "Final Invoice Details" : "Upload Final Documents"} - {selectedRow?.invoice_no}
             </DialogTitle>
           </DialogHeader>
 
           {selectedRow && (
-            <div className="px-6 py-5 space-y-6 max-h-[75vh] overflow-y-auto">
+            <div className="space-y-6 mt-6 min-w-0">
               {/* Summary Block */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 font-bold text-xs text-slate-700">
-                  Order Summary
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="flex items-center gap-2.5 px-5 py-3.5 bg-gradient-to-r from-blue-50 to-white border-b border-slate-200">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><FileText className="h-4 w-4" /></span>
+                  <p className="text-sm font-black text-slate-800">Order Summary</p>
                 </div>
-                <div className="grid grid-cols-2 p-4 gap-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Customer</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRow.customer_name}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Invoice No</p>
-                    <p className="text-sm font-black text-blue-700 font-mono bg-blue-50 px-2 py-0.5 rounded-md inline-block">
-                      {selectedRow.invoice_no}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Vehicle</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRow.vehicle_no}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Amount</p>
-                    <p className="text-sm font-black text-slate-900">₹{parseFloat(selectedRow.bill_amount || 0).toFixed(2)}</p>
-                  </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-5">
+                  <DetailTile label="Customer">{selectedRow.customer_name}</DetailTile>
+                  <DetailTile label="Invoice No"><span className="font-mono font-black text-blue-700">{selectedRow.invoice_no}</span></DetailTile>
+                  <DetailTile label="Invoice Date"><span className="font-mono">{selectedRow.invoice_date ? fmtDate(selectedRow.invoice_date) : "—"}</span></DetailTile>
+                  <DetailTile label="DO Number">{(selectedRow.order_nos?.length ? selectedRow.order_nos : [selectedRow.order_no]).filter(Boolean).join(", ") || "—"}</DetailTile>
+                  <DetailTile label="Vehicle">{selectedRow.vehicle_no || "—"}</DetailTile>
+                  <DetailTile label="Invoice Amount" highlight><span className="font-mono text-lg font-black text-emerald-700">₹{fmtNum(selectedRow.bill_amount || 0, 2)}</span></DetailTile>
+                  <DetailTile label="Insurance">{selectedRow.insurance_details || "—"}</DetailTile>
+                  <DetailTile label={`Diesel${selectedRow.petrol_pump_name ? ` (${selectedRow.petrol_pump_name})` : ""}`}><span className="font-mono">₹{fmtNum(selectedRow.diesel_amount || 0, 2)}</span></DetailTile>
+                  <DetailTile label="Driver Advance (Cash / Bank)"><span className="font-mono">₹{fmtNum(selectedRow.driver_advance_cash || 0, 2)} / ₹{fmtNum(selectedRow.driver_advance_bank || 0, 2)}</span></DetailTile>
                 </div>
               </div>
 
-              <OrderChargesPanel orderNos={selectedRow?.order_no ? [String(selectedRow.order_no)] : []} />
+              {/* Products on this invoice */}
+              {selectedRow.lines?.length > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-3.5 bg-gradient-to-r from-blue-50 to-white border-b border-slate-200">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><Package className="h-4 w-4" /></span>
+                      <p className="text-sm font-black text-slate-800">Products</p>
+                    </div>
+                    <Badge variant="outline" className="border-blue-200 bg-white text-blue-700 font-bold">{selectedRow.lines.length} {selectedRow.lines.length === 1 ? "item" : "items"}</Badge>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50 hover:bg-slate-50">
+                        <TableHead className="h-12 w-16 px-5 text-center text-xs font-black uppercase tracking-wider text-slate-500">#</TableHead>
+                        <TableHead className="h-12 px-5 text-left text-xs font-black uppercase tracking-wider text-slate-500">Product</TableHead>
+                        <TableHead className="h-12 px-5 text-left text-xs font-black uppercase tracking-wider text-slate-500">DO Number</TableHead>
+                        <TableHead className="h-12 px-5 text-right text-xs font-black uppercase tracking-wider text-slate-500">Quantity</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedRow.lines.map((l: any, i: number) => (
+                        <TableRow key={l.invoice_id} className="h-16 odd:bg-white even:bg-slate-50/50">
+                          <TableCell className="px-5 text-center text-sm font-bold text-slate-400">{i + 1}</TableCell>
+                          <TableCell className="px-5 text-left text-base font-bold text-slate-900">{l.product_name || "—"}</TableCell>
+                          <TableCell className="px-5 text-left text-sm font-medium text-slate-600">{l.order_no || "—"}</TableCell>
+                          <TableCell className="px-5 text-right">
+                            <span className="font-mono text-base font-black tabular-nums text-slate-900">{fmtNum(l.qty_to_dispatch || 0, 4)}</span>
+                            {l.unit && <span className="ml-2 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">{l.unit}</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              <OrderChargesPanel orderNos={(selectedRow?.order_nos?.length ? selectedRow.order_nos : selectedRow?.order_no ? [selectedRow.order_no] : []).map(String)} />
+
+              {/* Already-uploaded documents (read-only view) */}
+              {viewOnly && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 font-bold text-xs text-slate-700">Documents</div>
+                  <div className="flex flex-wrap gap-2 p-4">
+                    {selectedRow.e_invoice_file ? (
+                      <a href={selectedRow.e_invoice_file} target="_blank" rel="noopener noreferrer">
+                        <Badge variant="outline" className="text-green-600 border-green-300 gap-1 cursor-pointer hover:bg-green-50"><CheckCircle className="h-3 w-3" /> eInvoice</Badge>
+                      </a>
+                    ) : <span className="text-xs text-slate-400">eInvoice not uploaded</span>}
+                    {selectedRow.e_way_bill_file ? (
+                      <a href={selectedRow.e_way_bill_file} target="_blank" rel="noopener noreferrer">
+                        <Badge variant="outline" className="text-purple-600 border-purple-300 gap-1 cursor-pointer hover:bg-purple-50"><Receipt className="h-3 w-3" /> eWay Bill</Badge>
+                      </a>
+                    ) : <span className="text-xs text-slate-400">eWay Bill not uploaded</span>}
+                  </div>
+                </div>
+              )}
 
               {/* Uploads */}
+              {!viewOnly && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                 {/* eInvoice Upload */}
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm transition-all hover:border-blue-300 flex flex-col">
@@ -538,6 +613,7 @@ export default function FinalInvoicePage() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Proforma Invoice link */}
               {selectedRow.invoice_copy && (
@@ -551,25 +627,27 @@ export default function FinalInvoicePage() {
             </div>
           )}
 
-          <DialogFooter className="w-full border-t bg-slate-50/50 px-6 py-4 sm:flex-col sm:justify-start">
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
             <StageActionFooter
               // Cancel stays inert while a submit is running (it used to be a disabled button).
               onCancel={() => setIsDialogOpen(false)}
               cancelDisabled={isProcessing}
+              cancelLabel={viewOnly ? "Close" : "Cancel"}
               actions={[
                 {
                   variant: "outline",
                   label: <><Printer className="h-4 w-4" /> Print</>,
                   onClick: () => selectedRow && handlePrint(selectedRow),
                 },
-                {
+                ...(!viewOnly ? [{
                   label: <>{isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}{isProcessing ? "Submitting..." : "Submit Documents"}</>,
                   onClick: handleSubmit,
                   disabled: isProcessing || !formData.eInvoiceFileName || !formData.eWayBillFileName,
-                },
+                }] : []),
               ]}
             />
           </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </>
