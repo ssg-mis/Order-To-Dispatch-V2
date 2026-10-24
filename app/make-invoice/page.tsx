@@ -49,13 +49,17 @@ import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-he
 import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
 import { rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 
-function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, chargesBillable = 0 }: {
-  selectedGroups: any[]
-  selectedProducts: string[]
-  productCdData: Record<string, { isCd: string; cdAmount: string }>
-  /** Ledger charges still to be billed (an order's charges ride on its FIRST invoice only). No GST on them. */
-  chargesBillable?: number
-}) {
+/**
+ * The invoice total shown in the GST Breakdown (taxable + GST + ledger charges, rounded). Make Invoice's
+ * Bill Amount uses this same figure so every later stage (Check / Final Invoice) shows the same amount.
+ * invoiceTotal is null when a GST rate or the state split is missing: no honest total, so don't guess.
+ */
+function calcInvoiceAmounts(
+  selectedGroups: any[],
+  selectedProducts: string[],
+  productCdData: Record<string, { isCd: string; cdAmount: string }>,
+  chargesBillable = 0,
+) {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
@@ -68,10 +72,20 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
   const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
   const totalTaxable = gst.totalTaxable
 
-  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
   const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + chargesBillable + gst.cgst + gst.sgst + gst.igst : null
   const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
   const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  return { gst, totalTaxable, invoiceTotal, roundOff }
+}
+
+function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, chargesBillable = 0 }: {
+  selectedGroups: any[]
+  selectedProducts: string[]
+  productCdData: Record<string, { isCd: string; cdAmount: string }>
+  /** Ledger charges still to be billed (an order's charges ride on its FIRST invoice only). No GST on them. */
+  chargesBillable?: number
+}) {
+  const { gst, invoiceTotal, roundOff } = calcInvoiceAmounts(selectedGroups, selectedProducts, productCdData, chargesBillable)
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
@@ -758,33 +772,22 @@ export default function MakeInvoicePage() {
     if (!isDialogOpen || selectedGroups.length === 0) return;
 
     let totalQty = 0;
-    let totalBillAmount = 0;
-
     selectedGroups.forEach(group => {
       group._allProducts.forEach((product: any) => {
         if (selectedProducts.includes(product._rowKey)) {
-          const qty = parseFloat(product.qtyToDispatch) || 0;
-          // Use final_rate if available, and ADD freight_rate
-          const baseRate = parseFloat(product.final_rate || product.rate_per_ltr || product.rate_per_15kg || product.rate_of_material || 0);
-          const freightRate = parseFloat(product.freight_rate || 0);
-          
-          // CD Amount adjustment
-          const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
-          
-          const rate = baseRate + freightRate - cdAmt;
-          totalQty += qty;
-          totalBillAmount += qty * rate;
+          totalQty += parseFloat(product.qtyToDispatch) || 0;
         }
       });
     });
 
-    // ledger charges ride on the order's first invoice only
-    totalBillAmount += invoiceCharges.billableTotal;
+    // Bill Amount = the Total Invoice Amount of the GST Breakdown (ledger charges ride on the order's first
+    // invoice only), so Check / Final Invoice show the same figure the user saw here.
+    const { invoiceTotal } = calcInvoiceAmounts(selectedGroups, selectedProducts, productCdData, invoiceCharges.billableTotal)
 
     setInvoiceData(prev => ({
       ...prev,
       qty: totalQty.toString(),
-      billAmount: totalBillAmount.toFixed(2)
+      billAmount: invoiceTotal === null ? "" : invoiceTotal.toFixed(2)
     }));
   }, [selectedProducts, isDialogOpen, selectedGroups, productCdData, invoiceCharges.billableTotal]);
 
