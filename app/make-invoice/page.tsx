@@ -281,11 +281,17 @@ export default function MakeInvoicePage() {
     staleTime: 5 * 60 * 1000,
   })
   const insuranceOptions = useMemo(() => {
-    return (insuranceRes?.data?.insurance_details || []).map((ins: any) => ({
-      value: ins.insurance_company_name,
-      label: ins.insurance_company_name
-    }))
-  }, [insuranceRes])
+    return (insuranceRes?.data?.insurance_details || [])
+      .filter((ins: any) =>
+        String(ins.status || '').toLowerCase() === 'active' ||
+        ins.insurance_company_name === invoiceData.insuranceDetails
+      )
+      .map((ins: any) => ({
+        value: ins.insurance_company_name,
+        label: ins.insurance_company_name,
+        subLabel: `${ins.short_name ? `${ins.short_name}  •  ` : ''}Policy No: ${ins.policy_number || '—'}  •  Expires: ${ins.valid_upto ? formatDate(ins.valid_upto) : '—'}  •  Sum Insured: ${ins.sum_insured != null && ins.sum_insured !== '' ? `₹${Number(ins.sum_insured).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}`
+      }))
+  }, [insuranceRes, invoiceData.insuranceDetails])
 
   // Fetch pending invoices
   const [isUploadingObj, setIsUploadingObj] = useState<Record<string, boolean>>({})
