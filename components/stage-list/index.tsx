@@ -652,6 +652,8 @@ export function StageDecisionFooter({
   remarks,
   onRemarksChange,
   remarksPlaceholder = "Enter reason for reverting...",
+  remarksLabel = "Revert Remarks",
+  remarksRequired = true,
   disabled,
   revertActions,
   extraActions = [],
@@ -663,6 +665,9 @@ export function StageDecisionFooter({
   remarks: string
   onRemarksChange: (value: string) => void
   remarksPlaceholder?: string
+  /** Defaults to "Revert Remarks"; set remarksRequired={false} to drop the red asterisk when the approve path doesn't need remarks. */
+  remarksLabel?: string
+  remarksRequired?: boolean
   disabled?: boolean
   /** Revert buttons. The last one is destructive red; earlier ones are amber outline. */
   revertActions: StageFooterAction[]
@@ -677,7 +682,7 @@ export function StageDecisionFooter({
     <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-end lg:gap-6">
       <div className="min-w-0 flex-1 space-y-1.5">
         <Label className="ml-1 text-[10px] font-black uppercase tracking-tighter text-red-500">
-          Revert Remarks <span className="text-red-500">*</span>
+          {remarksLabel} {remarksRequired && <span className="text-red-500">*</span>}
         </Label>
         <Input
           className="h-10 w-full rounded-lg border-2 border-red-200 bg-white font-medium transition-colors focus:border-red-400"
