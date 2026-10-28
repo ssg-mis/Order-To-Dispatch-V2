@@ -37,6 +37,9 @@ type Step = 1 | 2 | 3 | 4
 interface ParsedRow {
   index: number
   unit_name: string
+  short_name: string
+  decimal_places: string
+  uqc: string
   status: string
 }
 
@@ -77,8 +80,8 @@ export function UnitBulkImportModal({
 
   // Download CSV Template for Units
   const handleDownloadTemplate = () => {
-    const headers = "UOM,Status"
-    const sampleRow = "Kilogram (KG),Active"
+    const headers = "Name of unit,Short name,Decimal places,UQC,Status"
+    const sampleRow = "Kilograms,KG,3,KGS,Active"
 
     const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(`${headers}\n${sampleRow}\n`)
     const link = document.createElement("a")
@@ -123,7 +126,10 @@ export function UnitBulkImportModal({
         .map((row, idx) => ({
           index: idx + 1,
           unit_name: row[0] || "",
-          status: row[1] || "Active",
+          short_name: row[1] || "",
+          decimal_places: row[2] || "",
+          uqc: row[3] || "",
+          status: row[4] || "Active",
         }))
 
       setParsedRows(mapped)
@@ -132,7 +138,17 @@ export function UnitBulkImportModal({
       const validated: ValidationResult[] = mapped.map((row) => {
         const errors: string[] = []
         if (!row.unit_name) {
-          errors.push("UOM / Unit Name is required")
+          errors.push("Name of unit is required")
+        }
+        if (!row.short_name) {
+          errors.push("Short name is required")
+        } else if (row.short_name.length > 20) {
+          errors.push("Short name must be 20 characters or fewer")
+        } else if (mapped.filter((m) => m.short_name.toLowerCase() === row.short_name.toLowerCase()).length > 1) {
+          errors.push("Short name is repeated in this file")
+        }
+        if (row.decimal_places !== "" && !/^[0-6]$/.test(row.decimal_places)) {
+          errors.push("Decimal places must be a whole number from 0 to 6")
         }
 
         return {
@@ -291,11 +307,38 @@ export function UnitBulkImportModal({
                   <div className="divide-y divide-slate-100">
                     <div className="px-3.5 py-2 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
                       <div className="flex items-center gap-2 shrink-0 min-w-[180px]">
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-[11px] font-semibold border border-slate-200/60">uom / unit_name</span>
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-[11px] font-semibold border border-slate-200/60">unit_name</span>
                         <span className="px-1.5 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-semibold border border-red-200/60 shrink-0">Required</span>
                       </div>
-                      <div className="text-slate-500 text-xs flex-1">Unit of Measurement (UOM Name)</div>
-                      <div className="text-slate-800 text-xs font-medium shrink-0">Kilogram (KG)</div>
+                      <div className="text-slate-500 text-xs flex-1">Name of unit (formal name)</div>
+                      <div className="text-slate-800 text-xs font-medium shrink-0">Kilograms</div>
+                    </div>
+
+                    <div className="px-3.5 py-2 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
+                      <div className="flex items-center gap-2 shrink-0 min-w-[180px]">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-[11px] font-semibold border border-slate-200/60">short_name</span>
+                        <span className="px-1.5 py-0.5 bg-red-50 text-red-600 border-red-200/60 rounded text-[10px] font-semibold border shrink-0">Required</span>
+                      </div>
+                      <div className="text-slate-500 text-xs flex-1">Short name (symbol), shown everywhere. Must be unique</div>
+                      <div className="text-slate-800 text-xs font-medium shrink-0">KG</div>
+                    </div>
+
+                    <div className="px-3.5 py-2 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
+                      <div className="flex items-center gap-2 shrink-0 min-w-[180px]">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-[11px] font-semibold border border-slate-200/60">decimal_places</span>
+                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 border-slate-200 rounded text-[10px] font-semibold border shrink-0">Optional</span>
+                      </div>
+                      <div className="text-slate-500 text-xs flex-1">Decimal places, 0 to 6 (default 2)</div>
+                      <div className="text-slate-800 text-xs font-medium shrink-0">3</div>
+                    </div>
+
+                    <div className="px-3.5 py-2 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
+                      <div className="flex items-center gap-2 shrink-0 min-w-[180px]">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-[11px] font-semibold border border-slate-200/60">uqc</span>
+                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 border-slate-200 rounded text-[10px] font-semibold border shrink-0">Optional</span>
+                      </div>
+                      <div className="text-slate-500 text-xs flex-1">UQC code for GST: KGS, NOS, LTR, MTR, BOX, SET</div>
+                      <div className="text-slate-800 text-xs font-medium shrink-0">KGS</div>
                     </div>
 
                     <div className="px-3.5 py-2 flex items-center justify-between gap-4 hover:bg-slate-50/40 transition-colors">
@@ -409,7 +452,10 @@ export function UnitBulkImportModal({
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
                     <tr>
                       <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">#</th>
-                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">Unit Name</th>
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">Name of unit</th>
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">Short name</th>
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">Decimals</th>
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">UQC</th>
                       <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">Status</th>
                       <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase text-right">Validation</th>
                     </tr>
@@ -419,6 +465,9 @@ export function UnitBulkImportModal({
                       <tr key={v.row.index} className={v.isValid ? "hover:bg-slate-50/50" : "bg-red-50/30 hover:bg-red-50/50"}>
                         <td className="px-3 py-2 text-slate-400 font-mono text-[11px]">{v.row.index}</td>
                         <td className="px-3 py-2 font-semibold text-slate-800">{v.row.unit_name || "—"}</td>
+                        <td className="px-3 py-2 font-mono text-slate-700">{v.row.short_name || "—"}</td>
+                        <td className="px-3 py-2 font-mono text-slate-700">{v.row.decimal_places || "—"}</td>
+                        <td className="px-3 py-2 text-slate-700">{v.row.uqc || "—"}</td>
                         <td className="px-3 py-2 text-slate-600">{v.row.status}</td>
                         <td className="px-3 py-2 text-right">
                           {v.isValid ? (

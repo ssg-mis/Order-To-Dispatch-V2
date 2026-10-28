@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Boxes, Scale, Receipt, Landmark, Plus, Lock } from "lucide-react"
 import { STATUS_OPTIONS } from "../types"
 import { SemiFinishedGoodSectionalHistoryTable } from "@/components/semi-finished-good-sectional-history-table"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 type SemiFinishedGoodSectionType = "basic" | "weight_conversion" | "tax_compliance" | "accounting"
 
@@ -66,7 +67,7 @@ export function SemiFinishedGoodForm({
         const next = { ...prev, ...patch }
         const ck = parseFloat(next.converted_kg)
         const pw = parseFloat(next.packing_weight_per_main_unit)
-        next.weight_difference = !isNaN(ck) && !isNaN(pw) ? (ck - pw).toFixed(4) : ''
+        next.weight_difference = !isNaN(ck) && !isNaN(pw) ? (ck - pw).toFixed(getWeightDecimals()) : ''
         return next
       })
     })
@@ -132,7 +133,7 @@ export function SemiFinishedGoodForm({
               >
                 <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select UOM" /></SelectTrigger>
                 <SelectContent>
-                  {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                  {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button type="button" variant="outline" size="icon" className="shrink-0 h-9 w-9" onClick={() => openQuickAdd('unit', (id) => setSemiFinishedGoodForm((prev: any) => ({ ...prev, main_uom_id: String(id) })))}>
@@ -182,7 +183,7 @@ export function SemiFinishedGoodForm({
             >
               <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select unit" /></SelectTrigger>
               <SelectContent>
-                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -222,7 +223,7 @@ export function SemiFinishedGoodForm({
             >
               <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select unit" /></SelectTrigger>
               <SelectContent>
-                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -258,7 +259,7 @@ export function SemiFinishedGoodForm({
             >
               <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select unit" /></SelectTrigger>
               <SelectContent>
-                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

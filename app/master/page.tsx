@@ -1052,6 +1052,9 @@ export default function MasterPage() {
       const headers = [
         "Unit ID / Code",
         "Unit Name",
+        "Short Name",
+        "Decimal Places",
+        "UQC",
         "Status",
       ]
 
@@ -1061,6 +1064,9 @@ export default function MasterPage() {
         const row = [
           `"${item.unit_code || item.unitCode || item.id || ''}"`,
           `"${(item.unit_name || item.unitName || '').replace(/"/g, '""')}"`,
+          `"${(item.short_name || '').replace(/"/g, '""')}"`,
+          `"${item.decimal_places ?? ''}"`,
+          `"${item.uqc_code || ''}"`,
           `"${item.status || 'Active'}"`,
         ]
         csvRows.push(row.join(","))
@@ -3418,7 +3424,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       const nextId = await fetchNextId(type)
       setQuickAddForm(
         type === 'unit'
-          ? { unit_code: nextId, unit_name: '', status: 'Active' }
+          ? { unit_code: nextId, unit_name: '', short_name: '', decimal_places: 2, uqc_id: '', status: 'Active' }
           : { ledger_code: nextId, ledger_name: '', ledger_group_id: '', status: 'Active' }
       )
     }
@@ -3429,6 +3435,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     if (!quickAddDialog) return
     if (quickAddDialog.type === 'unit' && !quickAddForm.unit_name?.trim()) {
       toast({ title: "Error", description: "Unit Name is required", variant: "destructive" })
+      return
+    }
+    if (quickAddDialog.type === 'unit' && !quickAddForm.short_name?.trim()) {
+      toast({ title: "Error", description: "Short name (symbol) is required", variant: "destructive" })
       return
     }
     if (quickAddDialog.type === 'ledger' && !quickAddForm.ledger_name?.trim()) {
@@ -3464,7 +3474,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         : await lookupApi.create(quickAddDialog.type, quickAddForm)
       if (res?.success) {
         const created = res.data
-        const label = quickAddDialog.type === 'unit' ? created.unit_name : quickAddDialog.type === 'ledger' ? created.ledger_name : created.name
+        const label = quickAddDialog.type === 'unit' ? (created.short_name || created.unit_name) : quickAddDialog.type === 'ledger' ? created.ledger_name : created.name
         const queryKey = quickAddDialog.type === 'unit' ? ['unit-options'] : quickAddDialog.type === 'ledger' ? ['ledger-options'] : [`lookup-${quickAddDialog.type}`]
         // Patch the cache directly (rather than just invalidating) so the new
         // row's label renders immediately even if it's pending approval and
@@ -3581,6 +3591,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [unitForm, setUnitForm] = useState<any>({
     unit_code: '',
     unit_name: '',
+    short_name: '',
+    decimal_places: 2,
+    uqc_id: '',
     status: 'Active',
   })
 
@@ -3978,7 +3991,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     })
     setLedgerGroupForm({ group_code: "", group_name: "", status: "Active" })
     setStockGroupForm({ group_code: "", group_name: "", status: "Active" })
-    setUnitForm({ unit_code: "", unit_name: "", status: "Active" })
+    setUnitForm({ unit_code: "", unit_name: "", short_name: "", decimal_places: 2, uqc_id: "", status: "Active" })
     setRawMaterialForm({ raw_material_code: "", name: "", main_uom_id: "", stock_group_id: "", additional_uoms: [], type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, status: "Active" })
     setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
     setShowAdditionalUomSection(false)
@@ -4221,6 +4234,19 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await stockGroupApi.create(stockGroupForm)
         }
       } else if (activeTab === "units") {
+        const unitDecimals = Number(unitForm.decimal_places ?? 2)
+        if (!String(unitForm.unit_name || "").trim()) {
+          toast({ title: "Error", description: "Name of unit is required", variant: "destructive" })
+          return
+        }
+        if (!String(unitForm.short_name || "").trim()) {
+          toast({ title: "Error", description: "Short name (symbol) is required", variant: "destructive" })
+          return
+        }
+        if (!Number.isInteger(unitDecimals) || unitDecimals < 0 || unitDecimals > 6) {
+          toast({ title: "Error", description: "Number of decimal places must be a whole number from 0 to 6", variant: "destructive" })
+          return
+        }
         if (editingItem) {
           res = await unitApi.update(editingItem.id, unitForm)
         } else {
@@ -5023,7 +5049,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       )
       case 'ledger_groups': return <LedgerGroupForm ledgerGroupForm={ledgerGroupForm} setLedgerGroupForm={setLedgerGroupForm} ledgerGroupOptionsData={ledgerGroupOptionsData} editingItem={editingItem} handleLedgerGroupFieldChangeAttempt={handleLedgerGroupFieldChangeAttempt} setLedgerGroupEffectiveDatesOpen={setLedgerGroupEffectiveDatesOpen} />
       case 'stock_groups': return <StockGroupForm stockGroupForm={stockGroupForm} setStockGroupForm={setStockGroupForm} stockGroupOptionsData={stockGroupOptionsData} editingItem={editingItem} handleStockGroupFieldChangeAttempt={handleStockGroupFieldChangeAttempt} setStockGroupEffectiveDatesOpen={setStockGroupEffectiveDatesOpen} />
-      case 'units': return <UnitForm unitForm={unitForm} setUnitForm={setUnitForm} editingItem={editingItem} handleUnitFieldChangeAttempt={handleUnitFieldChangeAttempt} setUnitEffectiveDatesOpen={setUnitEffectiveDatesOpen} />
+      case 'units': return <UnitForm unitForm={unitForm} setUnitForm={setUnitForm} uqcOptions={activeUqcCodes} editingItem={editingItem} handleUnitFieldChangeAttempt={handleUnitFieldChangeAttempt} setUnitEffectiveDatesOpen={setUnitEffectiveDatesOpen} />
       case 'raw_materials': return (
         <RawMaterialForm
           rawMaterialForm={rawMaterialForm}
@@ -5200,6 +5226,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const filteredUnits = unitsList.filter((u: any) =>
     matchesSearch(u?.unit_name, searchTerm) ||
+    matchesSearch(u?.short_name, searchTerm) ||
+    matchesSearch(u?.uqc_code, searchTerm) ||
     matchesSearch(u?.unit_code, searchTerm)
   )
 
@@ -7366,6 +7394,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 tabName="units"
                 codeKey="unit_code"
                 nameKey="unit_name"
+                nameLabel="Name of unit"
+                renderCustomHeaders={() => (
+                  <>
+                    <TableHead>Short name</TableHead>
+                    <TableHead>Decimals</TableHead>
+                    <TableHead>UQC</TableHead>
+                  </>
+                )}
+                renderCustomCells={(item: any) => (
+                  <>
+                    <TableCell className="font-mono font-semibold text-slate-800">{item.short_name || "—"}</TableCell>
+                    <TableCell className="font-mono text-slate-700">{item.decimal_places ?? "—"}</TableCell>
+                    <TableCell className="text-slate-700">{item.uqc_code || "—"}</TableCell>
+                  </>
+                )}
+                renderMobileCustomFields={(item: any) => (
+                  <p className="text-xs text-slate-500">Short name: {item.short_name || "—"} · Decimals: {item.decimal_places ?? "—"} · UQC: {item.uqc_code || "—"}</p>
+                )}
               />
             </MasterCardWrapper>
           </TabsContent>
@@ -8708,6 +8754,25 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               <div className="space-y-2">
                 <Label htmlFor="qa_unit_name">UOM *</Label>
                 <Input id="qa_unit_name" value={quickAddForm.unit_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, unit_name: e.target.value })} placeholder="e.g. Kilograms" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="qa_unit_short_name">Short name (symbol) *</Label>
+                  <Input id="qa_unit_short_name" maxLength={20} value={quickAddForm.short_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, short_name: e.target.value })} placeholder="e.g. KG" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qa_unit_decimals">Number of decimal places</Label>
+                  <Input id="qa_unit_decimals" type="number" min={0} max={6} step={1} value={quickAddForm.decimal_places ?? 2} onChange={e => setQuickAddForm({ ...quickAddForm, decimal_places: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>UQC – Unit Quantity Code</Label>
+                <Select value={quickAddForm.uqc_id ? String(quickAddForm.uqc_id) : ''} onValueChange={val => setQuickAddForm({ ...quickAddForm, uqc_id: val })}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select UQC" /></SelectTrigger>
+                  <SelectContent>
+                    {activeUqcCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="qa_unit_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm({ ...quickAddForm, status: checked === true ? 'Active' : 'Inactive' })} />

@@ -241,7 +241,7 @@ export function FinishedGoodsForm({
               <SelectContent>
                 {unitOptions.map((u: any) => (
                   <SelectItem key={u.id} value={String(u.id)}>
-                    {u.unit_name}
+                    {u.short_name || u.unit_name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -265,7 +265,7 @@ export function FinishedGoodsForm({
               <SelectContent>
                 {unitOptions.map((u: any) => (
                   <SelectItem key={u.id} value={String(u.id)}>
-                    {u.unit_name}
+                    {u.short_name || u.unit_name}
                   </SelectItem>
                 ))}
               </SelectContent>

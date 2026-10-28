@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { masterHistoryApi, unitApi } from "@/lib/api-service"
+import { masterHistoryApi, unitApi, lookupApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
 import { fmtDate, fmtDateTime } from "@/lib/table-format"
 
@@ -31,10 +31,13 @@ const displayVal = (v: any): any =>
 // This form has no natural sub-sections (UOM Name / Status are the only two
 // fields), so it's treated as one flat section - same pattern used for
 // SKU Selling Price/Pricing and Ledger/Stock Group Master.
-const DEDICATED_COLUMNS = ["UOM", "Status"]
+const DEDICATED_COLUMNS = ["UOM", "Short Name", "Decimal Places", "UQC", "Status"]
 
 const FIELD_LABEL_TO_KEY: Record<string, string> = {
   "UOM": "unit_name",
+  "Short Name": "short_name",
+  "Decimal Places": "decimal_places",
+  "UQC": "uqc_id",
   "Status": "status",
 }
 
@@ -83,8 +86,25 @@ export function UnitEffectiveDatesModalView({
   const getInitialFormState = () => ({
     wefDate: getTodayStr(),
     unit_name: unitForm.unit_name || "",
+    short_name: unitForm.short_name || "",
+    decimal_places: unitForm.decimal_places ?? 2,
+    uqc_id: unitForm.uqc_id ? String(unitForm.uqc_id) : "",
     status: unitForm.status || "Active",
   })
+
+  const { data: uqcRows } = useQuery({
+    queryKey: ["lookup-uqc"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll("uqc", { page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.items || []).map((item: any) => ({ ...item, id: item.id ?? item.lookup_id })) : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const uqcList: any[] = (uqcRows || []).filter((r: any) => r.status === "Active")
+  const uqcLabel = (id: any) => {
+    const r = (uqcRows || []).find((x: any) => String(x.id) === String(id))
+    return r ? r.code : "—"
+  }
 
   const [newVersionForm, setNewVersionForm] = useState<Record<string, any>>(getInitialFormState())
 
@@ -189,13 +209,25 @@ export function UnitEffectiveDatesModalView({
       toast({ title: "Validation Error", description: "UOM is required", variant: "destructive" })
       return
     }
+    if (!String(newVersionForm.short_name ?? "").trim()) {
+      toast({ title: "Validation Error", description: "Short name (symbol) is required", variant: "destructive" })
+      return
+    }
+    const dec = Number(newVersionForm.decimal_places)
+    if (!Number.isInteger(dec) || dec < 0 || dec > 6) {
+      toast({ title: "Validation Error", description: "Decimal places must be a whole number from 0 to 6", variant: "destructive" })
+      return
+    }
 
     try {
       setIsSaving(true)
 
       const logEntries = DEDICATED_COLUMNS.map((label) => {
         const key = FIELD_LABEL_TO_KEY[label]
-        return { fieldName: label, oldValue: unitForm[key] ?? "—", newValue: newVersionForm[key] || "—" }
+        if (key === "uqc_id") {
+          return { fieldName: label, oldValue: unitForm.uqc_id ? uqcLabel(unitForm.uqc_id) : "—", newValue: newVersionForm.uqc_id ? uqcLabel(newVersionForm.uqc_id) : "—" }
+        }
+        return { fieldName: label, oldValue: unitForm[key] ?? "—", newValue: newVersionForm[key] ?? "—" }
       })
 
       for (const entry of logEntries) {
@@ -213,6 +245,9 @@ export function UnitEffectiveDatesModalView({
       if (newVersionForm.wefDate <= todayStr) {
         const payload = {
           unit_name: newVersionForm.unit_name,
+          short_name: String(newVersionForm.short_name).trim(),
+          decimal_places: dec,
+          uqc_id: newVersionForm.uqc_id || null,
           status: newVersionForm.status,
         }
         await unitApi.update(unitId, payload)
@@ -372,6 +407,42 @@ export function UnitEffectiveDatesModalView({
                 onChange={(e) => setNewVersionForm(prev => ({ ...prev, unit_name: e.target.value }))}
                 placeholder="e.g. Kilograms"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Short Name</Label>
+              <Input
+                className="h-9 text-xs bg-white rounded-lg border-slate-200 shadow-xs hover:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/30 transition-colors"
+                maxLength={20}
+                value={newVersionForm.short_name ?? ""}
+                onChange={(e) => setNewVersionForm(prev => ({ ...prev, short_name: e.target.value }))}
+                placeholder="e.g. KG"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Decimal Places</Label>
+              <Input
+                type="number"
+                min={0}
+                max={6}
+                step={1}
+                className="h-9 text-xs bg-white rounded-lg border-slate-200 shadow-xs hover:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/30 transition-colors"
+                value={newVersionForm.decimal_places ?? 2}
+                onChange={(e) => setNewVersionForm(prev => ({ ...prev, decimal_places: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">UQC</Label>
+              <Select value={newVersionForm.uqc_id ? String(newVersionForm.uqc_id) : ""} onValueChange={(val) => setNewVersionForm(prev => ({ ...prev, uqc_id: val }))}>
+                <SelectTrigger className="h-9 text-xs bg-white rounded-lg border-slate-200 shadow-xs hover:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/30 transition-colors">
+                  <SelectValue placeholder="Select UQC" />
+                </SelectTrigger>
+                <SelectContent>
+                  {uqcList.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">

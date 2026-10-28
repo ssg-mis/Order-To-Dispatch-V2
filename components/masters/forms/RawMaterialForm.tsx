@@ -123,7 +123,7 @@ export function RawMaterialForm({
               >
                 <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select UOM" /></SelectTrigger>
                 <SelectContent>
-                  {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                  {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button type="button" variant="outline" size="icon" className="shrink-0 h-9 w-9" onClick={() => openQuickAdd('unit', (id) => setRawMaterialForm((prev: any) => ({ ...prev, main_uom_id: String(id) })))}>
@@ -154,7 +154,7 @@ export function RawMaterialForm({
                   const uom = unitOptions.find((u: any) => String(u.id) === String(row.uom_id))
                   return (
                     <div key={idx} className="flex items-center justify-between gap-2 bg-white rounded-md px-3 py-2 text-xs border border-slate-200">
-                      <span className="text-slate-700 font-medium">{uom?.unit_name || `UOM #${row.uom_id}`} — 1 = {row.conversion_ratio} base UOM</span>
+                      <span className="text-slate-700 font-medium">{uom?.short_name || uom?.unit_name || `UOM #${row.uom_id}`} — 1 = {row.conversion_ratio} base UOM</span>
                       <Button
                         type="button"
                         variant="ghost"
@@ -177,7 +177,7 @@ export function RawMaterialForm({
                     <Select value={newAdditionalUom.uom_id} onValueChange={val => setNewAdditionalUom((prev: any) => ({...prev, uom_id: val}))}>
                       <SelectTrigger className="w-full text-xs"><SelectValue placeholder="Select UOM" /></SelectTrigger>
                       <SelectContent>
-                        {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.unit_name}</SelectItem>)}
+                        {unitOptions.map((u: any) => <SelectItem key={u.id} value={String(u.id)}>{u.short_name || u.unit_name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <Button type="button" variant="outline" size="icon" className="shrink-0 h-9 w-9" onClick={() => openQuickAdd('unit', (id) => setNewAdditionalUom(prev => ({ ...prev, uom_id: String(id) })))}>

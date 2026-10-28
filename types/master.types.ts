@@ -144,6 +144,11 @@ export interface Unit {
   id: number
   unit_code: string
   unit_name: string
+  short_name?: string | null
+  decimal_places?: number
+  uqc_id?: number | null
+  uqc_code?: string | null
+  uqc_name?: string | null
   status: string
 }
 
