@@ -19,7 +19,8 @@ import { orderApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeftRight, FileText, Loader2, Printer, Receipt, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtDate, fmtNum, fmtAmount } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 const money = (v: any) =>
   `₹${(parseFloat(v || 0) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -53,7 +54,7 @@ const HISTORY_COLUMNS: StageDataCol<any>[] = [
   { id: "dn", label: "Customer DN", align: "left", accessor: (r) => r.gate.customerDnNo, render: (r) => r.gate.customerDnNo },
   { id: "product", label: "Product", align: "left", accessor: (r) => r.sku?.skuName, render: (r) => dash(r.sku?.skuName) },
   { id: "qty", label: "Qty", type: "number", align: "right", accessor: (r) => num(r.gate.qty), tone: "blue", cellClassName: NUM, render: (r) => fmtNum(num(r.gate.qty), 4) },
-  { id: "cn_amount", label: "CN Amount (₹)", type: "number", align: "right", accessor: (r) => num(r.gate.cnAmount), total: true, tone: "purple", cellClassName: cn(NUM, "font-semibold text-violet-600"), render: (r) => fmtNum(r.gate.cnAmount, 2) },
+  { id: "cn_amount", label: "CN Amount (₹)", type: "number", align: "right", accessor: (r) => num(r.gate.cnAmount), total: true, tone: "purple", cellClassName: cn(NUM, "font-semibold text-violet-600"), render: (r) => fmtAmount(r.gate.cnAmount, 2) },
   { id: "remarks", label: "Remarks", accessor: (r) => r.gate.remarks, align: "left", render: (r) => <span className="block max-w-[200px] truncate" title={r.gate.remarks || ""}>{dash(r.gate.remarks)}</span> },
 ]
 
@@ -73,6 +74,7 @@ const emptyForm = () => ({
 })
 
 export default function IssueReturnDocumentsPage() {
+  const wd = useWeightDecimals()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly } = useAuth()
@@ -253,7 +255,7 @@ export default function IssueReturnDocumentsPage() {
           rowKey={(r: any) => r.gate.id}
           loading={isHistoryLoading}
           emptyText="No credit notes issued yet."
-          format={(n, id) => (id === "cn_amount" ? n.toFixed(2) : fmtQty(n))}
+          format={(n, id) => (id === "cn_amount" ? fmtAmount(n, 2) : fmtQty(n))}
         />
         <StagePagination
           sticky
@@ -341,15 +343,15 @@ export default function IssueReturnDocumentsPage() {
                       {[
                         ["Original Invoice", form.invoiceNo || selected.order.refInvoiceNo, ""],
                         ["Invoice Date", fmtDate(chosen?.invoice_date ?? selected.originalBill?.invoice_date), ""],
-                        ["Invoice Amount (₹)", fmtNum(chosen?.bill_amount ?? selected.originalBill?.bill_amount, 2), ""],
-                        ["Credit Notes So Far (₹)", fmtNum(chosen?.credit_notes_so_far ?? selected.originalBill?.credit_notes_so_far, 2), "text-violet-600"],
-                        ["Max This CN (₹)", fmtNum(maxCn, 2), "text-red-600"],
-                        ["Qty × Invoice Rate (₹)", `${fmtNum(qty, 4)} × ${fmtNum(rate, 2)}`, ""],
+                        ["Invoice Amount (₹)", fmtAmount(chosen?.bill_amount ?? selected.originalBill?.bill_amount, 2), ""],
+                        ["Credit Notes So Far (₹)", fmtAmount(chosen?.credit_notes_so_far ?? selected.originalBill?.credit_notes_so_far, 2), "text-violet-600"],
+                        ["Max This CN (₹)", fmtAmount(maxCn, 2), "text-red-600"],
+                        ["Qty × Invoice Rate (₹)", `${fmtNum(qty, 4)} × ${fmtAmount(rate, 2)}`, ""],
                         ["Sent / Received", selected.receipt ? `${fmtNum(selected.receipt.expected_qty, 4)} / ${fmtNum(selected.receipt.received_qty, 4)}` : "—", ""],
                         ["Good / Damaged", selected.receipt ? `${fmtNum(selected.receipt.good_qty, 4)} / ${fmtNum(selected.receipt.damaged_qty, 4)}${selected.receipt.damaged_disposition ? ` (${selected.receipt.damaged_disposition})` : ""}` : "—", ""],
                         ["Batch · Expiry", selected.receipt ? `${selected.receipt.batch_no || "—"} · ${fmtDate(selected.receipt.expiry_date)}` : "—", ""],
                         ["RST No.", selected.receipt?.rst_no || "—", ""],
-                        ["Net Wt vs Items Gross Wt (kg)", selected.receipt && selected.receipt.net_weight != null ? `${fmtNum(selected.receipt.net_weight, 4)} / ${fmtNum(selected.receipt.expected_weight, 4)}` : "—", ""],
+                        ["Net Wt vs Items Gross Wt (kg)", selected.receipt && selected.receipt.net_weight != null ? `${fmtNum(selected.receipt.net_weight, wd)} / ${fmtNum(selected.receipt.expected_weight, wd)}` : "—", ""],
                       ].map(([label, value, cls]) => (
                         <div key={label as string}>
                           <p className="mb-1 text-[10px] font-bold uppercase leading-none tracking-widest text-slate-500">{label}</p>
@@ -380,7 +382,7 @@ export default function IssueReturnDocumentsPage() {
                         {!isOptionsLoading && invoiceOptions.length === 0 && <option value="">No invoice has this product available</option>}
                         {invoiceOptions.map((o) => (
                           <option key={o.invoice_no} value={o.invoice_no}>
-                            {o.invoice_no} · {fmtDate(o.invoice_date)} · {fmtNum(o.available_qty, 4)} available @ {fmtNum(o.rate, 2)}
+                            {o.invoice_no} · {fmtDate(o.invoice_date)} · {fmtNum(o.available_qty, 4)} available @ {fmtAmount(o.rate, 2)}
                           </option>
                         ))}
                       </select>
@@ -399,7 +401,7 @@ export default function IssueReturnDocumentsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>Rate (from this invoice) (₹)</Label>
-                      <Input className="h-10 bg-slate-50" value={fmtNum(rate, 2)} readOnly />
+                      <Input className="h-10 bg-slate-50" value={fmtAmount(rate, 2)} readOnly />
                       {leftAfter > 0 && !overQty && (
                         <p className="text-[11px] font-semibold text-amber-600">{leftAfter} will stay open for a credit note against another invoice</p>
                       )}
@@ -454,7 +456,7 @@ export default function IssueReturnDocumentsPage() {
                       <Label>CN Amount incl. GST (₹) <span className="text-red-500">*</span></Label>
                       <Input type="number" min={0} className="h-10" value={amountValue} onChange={(e) => setForm((f) => ({ ...f, cnAmount: e.target.value }))} placeholder="0.00" />
                       <p className="text-[11px] text-slate-500">
-                        Suggested ₹ {fmtNum(suggestedAmount, 2)} (qty × invoice rate)
+                        Suggested ₹ {fmtAmount(suggestedAmount, 2)} (qty × invoice rate)
                         {" · "}
                         <button type="button" className="font-semibold text-blue-600 hover:text-blue-800" onClick={() => setForm((f) => ({ ...f, cnAmount: "" }))}>Use</button>
                       </p>
@@ -478,13 +480,13 @@ export default function IssueReturnDocumentsPage() {
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 border-t pt-4 text-sm sm:grid-cols-4">
-                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Taxable Value (₹)</p><p className="font-mono font-semibold tabular-nums">{fmtNum(taxable, 2)}</p></div>
-                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">GST @ {gstPercent}% (₹)</p><p className="font-mono font-semibold tabular-nums">{fmtNum(gstAmt, 2)}</p></div>
-                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">CN Total (₹)</p><p className="font-mono font-bold tabular-nums text-violet-600">{fmtNum(cnAmount, 2)}</p></div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Taxable Value (₹)</p><p className="font-mono font-semibold tabular-nums">{fmtAmount(taxable, 2)}</p></div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">GST @ {gstPercent}% (₹)</p><p className="font-mono font-semibold tabular-nums">{fmtAmount(gstAmt, 2)}</p></div>
+                    <div><p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">CN Total (₹)</p><p className="font-mono font-bold tabular-nums text-violet-600">{fmtAmount(cnAmount, 2)}</p></div>
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Receivable After</p>
                       <p className={cn("font-semibold tabular-nums", overCap && "text-red-600")}>
-                        {overCap ? `Exceeds invoice by ₹ ${fmtNum(cnAmount - (maxCn ?? 0), 2)}` : "Invoice balance reduces by this CN"}
+                        {overCap ? `Exceeds invoice by ₹ ${fmtAmount(cnAmount - (maxCn ?? 0), 2)}` : "Invoice balance reduces by this CN"}
                       </p>
                     </div>
                   </div>

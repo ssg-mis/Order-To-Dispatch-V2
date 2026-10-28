@@ -34,7 +34,8 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-import { fmtNum, fmtDateTime } from "@/lib/table-format"
+import { fmtNum, fmtDateTime, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { usePersistedFilters } from "@/hooks/use-persisted-filters"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
 import {
@@ -71,13 +72,14 @@ const DISPATCH_TABLE_COLUMNS: StageColDef<any>[] = [
   { id: "actualDatetime", label: "Actual Datetime", type: "date", accessor: (r) => r.actual_3 || r.timestamp || null },
 ]
 const DISPATCH_RIGHT_ALIGN = new Set(["partySoDate", "actualDatetime", "totalQtyBox", "totalQtyKgs", "totalOrderAmount"])
-const DISPATCH_NUM_DECIMALS: Record<string, number> = { totalQtyBox: 0, totalQtyKgs: 4, totalOrderAmount: 2 }
+const DISPATCH_NUM_DECIMALS: Record<string, number> = { totalQtyBox: 0, totalOrderAmount: 2 }  // totalQtyKgs uses the Units Master KG decimals (wd)
 const DISPATCH_TOTAL_TONES: Record<string, StageTotalTone> = { totalQtyBox: "blue", totalQtyKgs: "purple", totalOrderAmount: "emerald" }
 
 export default function DispatchMaterialPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled, role } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
@@ -266,27 +268,27 @@ export default function DispatchMaterialPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Entered Rate (Gross incl. GST):</span>
-              <span className="font-mono font-semibold text-slate-800">₹{fmtNum(rate, 2)}</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtAmount(rate, 2)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Total Gross Amount:</span>
-              <span className="font-mono font-semibold text-slate-800">₹{fmtNum(grossTotal, 2)}</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtAmount(grossTotal, 2)}</span>
             </div>
             <div className="flex justify-between border-t border-dashed pt-1.5">
               <span className="text-slate-500">Ex-GST Base Rate:</span>
-              <span className="font-mono text-slate-700">₹{rate.toFixed(2)} ÷ {1 + pct/100} = ₹{rateWoGst.toFixed(4)}</span>
+              <span className="font-mono text-slate-700">₹{fmtAmount(rate, 2)} ÷ {1 + pct/100} = ₹{fmtAmount(rateWoGst, 4)}</span>
             </div>
             <div className="flex justify-between items-center bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-200 text-amber-900 font-bold">
               <span>Taxable Amount:</span>
-              <span className="font-mono text-sm text-amber-700">₹{fmtNum(taxableAmt, 2)}</span>
+              <span className="font-mono text-sm text-amber-700">₹{fmtAmount(taxableAmt, 2)}</span>
             </div>
             <div className="flex justify-between text-[11px] text-slate-500 pt-0.5">
               <span>GST ({pct}%):</span>
-              <span className="font-mono font-semibold text-slate-700">₹{fmtNum(totalGst, 2)}</span>
+              <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(totalGst, 2)}</span>
             </div>
             <div className="flex justify-between items-center bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 text-blue-900 font-bold">
               <span>Final Line Amount:</span>
-              <span className="font-mono text-blue-700">₹{fmtNum(grossTotal, 2)}</span>
+              <span className="font-mono text-blue-700">₹{fmtAmount(grossTotal, 2)}</span>
             </div>
           </div>
 
@@ -373,7 +375,7 @@ export default function DispatchMaterialPage() {
     })
     const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" }
     const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" }
-    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: wd, maximumFractionDigits: wd })
     const fmtDT = (s: any) => {
       if (!s) return ""
       const d = new Date(s)
@@ -1250,8 +1252,8 @@ export default function DispatchMaterialPage() {
         uploadSo: Object.values(group._ordersMap).map((o: any) => o.uploadSo).find(Boolean) || null,
         _productCount: group._allProducts.length,
         totalQtyBox: totalQtyBox > 0 ? fmtNum(totalQtyBox, 0) : "—",
-        totalQtyKgs: totalQtyKgs > 0 ? fmtNum(totalQtyKgs, 4) : "—",
-        totalOrderAmount: totalOrderAmount > 0 ? fmtNum(totalOrderAmount, 2) : "—",
+        totalQtyKgs: totalQtyKgs > 0 ? fmtNum(totalQtyKgs, wd) : "—",
+        totalOrderAmount: totalOrderAmount > 0 ? fmtAmount(totalOrderAmount, 2) : "—",
         deliveryFrom: firstOrderDetails.depoName || "—",
         punchBy: firstOrderDetails.order_punch_user || "—",
         actualDatetime: firstOrderDetails.actual_3 ? fmtDateTime(firstOrderDetails.actual_3) : (firstOrderDetails.timestamp ? fmtDateTime(firstOrderDetails.timestamp) : "—")
@@ -1261,7 +1263,7 @@ export default function DispatchMaterialPage() {
       if (!selectedDepoTab) return true;
       return (group.depoName || "").trim().toUpperCase() === selectedDepoTab.trim().toUpperCase();
     })
-  }, [filteredPendingOrders, selectedDepoTab])
+  }, [filteredPendingOrders, selectedDepoTab, wd])
 
   // ── Shared stage-list table state (column search / date range / sort / totals over loaded rows) ──
   const uniqueRowCustomers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.customerName)).filter(Boolean))).sort() as string[], [displayRows])
@@ -1428,7 +1430,7 @@ export default function DispatchMaterialPage() {
               columns={totalsColumns}
               totals={table.totals}
               count={sortedDisplayRows.length}
-              format={(n, id) => fmtNum(n, DISPATCH_NUM_DECIMALS[id] ?? 4)}
+              format={(n, id) => (isAmountCol(id) ? fmtAmount(n, DISPATCH_NUM_DECIMALS[id] ?? 2) : fmtNum(n, id === "totalQtyKgs" ? wd : (DISPATCH_NUM_DECIMALS[id] ?? 4)))}
               unit=""
               tones={DISPATCH_TOTAL_TONES}
               align={totalsAlign}
@@ -1719,7 +1721,7 @@ export default function DispatchMaterialPage() {
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
                                     <p className="text-base font-black text-blue-700 leading-tight">
-                                      ₹{orderDetails.advanceAmount || 0} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}
+                                      ₹{fmtAmount(orderDetails.advanceAmount || 0)} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}
                                     </p>
                                   </div>
                                   <div>
@@ -1923,7 +1925,7 @@ export default function DispatchMaterialPage() {
                                     <div className="font-semibold text-sm text-slate-800">{prod.productName || "—"}</div>
                                     <div className="text-xs text-slate-400 mt-0.5">{prod.orderNo || "—"}</div>
                                   </TableCell>
-                                  <TableCell className="text-sm font-medium text-slate-600 px-4 py-3 text-right font-mono tabular-nums">{prod.rate ? fmtNum(prod.rate, 2) : "—"}</TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-600 px-4 py-3 text-right font-mono tabular-nums">{prod.rate ? fmtAmount(prod.rate, 2) : "—"}</TableCell>
                                   <TableCell className="text-sm font-semibold text-blue-600 px-4 py-3 text-right font-mono tabular-nums">{prod.approvalQty ? fmtNum(prod.approvalQty, 4) : "—"}</TableCell>
                                   <TableCell className="text-sm font-medium text-slate-500 px-4 py-3 text-right font-mono tabular-nums">{fmtNum(maxLimit, 4)}</TableCell>
                                   <TableCell className="px-4 py-3">
@@ -1981,7 +1983,7 @@ export default function DispatchMaterialPage() {
                                   </TableCell>
                                   <TableCell className="text-sm font-bold text-amber-700 px-4 py-3 text-right font-mono tabular-nums bg-amber-50/30">
                                     <span className="inline-flex items-center justify-end">
-                                      {fmtNum(taxableAmt, 2)}
+                                      {fmtAmount(taxableAmt, 2)}
                                       {renderCalculationInfo(prod, currentDispatchQty)}
                                     </span>
                                   </TableCell>
@@ -2061,32 +2063,32 @@ export default function DispatchMaterialPage() {
                                           <div className="space-y-1.5 text-slate-600 text-[11px]">
                                             <div className="flex justify-between">
                                               <span>Total Taxable Value:</span>
-                                              <span className="font-mono font-bold text-slate-800">₹{fmtNum(totalTaxable, 2)}</span>
+                                              <span className="font-mono font-bold text-slate-800">₹{fmtAmount(totalTaxable, 2)}</span>
                                             </div>
                                             {!isIgstSelected ? (
                                               <>
                                                 <div className="flex justify-between">
                                                   <span>CGST {rateTag(2)}:</span>
-                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtNum(cgst, 2)}</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(cgst, 2)}</span>
                                                 </div>
                                                 <div className="flex justify-between">
                                                   <span>SGST {rateTag(2)}:</span>
-                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtNum(sgst, 2)}</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(sgst, 2)}</span>
                                                 </div>
                                               </>
                                             ) : (
                                               <div className="flex justify-between">
                                                 <span>IGST {rateTag(1)}:</span>
-                                                <span className="font-mono font-semibold text-slate-700">₹{fmtNum(igst, 2)}</span>
+                                                <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(igst, 2)}</span>
                                               </div>
                                             )}
                                             <div className="flex justify-between">
                                               <span>Rounding Off:</span>
-                                              <span className="font-mono font-semibold text-slate-600">{roundingOff.toFixed(2)}</span>
+                                              <span className="font-mono font-semibold text-slate-600">{fmtAmount(roundingOff, 2)}</span>
                                             </div>
                                             <div className="flex justify-between items-center bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-200 text-blue-900 font-bold text-xs mt-1">
                                               <span>Total Order Amount:</span>
-                                              <span className="font-mono text-sm text-blue-700">₹{fmtNum(roundedTotal, 2)}</span>
+                                              <span className="font-mono text-sm text-blue-700">₹{fmtAmount(roundedTotal, 2)}</span>
                                             </div>
                                           </div>
                                         </PopoverContent>
@@ -2097,32 +2099,32 @@ export default function DispatchMaterialPage() {
                                 </TableRow>
                                 <TableRow>
                                   <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value (₹):</span></TableCell>
-                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-bold text-slate-800">{fmtNum(totalTaxable, 2)}</TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-bold text-slate-800">{fmtAmount(totalTaxable, 2)}</TableCell>
                                 </TableRow>
                                 {!isIgstSelected ? (
                                   <>
                                     <TableRow>
                                       <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST{rateTag(2)} (₹):</span></TableCell>
-                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(cgst, 2)}</TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(cgst, 2)}</TableCell>
                                     </TableRow>
                                     <TableRow>
                                       <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST{rateTag(2)} (₹):</span></TableCell>
-                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(sgst, 2)}</TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(sgst, 2)}</TableCell>
                                     </TableRow>
                                   </>
                                 ) : (
                                   <TableRow>
                                     <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST{rateTag(1)} (₹):</span></TableCell>
-                                    <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtNum(igst, 2)}</TableCell>
+                                    <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(igst, 2)}</TableCell>
                                   </TableRow>
                                 )}
                                 <TableRow>
                                   <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off (₹):</span></TableCell>
-                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{roundingOff.toFixed(2)}</TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(roundingOff, 2)}</TableCell>
                                 </TableRow>
                                 <TableRow className="bg-blue-50/50">
                                   <TableCell colSpan={7} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount (₹):</span></TableCell>
-                                  <TableCell className="px-4 py-3 text-right font-mono tabular-nums text-base font-bold text-blue-700">{fmtNum(roundedTotal, 2)}</TableCell>
+                                  <TableCell className="px-4 py-3 text-right font-mono tabular-nums text-base font-bold text-blue-700">{fmtAmount(roundedTotal, 2)}</TableCell>
                                 </TableRow>
                               </tfoot>
                             )
@@ -2163,7 +2165,7 @@ export default function DispatchMaterialPage() {
                                 <div className="grid grid-cols-2 gap-3 text-xs">
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
-                                    <p className="mt-1 font-mono font-bold text-slate-700">{prod.rate ? fmtNum(prod.rate, 2) : "—"}</p>
+                                    <p className="mt-1 font-mono font-bold text-slate-700">{prod.rate ? fmtAmount(prod.rate, 2) : "—"}</p>
                                   </div>
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Approval</p>

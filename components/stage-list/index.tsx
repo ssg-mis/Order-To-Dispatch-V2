@@ -24,6 +24,10 @@ import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import { fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { isWeightCol } from "@/lib/weight-col"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
 import { ShellFiltersContext } from "@/components/workflow/shell-filters-context"
 import { useCanSortColumns } from "@/hooks/use-can-sort-columns"
@@ -403,8 +407,8 @@ const TONE: Record<StageTotalTone, string> = {
   red: "text-red-700",
 }
 
-/** Plain numbers only: no currency symbol, no thousand separators (paste-safe for Excel/Tally). */
-const cleanTotal = (s: string) => s.replace(/[₹,]/g, "").trim()
+/** Plain numbers: no currency symbol (preserves comma separators). */
+const cleanTotal = (s: string) => s.replace(/₹/g, "").trim()
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
 
@@ -432,7 +436,7 @@ export function StageTotalsRow<T>({
   columns: StageColDef<T>[]
   totals: Record<string, number>
   count: number
-  /** Number formatter (default: fixed decimals from `col.decimals`, else 4). Any ₹ and thousand separators are stripped. */
+  /** Number formatter (default: fixed decimals from `col.decimals`, else 4). Any ₹ is stripped, comma separators preserved. */
   format?: (n: number, colId: string) => string
   /** Deprecated and ignored: units belong in the column heading, never in cells. */
   unit?: string | ((colId: string) => string)
@@ -447,6 +451,7 @@ export function StageTotalsRow<T>({
   /** Deprecated: alignment is derived from column type (numbers/dates right, text left). */
   align?: Record<string, "left" | "center" | "right">
 }) {
+  const wd = useWeightDecimals()
   const sentinel = React.useRef<HTMLTableRowElement>(null)
   const [state, setState] = React.useState<{ checked: boolean; slots: Record<string, HTMLElement> }>({ checked: false, slots: {} })
 
@@ -469,6 +474,10 @@ export function StageTotalsRow<T>({
 
   const fmt = (n: number, id: string) => {
     const col = columns.find((c) => c.id === id)
+    if (isAmountCol(id, col?.label)) {
+      return fmtAmount(n, col?.decimals ?? 2)
+    }
+    if (isWeightCol(id, col?.label)) return fmtWeight(n, wd)
     return cleanTotal(format ? format(n, id) : n.toFixed(col?.decimals ?? 4))
   }
   const slotIds = Object.keys(state.slots)

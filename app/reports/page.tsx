@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts"
 import { useQuery } from "@tanstack/react-query"
 import { 
@@ -44,6 +45,8 @@ const API = process.env.NEXT_PUBLIC_API_URL || "/api/v1"
 const OIL_TYPES = ["All", "Soya", "Rice", "Palm", "Other"]
 
 // ─── helpers ───────────────────────────────────────────────────────────────
+// KG values: fixed decimals from the KG unit in the Units Master
+const fmtKg = (n: number, d: number) => (Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d })
 const fmt = (n: number, decimals = 1) => (n || 0).toLocaleString("en-IN", { maximumFractionDigits: decimals })
 const fmtDate = (d: string | null) => {
   if (!d) return "—"
@@ -81,6 +84,7 @@ function downloadCSV(data: any[], filename: string) {
 
 // ─── Main Report Page ──────────────────────────────────────────────────────
 export default function ReportsPage() {
+  const wd = useWeightDecimals()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<"summary" | "skus" | "timeline">("summary")
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
@@ -226,7 +230,7 @@ export default function ReportsPage() {
   const chartData = topSkus.slice(0, 10).map(s => ({
     name: s.sku.length > 18 ? s.sku.slice(0, 18) + "…" : s.sku,
     fullName: s.sku,
-    kg: Math.round(s.total_kg),
+    kg: Number(s.total_kg) || 0,
     oil: s.oil_type
   }))
 
@@ -448,7 +452,7 @@ export default function ReportsPage() {
                     <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">{fmt(card.count, 0)}</div>
                   )}
                   <div className="text-lg font-black mt-0.5" style={{ color: card.color }}>
-                    {fmt(card.kg || 0)} kg
+                    {fmtKg(card.kg || 0, wd)} kg
                   </div>
                 </>
               )}
@@ -532,7 +536,7 @@ export default function ReportsPage() {
                         </TableCell>
                         <TableCell className="py-3 font-black text-slate-800 tabular-nums">
                           <div className="flex flex-col">
-                            <span className="text-sm">{fmt(o.order_quantity_kg ?? parseFloat(o.order_quantity) ?? 0, 1)} kg</span>
+                            <span className="text-sm">{fmtKg(o.order_quantity_kg ?? parseFloat(o.order_quantity) ?? 0, wd)} kg</span>
                             {o.sku_weight > 0 && (
                               <span className="text-[9px] text-slate-400 font-medium">{fmt(o.order_quantity, 0)} × {o.sku_weight}kg</span>
                             )}
@@ -582,7 +586,7 @@ export default function ReportsPage() {
                       tick={{ fill: 'oklch(0.45 0.04 245)', fontSize: 9, fontWeight: 700 }} width={140} />
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(99,102,241,0.12)', fontSize: '12px', fontWeight: 'bold' }}
-                      formatter={(v: any, _: any, p: any) => [`${v.toLocaleString()} KG`, p.payload.fullName]}
+                      formatter={(v: any, _: any, p: any) => [`${fmtKg(v, wd)} KG`, p.payload.fullName]}
                     />
                     <Bar dataKey="kg" radius={[0, 6, 6, 0]}>
                       {chartData.map((entry, idx) => (
@@ -631,16 +635,16 @@ export default function ReportsPage() {
                         </TableCell>
                         {/* SKU Weight per unit */}
                         <TableCell className="py-3 text-right text-[11px] font-bold text-slate-500 tabular-nums">
-                          {s.sku_weight ? `${s.sku_weight} kg` : "—"}
+                          {s.sku_weight ? `${fmtKg(s.sku_weight, wd)} kg` : "—"}
                         </TableCell>
-                        <TableCell className="py-3 text-right font-black text-slate-800 tabular-nums">{fmt(s.total_kg)}</TableCell>
+                        <TableCell className="py-3 text-right font-black text-slate-800 tabular-nums">{fmtKg(s.total_kg, wd)}</TableCell>
                         {/* SKU Qty (Box) */}
                         <TableCell className="py-3 text-right text-slate-600 tabular-nums font-bold">
                           {s.total_qty ? fmt(s.total_qty, 0) : "—"}
                         </TableCell>
                         {/* SKU Qty in KG = total_qty × sku_weight */}
                         <TableCell className="pr-4 py-3 text-right font-black text-indigo-700 tabular-nums">
-                          {s.total_qty_kg ? fmt(s.total_qty_kg) : "—"}
+                          {s.total_qty_kg ? fmtKg(s.total_qty_kg, wd) : "—"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -698,7 +702,7 @@ export default function ReportsPage() {
                       </span>
                       <span className="text-xs font-bold text-slate-500 hidden md:inline">{order.sku_name || "—"}</span>
                       <span className="text-xs font-black tabular-nums" style={{ color: "oklch(0.42 0.18 265)" }}>
-                        {fmt(parseFloat(order.order_quantity) || 0)} KG
+                        {fmtKg(parseFloat(order.order_quantity) || 0, wd)} KG
                       </span>
                       <span className="text-[10px] text-slate-400">{order.stages.length} stages</span>
                     </button>

@@ -29,7 +29,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, CheckCircle, ShieldCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
@@ -62,7 +63,7 @@ const DYN_LABEL_OVERRIDES: Record<string, string> = {
   advanceAmount: "Advance Amount (₹)",
   bill_amount: "Bill Amount (₹)",
 }
-const NUM_DECIMALS: Record<string, number> = { rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2 }
+const NUM_DECIMALS: Record<string, number> = { rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2, actual_qty_dispatch: 0, actual_qty: 0 }
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return "—"
@@ -72,6 +73,8 @@ const formatDate = (dateStr: string) => {
 }
 
 export default function UnloadingPage() {
+  const wd = useWeightDecimals()
+  const numDecimals: Record<string, number> = { ...NUM_DECIMALS, gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd }
   const { user, isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const { toast } = useToast()
   const queryClient = useQueryClient()
@@ -611,7 +614,9 @@ export default function UnloadingPage() {
                       {dynamicColumns.map((colId) => (
                         <TableCell key={colId} className={bodyCellClass(stageColumns.find(c => c.id === colId), "whitespace-nowrap text-slate-600")}>
                           {NUMERIC_DYN_COLS.has(colId)
-                            ? fmtNum(getDynamicColumnValue(group, colId), NUM_DECIMALS[colId] ?? 4)
+                            ? (isAmountCol(colId, stageColumns.find(c => c.id === colId)?.label)
+                                ? fmtAmount(getDynamicColumnValue(group, colId), NUM_DECIMALS[colId] ?? 2)
+                                : fmtNum(getDynamicColumnValue(group, colId), numDecimals[colId] ?? 4))
                             : DATE_DYN_COLS.has(colId)
                               ? fmtDate(getDynamicColumnValue(group, colId))
                               : String(getDynamicColumnValue(group, colId))}

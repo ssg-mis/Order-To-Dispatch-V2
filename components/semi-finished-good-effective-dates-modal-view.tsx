@@ -1,7 +1,10 @@
 "use client"
 
 import {useState, useMemo, useEffect, useRef} from "react"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -61,6 +64,7 @@ export function SemiFinishedGoodEffectiveDatesModalView({
   onBack,
   onSemiFinishedGoodUpdated,
 }: SemiFinishedGoodEffectiveDatesModalViewProps) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
 
   // Scroll to top on mount for history view
   useEffect(() => {
@@ -90,7 +94,7 @@ export function SemiFinishedGoodEffectiveDatesModalView({
   const computeWeightDifference = (convertedKg: any, packingWeight: any) => {
     const ck = parseFloat(convertedKg)
     const pw = parseFloat(packingWeight)
-    return !isNaN(ck) && !isNaN(pw) ? (ck - pw).toFixed(4) : ""
+    return !isNaN(ck) && !isNaN(pw) ? (ck - pw).toFixed(getWeightDecimals()) : ""
   }
 
   const getInitialFormState = () => ({
@@ -793,7 +797,7 @@ export function SemiFinishedGoodEffectiveDatesModalView({
 
                     {DEDICATED_COLUMNS[activeSection].map((label) => (
                       <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                        {getSnapshotValue(version, label)}
+                        {(fmtHistoryWeight(label, getSnapshotValue(version, label), getWeightDecimals()) ?? fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                       </td>
                     ))}
 

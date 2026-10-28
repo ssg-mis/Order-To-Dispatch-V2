@@ -15,7 +15,9 @@ import { approvalApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 type ApprovalAction = "approve" | "reject" | "modify"
 
@@ -36,7 +38,7 @@ const CHECK_ITEMS = [
 
 const fmtMoney = (v: number | null | undefined) => {
   const n = Number(v || 0)
-  return n.toFixed(2)
+  return fmtAmount(n, 2)
 }
 const fmtDate = (v: string | null | undefined) => {
   if (!v) return "—"
@@ -46,6 +48,7 @@ const fmtDate = (v: string | null | undefined) => {
 }
 
 export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted }: ApprovalDetailDialogProps) {
+  const wd = useWeightDecimals()
   const { toast } = useToast()
   const { user, isReadOnly } = useAuth()
   const queryClient = useQueryClient()
@@ -297,7 +300,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                   Order Items &amp; Invoice
                 </span>
                 <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary">
-                  {selectedCount === items.length ? `${items.length} item${items.length === 1 ? "" : "s"}` : `${selectedCount} of ${items.length} items`}{totalKgs > 0 ? ` · ${fmtNum(totalKgs, 3)} KGF` : ""}
+                  {selectedCount === items.length ? `${items.length} item${items.length === 1 ? "" : "s"}` : `${selectedCount} of ${items.length} items`}{totalKgs > 0 ? ` · ${fmtWeight(totalKgs, wd)} KGF` : ""}
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -337,7 +340,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                             {it.orderItem?.orderQuantity != null && it.orderItem?.orderQuantity !== "" ? fmtNum(Number(it.orderItem.orderQuantity), 3) : "—"}
                             {(it.sku?.mainUom || it.orderItem?.uom) && <span className="ml-1 inline-block w-10 text-left font-sans text-xs text-slate-500">{it.sku?.mainUom || it.orderItem?.uom}</span>}
                           </td>
-                          <td className="px-3 text-right font-mono font-semibold tabular-nums text-slate-800">{kgs[idx] != null ? fmtNum(kgs[idx] as number, 3) : "—"}</td>
+                          <td className="px-3 text-right font-mono font-semibold tabular-nums text-slate-800">{kgs[idx] != null ? fmtWeight(kgs[idx] as number, wd) : "—"}</td>
                           <td className="px-3 text-right font-mono tabular-nums">{fmtMoney(line?.rate)}</td>
                           <td className="px-3 text-right font-mono tabular-nums text-slate-600">{fmtNum(Number(line?.gstPercent) || 0, 2)}</td>
                           <td className="px-3 text-right font-mono tabular-nums text-slate-800">{fmtMoney((line?.cgst || 0) + (line?.sgst || 0) + (line?.igst || 0))}</td>
@@ -369,7 +372,7 @@ export function ApprovalDetailDialog({ orderId, open, onOpenChange, onSubmitted 
                     <SumRow label="Rounding Off (₹)" value={previewTotals?.roundingOff} />
                     <tr className="border-t border-primary/20 bg-primary/10">
                       <td colSpan={7} className="px-4 py-3 text-right text-sm font-extrabold uppercase tracking-wide text-primary">Total Order Amount (₹)</td>
-                      <td className="px-4 py-3 text-right text-base font-extrabold tabular-nums text-primary">{fmtNum(previewTotals?.grandTotal || 0, 2)}</td>
+                      <td className="px-4 py-3 text-right text-base font-extrabold tabular-nums text-primary">{fmtAmount(previewTotals?.grandTotal || 0, 2)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -471,7 +474,7 @@ function SumRow({ label, value }: { label: string; value: number | null | undefi
   return (
     <tr className="border-t border-slate-100 bg-slate-50/60">
       <td colSpan={7} className="px-4 py-2 text-right text-xs text-slate-500">{label}</td>
-      <td className="px-4 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">{fmtNum(Number(value) || 0, 2)}</td>
+      <td className="px-4 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">{fmtAmount(Number(value) || 0, 2)}</td>
     </tr>
   )
 }

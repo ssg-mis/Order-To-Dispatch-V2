@@ -14,6 +14,10 @@ import {
 } from "@tanstack/react-table"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { isWeightCol } from "@/lib/weight-col"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { Input } from "@/components/ui/input"
 import { ChevronLeft, ChevronRight, ChevronsUpDown, Search } from "lucide-react"
 
@@ -35,6 +39,7 @@ interface DataTableProps<TData, TValue> {
 }
 
 export function WorkflowTable<TData, TValue>({ columns, data, searchKey }: DataTableProps<TData, TValue>) {
+  const wd = useWeightDecimals()
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
 
@@ -100,7 +105,14 @@ export function WorkflowTable<TData, TValue>({ columns, data, searchKey }: DataT
                       {i === 0
                         ? `Total (${rows.length})`
                         : m.total
-                          ? rows.reduce((sum, r) => sum + (Number(r.getValue(col.id)) || 0), 0).toFixed(m.decimals ?? 4)
+                          ? (() => {
+                              const t = rows.reduce((sum, r) => sum + (Number(r.getValue(col.id)) || 0), 0)
+                              return isAmountCol(col.id, typeof col.columnDef.header === "string" ? col.columnDef.header : undefined)
+                                ? fmtAmount(t, m.decimals ?? 2)
+                                : isWeightCol(col.id, typeof col.columnDef.header === "string" ? col.columnDef.header : undefined)
+                                  ? fmtWeight(t, wd)
+                                  : t.toFixed(m.decimals ?? 4)
+                            })()
                           : ""}
                     </TableCell>
                   )

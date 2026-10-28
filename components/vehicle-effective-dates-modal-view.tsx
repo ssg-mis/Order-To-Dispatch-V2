@@ -30,7 +30,10 @@ import { Combobox } from "@/components/ui/combobox"
 import { MultiCombobox } from "@/components/ui/multi-combobox"
 import { masterHistoryApi, vehicleMasterApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 // Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
 const displayVal = (v: any): any =>
@@ -61,6 +64,7 @@ export function VehicleEffectiveDatesModalView({
   onBack,
   onVehicleUpdated,
 }: VehicleEffectiveDatesModalViewProps) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
 
   // Scroll to top on mount for history view
   useEffect(() => {
@@ -765,7 +769,7 @@ export function VehicleEffectiveDatesModalView({
 
                     {DEDICATED_COLUMNS[activeSection].map((label) => (
                       <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                        {getSnapshotValue(version, label)}
+                        {(fmtHistoryWeight(label, getSnapshotValue(version, label), getWeightDecimals()) ?? fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                       </td>
                     ))}
 

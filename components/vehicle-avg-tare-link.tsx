@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useVehicleTareStats } from "@/hooks/use-vehicle-tare-stats"
 import { fmtDate } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 const kg = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
@@ -16,6 +18,8 @@ const kg = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleStri
  * that lists the actual dispatches the average is computed from.
  */
 export function VehicleAvgTareLink({ vehicleId, vehicleNo }: { vehicleId: number | string; vehicleNo?: string }) {
+  const wd = useWeightDecimals()
+  const kg = (n: number | null | undefined) => (n == null ? "—" : fmtWeight(n, wd))
   const [open, setOpen] = React.useState(false)
 
   const { data, isLoading, isError } = useVehicleTareStats(vehicleId)

@@ -37,7 +37,8 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { getOriginalImageUrl } from "@/lib/original-image-url"
 
 function formatDate(dateStr: string) {
@@ -199,6 +200,7 @@ export default function ActualDispatchPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
@@ -682,9 +684,9 @@ export default function ActualDispatchPage() {
 
     setLoadData(prev => ({
       ...prev,
-      netWeightPacking: (loadData.grossWeight || loadData.tareWeight) ? net.toFixed(2) : prev.netWeightPacking
+      netWeightPacking: (loadData.grossWeight || loadData.tareWeight) ? net.toFixed(wd) : prev.netWeightPacking
     }))
-  }, [loadData.grossWeight, loadData.tareWeight])
+  }, [loadData.grossWeight, loadData.tareWeight, wd])
 
   // Calculate Expected SKU Weight for calculations
   const totalPackingWeightFromSku = useMemo(() => {
@@ -715,9 +717,9 @@ export default function ActualDispatchPage() {
       ...prev,
       // Only once Gross/Tare have been entered (Net is computed) — otherwise the
       // Difference would show a meaningless negative before the user types anything.
-      differanceWeight: loadData.netWeightPacking ? diff.toFixed(4) : ""
+      differanceWeight: loadData.netWeightPacking ? diff.toFixed(wd) : ""
     }))
-  }, [loadData.netWeightPacking, totalCombinedWeight])
+  }, [loadData.netWeightPacking, totalCombinedWeight, wd])
 
   // Baseline tare for the confirmed vehicle: average of the tare weights recorded on its
   // earlier dispatches, or the vehicle's ULW on its first trip. It prefills Tare Wt and
@@ -764,16 +766,16 @@ export default function ActualDispatchPage() {
     const net = parseFloat(loadData.netWeightPacking) || 0
     const msgs: string[] = []
     if (gvw > 0 && gross > gvw) {
-      msgs.push(`Weighbridge gross ${gross.toFixed(2)} KG exceeds vehicle GVW ${gvw.toFixed(2)} KG`)
+      msgs.push(`Weighbridge gross ${gross.toFixed(wd)} KG exceeds vehicle GVW ${gvw.toFixed(wd)} KG`)
     }
     if (passing > 0 && net > passing) {
-      msgs.push(`Weighbridge net ${net.toFixed(2)} KG exceeds vehicle passing weight ${passing.toFixed(2)} KG`)
+      msgs.push(`Weighbridge net ${net.toFixed(wd)} KG exceeds vehicle passing weight ${passing.toFixed(wd)} KG`)
     }
     if (passing > 0 && totalCombinedWeight > passing) {
-      msgs.push(`Total planned weight ${totalCombinedWeight.toFixed(2)} KG exceeds vehicle passing weight ${passing.toFixed(2)} KG`)
+      msgs.push(`Total planned weight ${totalCombinedWeight.toFixed(wd)} KG exceeds vehicle passing weight ${passing.toFixed(wd)} KG`)
     }
     return msgs
-  }, [planVehicleRecord, effectivePassing, loadData.grossWeight, loadData.netWeightPacking, totalCombinedWeight])
+  }, [planVehicleRecord, effectivePassing, loadData.grossWeight, loadData.netWeightPacking, totalCombinedWeight, wd])
 
   // Status (STG 7) is detected automatically: any overload selects "Reject Load", otherwise "Approved Quality".
   // It is only re-selected when the overload result changes, so the user can still change it by hand.
@@ -938,8 +940,9 @@ export default function ActualDispatchPage() {
     if (v === "—") return v
     if (colId === "partySoDate") return v
     if (DATE_COLS.includes(colId)) return formatDate(v)
-    if (NUMERIC_COLS.includes(colId)) return fmtNum(parseAmount(v), colId === "totalWithGst" ? 2 : 4)
-    if (RATE_COLS.includes(colId)) return Number.isFinite(Number(v)) ? fmtNum(v, 2) : v
+    if (colId === "totalWithGst") return fmtAmount(parseAmount(v), 2)
+    if (NUMERIC_COLS.includes(colId)) return fmtNum(parseAmount(v), 4)
+    if (RATE_COLS.includes(colId)) return Number.isFinite(Number(v)) ? fmtAmount(v, 2) : v
     return v
   }
 
@@ -1191,7 +1194,7 @@ export default function ActualDispatchPage() {
 
     const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" };
     const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" };
-    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: wd, maximumFractionDigits: wd });
     const fmtDT = (s: any) => {
       if (!s) return "";
       const d = new Date(s);
@@ -2010,7 +2013,7 @@ export default function ActualDispatchPage() {
                   count={sortedDisplayRows.length}
                   labelColumnId={tableCols[0]?.id}
                   unit=""
-                  format={(n, id) => n.toFixed(id === "totalWithGst" ? 2 : 4)}
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : n.toFixed(4))}
                   tones={{ qtyToDispatch: "blue", orderQty: "purple", approvalQty: "emerald", altQty: "amber", totalWithGst: "default" }}
                   align={Object.fromEntries([["__select", "center" as const], ...tableCols.map(c => [c.id, (RIGHT_COLS.includes(c.id) ? "right" : "left") as "right" | "left"])])}
                 />
@@ -2411,7 +2414,7 @@ export default function ActualDispatchPage() {
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
-                                      <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}</p>
+                                      <p className="text-base font-black text-blue-700 leading-tight">₹{fmtAmount(orderDetails.advanceAmount || 0)} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Broker</p>
@@ -2530,7 +2533,7 @@ export default function ActualDispatchPage() {
                           <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
                             {fmtNum(selectedGroups.flatMap(g => g._allProducts)
                               .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0))}
+                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0), wd)}
                           </TableCell>
                           <TableCell className="px-4"></TableCell>
                         </TableRow>
@@ -2618,7 +2621,7 @@ export default function ActualDispatchPage() {
                               </TableCell>
                               <TableCell className="px-4 py-3 text-right min-w-[130px]">
                                 <div className="font-mono tabular-nums font-black text-sm text-purple-700">
-                                  {calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch)).toFixed(4)}
+                                  {calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch)).toFixed(wd)}
                                 </div>
                               </TableCell>
                               <TableCell className="px-4 py-3 text-left">
@@ -2699,7 +2702,7 @@ export default function ActualDispatchPage() {
                             <div className="grid grid-cols-1 gap-2 pt-2">
                               <div className="bg-purple-50 p-2 rounded-lg">
                                 <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-left">Weight (kg)</p>
-                                <p className="text-[10px] font-black text-purple-700 text-left font-mono tabular-nums">{weight.toFixed(4)}</p>
+                                <p className="text-[10px] font-black text-purple-700 text-left font-mono tabular-nums">{weight.toFixed(wd)}</p>
                               </div>
                             </div>
                           </div>
@@ -2718,7 +2721,7 @@ export default function ActualDispatchPage() {
                                 .reduce((total, prod) => {
                                   const rowKey = prod._rowKey
                                   return total + calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch))
-                                }, 0).toFixed(4)}
+                                }, 0).toFixed(wd)}
                             </p>
                           </div>
                         </div>
@@ -2774,7 +2777,7 @@ export default function ActualDispatchPage() {
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
                             <p className={cn("text-[11px] font-black uppercase leading-none", (effectivePassing > 0 && totalCombinedWeight > effectivePassing) ? "text-red-600" : "text-purple-600")}>
-                              {effectivePassing > 0 ? effectivePassing.toFixed(2) : '0.00'} KG
+                              {effectivePassing > 0 ? effectivePassing.toFixed(wd) : (0).toFixed(wd)} KG
                             </p>
                           </div>
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
@@ -2789,7 +2792,7 @@ export default function ActualDispatchPage() {
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Avg Tare Wt</p>
                             <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
                               {vehicleTareStats && vehicleTareStats.count > 0
-                                ? <>{Number(vehicleTareStats.avgTare).toFixed(2)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
+                                ? <>{Number(vehicleTareStats.avgTare).toFixed(wd)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
                                 : <>--- <span className="text-[9px] font-semibold text-slate-400 normal-case">{planVehicleRecord ? '(first trip, ULW used)' : ''}</span></>}
                             </p>
                           </div>
@@ -3040,7 +3043,7 @@ export default function ActualDispatchPage() {
                       <div className="pt-4 border-t-2 border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Items Gross Weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(4)} />
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(wd)} />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Extra packing material weight</Label>
@@ -3050,7 +3053,7 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(4)} />
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(wd)} />
                         </div>
                       </div>
 
@@ -3091,7 +3094,7 @@ export default function ActualDispatchPage() {
                                 {planVehicleInfo.freightRateType === 'Bhada Rate' ? 'Bhada Rate (Per MT)' : 'Fixed Bhada Amount'}
                               </Label>
                               <div className="h-10 flex items-center px-3 border-2 border-slate-200 rounded-xl font-bold bg-slate-50 text-slate-700">
-                                {planVehicleInfo.freightAmount != null ? `₹${planVehicleInfo.freightAmount}` : '---'}
+                                {planVehicleInfo.freightAmount != null ? `₹${fmtAmount(planVehicleInfo.freightAmount)}` : '---'}
                               </div>
                             </div>
                           </div>

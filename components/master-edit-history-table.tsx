@@ -5,10 +5,15 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, ChevronDown, Clock, User, FileEdit, Loader2, History, ArrowRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { masterHistoryApi } from "@/lib/api-service"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 // Display-only: ISO date / datetime strings become dd/mm/yyyy; everything else unchanged.
-const fmtHistVal = (v: string): string => {
+const fmtHistVal = (v: string, fieldName?: string): string => {
+  const amt = fmtHistoryWeight(fieldName, v, getWeightDecimals()) ?? fmtHistoryAmount(fieldName, v)
+  if (amt !== null) return amt
   const t = String(v).trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return fmtDate(t)
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t)) return fmtDateTime(t)
@@ -35,6 +40,7 @@ interface GroupedHistory {
 }
 
 export function MasterEditHistoryTable({ masterType, recordId }: { masterType: string; recordId?: number | string }) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   const { data: historyData, isLoading } = useQuery({
@@ -221,7 +227,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                           </td>
                           <td className="py-2.5 px-3.5 text-slate-600 bg-amber-50/20 border-r border-slate-200 font-mono text-[11px] break-all">
                             {item.oldValue ? (
-                              <span className="text-slate-700">{fmtHistVal(item.oldValue)}</span>
+                              <span className="text-slate-700">{fmtHistVal(item.oldValue, item.fieldName)}</span>
                             ) : (
                               <span className="text-slate-400 italic text-[10px]">None / Blank</span>
                             )}
@@ -230,7 +236,7 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                             {item.newValue ? (
                               <span className="text-emerald-950 flex items-center gap-1.5">
                                 <ArrowRight className="h-3 w-3 text-emerald-600 shrink-0 hidden sm:inline" />
-                                {fmtHistVal(item.newValue)}
+                                {fmtHistVal(item.newValue, item.fieldName)}
                               </span>
                             ) : (
                               <span className="text-slate-400 italic text-[10px]">Cleared / Empty</span>

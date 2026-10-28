@@ -29,7 +29,8 @@ import { ModifyOrderDialog } from "@/components/order-punch/modify-order-dialog"
 import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { cn } from "@/lib/utils"
 import { formatDate, formatDateTime } from "@/lib/order-punch-format"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { Input } from "@/components/ui/input"
 
 const STAGE_KEY = "order-punch-detail-items"
@@ -68,6 +69,8 @@ function stage3Badge(status: string | null | undefined) {
 }
 
 export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | null, onClose: () => void }) {
+  const wd = useWeightDecimals()
+  const decOf = (id: string) => (id === "alternate_qty_kg" ? wd : DECIMALS[id] ?? 3)
   const searchParams = useSearchParams()
   const { toast } = useToast()
   const { isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
@@ -117,11 +120,11 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
         const raw = id === "approval_status"
           ? (row.approval_status === "true" ? "Approved" : row.approval_status === "false" ? "Rejected" : row.approval_status || "Pending")
           : row[id]
-        const hay = NUMBER_ITEM_COLS.has(id) ? fmtNum(raw, DECIMALS[id] ?? 3) : String(raw ?? "")
+        const hay = NUMBER_ITEM_COLS.has(id) ? fmtNum(raw, decOf(id)) : String(raw ?? "")
         return hay.toLowerCase().includes(v.toLowerCase().trim())
       })
     )
-  }, [items, columnFilters])
+  }, [items, columnFilters, wd])
   const itemTotals = useMemo(() => {
     const t: Record<string, number> = {}
     TOTAL_ITEM_COLS.forEach((id) => { t[id] = filteredItems.reduce((sum, r) => sum + (Number(r[id]) || 0), 0) })
@@ -165,9 +168,9 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
       case "order_quantity":
         return <TableCell key={colId} className={alignClass}>{fmtNum(row.order_quantity, DECIMALS.order_quantity)}</TableCell>
       case "alternate_qty_kg":
-        return <TableCell key={colId} className={alignClass}>{fmtNum(row.alternate_qty_kg, DECIMALS.alternate_qty_kg)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.alternate_qty_kg, wd)}</TableCell>
       case "rate_of_material":
-        return <TableCell key={colId} className={alignClass}>{fmtNum(row.rate_of_material, DECIMALS.rate_of_material)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtAmount(row.rate_of_material, DECIMALS.rate_of_material)}</TableCell>
       case "oil_type":
         return <TableCell key={colId} className={cn("px-4", widthClass)}>{row.oil_type || "—"}</TableCell>
       case "approval_status":
@@ -304,7 +307,7 @@ export function OrderPunchDetailModal({ orderId, onClose }: { orderId: number | 
                         return <TableCell key={`total-${col.id}`} className={cn("font-black text-slate-900 uppercase tracking-wider text-[11px]", alignClass)}>Total ({sortedItems.length})</TableCell>
                       }
                       if (TOTAL_ITEM_COLS.includes(col.id)) {
-                        return <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>{fmtNum(itemTotals[col.id], DECIMALS[col.id] ?? 3)}</TableCell>
+                        return <TableCell key={`total-${col.id}`} className={cn("font-mono font-black text-blue-700", alignClass)}>{fmtNum(itemTotals[col.id], decOf(col.id))}</TableCell>
                       }
                       return <TableCell key={`total-${col.id}`} className={cn("text-slate-400 font-normal", alignClass)}></TableCell>
                     })}

@@ -21,6 +21,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Boxes, Info, Loader2, PackageOpen, Scale } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 const PAGE_SIZE = 25
 
@@ -29,7 +31,6 @@ const num = (v: any) => parseFloat(v) || 0
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000
 
 const dash = (v: any) => (v === null || v === undefined || v === "" ? "—" : String(v))
-const fmtN = (n: number) => n.toFixed(4)
 
 const NUM = "font-mono tabular-nums min-w-[110px]"
 const DT = "font-mono tabular-nums min-w-[110px]"
@@ -65,8 +66,8 @@ const HISTORY_COLUMNS: StageDataCol<any>[] = [
   { id: "shortage", label: "Shortage", type: "number", align: "right", accessor: (r) => num(r.gate.shortageQty), tone: "red", cellClassName: NUM, render: (r) => <span className={cn(num(r.gate.shortageQty) > 0 && "font-semibold text-red-600")}>{fmtNum(num(r.gate.shortageQty), 4)}</span> },
   { id: "depot", label: "Restock Depot", align: "left", accessor: (r) => r.restockDepotName, render: (r) => dash(r.restockDepotName) },
   { id: "rst", label: "RST No.", align: "left", accessor: (r) => r.gate.rstNo, render: (r) => dash(r.gate.rstNo) },
-  { id: "net_wt", label: "Net Wt (kg)", type: "number", align: "right", accessor: (r) => (r.gate.netWeight != null ? num(r.gate.netWeight) : null), total: true, tone: "blue", cellClassName: NUM, render: (r) => (r.gate.netWeight != null ? fmtNum(num(r.gate.netWeight), 4) : "—") },
-  { id: "wt_diff", label: "Wt Diff (kg)", type: "number", align: "right", accessor: (r) => (r.gate.weightDifference != null ? num(r.gate.weightDifference) : null), total: true, tone: "amber", cellClassName: NUM, render: (r) => <span className={cn(Math.abs(num(r.gate.weightDifference)) > 0.5 && "font-semibold text-amber-700")}>{r.gate.weightDifference != null ? fmtNum(num(r.gate.weightDifference), 4) : "—"}</span> },
+  { id: "net_wt", label: "Net Wt (kg)", type: "number", align: "right", accessor: (r) => (r.gate.netWeight != null ? num(r.gate.netWeight) : null), total: true, tone: "blue", cellClassName: NUM, render: (r) => (r.gate.netWeight != null ? fmtWeight(r.gate.netWeight) : "—") },
+  { id: "wt_diff", label: "Wt Diff (kg)", type: "number", align: "right", accessor: (r) => (r.gate.weightDifference != null ? num(r.gate.weightDifference) : null), total: true, tone: "amber", cellClassName: NUM, render: (r) => <span className={cn(Math.abs(num(r.gate.weightDifference)) > 0.5 && "font-semibold text-amber-700")}>{r.gate.weightDifference != null ? fmtWeight(r.gate.weightDifference) : "—"}</span> },
   { id: "remarks", label: "Remarks", accessor: (r) => r.gate.remarks, align: "left", render: (r) => <span className="block max-w-[200px] truncate" title={r.gate.remarks || ""}>{dash(r.gate.remarks)}</span> },
 ]
 
@@ -91,6 +92,8 @@ const emptyForm = () => ({
 })
 
 export default function UnloadReturnedStockPage() {
+  const wd = useWeightDecimals()
+  const totalsFormat = (n: number, id: string) => (id === "net_wt" || id === "wt_diff" ? fmtWeight(n, wd) : n.toFixed(4))
   const { toast } = useToast()
   const { isReadOnly } = useAuth()
   const queryClient = useQueryClient()
@@ -347,7 +350,7 @@ export default function UnloadReturnedStockPage() {
             loading={isHistoryLoading}
             emptyText="No returned stock received yet."
             selects={[{ id: "depot", allLabel: "All Depots", getValue: (r: any) => r.restockDepotName }]}
-            format={fmtN}
+            format={totalsFormat}
           />
           <StagePagination
             sticky
@@ -387,7 +390,7 @@ export default function UnloadReturnedStockPage() {
             ),
           }}
           rowClassName={(r: any) => (selectedId === r.gate.id ? "bg-blue-50/50" : undefined)}
-          format={fmtN}
+          format={totalsFormat}
         />
 
         <StagePagination
@@ -523,17 +526,17 @@ export default function UnloadReturnedStockPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>Net Weight (kg)</Label>
-                      <Input className="h-10 bg-muted" readOnly value={grossWt > 0 ? String(netWt) : ""} placeholder="Gross − Tare" />
+                      <Input className="h-10 bg-muted" readOnly value={grossWt > 0 ? netWt.toFixed(wd) : ""} placeholder="Gross − Tare" />
                     </div>
                     <div className="space-y-2">
                       <Label>Total Items Gross Wt (kg)</Label>
-                      <Input className="h-10 bg-muted" readOnly value={expectedWt > 0 ? String(expectedWt) : ""} placeholder="SKU gross wt × received qty" />
+                      <Input className="h-10 bg-muted" readOnly value={expectedWt > 0 ? expectedWt.toFixed(wd) : ""} placeholder="SKU gross wt × received qty" />
                     </div>
                   </div>
                   {grossWt > 0 && expectedWt > 0 && (
                     <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm", needsDiffReason ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
                       <span>Net weight vs items' total gross weight</span>
-                      <span className="font-semibold tabular-nums">{diffWt > 0 ? "+" : ""}{diffWt} kg {needsDiffReason ? "· reason required" : "· within tolerance"}</span>
+                      <span className="font-semibold tabular-nums">{diffWt > 0 ? "+" : ""}{diffWt.toFixed(wd)} kg {needsDiffReason ? "· reason required" : "· within tolerance"}</span>
                     </div>
                   )}
                   {needsDiffReason && (

@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { fmtNum } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -54,6 +56,7 @@ export function UnloadingForm({
   /** Oil (kg) in one semi-finished good, from the SFG master; used for complete losses. */
   sfgOilKg?: number | null
 }) {
+  const wd = useWeightDecimals()
   const [formData, setFormData] = useState<UnloadingFormData>({
     receivedDate: today(),
     receivedProofFile: null,
@@ -358,7 +361,7 @@ export function UnloadingForm({
                           />
                         ) : (
                           <div className="h-9 flex items-center px-3 rounded-md border border-dashed border-slate-300 text-sm text-slate-500">
-                            {sfgOilKg ? <span className="font-mono tabular-nums">{fmtNum(sfgOilKg, 3)} (auto, full item)</span> : "Auto from SFG master"}
+                            {sfgOilKg ? <span className="font-mono tabular-nums">{fmtWeight(sfgOilKg, wd)} (auto, full item)</span> : "Auto from SFG master"}
                           </div>
                         )}
                       </div>
@@ -379,7 +382,7 @@ export function UnloadingForm({
               <span className="font-semibold text-amber-800 flex items-center gap-2">
                 <Droplets className="h-4 w-4" /> Total oil weight lost (kg)
               </span>
-              <span className="font-black font-mono tabular-nums text-amber-900">{fmtNum(totalOilLost, 3)}</span>
+              <span className="font-black font-mono tabular-nums text-amber-900">{fmtWeight(totalOilLost, wd)}</span>
             </div>
             <FileUploadField
               label={<>Upload Damage Photos <span className="text-red-500">*</span></>}

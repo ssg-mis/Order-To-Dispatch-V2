@@ -1,7 +1,10 @@
 "use client"
 
 import {useState, useMemo, useEffect, useRef} from "react"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -81,6 +84,7 @@ export function SkuSellingPriceEffectiveDatesModalView({
   onBack,
   onSkuSellingPriceUpdated,
 }: SkuSellingPriceEffectiveDatesModalViewProps) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
 
   // Scroll to top on mount for history view
   useEffect(() => {
@@ -587,7 +591,7 @@ export function SkuSellingPriceEffectiveDatesModalView({
                     </td>
 
                     {DEDICATED_COLUMNS.map((fieldName) => {
-                      const val = getSnapshotValue(version, fieldName)
+                      const val = (fmtHistoryWeight(fieldName, getSnapshotValue(version, fieldName), getWeightDecimals()) ?? fmtHistoryAmount(fieldName, getSnapshotValue(version, fieldName)) ?? getSnapshotValue(version, fieldName))
                       if (fieldName === "Status") {
                         return (
                           <td key={fieldName} className="py-2.5 px-3 border-r border-slate-200">

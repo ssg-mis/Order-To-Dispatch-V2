@@ -37,7 +37,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
@@ -97,6 +99,7 @@ export default function DamageAdjustmentPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   // Damage status buttons are remembered permanently; quick search / customer filter only for the session.
   // The Pending/History tab is owned and remembered by WorkflowStageShell (persistKey).
@@ -335,7 +338,7 @@ export default function DamageAdjustmentPage() {
     rate: "Rate (₹)", ratePerLtr: "Rate Per Ltr (₹)", ratePer15Kg: "Rate Per 15 kg (₹)", rateOfMaterial: "Rate Of Material (₹)",
     totalWithGst: "Total Amount With Gst (₹)", advanceAmount: "Advance Amount (₹)", bill_amount: "Bill Amount (₹)",
   }
-  const DMG_NUM_DECIMALS: Record<string, number> = { rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2, products: 0, damageInfo: 0 }
+  const DMG_NUM_DECIMALS: Record<string, number> = { rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2, products: 0, actual_qty_dispatch: 0, actual_qty: 0, damageInfo: 0, gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd }
   const FIXED_COLUMN_IDS = ["partySoDate", "orderNo", "processid", "customerName", "vehicleNo", "orderPunchRemarks", "status", "invoiceNo", "products"]
 
   const dynamicColumns = visibleColumns.filter((colId) => !FIXED_COLUMN_IDS.includes(colId) && ALL_COLUMNS.some((c) => c.id === colId))
@@ -709,7 +712,9 @@ export default function DamageAdjustmentPage() {
                     {dynamicColumns.map((colId) => (
                       <TableCell key={colId} className={bodyCellClass(stageColumns.find(c => c.id === colId), "font-medium text-slate-700")}>
                         {DMG_NUMERIC_DYN_COLS.has(colId)
-                          ? fmtNum(getDynamicColumnValue(group, colId), DMG_NUM_DECIMALS[colId] ?? 4)
+                          ? (isAmountCol(colId, stageColumns.find(c => c.id === colId)?.label)
+                              ? fmtAmount(getDynamicColumnValue(group, colId), DMG_NUM_DECIMALS[colId] ?? 2)
+                              : fmtNum(getDynamicColumnValue(group, colId), DMG_NUM_DECIMALS[colId] ?? 4))
                           : DMG_DATE_DYN_COLS.has(colId)
                             ? fmtDate(getDynamicDateValue(group, colId))
                             : String(getDynamicColumnValue(group, colId))}
@@ -924,7 +929,7 @@ export default function DamageAdjustmentPage() {
                             { label: "DO Date", value: selectedGroup.partySoDate, color: "text-blue-600" },
                             { label: "Transport Type", value: selectedGroup.transportType },
                             { label: "Contact Person", value: `${selectedGroup.contactPerson} — (${selectedGroup.contactWhatsapp})` },
-                            { label: "Broker / Advance (₹)", value: `${(selectedGroup.isOrderThrough === "Direct" || (selectedGroup.isOrderThrough === "—" && !selectedGroup.isBroker)) ? "No" : selectedGroup.brokerName} / ${fmtNum(selectedGroup.advanceAmount, 2)}`, color: "text-blue-600" },
+                            { label: "Broker / Advance (₹)", value: `${(selectedGroup.isOrderThrough === "Direct" || (selectedGroup.isOrderThrough === "—" && !selectedGroup.isBroker)) ? "No" : selectedGroup.brokerName} / ${fmtAmount(selectedGroup.advanceAmount, 2)}`, color: "text-blue-600" },
                             { label: "Credit Status", value: selectedGroup.partyCredit, color: selectedGroup.partyCredit === "Good" ? "text-green-700" : "text-red-600" },
                             { label: "Customer Address", value: selectedGroup.customerAddress },
                             { label: "Invoice No / Date", value: `${selectedGroup.invoiceNo} / ${selectedGroup.invoiceDate}`, color: "text-blue-600" },
@@ -934,18 +939,18 @@ export default function DamageAdjustmentPage() {
                             { label: "Transporter", value: selectedGroup.transporterName },
                             { label: "Vehicle Type", value: selectedGroup.vehicleType },
                             { label: "RTO", value: selectedGroup.rto },
-                            { label: "Passing Weight", value: selectedGroup.passingWeight },
+                            { label: "Passing Weight", value: fmtWeight(selectedGroup.passingWeight, wd) },
                             { label: "Road Tax", value: selectedGroup.roadTax },
-                            { label: "GVW", value: selectedGroup.gvw },
+                            { label: "GVW", value: fmtWeight(selectedGroup.gvw, wd) },
                             { label: "ULW", value: selectedGroup.ulw },
                             { label: "Driver Name", value: selectedGroup.driverName },
                             { label: "Driver Contact", value: selectedGroup.driverContact },
                             { label: "License No", value: selectedGroup.driverLicense },
                             { label: "DL Valid Upto", value: selectedGroup.dlValidUpto ? new Date(selectedGroup.dlValidUpto).toLocaleDateString("en-GB") : "—" },
                             { label: "RST No", value: `#${selectedGroup.rstNo}`, color: "text-blue-600" },
-                            { label: "Gross / Tare / Net", value: `${selectedGroup.grossWeight} / ${selectedGroup.tareWeight} / ${selectedGroup.netWeight}`, color: "text-[#3b82f6]" },
-                            { label: "Weight Diff", value: selectedGroup.weightDiff, color: "text-orange-500" },
-                            { label: "Extra Weight", value: selectedGroup.extraWeight, color: "text-[#d946ef]" },
+                            { label: "Gross / Tare / Net", value: `${fmtWeight(selectedGroup.grossWeight, wd)} / ${fmtWeight(selectedGroup.tareWeight, wd)} / ${fmtWeight(selectedGroup.netWeight, wd)}`, color: "text-[#3b82f6]" },
+                            { label: "Weight Diff", value: fmtWeight(selectedGroup.weightDiff, wd), color: "text-orange-500" },
+                            { label: "Extra Weight", value: fmtWeight(selectedGroup.extraWeight, wd), color: "text-[#d946ef]" },
                           ].map((item, idx) => (
                             <div key={idx} className="space-y-1.5 min-w-0">
                               <Label className="text-[11px] font-medium uppercase text-slate-500 tracking-wide block leading-none">{item.label}</Label>
@@ -1018,7 +1023,7 @@ export default function DamageAdjustmentPage() {
                             <div className="grid grid-cols-2 gap-3 text-xs">
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Inv Qty</p>
-                                  <p className="mt-1 font-mono font-semibold text-slate-900">{fmtNum(product.actualQty || 0, 4)}</p>
+                                  <p className="mt-1 font-mono font-semibold text-slate-900">{fmtNum(product.actualQty || 0, 0)}</p>
                               </div>
                               <div className="rounded-md bg-slate-50 p-2">
                                 <p className="text-[10px] font-black uppercase text-slate-400">Damage Qty</p>
@@ -1080,7 +1085,7 @@ export default function DamageAdjustmentPage() {
                                 <p className="text-sm font-medium text-slate-900">{product.productName}</p>
                                 <p className="text-xs text-slate-500">{product.specificOrderNo}</p>
                               </TableCell>
-                              <TableCell className="px-4 text-right text-sm font-mono tabular-nums">{fmtNum(product.actualQty || 0, 4)}</TableCell>
+                              <TableCell className="px-4 text-right text-sm font-mono tabular-nums">{fmtNum(product.actualQty || 0, 0)}</TableCell>
                               <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium text-slate-900">{fmtNum(product.damageQty || 0, 4)}</TableCell>
                               <TableCell className="px-4 text-left">
                                 <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700 text-[11px] font-medium capitalize">

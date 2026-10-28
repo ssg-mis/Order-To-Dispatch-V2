@@ -26,7 +26,9 @@ import {
   StageTotalsRow,
   type StageTotalTone, StagePagination } from "@/components/stage-list"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-import { fmtNum, fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtDateTime, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { ApprovalDetailDialog } from "@/components/approval-of-order/approval-detail-dialog"
 
 const STAGE_KEY = "approval-of-order"
@@ -60,9 +62,10 @@ const STAGE_COLS: StageColDef<any>[] = PAGE_COLUMNS.map((c) => ({
 const TOTAL_TONES: Record<string, StageTotalTone> = { total_qty_box: "emerald", total_qty_kg: "blue", total_order_amount: "purple" }
 const RIGHT_ALIGN_COLS = new Set(["total_qty_box", "total_qty_kg", "total_order_amount", "party_so_date", "order_datetime", "actual_datetime"])
 const NUMBER_ALIGN: Record<string, "right"> = Object.fromEntries([...RIGHT_ALIGN_COLS].map((id) => [id, "right" as const]))
-const DECIMALS: Record<string, number> = { total_qty_box: 0, total_qty_kg: 3, total_order_amount: 2 }
+const DECIMALS: Record<string, number> = { total_qty_box: 0, total_order_amount: 2 }  // total_qty_kg uses the Units Master KG decimals (getWeightDecimals)
 
-const fmtNumber = (colId: string, v: unknown) => fmtNum(v ?? 0, DECIMALS[colId] ?? 4)
+const fmtNumber = (colId: string, v: unknown) =>
+  isAmountCol(colId) ? fmtAmount(v ?? 0, DECIMALS[colId] ?? 2) : fmtNum(v ?? 0, colId === "total_qty_kg" ? getWeightDecimals() : (DECIMALS[colId] ?? 4))
 
 function formatCell(colId: string, value: any) {
   if (colId === "order_datetime") return fmtDateTime(value)
@@ -82,6 +85,7 @@ function formatCell(colId: string, value: any) {
 
 export default function ApprovalOfOrderPage() {
   const { isAdmin, isFeatureEnabled } = useAuth()
+  useWeightDecimals() // re-render when the Units Master KG decimals load (formatting reads getWeightDecimals)
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [filterValues, setFilterValues] = useState({
     search: "",

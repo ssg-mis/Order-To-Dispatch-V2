@@ -16,7 +16,10 @@ import { Label } from "@/components/ui/label"
 import { Calendar as CalendarIcon } from "lucide-react"
 import { StageSortIcon } from "@/components/stage-list"
 import { cn } from "@/lib/utils"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { isWeightCol } from "@/lib/weight-col"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { useCanSortColumns } from "@/hooks/use-can-sort-columns"
 import type { StageColDef, StageTableState } from "@/hooks/use-stage-table"
 
@@ -102,6 +105,7 @@ const TOTAL_TONE_CLASS: Record<string, string> = {
 }
 
 function TotalCell({ col, table, count, isLabel, decimals, tones, right = isRightCol(col) }: { col: StageColDef<any>; table: StageTableState; count: number; isLabel: boolean; decimals: Record<string, number>; tones?: Record<string, string>; right?: boolean }) {
+  const wd = useWeightDecimals()
   const align = right ? "text-right px-4 tabular-nums" : "px-4"
   if (isLabel) {
     return (
@@ -111,7 +115,13 @@ function TotalCell({ col, table, count, isLabel, decimals, tones, right = isRigh
     )
   }
   if (col.total && table.totals[col.id] !== undefined) {
-    return <TableCell className={cn("font-mono font-black", tones?.[col.id] ? (TOTAL_TONE_CLASS[tones[col.id]] ?? "text-slate-900") : "text-slate-900", align)}>{fmtNum(table.totals[col.id], decimals[col.id] ?? 0)}</TableCell>
+    const val = table.totals[col.id]
+    const formatted = isAmountCol(col.id, col.label)
+      ? fmtAmount(val, decimals[col.id] ?? 2)
+      : isWeightCol(col.id, col.label)
+        ? fmtWeight(val, wd)
+        : fmtNum(val, decimals[col.id] ?? 0)
+    return <TableCell className={cn("font-mono font-black", tones?.[col.id] ? (TOTAL_TONE_CLASS[tones[col.id]] ?? "text-slate-900") : "text-slate-900", align)}>{formatted}</TableCell>
   }
   return <TableCell className={cn("text-slate-400 font-normal", align)} />
 }

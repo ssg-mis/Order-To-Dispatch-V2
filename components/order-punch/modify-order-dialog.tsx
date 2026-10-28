@@ -32,7 +32,9 @@ import { fetchCustomerDropdownOptions, fetchDepotDropdownOptions } from "@/compo
 import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { cn } from "@/lib/utils"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { resolveStateName, gstSupplyTypeOf } from "@/lib/gst-state"
 import { LedgerChargesEditor, incompleteChargeIndex, validCharges, chargesTotal, newChargeRow, type ChargeRow } from "@/components/order-punch/ledger-charges-editor"
 import { FileText, MapPin, Receipt, Loader2, Plus, Trash2 } from "lucide-react"
@@ -45,6 +47,7 @@ interface ModifyOrderDialogProps {
 }
 
 export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: ModifyOrderDialogProps) {
+  const wd = useWeightDecimals()
   const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
   const [isInitializing, setIsInitializing] = useState(false)
@@ -601,7 +604,7 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
               <div className="space-y-0.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Order Weight (KG)</p>
-                <p className="text-sm font-bold text-blue-700">{fmtNum(totalWeight, 3)}</p>
+                <p className="text-sm font-bold text-blue-700">{fmtWeight(totalWeight, wd)}</p>
               </div>
               <div className="space-y-0.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Order Qty</p>
@@ -609,7 +612,7 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
               </div>
               <div className="space-y-0.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total Taxable Amount (₹)</p>
-                <p className="text-sm font-bold text-blue-700">{fmtNum(taxableWithCharges, 2)}</p>
+                <p className="text-sm font-bold text-blue-700">{fmtAmount(taxableWithCharges, 2)}</p>
               </div>
             </div>
 
@@ -659,28 +662,28 @@ export function ModifyOrderDialog({ order, open, onOpenChange, onSaved }: Modify
                   <>
                     <div className="flex justify-between items-center">
                       <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%) (₹)</span>
-                      <span className="font-mono font-bold text-slate-700">{fmtNum(orderCgst, 2)}</span>
+                      <span className="font-mono font-bold text-slate-700">{fmtAmount(orderCgst, 2)}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%) (₹)</span>
-                      <span className="font-mono font-bold text-slate-700">{fmtNum(orderSgst, 2)}</span>
+                      <span className="font-mono font-bold text-slate-700">{fmtAmount(orderSgst, 2)}</span>
                     </div>
                   </>
                 ) : (
                   <div className="flex justify-between items-center">
                     <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
-                    <span className="font-mono font-bold text-slate-700">{fmtNum(orderIgst, 2)}</span>
+                    <span className="font-mono font-bold text-slate-700">{fmtAmount(orderIgst, 2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center">
                   <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
                   <span className="font-mono font-bold text-slate-500">
-                    {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
+                    {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtAmount(Math.abs(orderRoundOff), 2)}`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
                   <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value (₹)</span>
-                  <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtNum(orderRoundedTotal, 2)}</span>
+                  <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtAmount(orderRoundedTotal, 2)}</span>
                 </div>
               </div>
             </div>

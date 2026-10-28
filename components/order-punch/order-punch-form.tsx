@@ -25,7 +25,9 @@ import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
 import { cn, fuzzyMatch } from "@/lib/utils"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import {
   Table,
   TableBody,
@@ -102,6 +104,7 @@ interface OrderPunchFormProps {
 }
 
 export function OrderPunchForm({ onCancel, onSuccess }: OrderPunchFormProps) {
+  const wd = useWeightDecimals()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isLoading: isAuthLoading } = useAuth()
 
@@ -1847,8 +1850,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           {preApprovalProducts.map((p) => (
                             <TableRow key={p.id} className="hover:bg-blue-50/30">
                               <TableCell className="font-medium py-2 px-4">{p.oilType}</TableCell>
-                              <TableCell className="font-semibold text-green-600 py-2 px-4 text-right font-mono tabular-nums">{fmtNum(p.ratePer15Kg || null, 2)}</TableCell>
-                              <TableCell className="font-semibold text-blue-600 py-2 px-4 text-right font-mono tabular-nums">{fmtNum(p.ratePerLtr || null, 2)}</TableCell>
+                              <TableCell className="font-semibold text-green-600 py-2 px-4 text-right font-mono tabular-nums">{fmtAmount(p.ratePer15Kg || null, 2)}</TableCell>
+                              <TableCell className="font-semibold text-blue-600 py-2 px-4 text-right font-mono tabular-nums">{fmtAmount(p.ratePerLtr || null, 2)}</TableCell>
                               <TableCell className="py-2 px-4 text-left">
                                 <Button
                                   type="button"
@@ -1970,7 +1973,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                           <SelectContent>
                             {returnInvoices.map((inv: any) => (
                               <SelectItem key={inv.invoice_no} value={inv.invoice_no}>
-                                {inv.invoice_no} · {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-GB") : "—"} · amount (₹) {fmtNum(inv.bill_amount || 0, 2)} · returnable {inv.returnable_qty}
+                                {inv.invoice_no} · {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-GB") : "—"} · amount (₹) {fmtAmount(inv.bill_amount || 0, 2)} · returnable {inv.returnable_qty}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2016,7 +2019,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                               <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.invoiced_qty, 3)}</td>
                               <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.already_returned_qty, 3)}</td>
                               <td className="px-4 py-2 text-right font-semibold font-mono tabular-nums">{fmtNum(l.returnable_qty, 3)}</td>
-                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtNum(l.rate, 2)}</td>
+                              <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtAmount(l.rate, 2)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -2146,7 +2149,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                                 const nos = parseFloat(product.nosPerMainUom) || 0;
                                 const qty = parseFloat(product.orderQty) || 0;
                                 const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2));
-                                return `₹${(rateWoGst * qty).toFixed(2)}`;
+                                return `₹${fmtAmount(rateWoGst * qty, 2)}`;
                               })()}
                               className="bg-background h-11 min-w-[120px] border-slate-200 font-semibold text-blue-600 text-base px-3"
                             />
@@ -2188,7 +2191,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Weight (KG)</p>
                           <p className="text-sm font-bold text-blue-700">
-                            {fmtNum(products.reduce((sum, p) => sum + (parseFloat(p.skuWeight) || 0) * (parseFloat(p.orderQty) || 0), 0), 3)}
+                            {fmtWeight(products.reduce((sum, p) => sum + (parseFloat(p.skuWeight) || 0) * (parseFloat(p.orderQty) || 0), 0), wd)}
                           </p>
                         </div>
                         <div className="space-y-0.5">
@@ -2200,7 +2203,7 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                         <div className="space-y-0.5">
                           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount (₹)</p>
                           <p className="text-sm font-bold text-blue-700">
-                            {fmtNum(taxableWithCharges, 2)}
+                            {fmtAmount(taxableWithCharges, 2)}
                           </p>
                         </div>
                       </div>
@@ -2253,28 +2256,28 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
                             <>
                               <div className="flex justify-between items-center">
                                 <span className="font-black uppercase text-slate-500 text-[10px]">CGST ({halfRate.toFixed(1)}%) (₹)</span>
-                                <span className="font-mono font-bold text-slate-700">{fmtNum(orderCgst, 2)}</span>
+                                <span className="font-mono font-bold text-slate-700">{fmtAmount(orderCgst, 2)}</span>
                               </div>
                               <div className="flex justify-between items-center">
                                 <span className="font-black uppercase text-slate-500 text-[10px]">SGST ({halfRate.toFixed(1)}%) (₹)</span>
-                                <span className="font-mono font-bold text-slate-700">{fmtNum(orderSgst, 2)}</span>
+                                <span className="font-mono font-bold text-slate-700">{fmtAmount(orderSgst, 2)}</span>
                               </div>
                             </>
                           ) : (
                             <div className="flex justify-between items-center">
                               <span className="font-black uppercase text-slate-500 text-[10px]">IGST ({numericGstRate.toFixed(1)}%) (₹)</span>
-                              <span className="font-mono font-bold text-slate-700">{fmtNum(orderIgst, 2)}</span>
+                              <span className="font-mono font-bold text-slate-700">{fmtAmount(orderIgst, 2)}</span>
                             </div>
                           )}
                           <div className="flex justify-between items-center">
                             <span className="font-black uppercase text-slate-500 text-[10px]">Round Off (₹)</span>
                             <span className="font-mono font-bold text-slate-500">
-                              {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtNum(Math.abs(orderRoundOff), 2)}`}
+                              {gstSupplyType === null ? "—" : `${orderRoundOff >= 0 ? "+" : "-"}${fmtAmount(Math.abs(orderRoundOff), 2)}`}
                             </span>
                           </div>
                           <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-1">
                             <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value (₹)</span>
-                            <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtNum(orderRoundedTotal, 2)}</span>
+                            <span className="font-mono font-black text-blue-700 text-sm">{gstSupplyType === null ? "—" : fmtAmount(orderRoundedTotal, 2)}</span>
                           </div>
                         </div>
                       </div>

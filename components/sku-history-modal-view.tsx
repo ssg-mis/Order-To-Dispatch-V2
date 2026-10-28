@@ -18,11 +18,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { masterHistoryApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 // Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
-const displayVal = (v: any): any =>
-  typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v.trim()) ? fmtDate(v.trim()) : v
+const displayVal = (v: any, fieldName?: string): any =>
+  fmtHistoryWeight(fieldName, v, getWeightDecimals()) ??
+  fmtHistoryAmount(fieldName, v) ??
+  (typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v.trim()) ? fmtDate(v.trim()) : v)
 
 interface SkuHistoryModalViewProps {
   skuId: number
@@ -37,6 +42,7 @@ export function SkuHistoryModalView({
   initialSection = "basic",
   onBack,
 }: SkuHistoryModalViewProps) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
 
   // Scroll to top on mount for history view
   useEffect(() => {
@@ -509,12 +515,12 @@ export function SkuHistoryModalView({
                               <td className="py-2 px-4 text-slate-500">
                                 {oldIsUrl
                                   ? renderFileLink(change.oldValue)
-                                  : displayVal(change.oldValue) || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.oldValue, change.fieldName) || <span className="text-slate-300">—</span>}
                               </td>
                               <td className="py-2 px-4 font-semibold text-emerald-700 bg-emerald-50/40">
                                 {newIsUrl
                                   ? renderFileLink(change.newValue)
-                                  : displayVal(change.newValue) || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.newValue, change.fieldName) || <span className="text-slate-300">—</span>}
                               </td>
                             </tr>
                           )

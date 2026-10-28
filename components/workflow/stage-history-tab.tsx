@@ -11,7 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useQuery } from "@tanstack/react-query"
 import { FIELD_GROUPS, STAGE_NAMES, FIELD_LABELS, fieldOrderPriority } from "./workflow-stage-shell"
-import { fmtDateTime, fmtNum } from "@/lib/table-format"
+import { fmtDateTime, fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { isTimestamp } from "@/lib/date-utils"
 import { LOSS_CAUSES, BORNE_BY_LABEL, type BorneBy } from "@/lib/loss-causes"
 import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
@@ -66,6 +68,9 @@ interface StageHistoryTabProps {
   mapOrderNo?: (order: any) => string
 }
 
+// Weight (KGS) fields get the Units Master KG decimals (not qty / MT / text fields)
+const isWeightKey = (k: string) => /weight(?!ment)|gvw|(^|_)kgs?($|_)/i.test(k) && !/_mt|reason|remark|image|copy|status|user/i.test(k)
+
 export function StageHistoryTab({
   queryKeyPrefix,
   getHistoryApi,
@@ -84,6 +89,7 @@ export function StageHistoryTab({
   mapCustomerName,
   mapOrderNo,
 }: StageHistoryTabProps) {
+  const wd = useWeightDecimals()
   const [historyPage, setHistoryPage] = useState(1)
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<any>(null)
   const [historySearch, setHistorySearch] = useState("")
@@ -260,6 +266,7 @@ export function StageHistoryTab({
 
   const renderValue = (value: any, key?: string) => {
     if (value === null || value === undefined) return "—"
+    if (key && isWeightKey(key) && (typeof value === "number" || (typeof value === "string" && value.trim() !== "" && /^-?\d+(\.\d+)?$/.test(value.trim())))) return fmtWeight(value, wd)
     if (key === "overall_status_of_order") {
       const v = String(value).toLowerCase()
       return v === "true" || v === "approved" ? "Approved" : "Rejected"
@@ -288,7 +295,7 @@ export function StageHistoryTab({
       )
     }
     if (isTimestamp(value)) return fmtDateTime(value)
-    if (typeof value === "number" && Number.isFinite(value) && !/(^|_)(id|no|number|phone|mobile|code)$/i.test(key || "")) return fmtNum(value, 2)
+    if (typeof value === "number" && Number.isFinite(value) && !/(^|_)(id|no|number|phone|mobile|code)$/i.test(key || "")) return isAmountCol(key) ? fmtAmount(value, 2) : fmtNum(value, 2)
     return String(value)
   }
 

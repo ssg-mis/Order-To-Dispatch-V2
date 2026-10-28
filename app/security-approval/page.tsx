@@ -40,7 +40,8 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
@@ -106,6 +107,7 @@ type ColId = typeof PAGE_COLUMNS[number]["id"]
 
 export default function SecurityApprovalPage() {
   const queryClient = useQueryClient()
+  const wd = useWeightDecimals()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -650,8 +652,8 @@ export default function SecurityApprovalPage() {
   const NUMERIC_TOTAL_COLS = new Set(["actual_qty_dispatch"])
   // Table standard: numeric + date extra columns right aligned, plain fixed decimals / dd/mm/yyyy.
   const NUM_DECIMALS: Record<string, number> = {
-    actual_qty_dispatch: 4, orderQty: 4, qtyToDispatch: 4, actual_qty: 4, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
-    gross_weight: 4, tare_weight: 4, net_weight: 4, extra_weight: 4,
+    actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+    gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd,
     rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
   }
   const DATE_COL_IDS = new Set([
@@ -660,7 +662,7 @@ export default function SecurityApprovalPage() {
   ])
   const fmtExtra = (id: string, v: any) => {
     if (v === "—" || v === null || v === undefined || v === "") return "—"
-    if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
+    if (id in NUM_DECIMALS) return isAmountCol(id) ? fmtAmount(v, NUM_DECIMALS[id]) : fmtNum(v, NUM_DECIMALS[id])
     if (DATE_COL_IDS.has(id)) return fmtDate(v)
     return String(v)
   }
@@ -958,7 +960,7 @@ export default function SecurityApprovalPage() {
                   count={sortedDisplayRows.length}
                   labelColumnId={tableCols[0]?.id}
                   unit=""
-                  format={(n) => n.toFixed(4)}
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : n.toFixed(4))}
                   tones={{ actual_qty_dispatch: "blue" }}
                   align={Object.fromEntries(tableCols.map(c => [c.id, colAlign(c.id)]))}
                 />
@@ -1242,7 +1244,7 @@ export default function SecurityApprovalPage() {
 
                                     <div className="sm:col-span-2">
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{orderDetails.advanceAmount || 0}</p>
+                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{fmtAmount(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
 
                                     <div className="sm:col-span-2">
@@ -1327,7 +1329,7 @@ export default function SecurityApprovalPage() {
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-xs font-bold text-slate-900">{firstProd.passing_weight != null && firstProd.passing_weight !== "" ? fmtNum(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
@@ -1376,13 +1378,13 @@ export default function SecurityApprovalPage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
                                       <p className="text-[10px] font-black text-slate-700 leading-none">
-                                        {firstProd.gross_weight || 0}/{firstProd.tare_weight || 0}/<span className="text-blue-600">{(Number(firstProd.gross_weight || 0) - Number(firstProd.tare_weight || 0))}</span>
+                                        {fmtNum(firstProd.gross_weight || 0, wd)}/{fmtNum(firstProd.tare_weight || 0, wd)}/<span className="text-blue-600">{fmtNum(Number(firstProd.gross_weight || 0) - Number(firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Diff / Extra</p>
                                       <p className="text-xs font-black text-slate-700 leading-none">
-                                        <span className={(parseFloat(firstProd.weight_diff) || 0) < 0 ? "text-red-500" : "text-green-600"}>{firstProd.weight_diff || 0}</span> / {firstProd.extra_weight || 0}
+                                        <span className={(parseFloat(firstProd.weight_diff) || 0) < 0 ? "text-red-500" : "text-green-600"}>{fmtNum(firstProd.weight_diff || 0, wd)}</span> / {fmtNum(firstProd.extra_weight || 0, wd)}
                                       </p>
                                     </div>
                                     <div className="sm:col-span-2 xl:col-span-1">
@@ -1405,14 +1407,14 @@ export default function SecurityApprovalPage() {
                                     <TableCell className="w-12 px-4"></TableCell>
                                     <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({orderProducts.length})</TableCell>
                                     <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
-                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch || p.actualQty) || 0), 0))}
+                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch || p.actualQty) || 0), 0), 0)}
                                     </TableCell>
                                     <TableCell className="w-[110px] min-w-[110px] px-4 text-center"></TableCell>
                                     <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
                                       {fmtNum(orderProducts.reduce((sum: number, p: any) => {
                                         const perUnit = Number(p.sku_gross_weight) > 0 ? Number(p.sku_gross_weight) : (Number(p.sku_unit_weight) || 0)
                                         return sum + perUnit * (Number(p.actual_qty_dispatch || p.actualQty) || 0)
-                                      }, 0))}
+                                      }, 0), wd)}
                                     </TableCell>
                                     <TableCell className="w-[200px] min-w-[200px] px-4 text-left"></TableCell>
                                   </TableRow>
@@ -1459,7 +1461,7 @@ export default function SecurityApprovalPage() {
                                         </div>
                                       </TableCell>
                                       <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
-                                        {fmtNum(product.actual_qty_dispatch || product.actualQty || 0)}
+                                        {fmtNum(product.actual_qty_dispatch || product.actualQty || 0, 0)}
                                       </TableCell>
                                       <TableCell className="w-[110px] min-w-[110px] px-4 text-center py-2 text-xs font-semibold text-slate-600 uppercase">
                                         {product.uom || "—"}
@@ -1467,7 +1469,7 @@ export default function SecurityApprovalPage() {
                                       <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
                                         {(() => {
                                           const perUnit = Number(product.sku_gross_weight) > 0 ? Number(product.sku_gross_weight) : (Number(product.sku_unit_weight) || 0)
-                                          return fmtNum(perUnit * (Number(product.actual_qty_dispatch || product.actualQty) || 0))
+                                          return fmtNum(perUnit * (Number(product.actual_qty_dispatch || product.actualQty) || 0), wd)
                                         })()}
                                       </TableCell>
                                       <TableCell className="w-[200px] min-w-[200px] px-4 text-left py-2">
@@ -1508,7 +1510,7 @@ export default function SecurityApprovalPage() {
                                   <div className="flex-1 space-y-1">
                                     <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center gap-2">
                                       <span className="text-xs font-black text-slate-800 uppercase leading-tight break-words">{product.productName}</span>
-                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Actual Qty Dispatch: {fmtNum(product.actual_qty_dispatch || 0)} {product.uom || ""}</Badge>
+                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Actual Qty Dispatch: {fmtNum(product.actual_qty_dispatch || 0, 0)} {product.uom || ""}</Badge>
                                     </div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{product.specificOrderNo}</p>
                                     {product.security_guard_status === 'REJECT' ? (

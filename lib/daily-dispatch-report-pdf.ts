@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 interface DDItem { item_name: string; qty: number; uom: string; rate: number; net: number; gross: number }
 interface DDOil { oil: "rice" | "soya" | "palm" | "other"; label: string; items: DDItem[]; total: { qty: number; net: number; gross: number } }
@@ -67,10 +68,10 @@ const fmtDate = (s: string | null) => {
   if (isNaN(d.getTime())) return ""
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`
 }
-const n3 = (n: number) => (n ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : "-")
+const n3 = (n: number) => { const d = getWeightDecimals(); return n ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) : "-" }
 const r2 = (n: number) => (n ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
 const qd = (n: number) => (n ? String(n) : "-")
-const diffStr = (n: number) => (n < 0 ? `(-)${Math.abs(n).toFixed(3)}` : Number(n || 0).toFixed(3))
+const diffStr = (n: number) => (n < 0 ? `(-)${Math.abs(n).toFixed(getWeightDecimals())}` : Number(n || 0).toFixed(getWeightDecimals()))
 
 // Columns: SN | Customer+Addr | Doc No | Doc Date | Item | Qty | UOM | Rate | Net Wt | Gross Wt | Remarks | Transporter |
 // Transportation To Be | Actual Transportation (the last three come from the approved Stage 20 transport bill)
