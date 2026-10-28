@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Pencil, Trash2, CheckCircle2, Check, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { fmtAmount } from "@/lib/table-format"
 
 interface TdsRuleMasterTableProps {
   subTab: string
@@ -159,7 +160,7 @@ export const TdsRuleMasterTable: React.FC<TdsRuleMasterTableProps> = ({
                     <TableCell className="font-medium pl-6">{item.tds_rule_code}</TableCell>
                     <TableCell className="font-semibold text-slate-900">{item.name || "—"}</TableCell>
                     <TableCell>{item.guiding_rule || "—"}</TableCell>
-                    <TableCell>{item.threshold_limit != null && item.threshold_limit !== '' ? `₹${Number(item.threshold_limit).toLocaleString('en-IN')}` : "—"}</TableCell>
+                    <TableCell>{item.threshold_limit != null && item.threshold_limit !== '' ? `₹${fmtAmount(item.threshold_limit)}` : "—"}</TableCell>
                     <TableCell>{item.rate != null && item.rate !== '' ? `${item.rate}%` : "—"}</TableCell>
                     <TableCell><Badge variant="outline" className="bg-slate-50 text-slate-700 text-xs font-medium">{item.applicable_amount_type || "Amount Exceeding Threshold"}</Badge></TableCell>
                     <TableCell className="text-xs text-slate-600">{item.wef_date ? new Date(item.wef_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>

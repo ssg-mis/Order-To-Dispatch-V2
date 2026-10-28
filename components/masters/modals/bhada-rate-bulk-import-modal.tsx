@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { bhadaRateApi } from "@/lib/api-service"
+import { fmtAmount } from "@/lib/table-format"
 
 interface BhadaRateBulkImportModalProps {
   open: boolean
@@ -478,7 +479,7 @@ export function BhadaRateBulkImportModal({
                       <tr key={idx} className={v.isValid ? "hover:bg-slate-50/50" : "bg-red-50/30"}>
                         <td className="p-2.5 text-center text-slate-400">{v.row.index}</td>
                         <td className="p-2.5 font-bold text-slate-800">{v.row.name || "—"}</td>
-                        <td className="p-2.5">{v.row.rate ? `₹${v.row.rate}` : "₹0"}</td>
+                        <td className="p-2.5">{v.row.rate ? `₹${fmtAmount(v.row.rate)}` : "₹0"}</td>
                         <td className="p-2.5 text-slate-600">{v.row.wefDate || "—"}</td>
                         <td className="p-2.5">
                           <Badge variant="outline" className="text-[10px]">

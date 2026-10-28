@@ -47,6 +47,7 @@ import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress } from "@/hooks/use-customer-addresses"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+import { fmtAmount } from "@/lib/table-format"
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -1373,7 +1374,7 @@ export default function CommitmentPunchPage() {
       case "oil_type":
         return <TableCell key={colId} className={cn(alignClass, widthClass)}><Badge variant="outline" className="text-xs">{row.oil_type || "—"}</Badge></TableCell>
       case "rate":
-        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.rate != null ? fmtNum(row.rate) : "—"}</TableCell>
+        return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.rate != null ? fmtAmount(row.rate, 4) : "—"}</TableCell>
       case "quantity":
         return <TableCell key={colId} className={cn("font-mono", alignClass, widthClass)}>{row.quantity != null ? fmtNum(row.quantity) : "—"}</TableCell>
       case "processed_qty":
@@ -1773,7 +1774,7 @@ export default function CommitmentPunchPage() {
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Rate (PMT)</p>
-                      <p className="mt-1 font-mono font-semibold">{row.rate != null ? fmtNum(row.rate) : "—"}</p>
+                      <p className="mt-1 font-mono font-semibold">{row.rate != null ? fmtAmount(row.rate, 4) : "—"}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Qty (MT)</p>
@@ -2689,7 +2690,7 @@ export default function CommitmentPunchPage() {
                               className="h-8 flex items-center justify-end px-2 bg-slate-50 border rounded text-xs font-mono tabular-nums text-slate-700 cursor-not-allowed"
                               title={row.sku ? `Rate ÷ (1 + ${gstPct}% GST from Finished Good master)` : "Select a SKU"}
                             >
-                              {rateExGst.toFixed(4)}
+                              {fmtAmount(rateExGst, 4)}
                             </div>
                           </td>
                           <td className="py-1 px-2">
@@ -2795,7 +2796,7 @@ export default function CommitmentPunchPage() {
                         <div className="space-y-2">
                           <Label>Rate w/o GST</Label>
                           <div className="h-10 flex items-center justify-end px-3 bg-slate-50 border rounded text-sm font-mono tabular-nums text-slate-700">
-                            {rateWithoutGst(row.sku, row.rate).toFixed(4)}
+                            {fmtAmount(rateWithoutGst(row.sku, row.rate), 4)}
                           </div>
                         </div>
                         <div className="space-y-2">
@@ -3294,7 +3295,7 @@ export default function CommitmentPunchPage() {
   const cols = (DETAIL_COLS[detailsType] || []).filter(c => !detailsHiddenCols[c.id])
   const detailsActiveFiltersCount = Object.values(detailsColumnFilters).filter(v => v.trim()).length
   const fmtDate = (v: any) => (v ? new Date(v).toLocaleDateString("en-GB") : "—")
-  const numTxt = (v: any, dec: number, empty = "—") => (v == null || v === "" ? empty : Number(v).toFixed(dec))
+  const numTxt = (v: any, dec: number, empty = "—", amt = false) => (v == null || v === "" ? empty : amt ? fmtAmount(v, dec) : Number(v).toFixed(dec))
   const alignCls = (c: DCol) => (c.right ? "text-right px-4 tabular-nums" : "px-4")
   const hoverCls = detailsType === "delivered" ? "hover:bg-purple-50/30" : detailsType === "pending" ? "hover:bg-amber-50/30" : "hover:bg-blue-50/30"
 
@@ -3307,7 +3308,7 @@ export default function CommitmentPunchPage() {
 
   const totalFor = (c: DCol) => {
     const sum = filteredDetailsData.reduce((s: number, d: any) => s + (Number(d[c.id]) || 0), 0)
-    return numTxt(sum, c.dec ?? 0)
+    return numTxt(sum, c.dec ?? 0, "—", c.id === "invoice_amount" || c.id === "sku_rate")
   }
 
   const renderDetailCell = (d: any, c: DCol) => {
@@ -3355,7 +3356,7 @@ export default function CommitmentPunchPage() {
       case "invoice_amount":
       case "sku_rate": {
         const empty = ["delivered_box", "pending_box", "delivered_mt", "pending_mt"].includes(c.id) ? numTxt(0, c.dec ?? 0) : "—"
-        return <TableCell key={c.id} className={cn("font-mono font-semibold", numColor(c.id), base)}>{numTxt(d[c.id], c.dec ?? 0, empty)}</TableCell>
+        return <TableCell key={c.id} className={cn("font-mono font-semibold", numColor(c.id), base)}>{numTxt(d[c.id], c.dec ?? 0, empty, c.id === "invoice_amount" || c.id === "sku_rate")}</TableCell>
       }
       default:
         return <TableCell key={c.id} className={base}>{d[c.id] || "—"}</TableCell>
@@ -3570,7 +3571,7 @@ export default function CommitmentPunchPage() {
                           {detailsType === "delivered" && (
                             <div>
                               <p className="text-[10px] font-bold uppercase text-slate-400">Invoice Amount</p>
-                              <p className="font-mono font-bold text-slate-800">{d.invoice_amount != null ? fmtNum(d.invoice_amount, 2) : "—"}</p>
+                              <p className="font-mono font-bold text-slate-800">{d.invoice_amount != null ? fmtAmount(d.invoice_amount, 2) : "—"}</p>
                             </div>
                           )}
                         </div>

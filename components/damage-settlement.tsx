@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FileUploadField } from "@/components/file-upload-field"
 import { cn } from "@/lib/utils"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
 import { AlertTriangle, FileText, IndianRupee, Landmark, Package, Undo2, Truck, type LucideIcon } from "lucide-react"
 
 export type SettlementDocs = {
@@ -94,7 +94,7 @@ export function settlementComplete(st: Settlement, docs: SettlementDocs) {
   return true
 }
 
-const inr = (n: number) => fmtNum(n, 2)
+const inr = (n: number) => fmtAmount(n, 2)
 
 const ACCENTS = {
   blue: "bg-blue-50 text-blue-600",

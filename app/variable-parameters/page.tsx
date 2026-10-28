@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
+import { fmtAmount } from "@/lib/table-format"
 
 const OIL_TYPES = ["Palm Oil", "Soya Oil", "Rice Oil"] as const;
 type OilType = typeof OIL_TYPES[number];
@@ -353,7 +354,7 @@ export default function VariableParametersPage() {
                                                     </div>
                                                     <span className="text-sm font-bold text-slate-300 uppercase letter-spacing-1">Total Base</span>
                                                 </div>
-                                                <span className="text-2xl font-black text-white font-mono">₹{varCalc.total}</span>
+                                                <span className="text-2xl font-black text-white font-mono">₹{fmtAmount(varCalc.total)}</span>
                                             </div>
 
                                             <div className="flex justify-between items-center group">
@@ -363,7 +364,7 @@ export default function VariableParametersPage() {
                                                     </div>
                                                     <span className="text-sm font-bold text-slate-300 uppercase letter-spacing-1">GST (5%)</span>
                                                 </div>
-                                                <span className="text-2xl font-black text-emerald-400 font-mono">₹{varCalc.gst}</span>
+                                                <span className="text-2xl font-black text-emerald-400 font-mono">₹{fmtAmount(varCalc.gst)}</span>
                                             </div>
 
                                             <Separator className="bg-white/10 h-px" />
@@ -372,7 +373,7 @@ export default function VariableParametersPage() {
                                                 <div className="absolute inset-0 bg-indigo-500/10 blur-xl rounded-full opacity-50"></div>
                                                 <Label className="block text-[10px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-3 relative">Grand Total (GT)</Label>
                                                 <div className="text-5xl font-black text-white font-mono tracking-tighter relative">
-                                                    ₹{varCalc.gt}
+                                                    ₹{fmtAmount(varCalc.gt)}
                                                 </div>
                                             </div>
                                         </div>
@@ -461,12 +462,12 @@ export default function VariableParametersPage() {
                                                                         <span className="text-slate-400 text-xs">—</span>
                                                                     )}
                                                                 </TableCell>
-                                                                <TableCell className="font-mono font-medium text-slate-600">₹{row.loose_1_kg_oil_rate ?? row.oil_rate ?? '0.00'}</TableCell>
-                                                                <TableCell className="font-mono font-medium text-slate-600">₹{row.freight_rate ?? '0.00'}</TableCell>
-                                                                <TableCell className="font-mono font-medium text-slate-600">₹{row.total ?? '0.00'}</TableCell>
-                                                                <TableCell className="font-mono font-bold text-emerald-600">₹{row.five_percent_gst ?? row.gst ?? '0.00'}</TableCell>
+                                                                <TableCell className="font-mono font-medium text-slate-600">₹{fmtAmount(row.loose_1_kg_oil_rate ?? row.oil_rate ?? 0)}</TableCell>
+                                                                <TableCell className="font-mono font-medium text-slate-600">₹{fmtAmount(row.freight_rate ?? 0)}</TableCell>
+                                                                <TableCell className="font-mono font-medium text-slate-600">₹{fmtAmount(row.total ?? 0)}</TableCell>
+                                                                <TableCell className="font-mono font-bold text-emerald-600">₹{fmtAmount(row.five_percent_gst ?? row.gst ?? 0)}</TableCell>
                                                                 <TableCell className="text-right font-mono font-black text-indigo-600 pr-8 text-lg">
-                                                                    ₹{row.gt ?? '0.00'}
+                                                                    ₹{fmtAmount(row.gt ?? 0)}
                                                                 </TableCell>
                                                             </TableRow>
                                                         ))}

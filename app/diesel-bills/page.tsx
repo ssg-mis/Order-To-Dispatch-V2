@@ -20,7 +20,7 @@ import { orderApi, dieselBillApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Info, BadgeCheck, Fuel, Loader2, Lock, Plus, Save, Truck } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtDate, fmtNum, fmtAmount } from "@/lib/table-format"
 
 const money = (v: any) =>
   `₹${(parseFloat(v || 0) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -63,13 +63,13 @@ const dieselCustomerCol = (): StageDataCol<any> => ({
 })
 const pumpCol = (): StageDataCol<any> => ({ id: "pump", label: "Fuel Station", align: "left", accessor: (b) => b.pump_name, render: (b) => dash(b.pump_name) })
 const amountCols = (): StageDataCol<any>[] => [
-  { id: "planned_amt", label: "Planned (₹)", type: "number", align: "right", accessor: (b) => num(b.planned_amount), total: true, tone: "blue", cellClassName: "font-mono tabular-nums min-w-[110px]", render: (b) => fmtNum(b.planned_amount, 2) },
-  { id: "actual_amt", label: "Actual (₹)", type: "number", align: "right", accessor: (b) => num(b.actual_amount), total: true, tone: "purple", cellClassName: "font-mono tabular-nums min-w-[110px] font-semibold text-violet-600", render: (b) => fmtNum(b.actual_amount, 2) },
+  { id: "planned_amt", label: "Planned (₹)", type: "number", align: "right", accessor: (b) => num(b.planned_amount), total: true, tone: "blue", cellClassName: "font-mono tabular-nums min-w-[110px]", render: (b) => fmtAmount(b.planned_amount, 2) },
+  { id: "actual_amt", label: "Actual (₹)", type: "number", align: "right", accessor: (b) => num(b.actual_amount), total: true, tone: "purple", cellClassName: "font-mono tabular-nums min-w-[110px] font-semibold text-violet-600", render: (b) => fmtAmount(b.actual_amount, 2) },
   {
     id: "diff", label: "Difference (₹)", type: "number", align: "right", accessor: (b) => diffOf(b), total: true, tone: "amber", cellClassName: "font-mono tabular-nums min-w-[110px]",
     render: (b) => {
       const d = diffOf(b)
-      return <span className={cn(d > 0 && "text-red-600", d < 0 && "text-emerald-600")}>{d > 0 ? "+" : ""}{fmtNum(d, 2)}</span>
+      return <span className={cn(d > 0 && "text-red-600", d < 0 && "text-emerald-600")}>{d > 0 ? "+" : ""}{fmtAmount(d, 2)}</span>
     },
   },
 ]
@@ -305,7 +305,7 @@ export default function DieselBillsPage() {
           emptyText="No approved diesel bills yet."
           selects={[{ id: "pump", allLabel: "All Fuel Stations", getValue: (b: any) => b.pump_name }]}
           onRowClick={(b: any) => setOpenId(b.id)}
-          format={(n) => n.toFixed(2)}
+          format={(n) => fmtAmount(n, 2)}
         />
         <StagePagination
           sticky
@@ -344,7 +344,7 @@ export default function DieselBillsPage() {
             cell: (b: any) => <Checkbox checked={selectedId === b.id} onCheckedChange={() => setSelectedId(selectedId === b.id ? null : b.id)} />,
           }}
           rowClassName={(b: any) => (selectedId === b.id ? "bg-blue-50/50" : undefined)}
-          format={(n) => n.toFixed(2)}
+          format={(n) => fmtAmount(n, 2)}
         />
         <StagePagination
           sticky
@@ -395,7 +395,7 @@ export default function DieselBillsPage() {
                           : `On ${fmtDate(detail.change.accident_date)}${detail.change.accident_location ? ` at ${detail.change.accident_location}` : ""} · Cause: ${detail.change.accident_cause || "—"}${detail.change.accident_loss ? ` · Loss: ${detail.change.accident_loss}` : ""}`}
                       </p>
                       {(detail.change.new_vehicle || detail.change.new_transporter) && (
-                        <p>New vehicle: {detail.change.new_vehicle || "—"}{detail.change.new_driver ? ` (${detail.change.new_driver})` : ""} · Transporter: {detail.change.new_transporter || "—"} · Diesel advance recorded (₹): {fmtNum(detail.change.diesel_advance, 2)}</p>
+                        <p>New vehicle: {detail.change.new_vehicle || "—"}{detail.change.new_driver ? ` (${detail.change.new_driver})` : ""} · Transporter: {detail.change.new_transporter || "—"} · Diesel advance recorded (₹): {fmtAmount(detail.change.diesel_advance, 2)}</p>
                       )}
                       {detail.change.route_decision === "return_to_factory" && <p className="font-semibold">Stock was returned to the factory.</p>}
                     </div>
@@ -439,7 +439,7 @@ export default function DieselBillsPage() {
                   <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-3">
                     <div className="space-y-2">
                       <Label>Planned Diesel (₹)</Label>
-                      <Input className="h-10 bg-slate-50" readOnly value={fmtNum(calc.planned, 2)} />
+                      <Input className="h-10 bg-slate-50" readOnly value={fmtAmount(calc.planned, 2)} />
                       <p className="text-[11px] text-slate-500">
                         {bill.leg_source === "reach" ? "As recorded at Reach Vehicle (Stage 13)" : bill.leg_source === "dispatch" ? "As filled at Actual Dispatch" : "As filled at Plan Vehicle"}
                       </p>
@@ -447,17 +447,17 @@ export default function DieselBillsPage() {
                     <div className="space-y-2">
                       <Label>Actual Diesel (₹) <span className="text-red-500">*</span></Label>
                       {locked ? (
-                        <Input className="h-10 bg-slate-50" readOnly value={fmtNum(calc.actual, 2)} />
+                        <Input className="h-10 bg-slate-50" readOnly value={fmtAmount(calc.actual, 2)} />
                       ) : (
                         <Input type="number" min={0} className="h-10" value={form.actual} disabled={isReadOnly || isProcessing} onChange={(e) => setForm((f) => ({ ...f, actual: e.target.value }))} />
                       )}
                       <p className="text-[11px] text-slate-500">
-                        {bill.leg_source === "reach" ? "No Make Invoice for this vehicle - starts from the planned amount" : `As filled at Make Invoice (₹ ${fmtNum(calc.invoiceDiesel, 2)})`}
+                        {bill.leg_source === "reach" ? "No Make Invoice for this vehicle - starts from the planned amount" : `As filled at Make Invoice (₹ ${fmtAmount(calc.invoiceDiesel, 2)})`}
                       </p>
                     </div>
                     <div className="space-y-2">
                       <Label>Difference (Actual - Planned) (₹)</Label>
-                      <Input className={cn("h-10 bg-slate-50 font-semibold", (locked ? calc.difference : diff) > 0 && "text-red-600", (locked ? calc.difference : diff) < 0 && "text-emerald-600")} readOnly value={`${(locked ? calc.difference : diff) > 0 ? "+" : ""}${fmtNum(locked ? calc.difference : diff, 2)}`} />
+                      <Input className={cn("h-10 bg-slate-50 font-semibold", (locked ? calc.difference : diff) > 0 && "text-red-600", (locked ? calc.difference : diff) < 0 && "text-emerald-600")} readOnly value={`${(locked ? calc.difference : diff) > 0 ? "+" : ""}${fmtAmount(locked ? calc.difference : diff, 2)}`} />
                     </div>
                   </div>
                 </div>
@@ -543,8 +543,8 @@ export default function DieselBillsPage() {
                               <TableRow className="bg-blue-50/60">
                                 <TableHead className="px-4 text-left text-xs font-bold text-slate-700">Total</TableHead>
                                 <TableHead /><TableHead />
-                                <TableHead className="px-4 text-right font-mono text-xs font-bold tabular-nums text-slate-700">{fmtNum(detail.posting.reduce((s: number, p: any) => s + num(p.debit), 0), 2)}</TableHead>
-                                <TableHead className="px-4 text-right font-mono text-xs font-bold tabular-nums text-slate-700">{fmtNum(detail.posting.reduce((s: number, p: any) => s + num(p.credit), 0), 2)}</TableHead>
+                                <TableHead className="px-4 text-right font-mono text-xs font-bold tabular-nums text-slate-700">{fmtAmount(detail.posting.reduce((s: number, p: any) => s + num(p.debit), 0), 2)}</TableHead>
+                                <TableHead className="px-4 text-right font-mono text-xs font-bold tabular-nums text-slate-700">{fmtAmount(detail.posting.reduce((s: number, p: any) => s + num(p.credit), 0), 2)}</TableHead>
                                 <TableHead />
                               </TableRow>
                               <TableRow className="bg-slate-50">
@@ -557,8 +557,8 @@ export default function DieselBillsPage() {
                                   <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtDate(p.entry_date)}</TableCell>
                                   <TableCell className="px-4 text-left text-xs">{p.voucher_type} · {p.voucher_ref}</TableCell>
                                   <TableCell className="px-4 text-left text-xs font-medium">{p.ledger_name}</TableCell>
-                                  <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(p.debit, 2)}</TableCell>
-                                  <TableCell className="px-4 text-right font-mono text-xs font-semibold tabular-nums text-violet-600">{fmtNum(p.credit, 2)}</TableCell>
+                                  <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtAmount(p.debit, 2)}</TableCell>
+                                  <TableCell className="px-4 text-right font-mono text-xs font-semibold tabular-nums text-violet-600">{fmtAmount(p.credit, 2)}</TableCell>
                                   <TableCell className="px-4 text-left text-xs">{p.narration}</TableCell>
                                 </TableRow>
                               ))}
@@ -572,7 +572,7 @@ export default function DieselBillsPage() {
                   ) : bill.status === "Submitted" ? (
                     canApprove ? (
                       <div className="space-y-2">
-                        <p className="text-xs text-slate-600">On approval the figures are locked and ₹ {fmtNum(calc.actual, 2)} is posted as a credit to the selected fuel station ledger.</p>
+                        <p className="text-xs text-slate-600">On approval the figures are locked and ₹ {fmtAmount(calc.actual, 2)} is posted as a credit to the selected fuel station ledger.</p>
                         <Input className="h-10" value={approvalRemarks} onChange={(e) => setApprovalRemarks(e.target.value)} placeholder="Approval remarks (optional)" />
                       </div>
                     ) : (

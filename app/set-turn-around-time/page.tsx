@@ -15,25 +15,27 @@ import { useAuth } from "@/hooks/use-auth"
 import { processStageApi } from "@/lib/api-service"
 
 const STAGE_OPTIONS = [
-  "Commitment Punch",
-  "Order Punch",
   "Pre Approval",
   "Approval of Order",
   "Dispatch Planning",
+  "Plan Vehicle",
+  "Gate In",
   "Actual Dispatch",
   "Security Guard Approval",
   "Make Invoice (Proforma)",
   "Check Invoice",
+  "Make Final Invoice",
   "Gate Out",
   "Reach Vehicle",
   "Unloading",
   "Damage Adjustment",
+  "Collection",
+  "Return",
   "Credit Note",
   "Unload Returned Stock",
   "Issue Documents Against Returned Stock",
   "Transport Bills",
   "Diesel Bills",
-  "Gate In",
 ]
 
 interface ProcessStage {
@@ -261,7 +263,7 @@ export default function SetTurnAroundTimePage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
-                    <TableHead className="w-[80px]">ID</TableHead>
+                    <TableHead className="w-[80px]">No.</TableHead>
                     <TableHead>Stage Name</TableHead>
                     <TableHead className="text-center">TAT</TableHead>
                     <TableHead className="text-center">Submitted At</TableHead>
@@ -283,9 +285,10 @@ export default function SetTurnAroundTimePage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    stages.map((stage) => (
+                    stages.map((stage, index) => (
                       <TableRow key={stage.id}>
-                        <TableCell className="font-medium">{stage.id}</TableCell>
+                        {/* Position in the workflow order (1, 2, 3 ...); the database id is internal and not shown. */}
+                        <TableCell className="font-medium">{index + 1}</TableCell>
                         <TableCell>{stage.stage_name}</TableCell>
                         <TableCell className="text-center">
                           <Badge variant="secondary" className="font-semibold">

@@ -22,7 +22,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { masterHistoryApi, tdsRuleApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 
 // Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
 const displayVal = (v: any): any =>
@@ -543,7 +543,7 @@ export function TdsRuleEffectiveDatesModalView({
 
                     {DEDICATED_COLUMNS.map((label) => (
                       <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                        {getSnapshotValue(version, label)}
+                        {(fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                       </td>
                     ))}
 

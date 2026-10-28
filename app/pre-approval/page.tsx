@@ -63,7 +63,7 @@ import {
   StageActiveChips,
   StageSortIcon,
   type StageTotalTone, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 
@@ -812,7 +812,7 @@ export default function PreApprovalPage() {
           if (enteredRate < minAllowed) {
             toast({
               title: "Rate Too Low",
-              description: `Final rate for ${rateData?.skuName} is below landing cost (₹${minAllowed}).`,
+              description: `Final rate for ${rateData?.skuName} is below landing cost (₹${fmtAmount(minAllowed)}).`,
               variant: "destructive"
             });
             setIsApproving(false);
@@ -822,7 +822,7 @@ export default function PreApprovalPage() {
           if (enteredRate > maxAllowed) {
             toast({
               title: "Rate Too High",
-              description: `Final rate for ${rateData?.skuName} exceeds allowed margin (Max ₹${maxAllowed}).`,
+              description: `Final rate for ${rateData?.skuName} exceeds allowed margin (Max ₹${fmtAmount(maxAllowed)}).`,
               variant: "destructive"
             });
             setIsApproving(false);
@@ -1486,6 +1486,7 @@ export default function PreApprovalPage() {
   const preFmtCell = (id: string, v: any) => {
     const d = PRE_DECIMALS[id]
     if (d === undefined || v === null || v === undefined || v === "" || v === "—") return v
+    if (isAmountCol(id)) return Number.isFinite(Number(v)) ? fmtAmount(v, d) : v
     return Number.isFinite(Number(v)) ? fmtNum(v, d) : v
   }
   const PRE_DATE_RAW: Record<string, string> = { partySoDate: "soDate", startDate: "startDate", endDate: "endDate", deliveryDate: "deliveryDate" }
@@ -1778,9 +1779,9 @@ export default function PreApprovalPage() {
       const minAllowed = dynamicCost.landingCost
       const maxAllowed = minAllowed * (1 + dynamicCost.margin / 100)
       if (enteredRate < minAllowed) {
-        setRateValidationErrors({ ...rateValidationErrors, [rowKey]: `Below Landing Cost (Min ₹${minAllowed})` })
+        setRateValidationErrors({ ...rateValidationErrors, [rowKey]: `Below Landing Cost (Min ₹${fmtAmount(minAllowed)})` })
       } else if (enteredRate > maxAllowed) {
-        setRateValidationErrors({ ...rateValidationErrors, [rowKey]: `Exceeds Max Margin (Max ₹${maxAllowed.toFixed(2)})` })
+        setRateValidationErrors({ ...rateValidationErrors, [rowKey]: `Exceeds Max Margin (Max ₹${fmtAmount(maxAllowed)})` })
       } else {
         const newErrors = { ...rateValidationErrors }
         delete newErrors[rowKey]
@@ -1957,7 +1958,7 @@ export default function PreApprovalPage() {
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount (₹)</p>
-                                      <p className="text-base font-black text-blue-700 leading-tight">{fmtNum(orderDetails.advanceAmount || 0, 2)}</p>
+                                      <p className="text-base font-black text-blue-700 leading-tight">{fmtAmount(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Payment</p>
@@ -2314,12 +2315,12 @@ export default function PreApprovalPage() {
                                                           if (enteredRate < minAllowed) {
                                                             setRateValidationErrors({
                                                               ...rateValidationErrors,
-                                                              [rowKey]: `Below Landing Cost (Min ₹${minAllowed})`
+                                                              [rowKey]: `Below Landing Cost (Min ₹${fmtAmount(minAllowed)})`
                                                             });
                                                           } else if (enteredRate > maxAllowed) {
                                                             setRateValidationErrors({
                                                               ...rateValidationErrors,
-                                                              [rowKey]: `Exceeds Max Margin (Max ₹${maxAllowed.toFixed(2)})`
+                                                              [rowKey]: `Exceeds Max Margin (Max ₹${fmtAmount(maxAllowed)})`
                                                             });
                                                           } else {
                                                             const newErrors = { ...rateValidationErrors };
@@ -2415,7 +2416,7 @@ export default function PreApprovalPage() {
                                                     return (
                                                       <>
                                                         <p className="text-[8px] text-slate-400 mt-1 text-center font-bold">
-                                                          Range: {fmtNum(dynamicCost.landingCost, 2)} - {fmtNum(maxRate, 2)}
+                                                          Range: {fmtAmount(dynamicCost.landingCost, 2)} - {fmtAmount(maxRate, 2)}
                                                         </p>
                                                         {warningElement}
                                                       </>
@@ -2635,7 +2636,7 @@ export default function PreApprovalPage() {
                                                   <p className="text-[9px] text-red-600 font-black uppercase tracking-tighter">{rateValidationErrors[rowKey]}</p>
                                                 )}
                                                 {dynamicCost && !dynamicCost.noVarCalc && maxRate && (
-                                                  <p className="text-[9px] text-slate-400 font-bold break-words">Range: {fmtNum(dynamicCost.landingCost, 2)} - {fmtNum(maxRate, 2)}</p>
+                                                  <p className="text-[9px] text-slate-400 font-bold break-words">Range: {fmtAmount(dynamicCost.landingCost, 2)} - {fmtAmount(maxRate, 2)}</p>
                                                 )}
                                                 {dynamicCost?.noVarCalc && (
                                                   <p className="rounded-sm border border-red-200 bg-red-50 p-1 text-[10px] font-bold text-red-700">
@@ -3054,7 +3055,7 @@ export default function PreApprovalPage() {
                                           </div>
                                         </TableCell>
                                         <TableCell className="text-right font-black text-blue-700 text-lg py-3 px-4 rounded-r-2xl font-mono tabular-nums">
-                                          {fmtNum(item.calculatedRate, 2)}
+                                          {fmtAmount(item.calculatedRate, 2)}
                                         </TableCell>
                                       </TableRow>
                                     ))}
@@ -3106,7 +3107,7 @@ export default function PreApprovalPage() {
                                           </div>
                                         </TableCell>
                                         <TableCell className="text-right font-black text-green-700 text-lg py-3 px-4 rounded-r-2xl font-mono tabular-nums">
-                                          {fmtNum(item.calculatedRate, 2)}
+                                          {fmtAmount(item.calculatedRate, 2)}
                                         </TableCell>
                                       </TableRow>
                                     ))}

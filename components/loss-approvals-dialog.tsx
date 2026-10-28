@@ -10,11 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { unloadingApi } from "@/lib/api-service"
 import { LOSS_CAUSES, BORNE_BY_LABEL, BORNE_BY_STYLE, type BorneBy } from "@/lib/loss-causes"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtAmount } from "@/lib/table-format"
 import { Loader2, CheckCircle, XCircle, ImageIcon } from "lucide-react"
 
 const PARTIES: BorneBy[] = ["company", "transporter", "customer"]
-const fmt = (n: any) => fmtNum(n || 0, 2)
+const fmt = (n: any) => fmtAmount(n || 0, 2)
 
 /**
  * Company Admin sign-off on losses reported at Unloading. Approving lets the loss
@@ -110,7 +110,7 @@ export function LossApprovalsDialog({ open, onOpenChange }: { open: boolean; onO
                       <div className="min-w-0">
                         <p className="font-black text-blue-700">{row.so_no} <span className="text-slate-400 font-medium">· {row.invoice_no || "No invoice"}</span></p>
                         <p className="text-sm font-medium text-slate-700">{row.party_name}</p>
-                        <p className="text-xs text-slate-500">{row.product_name} · Dispatched qty: <span className="font-mono tabular-nums">{fmtNum(row.actual_qty_dispatch || 0, 4)}</span> · Received: <span className="font-mono tabular-nums">{fmtDate(row.received_date)}</span></p>
+                        <p className="text-xs text-slate-500">{row.product_name} · Dispatched qty: <span className="font-mono tabular-nums">{fmtNum(row.actual_qty_dispatch || 0, 0)}</span> · Received: <span className="font-mono tabular-nums">{fmtDate(row.received_date)}</span></p>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total loss (₹)</p>

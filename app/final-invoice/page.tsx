@@ -23,7 +23,7 @@ import { finalInvoiceApi, orderApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 import { cn } from "@/lib/utils"
 
 const FINAL_INVOICE_COLS: StageColDef<any>[] = [
@@ -161,7 +161,7 @@ function FinalInvoiceTable({
                 count={table.rows.length}
                 unit=""
                 trailingCells={1}
-                format={(n) => fmtNum(n, 2)}
+                format={(n, id) => isAmountCol(id) ? fmtAmount(n, 2) : fmtNum(n, 2)}
                 tones={{ bill_amount: "emerald" }}
                 align={{ bill_amount: "right" }}
               />
@@ -340,11 +340,11 @@ export default function FinalInvoicePage() {
           <div class="field"><label>Customer Name</label><p>${row.customer_name || '—'}</p></div>
           <div class="field"><label>Invoice No.</label><p>${row.invoice_no || '—'}</p></div>
           <div class="field"><label>Vehicle No.</label><p>${row.vehicle_no || '—'}</p></div>
-          <div class="field"><label>Bill Amount</label><p>₹${parseFloat(row.bill_amount || 0).toFixed(2)}</p></div>
+          <div class="field"><label>Bill Amount</label><p>₹${fmtAmount(row.bill_amount || 0, 2)}</p></div>
           <div class="field"><label>Insurance</label><p>${row.insurance_details || '—'}</p></div>
-          <div class="field"><label>Diesel Amount</label><p>₹${row.diesel_amount || 0}</p></div>
-          <div class="field"><label>Driver Advance (Cash)</label><p>₹${row.driver_advance_cash || 0}</p></div>
-          <div class="field"><label>Driver Advance (Bank)</label><p>₹${row.driver_advance_bank || 0}</p></div>
+          <div class="field"><label>Diesel Amount</label><p>₹${fmtAmount(row.diesel_amount || 0, 2)}</p></div>
+          <div class="field"><label>Driver Advance (Cash)</label><p>₹${fmtAmount(row.driver_advance_cash || 0, 2)}</p></div>
+          <div class="field"><label>Driver Advance (Bank)</label><p>₹${fmtAmount(row.driver_advance_bank || 0, 2)}</p></div>
         </div>
         ${row.invoice_copy ? `<div class="doc-link">📎 Proforma Invoice: <a href="${row.invoice_copy}" target="_blank">${row.invoice_copy.split('/').pop()}</a></div>` : ''}
         ${row.e_invoice_file ? `<div class="doc-link">✅ eInvoice: <a href="${row.e_invoice_file}" target="_blank">${row.e_invoice_file.split('/').pop()}</a></div>` : '<div class="doc-link" style="color:#c00">⚠️ eInvoice not uploaded</div>'}
@@ -364,7 +364,7 @@ export default function FinalInvoicePage() {
       case "vehicle_no":
         return <TableCell key={colId} className="px-4 text-left">{row.vehicle_no || "—"}</TableCell>
       case "bill_amount":
-        return <TableCell key={colId} className="px-4 text-right font-semibold font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtNum(row.bill_amount || 0, 2)}</TableCell>
+        return <TableCell key={colId} className="px-4 text-right font-semibold font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtAmount(row.bill_amount || 0, 2)}</TableCell>
       case "documents":
         return (
           <TableCell key={colId} className="px-4 text-left" onClick={(e) => e.stopPropagation()}>
@@ -504,10 +504,10 @@ export default function FinalInvoicePage() {
                   <DetailTile label="Invoice Date"><span className="font-mono">{selectedRow.invoice_date ? fmtDate(selectedRow.invoice_date) : "—"}</span></DetailTile>
                   <DetailTile label="DO Number">{(selectedRow.order_nos?.length ? selectedRow.order_nos : [selectedRow.order_no]).filter(Boolean).join(", ") || "—"}</DetailTile>
                   <DetailTile label="Vehicle">{selectedRow.vehicle_no || "—"}</DetailTile>
-                  <DetailTile label="Invoice Amount" highlight><span className="font-mono text-lg font-black text-emerald-700">₹{fmtNum(selectedRow.bill_amount || 0, 2)}</span></DetailTile>
+                  <DetailTile label="Invoice Amount" highlight><span className="font-mono text-lg font-black text-emerald-700">₹{fmtAmount(selectedRow.bill_amount || 0, 2)}</span></DetailTile>
                   <DetailTile label="Insurance">{selectedRow.insurance_details || "—"}</DetailTile>
-                  <DetailTile label={`Diesel${selectedRow.petrol_pump_name ? ` (${selectedRow.petrol_pump_name})` : ""}`}><span className="font-mono">₹{fmtNum(selectedRow.diesel_amount || 0, 2)}</span></DetailTile>
-                  <DetailTile label="Driver Advance (Cash / Bank)"><span className="font-mono">₹{fmtNum(selectedRow.driver_advance_cash || 0, 2)} / ₹{fmtNum(selectedRow.driver_advance_bank || 0, 2)}</span></DetailTile>
+                  <DetailTile label={`Diesel${selectedRow.petrol_pump_name ? ` (${selectedRow.petrol_pump_name})` : ""}`}><span className="font-mono">₹{fmtAmount(selectedRow.diesel_amount || 0, 2)}</span></DetailTile>
+                  <DetailTile label="Driver Advance (Cash / Bank)"><span className="font-mono">₹{fmtAmount(selectedRow.driver_advance_cash || 0, 2)} / ₹{fmtAmount(selectedRow.driver_advance_bank || 0, 2)}</span></DetailTile>
                 </div>
               </div>
 

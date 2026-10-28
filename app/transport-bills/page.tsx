@@ -20,7 +20,7 @@ import { orderApi, transportBillApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Info, BadgeCheck, FileText, Loader2, Lock, Receipt, Save, Truck } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtDate, fmtNum, fmtAmount } from "@/lib/table-format"
 
 const money = (v: any) =>
   `₹${(parseFloat(v || 0) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -57,7 +57,7 @@ const customerCol = (): StageDataCol<any> => ({
 const transporterCol = (): StageDataCol<any> => ({ id: "transporter", label: "Transporter", align: "left", accessor: (b) => b.transporter_name, render: (b) => dash(b.transporter_name) })
 const vehicleCol = (): StageDataCol<any> => ({ id: "vehicle", label: "Vehicle", align: "left", accessor: (b) => b.vehicle_no, render: (b) => dash(b.vehicle_no) })
 const moneyCol = (id: string, label: string, field: string, tone: StageDataCol<any>["tone"], extra = ""): StageDataCol<any> => ({
-  id, label: `${label} (₹)`, type: "number", align: "right", accessor: (b) => num(b[field]), total: true, tone, cellClassName: `font-mono tabular-nums min-w-[110px] ${extra}`, render: (b) => fmtNum(b[field], 2),
+  id, label: `${label} (₹)`, type: "number", align: "right", accessor: (b) => num(b[field]), total: true, tone, cellClassName: `font-mono tabular-nums min-w-[110px] ${extra}`, render: (b) => fmtAmount(b[field], 2),
 })
 
 const HISTORY_BASE_COLUMNS: StageDataCol<any>[] = [
@@ -260,7 +260,7 @@ export default function TransportBillsPage() {
 
   const calcRows: { label: string; hint?: string; tb: number; act: number; editKey?: "cash" | "bank" | "diesel"; strong?: boolean; minus?: boolean }[] = calc
     ? [
-        { label: "Total Bhada", hint: calc.rateType === "Bhada Rate" ? `Rate (₹ per MT) ${fmtNum(calc.rateOrAmount, 2)} × weight (MT) ${fmtNum(calc.weightMt, 4)}, rounded to the rupee` : calc.rateType === "Fixed Bhada" ? "Fixed Bhada" : "", tb: calc.totalBhada, act: calc.totalBhada, strong: true },
+        { label: "Total Bhada", hint: calc.rateType === "Bhada Rate" ? `Rate (₹ per MT) ${fmtAmount(calc.rateOrAmount, 2)} × weight (MT) ${fmtNum(calc.weightMt, 4)}, rounded to the rupee` : calc.rateType === "Fixed Bhada" ? "Fixed Bhada" : "", tb: calc.totalBhada, act: calc.totalBhada, strong: true },
         { label: `TDS${calc.tdsSection ? ` (${calc.tdsSection} @ ${calc.tdsRate}%)` : " u/s 194C"}`, tb: calc.tdsAmount, act: calc.tdsAmount, minus: true },
         { label: "Loss in transit borne by Transporter", hint: "As decided at Stage 14: Unloading", tb: calc.lossDeduction, act: calc.lossDeduction, minus: true },
         { label: "Advance Cash", hint: "Planned at Plan Vehicle / given at Make Invoice", tb: calc.tb.cash, act: num(adv.cash), editKey: "cash", minus: true },
@@ -330,7 +330,7 @@ export default function TransportBillsPage() {
           loading={isHistoryLoading}
           emptyText="No approved transport bills yet."
           selects={[{ id: "transporter", allLabel: "All Transporters", getValue: (b: any) => b.transporter_name }]}
-          format={(n) => n.toFixed(2)}
+          format={(n) => fmtAmount(n, 2)}
         />
         <StagePagination
           sticky
@@ -369,7 +369,7 @@ export default function TransportBillsPage() {
             cell: (b: any) => <Checkbox checked={selectedId === b.id} onCheckedChange={() => setSelectedId(selectedId === b.id ? null : b.id)} />,
           }}
           rowClassName={(b: any) => (selectedId === b.id ? "bg-blue-50/50" : undefined)}
-          format={(n) => n.toFixed(2)}
+          format={(n) => fmtAmount(n, 2)}
         />
         <StagePagination
           sticky
@@ -449,7 +449,7 @@ export default function TransportBillsPage() {
                             <TableCell className="px-4 text-left text-xs">{it.broker_name || "—"}</TableCell>
                             <TableCell className="px-4 text-left text-xs">{it.invoice_no || "—"}</TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtDate(it.invoice_date)}</TableCell>
-                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(it.bill_amount, 2)}</TableCell>
+                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtAmount(it.bill_amount, 2)}</TableCell>
                             <TableCell className="px-4 text-left text-xs">{it.sku_name || "—"}</TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(it.qty, 4)}</TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtDate(it.dispatch_date)}</TableCell>
@@ -466,9 +466,9 @@ export default function TransportBillsPage() {
                 <div className="space-y-4 rounded-lg border bg-white p-4 shadow-sm sm:p-6">
                   <SectionTitle icon={Receipt}>Damage Reported &amp; Loss in Transit</SectionTitle>
                   <div className="grid grid-cols-3 gap-4">
-                    <Field label="Borne by Company (₹)" value={fmtNum(detail.lossTotals.company, 2)} />
-                    <Field label="Borne by Transporter (₹)" value={fmtNum(detail.lossTotals.transporter, 2)} className="text-red-600" />
-                    <Field label="Borne by Customer (₹)" value={fmtNum(detail.lossTotals.customer, 2)} />
+                    <Field label="Borne by Company (₹)" value={fmtAmount(detail.lossTotals.company, 2)} />
+                    <Field label="Borne by Transporter (₹)" value={fmtAmount(detail.lossTotals.transporter, 2)} className="text-red-600" />
+                    <Field label="Borne by Customer (₹)" value={fmtAmount(detail.lossTotals.customer, 2)} />
                   </div>
                   <div className="overflow-x-auto">
                     <Table>
@@ -482,12 +482,12 @@ export default function TransportBillsPage() {
                               <TableHead />
                               <TableHead className={T}>{fmtNum(sum("damaged_containers"), 0)}</TableHead>
                               <TableHead />
-                              <TableHead className={T}>{fmtNum(sum("total_loss_value"), 2)}</TableHead>
+                              <TableHead className={T}>{fmtAmount(sum("total_loss_value"), 2)}</TableHead>
                               <TableHead />
                               <TableHead />
-                              <TableHead className={T}>{fmtNum(sum("credit_note_amount"), 2)}</TableHead>
+                              <TableHead className={T}>{fmtAmount(sum("credit_note_amount"), 2)}</TableHead>
                               <TableHead />
-                              <TableHead className={T}>{fmtNum(sum("debit_note_amount"), 2)}</TableHead>
+                              <TableHead className={T}>{fmtAmount(sum("debit_note_amount"), 2)}</TableHead>
                             </TableRow>
                           )
                         })()}
@@ -504,12 +504,12 @@ export default function TransportBillsPage() {
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(d.shortage_qty, 4)}</TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(d.damaged_containers, 0)}</TableCell>
                             <TableCell className="px-4 text-left text-xs">{d.shortage_cause || "—"}</TableCell>
-                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtNum(d.total_loss_value, 2)}</TableCell>
+                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{fmtAmount(d.total_loss_value, 2)}</TableCell>
                             <TableCell className="px-4 text-left text-xs">{d.credit_note_no || "—"}</TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{d.credit_note_no ? fmtDate(d.credit_note_date) : "—"}</TableCell>
-                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{d.credit_note_amount ? fmtNum(d.credit_note_amount, 2) : "—"}</TableCell>
+                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{d.credit_note_amount ? fmtAmount(d.credit_note_amount, 2) : "—"}</TableCell>
                             <TableCell className="px-4 text-left text-xs">{d.debit_note_no || "—"}</TableCell>
-                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{d.debit_note_no ? fmtNum(d.debit_note_amount, 2) : "—"}</TableCell>
+                            <TableCell className="px-4 text-right font-mono text-xs tabular-nums">{d.debit_note_no ? fmtAmount(d.debit_note_amount, 2) : "—"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -524,12 +524,12 @@ export default function TransportBillsPage() {
                     <Field
                       label={`Planned Bhada Rate (master) (₹${detail.plannedBhadaRate?.rateType === "Fixed Bhada" ? ", fixed" : " per MT"})`}
                       value={detail.plannedBhadaRate
-                        ? `${fmtNum(detail.plannedBhadaRate.rate, 2)}${detail.plannedBhadaRate.name ? ` · ${detail.plannedBhadaRate.name}` : ""}`
+                        ? `${fmtAmount(detail.plannedBhadaRate.rate, 2)}${detail.plannedBhadaRate.name ? ` · ${detail.plannedBhadaRate.name}` : ""}`
                         : "No matching rate in the master"}
                       className={!detail.plannedBhadaRate ? "font-normal text-slate-400" : ""}
                     />
                     <Field label="Actual Rate Type (Plan Vehicle)" value={calc.rateType} />
-                    <Field label={calc.rateType === "Bhada Rate" ? "Actual Bhada Rate (₹ per MT)" : "Actual Fixed Bhada (₹)"} value={fmtNum(calc.rateOrAmount, 2)} />
+                    <Field label={calc.rateType === "Bhada Rate" ? "Actual Bhada Rate (₹ per MT)" : "Actual Fixed Bhada (₹)"} value={fmtAmount(calc.rateOrAmount, 2)} />
                     <Field label="Net Weight (RST) (MT)" value={fmtNum(calc.weightMt, 4)} />
                   </div>
                 </div>
@@ -557,11 +557,11 @@ export default function TransportBillsPage() {
                               {r.editKey ? (
                                 // the 6 amounts: the advance planned at Plan Vehicle and the one given at Make Invoice
                                 <span className="inline-flex flex-col items-end gap-0.5">
-                                  <span>{fmtNum(r.tb, 2)}<span className="ml-1 text-[10px] text-slate-500">Plan Vehicle</span></span>
-                                  <span className="text-slate-600">{fmtNum(calc.invoiceAdvances?.[r.editKey], 2)}<span className="ml-1 text-[10px] text-slate-500">Make Invoice</span></span>
+                                  <span>{fmtAmount(r.tb, 2)}<span className="ml-1 text-[10px] text-slate-500">Plan Vehicle</span></span>
+                                  <span className="text-slate-600">{fmtAmount(calc.invoiceAdvances?.[r.editKey], 2)}<span className="ml-1 text-[10px] text-slate-500">Make Invoice</span></span>
                                 </span>
                               ) : (
-                                fmtNum(r.tb, 2)
+                                fmtAmount(r.tb, 2)
                               )}
                             </TableCell>
                             <TableCell className="px-4 text-right font-mono text-xs tabular-nums">
@@ -572,15 +572,15 @@ export default function TransportBillsPage() {
                                   onChange={(e) => setAdv((a) => ({ ...a, [r.editKey as string]: e.target.value }))}
                                 />
                               ) : (
-                                fmtNum(r.act, 2)
+                                fmtAmount(r.act, 2)
                               )}
                             </TableCell>
                           </TableRow>
                         ))}
                         <TableRow className="bg-slate-50">
                           <TableCell className="px-4 text-left text-xs font-bold">Amount to be paid to the Transporter</TableCell>
-                          <TableCell className="px-4 text-right font-mono text-sm font-bold tabular-nums">{fmtNum(calc.tb.netPayable, 2)}</TableCell>
-                          <TableCell className="px-4 text-right font-mono text-sm font-bold tabular-nums text-violet-600">{fmtNum(locked ? calc.act.netPayable : actNet, 2)}</TableCell>
+                          <TableCell className="px-4 text-right font-mono text-sm font-bold tabular-nums">{fmtAmount(calc.tb.netPayable, 2)}</TableCell>
+                          <TableCell className="px-4 text-right font-mono text-sm font-bold tabular-nums text-violet-600">{fmtAmount(locked ? calc.act.netPayable : actNet, 2)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
@@ -624,7 +624,7 @@ export default function TransportBillsPage() {
                       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                         <Field label="Voucher No." value={bill.voucher_no} />
                         <Field label="Voucher Date" value={fmtDate(bill.voucher_date)} />
-                        <Field label="Amount Paid (₹)" value={fmtNum(bill.voucher_amount, 2)} className="text-emerald-700" />
+                        <Field label="Amount Paid (₹)" value={fmtAmount(bill.voucher_amount, 2)} className="text-emerald-700" />
                         <Field label="Remarks" value={bill.voucher_remarks} />
                       </div>
                     ) : (
@@ -640,7 +640,7 @@ export default function TransportBillsPage() {
                         <div className="space-y-2">
                           <Label>Amount Paid (₹)</Label>
                           <Input type="number" min={0} className="h-10" value={voucher.amount} onChange={(e) => setVoucher((v) => ({ ...v, amount: e.target.value }))} />
-                          <p className="text-[11px] text-slate-500">Amount to be paid (₹): {fmtNum(Math.max(0, calc.act.netPayable), 2)}</p>
+                          <p className="text-[11px] text-slate-500">Amount to be paid (₹): {fmtAmount(Math.max(0, calc.act.netPayable), 2)}</p>
                         </div>
                         <div className="space-y-2">
                           <FileUploadField

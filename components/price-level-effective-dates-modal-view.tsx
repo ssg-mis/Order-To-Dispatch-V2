@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { masterHistoryApi, priceLevelApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
 
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 
 // Display-only: ISO dates (yyyy-mm-dd[...]) shown as dd/mm/yyyy; other text untouched.
 const dispVal = (v: any): any =>
@@ -737,10 +737,10 @@ export function PriceLevelEffectiveDatesModalView({
                         {activeSection === "header" && fieldName === "Price Level Code" ? (
                           <span className="flex items-center gap-1.5">
                             <Lock className="h-3 w-3 text-slate-400 shrink-0" />
-                            <span className="font-mono text-[11px] text-slate-600">{dispVal(getSnapshotValue(version, fieldName))}</span>
+                            <span className="font-mono text-[11px] text-slate-600">{dispVal((fmtHistoryAmount(fieldName, getSnapshotValue(version, fieldName)) ?? getSnapshotValue(version, fieldName)))}</span>
                           </span>
                         ) : (
-                          dispVal(getSnapshotValue(version, fieldName))
+                          dispVal((fmtHistoryAmount(fieldName, getSnapshotValue(version, fieldName)) ?? getSnapshotValue(version, fieldName)))
                         )}
                       </td>
                     ))}

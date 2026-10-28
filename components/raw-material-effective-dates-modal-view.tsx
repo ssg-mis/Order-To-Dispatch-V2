@@ -1,7 +1,7 @@
 "use client"
 
 import {useState, useMemo, useEffect, useRef} from "react"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -818,7 +818,7 @@ export function RawMaterialEffectiveDatesModalView({
 
                     {DEDICATED_COLUMNS[activeSection].map((label) => (
                       <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                        {getSnapshotValue(version, label)}
+                        {(fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                       </td>
                     ))}
 

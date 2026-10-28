@@ -26,7 +26,7 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
 import { cn } from "@/lib/utils"
-import { fmtNum, fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtDateTime, fmtAmount } from "@/lib/table-format"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
@@ -199,7 +199,7 @@ export default function OrderPunchListPage() {
       case "total_qty_kgs":
         return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_qty_kgs, 3)}</TableCell>
       case "total_order_amount":
-        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_order_amount, 2)}</TableCell>
+        return <TableCell key={colId} className={alignClass}>{fmtAmount(row.total_order_amount, 2)}</TableCell>
       case "depot_name":
         return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.depot_name || "—"}</TableCell>
       case "remarks":

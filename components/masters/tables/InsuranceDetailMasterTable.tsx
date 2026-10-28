@@ -1,5 +1,6 @@
 "use client"
 
+import { fmtAmount } from "@/lib/table-format"
 import React from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -167,7 +168,7 @@ export const InsuranceDetailMasterTable: React.FC<InsuranceDetailMasterTableProp
                     <TableCell className="font-semibold text-slate-900">{item.insurance_company_name}</TableCell>
                     <TableCell>{item.policy_number || "—"}</TableCell>
                     <TableCell>{formatDocDate(item.valid_upto)}</TableCell>
-                    <TableCell>{item.sum_insured ? `₹${item.sum_insured}` : "—"}</TableCell>
+                    <TableCell>{item.sum_insured ? `₹${fmtAmount(item.sum_insured)}` : "—"}</TableCell>
                     <TableCell>
                       <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
                         {item.status}

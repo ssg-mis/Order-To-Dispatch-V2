@@ -6,7 +6,7 @@ import { Loader2, Receipt } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { orderApi } from "@/lib/api-service"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
 import { LedgerChargesEditor, incompleteChargeIndex, validCharges, newChargeRow, type ChargeRow } from "@/components/order-punch/ledger-charges-editor"
 
 /**
@@ -126,13 +126,13 @@ export function OrderChargesPanel({
                   {info.charges.map((c) => (
                     <li key={c.id} className="flex items-center justify-between py-1.5">
                       <span className="text-slate-700">{c.ledger_name || `Ledger ${c.ledger_id}`}</span>
-                      <span className="font-mono font-semibold tabular-nums text-slate-900">₹{fmtNum(Number(c.amount) || 0, 2)}</span>
+                      <span className="font-mono font-semibold tabular-nums text-slate-900">₹{fmtAmount(Number(c.amount) || 0, 2)}</span>
                     </li>
                   ))}
                 </ul>
                 <div className="flex items-center justify-between border-t border-slate-200 pt-1.5 text-xs">
                   <span className="font-semibold text-slate-600">Charges total (counted once for this order)</span>
-                  <span className="font-mono font-bold text-blue-700">₹{fmtNum(info.total, 2)}</span>
+                  <span className="font-mono font-bold text-blue-700">₹{fmtAmount(info.total, 2)}</span>
                 </div>
               </>
             ) : (

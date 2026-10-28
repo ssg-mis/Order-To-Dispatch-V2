@@ -31,11 +31,11 @@ import { BarChart3, CheckCircle, ChevronDown, FileText, IndianRupee, Loader2, Re
 import { collectionApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtDate, fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
 
 type View = "receivable" | "disputed" | "all"
 
-const money = (v: any) => fmtNum(parseFloat(v || 0) || 0, 2)
+const money = (v: any) => fmtAmount(parseFloat(v || 0) || 0, 2)
 const RIGHT_COLS = ["invoiceDate", "billAmount", "received", "tds", "cd", "creditNote", "pendingBalance", "receiptDate"]
 const colAlign = (id: string) => (RIGHT_COLS.includes(id) ? ("right" as const) : ("left" as const))
 const today = () => new Date().toISOString().split("T")[0]
@@ -64,9 +64,9 @@ const isRcptEvent = (r: any) => r.payment_mode === "Dispute Raised" || r.payment
 const RCPT_COLS: { id: string; label: string; right?: boolean; total?: boolean; field?: string; text: (r: any) => string }[] = [
   { id: "date", label: "Date", right: true, text: (r) => fmtDate(r.receipt_date) },
   { id: "entry", label: "Entry", text: (r) => r.payment_mode || "" },
-  { id: "received", label: "Received (₹)", right: true, total: true, field: "amount_received", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.amount_received, 2)) },
-  { id: "tds", label: "TDS (₹)", right: true, total: true, field: "tds_deducted", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.tds_deducted, 2)) },
-  { id: "cd", label: "CD (₹)", right: true, total: true, field: "cd_given", text: (r) => (isRcptEvent(r) ? "" : fmtNum(r.cd_given, 2)) },
+  { id: "received", label: "Received (₹)", right: true, total: true, field: "amount_received", text: (r) => (isRcptEvent(r) ? "" : fmtAmount(r.amount_received, 2)) },
+  { id: "tds", label: "TDS (₹)", right: true, total: true, field: "tds_deducted", text: (r) => (isRcptEvent(r) ? "" : fmtAmount(r.tds_deducted, 2)) },
+  { id: "cd", label: "CD (₹)", right: true, total: true, field: "cd_given", text: (r) => (isRcptEvent(r) ? "" : fmtAmount(r.cd_given, 2)) },
   { id: "ref", label: "UTR / Ref", text: (r) => r.reference_no || "" },
   { id: "rule", label: "TDS Rule", text: (r) => r.tds_rule_name || "" },
   { id: "remarks", label: "Remarks", text: (r) => r.remarks || "" },
@@ -445,17 +445,17 @@ export default function CollectionPage() {
       case "invoiceDate":
         return <TableCell key={id} className="text-right text-xs px-4 font-mono tabular-nums whitespace-nowrap min-w-[110px]">{fmtDate(inv.invoice_date)}</TableCell>
       case "billAmount":
-        return <TableCell key={id} className="text-xs font-medium font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(billAmount, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs font-medium font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount(billAmount, 2)}</TableCell>
       case "received":
-        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(received, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount(received, 2)}</TableCell>
       case "tds":
-        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(tds, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount(tds, 2)}</TableCell>
       case "cd":
-        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(cd, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount(cd, 2)}</TableCell>
       case "creditNote":
-        return <TableCell key={id} className="text-xs text-violet-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum((parseFloat(inv.total_credit_note || 0) || 0), 2)}</TableCell>
+        return <TableCell key={id} className="text-xs text-violet-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount((parseFloat(inv.total_credit_note || 0) || 0), 2)}</TableCell>
       case "pendingBalance":
-        return <TableCell key={id} className="text-xs font-bold text-red-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtNum(pendingOf(inv), 2)}</TableCell>
+        return <TableCell key={id} className="text-xs font-bold text-red-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{fmtAmount(pendingOf(inv), 2)}</TableCell>
       case "status":
         return <TableCell key={id} className="text-left px-4"><StatusBadge status={inv.collection_status} /></TableCell>
       default:
@@ -483,11 +483,11 @@ export default function CollectionPage() {
           </TableCell>
         )
       case "received":
-        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.amount_received, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs font-medium text-emerald-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtAmount(e.amount_received, 2)}</TableCell>
       case "tds":
-        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.tds_deducted, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs text-orange-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtAmount(e.tds_deducted, 2)}</TableCell>
       case "cd":
-        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtNum(e.cd_given, 2)}</TableCell>
+        return <TableCell key={id} className="text-xs text-blue-600 font-mono tabular-nums text-right px-4 min-w-[120px]">{isDisputeEvent ? "—" : fmtAmount(e.cd_given, 2)}</TableCell>
       case "mode":
         return <TableCell key={id} className="text-left text-xs px-4">{isDisputeEvent ? "—" : e.payment_mode || "—"}</TableCell>
       case "reference":
@@ -597,7 +597,7 @@ export default function CollectionPage() {
                   totals={historyTable.totals}
                   count={historyTable.rows.length}
                   unit=""
-                  format={(n) => fmtNum(n, 2)}
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : fmtNum(n, 2))}
                   tones={{ received: "emerald", tds: "amber", cd: "blue" }}
                   align={allAlign(HIST_COLUMNS)}
                 />
@@ -773,7 +773,7 @@ export default function CollectionPage() {
                   count={pendingTable.rows.length}
                   leadingCells={1}
                   unit=""
-                  format={(n) => fmtNum(n, 2)}
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : fmtNum(n, 2))}
                   tones={{ received: "emerald", tds: "amber", cd: "blue", creditNote: "purple", pendingBalance: "red" }}
                   align={allAlign(orderedVisibleCols)}
                 />
@@ -1290,7 +1290,7 @@ export default function CollectionPage() {
                           <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
                             {RCPT_COLS.map((c, i) => (
                               <TableCell key={`total-${c.id}`} className={cn("px-4", i === 0 ? "text-left font-black text-slate-900 uppercase tracking-wider text-[11px]" : c.right ? "text-right font-mono tabular-nums font-black text-slate-900" : "text-left")}>
-                                {i === 0 ? `Total (${rcptRows.length})` : c.total ? fmtNum(rcptRows.reduce((t: number, r: any) => t + (isRcptEvent(r) ? 0 : num(r[c.field!])), 0), 2) : ""}
+                                {i === 0 ? `Total (${rcptRows.length})` : c.total ? fmtAmount(rcptRows.reduce((t: number, r: any) => t + (isRcptEvent(r) ? 0 : num(r[c.field!])), 0), 2) : ""}
                               </TableCell>
                             ))}
                           </TableRow>
@@ -1319,9 +1319,9 @@ export default function CollectionPage() {
                                     r.payment_mode || "—"
                                   )}
                                 </TableCell>
-                                <TableCell className="text-right text-xs font-medium text-emerald-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.amount_received, 2)}</TableCell>
-                                <TableCell className="text-right text-xs text-orange-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.tds_deducted, 2)}</TableCell>
-                                <TableCell className="text-right text-xs text-blue-600 font-mono tabular-nums px-4">{ev ? "—" : fmtNum(r.cd_given, 2)}</TableCell>
+                                <TableCell className="text-right text-xs font-medium text-emerald-600 font-mono tabular-nums px-4">{ev ? "—" : fmtAmount(r.amount_received, 2)}</TableCell>
+                                <TableCell className="text-right text-xs text-orange-600 font-mono tabular-nums px-4">{ev ? "—" : fmtAmount(r.tds_deducted, 2)}</TableCell>
+                                <TableCell className="text-right text-xs text-blue-600 font-mono tabular-nums px-4">{ev ? "—" : fmtAmount(r.cd_given, 2)}</TableCell>
                                 <TableCell className="text-left text-xs px-4">{r.reference_no || "—"}</TableCell>
                                 <TableCell className="text-left text-xs px-4">{r.tds_rule_name || "—"}</TableCell>
                                 <TableCell className="text-left text-xs px-4">{r.remarks || "—"}</TableCell>

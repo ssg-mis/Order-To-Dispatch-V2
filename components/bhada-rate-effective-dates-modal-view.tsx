@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { masterHistoryApi, bhadaRateApi } from "@/lib/api-service"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 import { useToast } from "@/hooks/use-toast"
 import { STATUS_OPTIONS } from "@/components/masters/types"
 
@@ -497,7 +497,7 @@ export function BhadaRateEffectiveDatesModalView({
 
                     {DEDICATED_COLUMNS.map((label) => (
                       <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                        {getSnapshotValue(version, label)}
+                        {(fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                       </td>
                     ))}
 

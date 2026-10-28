@@ -3,6 +3,7 @@
 import React, { useMemo } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Calculator } from "lucide-react"
+import { fmtAmount } from "@/lib/table-format"
 import { cn } from "@/lib/utils"
 
 export interface RateInclusiveTaxPopoverProps {
@@ -101,7 +102,7 @@ export function RateInclusiveTaxPopover({
           )}
           title="Click to view Rate Inc. Taxes formula breakdown"
         >
-          <span>{finalRate ? finalRate.toFixed(2) : "—"}</span>
+          <span>{finalRate ? fmtAmount(finalRate) : "—"}</span>
         </button>
       </DialogTrigger>
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md p-0 gap-0 overflow-hidden text-left">
@@ -120,14 +121,14 @@ export function RateInclusiveTaxPopover({
         <div className="px-6">
           <div className="rounded-xl border border-slate-200/80 bg-white/70">
             {[
-              { op: "", label: "Order Punch Rate / Unit", tag: "Order Punch", hint: "Rate of 1 piece / bottle / tin", value: `₹${punchRate.toFixed(2)}` },
+              { op: "", label: "Order Punch Rate / Unit", tag: "Order Punch", hint: "Rate of 1 piece / bottle / tin", value: `₹${fmtAmount(punchRate)}` },
               { op: "×", label: "Nos per Main UOM", tag: "SKU", hint: nos > 1 ? `${nos} pcs per box` : "1 tin (1*1)", value: `${nos}` },
-              { op: "=", label: "Base Rate per Main UOM", hint: "Order Punch Rate × Nos", value: `₹${baseRate.toFixed(2)}`, subtotal: true },
-              { op: "+", label: "Additional Freight", tag: "Dispatch Plan", hint: "Tax inclusive, per main UOM", value: `₹${freight.toFixed(2)}` },
+              { op: "=", label: "Base Rate per Main UOM", hint: "Order Punch Rate × Nos", value: `₹${fmtAmount(baseRate)}`, subtotal: true },
+              { op: "+", label: "Additional Freight", tag: "Dispatch Plan", hint: "Tax inclusive, per main UOM", value: `₹${fmtAmount(freight)}` },
               {
                 op: "−", label: "CD per Main UOM", tag: "Make Invoice",
                 hint: "Tax inclusive, per main UOM",
-                value: `₹${cd.toFixed(2)}`,
+                value: `₹${fmtAmount(cd)}`,
               },
             ].map((row, i) => (
               <div
@@ -165,10 +166,10 @@ export function RateInclusiveTaxPopover({
             <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">Rate Inc. Taxes</p>
               <p className="mt-0.5 font-mono tabular-nums text-[11px] text-muted-foreground">
-                ({punchRate.toFixed(2)} × {nos}) + {freight.toFixed(2)} − {cd.toFixed(2)}
+                ({fmtAmount(punchRate)} × {nos}) + {fmtAmount(freight)} − {fmtAmount(cd)}
               </p>
             </div>
-            <span className="font-mono tabular-nums text-2xl font-bold tracking-tight text-primary">₹{finalRate.toFixed(2)}</span>
+            <span className="font-mono tabular-nums text-2xl font-bold tracking-tight text-primary">₹{fmtAmount(finalRate)}</span>
           </div>
         </div>
       </DialogContent>

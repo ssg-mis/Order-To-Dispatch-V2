@@ -29,7 +29,7 @@ import { Combobox } from "@/components/ui/combobox"
 import { FileUploadField } from "@/components/file-upload-field"
 import { masterHistoryApi, transportMasterApi, orderApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 
 // Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
 const displayVal = (v: any): any =>
@@ -771,7 +771,7 @@ export function TransportEffectiveDatesModalView({
                       const isUpload = UPLOAD_KEYS.has(key)
                       return (
                         <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                          {isUpload ? renderFileLink(getSnapshotValue(version, label)) : getSnapshotValue(version, label)}
+                          {isUpload ? renderFileLink((fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))) : (fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label))}
                         </td>
                       )
                     })}

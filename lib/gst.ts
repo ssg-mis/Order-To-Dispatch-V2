@@ -1,3 +1,4 @@
+import { fmtAmount } from "@/lib/table-format"
 /**
  * GST helpers for the invoice stages (Make Invoice, Check Invoice, Gate Out).
  *
@@ -30,7 +31,7 @@ export const rateWithoutGst = (rateIncTaxes: number, p: any): number | null => {
 export const rateWithoutGstText = (
   rateIncTaxes: number,
   p: any,
-  fmt: (n: number) => string = (n) => n.toFixed(2),
+  fmt: (n: number) => string = (n) => fmtAmount(n, 2),
 ): string => {
   const v = rateWithoutGst(rateIncTaxes, p)
   return rateIncTaxes && v !== null ? fmt(v) : "—"

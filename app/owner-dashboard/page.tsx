@@ -39,6 +39,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart as ReBarChart, Bar as ReBar, Cell, PieChart, Pie, Legend
 } from 'recharts'
+import { fmtAmount } from "@/lib/table-format"
 
 // ─── tiny helpers ────────────────────────────────────────────────────────────
 const fmt = (n: number) => n?.toLocaleString("en-IN") ?? "0"
@@ -49,7 +50,7 @@ const fmtRs = (n: number) =>
     ? `₹${(n / 1_00_000).toFixed(2)} L`
     : n >= 1000
     ? `₹${(n / 1000).toFixed(1)} K`
-    : `₹${n}`
+    : `₹${fmtAmount(n, 2)}`
 
 const agingColor = (b: string) => {
   const m: Record<string, string> = {
@@ -456,7 +457,7 @@ export default function OwnerDashboardPage() {
                       />
                       <RechartsTooltip 
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        formatter={(val: number) => [fmtRs(val), 'Booking Value']}
+                        formatter={(val: number) => [`₹${fmtAmount(val, 2)}`, 'Booking Value']}
                       />
                       <Area type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
                     </AreaChart>

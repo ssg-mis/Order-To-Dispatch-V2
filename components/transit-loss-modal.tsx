@@ -10,7 +10,7 @@ import { Download, Landmark, Loader2 } from "lucide-react"
 import { reportsApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
-import { fmtDate, fmtNum } from "@/lib/table-format"
+import { fmtDate, fmtNum, fmtAmount } from "@/lib/table-format"
 
 type LossRow = {
   booked_at: string
@@ -38,7 +38,7 @@ const LOSS_COLS: { id: string; label: string; right?: boolean; text: (r: LossRow
   { id: "depot", label: "Depot", text: (r) => r.depot_name || "" },
   { id: "product", label: "Product", text: (r) => r.product_name || "" },
   { id: "docs", label: "Documents", text: (r) => docsOf(r) },
-  { id: "loss", label: "Loss (₹)", right: true, text: (r) => fmtNum(r.amount, 2) },
+  { id: "loss", label: "Loss (₹)", right: true, text: (r) => fmtAmount(r.amount, 2) },
 ]
 const monthLabel = (m: string) => {
   const [y, mo] = m.split("-")
@@ -140,7 +140,7 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
                     <p className="text-xs font-medium text-slate-500">Total company loss (₹)</p>
-                    <p className="text-xl font-semibold text-slate-900">{fmtNum(report.total, 2)}</p>
+                    <p className="text-xl font-semibold text-slate-900">{fmtAmount(report.total, 2)}</p>
                   </div>
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
                     <p className="text-xs font-medium text-slate-500">Shipments</p>
@@ -159,7 +159,7 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                         <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
                           <TableCell className="px-4 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({report.months.length})</TableCell>
                           <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">{report.months.reduce((t, m) => t + (Number(m.count) || 0), 0)}</TableCell>
-                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">{fmtNum(report.months.reduce((t, m) => t + (Number(m.amount) || 0), 0), 2)}</TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">{fmtAmount(report.months.reduce((t, m) => t + (Number(m.amount) || 0), 0), 2)}</TableCell>
                         </TableRow>
                         <TableRow>
                           <TableHead className="px-4 text-left whitespace-nowrap">Month</TableHead>
@@ -172,7 +172,7 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                           <TableRow key={m.month}>
                             <TableCell className="px-4 text-left text-sm">{monthLabel(m.month)}</TableCell>
                             <TableCell className="px-4 text-right text-sm font-mono tabular-nums">{fmtNum(m.count, 0)}</TableCell>
-                            <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtNum(m.amount, 2)}</TableCell>
+                            <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtAmount(m.amount, 2)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -199,7 +199,7 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                         <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
                           {LOSS_COLS.map((c, i) => (
                             <TableCell key={`total-${c.id}`} className={cn("px-4", c.right ? "text-right" : "text-left", i === 0 && "font-black text-slate-900 uppercase tracking-wider text-[11px]", c.id === "loss" && "font-mono tabular-nums font-black text-slate-900")}>
-                              {i === 0 ? `Total (${shownRows.length})` : c.id === "loss" ? fmtNum(shownTotal, 2) : ""}
+                              {i === 0 ? `Total (${shownRows.length})` : c.id === "loss" ? fmtAmount(shownTotal, 2) : ""}
                             </TableCell>
                           ))}
                         </TableRow>
@@ -224,7 +224,7 @@ export function TransitLossModal({ open, onOpenChange }: { open: boolean; onOpen
                           <TableCell className="px-4 text-left text-sm">{r.depot_name || "—"}</TableCell>
                           <TableCell className="px-4 text-left text-sm">{r.product_name || "—"}</TableCell>
                           <TableCell className="px-4 text-left text-xs text-slate-600">{docsOf(r) || "—"}</TableCell>
-                          <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtNum(r.amount, 2)}</TableCell>
+                          <TableCell className="px-4 text-right text-sm font-mono tabular-nums font-medium">{fmtAmount(r.amount, 2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

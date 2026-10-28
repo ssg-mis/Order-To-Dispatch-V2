@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AsyncCombobox } from "@/components/ui/async-combobox"
 import { ledgerApi } from "@/lib/api-service"
-import { fmtNum } from "@/lib/table-format"
+import { fmtNum, fmtAmount } from "@/lib/table-format"
 
 /**
  * "Add Ledger": extra taxable lines picked from the Ledgers master (e.g. Transporting Expenses),
@@ -127,7 +127,7 @@ export function LedgerChargesEditor({
         </Button>
         {validCharges(rows).length > 0 && (
           <span className="text-xs text-slate-600">
-            Charges total <strong className="font-mono text-blue-700">₹{fmtNum(chargesTotal(rows), 2)}</strong>
+            Charges total <strong className="font-mono text-blue-700">₹{fmtAmount(chargesTotal(rows), 2)}</strong>
           </span>
         )}
       </div>

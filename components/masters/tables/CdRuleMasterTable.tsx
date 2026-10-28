@@ -1,5 +1,6 @@
 "use client"
 
+import { fmtAmount } from "@/lib/table-format"
 import React from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -160,7 +161,7 @@ export const CdRuleMasterTable: React.FC<CdRuleMasterTableProps> = ({
                       <TableCell className="font-medium pl-6">{item.cd_rule_code}</TableCell>
                       <TableCell>{item.wef_date ? new Date(item.wef_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : "—"}</TableCell>
                       <TableCell className="font-semibold text-slate-900">{categoryName || "—"}</TableCell>
-                      <TableCell>{item.discount_rate_per_main_uom != null ? `₹${item.discount_rate_per_main_uom}` : "—"}</TableCell>
+                      <TableCell>{item.discount_rate_per_main_uom != null ? `₹${fmtAmount(item.discount_rate_per_main_uom)}` : "—"}</TableCell>
                       <TableCell>{item.payment_condition_days != null ? `${item.payment_condition_days} days` : "—"}</TableCell>
                       <TableCell>
                         <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>

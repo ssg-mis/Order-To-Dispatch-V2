@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { masterHistoryApi, insuranceDetailApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
 
-import { fmtDate, fmtDateTime } from "@/lib/table-format"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
 
 // Display-only: ISO dates (yyyy-mm-dd[...]) shown as dd/mm/yyyy; other text untouched.
 const dispVal = (v: any): any =>
@@ -652,7 +652,7 @@ export function InsuranceDetailEffectiveDatesModalView({
 
                     {visibleColumns.map((label) => (
                       <td key={label} className={`py-2.5 px-2 border-r border-slate-200 text-slate-700 font-medium break-words ${isDateLabel(label) ? "text-right" : ""}`}>
-                        {dispVal(getSnapshotValue(version, label))}
+                        {dispVal((fmtHistoryAmount(label, getSnapshotValue(version, label)) ?? getSnapshotValue(version, label)))}
                       </td>
                     ))}
 

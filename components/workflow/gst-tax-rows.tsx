@@ -2,6 +2,7 @@
 
 import React from "react"
 import type { GstSummary } from "@/lib/gst"
+import { fmtAmount } from "@/lib/table-format"
 
 const pctText = (n: number) => `${+n.toFixed(2)}%`
 
@@ -19,7 +20,7 @@ export function GstTaxRows({ summary }: { summary: GstSummary }) {
   const line = (key: string, label: string, amount: number | null) => (
     <div key={key} className="flex justify-between items-center text-xs">
       <span className="font-black uppercase text-slate-500 text-[10px]">{label}</span>
-      <span className="font-mono font-bold text-slate-700">{amount === null ? "—" : `₹${amount.toFixed(2)}`}</span>
+      <span className="font-mono font-bold text-slate-700">{amount === null ? "—" : `₹${fmtAmount(amount)}`}</span>
     </div>
   )
 
