@@ -35,7 +35,8 @@ import { Combobox } from "@/components/ui/combobox"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
 import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -97,19 +98,19 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
         {chargesBillable > 0 && (
           <div className="flex justify-between items-center text-xs">
             <span className="font-black uppercase text-slate-500 text-[10px]">Ledger Charges (no GST)</span>
-            <span className="font-mono font-bold text-slate-700">₹{chargesBillable.toFixed(2)}</span>
+            <span className="font-mono font-bold text-slate-700">₹{fmtAmount(chargesBillable)}</span>
           </div>
         )}
         <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff === null ? "—" : roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${fmtAmount(roundOff)}` : roundOff < 0 ? `-₹${fmtAmount(Math.abs(roundOff))}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${invoiceTotal.toFixed(2)}`}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${fmtAmount(invoiceTotal)}`}</span>
         </div>
       </div>
     </div>
@@ -118,6 +119,7 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, charg
 
 export default function MakeInvoicePage() {
   const queryClient = useQueryClient()
+  const wd = useWeightDecimals()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -304,7 +306,7 @@ export default function MakeInvoicePage() {
       .map((ins: any) => ({
         value: ins.insurance_company_name,
         label: ins.insurance_company_name,
-        subLabel: `${ins.short_name ? `${ins.short_name}  •  ` : ''}Policy No: ${ins.policy_number || '—'}  •  Expires: ${ins.valid_upto ? formatDate(ins.valid_upto) : '—'}  •  Sum Insured: ${ins.sum_insured != null && ins.sum_insured !== '' ? `₹${Number(ins.sum_insured).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}`
+        subLabel: `${ins.short_name ? `${ins.short_name}  •  ` : ''}Policy No: ${ins.policy_number || '—'}  •  Expires: ${ins.valid_upto ? formatDate(ins.valid_upto) : '—'}  •  Sum Insured: ${ins.sum_insured != null && ins.sum_insured !== '' ? `₹${fmtAmount(ins.sum_insured, 2)}` : '—'}`
       }))
   }, [insuranceRes, invoiceData.insuranceDetails])
 
@@ -420,8 +422,14 @@ export default function MakeInvoicePage() {
       // Normalize vehicle no: trim, uppercase, and remove ALL spaces for consistent grouping
       const vehicleNo = (order.truck_no || "—").trim().toUpperCase().replace(/\s+/g, '')
 
-      // Group by normalized Company Name, date, and Vehicle No.
-      const groupKey = `${partyName}-${actual1Str}-${vehicleNo}`;
+      // Stage 9 grouping: Vehicle No. + Actual Dispatch date + Customer ID + Address.
+      // Orders keep no address ID (the address is stored as text on the order), so the delivery address
+      // (falling back to ship / billing address), normalised, identifies the address. The party name only
+      // stands in for the Customer ID when an order has none.
+      const customerKey = order.customer_id != null && order.customer_id !== "" ? `C${order.customer_id}` : `N${partyName}`
+      const addressKey = String(order.customer_delivery_address || order.ship_address || order.customer_address || "—")
+        .trim().toUpperCase().replace(/\s+/g, ' ')
+      const groupKey = `${vehicleNo}|${actual1Str}|${customerKey}|${addressKey}`;
 
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
@@ -564,8 +572,8 @@ export default function MakeInvoicePage() {
   const NUMERIC_TOTAL_COLS = new Set(["actual_qty_dispatch"])
   // Table standard: numeric + date columns right aligned, units in headings, plain fixed decimals.
   const NUM_DECIMALS: Record<string, number> = {
-    actual_qty_dispatch: 4, orderQty: 4, qtyToDispatch: 4, actual_qty: 4, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
-    gross_weight: 4, tare_weight: 4, net_weight: 4, extra_weight: 4,
+    actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+    gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd,
     rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
   }
   // Summable columns (quantities, weights, bill amount). Rates are never totalled.
@@ -577,6 +585,7 @@ export default function MakeInvoicePage() {
   const isRightCol = (id: string) => id in NUM_DECIMALS || DATE_COL_IDS.has(id)
   const fmtCell = (id: string, v: any) => {
     if (v === "—" || v === null || v === undefined || v === "") return "—"
+    if (isAmountCol(id)) return fmtAmount(v, NUM_DECIMALS[id] ?? 2)
     if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
     if (DATE_COL_IDS.has(id)) return fmtDate(v)
     return String(v)
@@ -806,8 +815,8 @@ export default function MakeInvoicePage() {
       <tr>
         <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
         <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.qtyToDispatch || '—'} ${p.unit || ''}</td>
-        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0).toFixed(2)}</td>
-        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${((parseFloat(p.qtyToDispatch||0)) * parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0)).toFixed(2)}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0), 2)}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount((parseFloat(p.qtyToDispatch||0)) * parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0), 2)}</td>
       </tr>
     `).join('')
 
@@ -841,11 +850,11 @@ export default function MakeInvoicePage() {
           <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
           <div class="field"><label>Invoice Date</label><p>${date}</p></div>
           <div class="field"><label>Invoice No.</label><p>${invoiceData.invoiceNo || '—'}</p></div>
-          <div class="field"><label>Total Bill Amount</label><p>₹${parseFloat(invoiceData.billAmount || '0').toFixed(2)}</p></div>
-          <div class="field"><label>Driver Advance (Cash)</label><p>₹${invoiceData.driverAdvanceCash || '0'}</p></div>
-          <div class="field"><label>Driver Advance (Bank)</label><p>₹${invoiceData.driverAdvanceBank || '0'}</p></div>
+          <div class="field"><label>Total Bill Amount</label><p>₹${fmtAmount(parseFloat(invoiceData.billAmount || '0'), 2)}</p></div>
+          <div class="field"><label>Driver Advance (Cash)</label><p>₹${fmtAmount(invoiceData.driverAdvanceCash || 0, 2)}</p></div>
+          <div class="field"><label>Driver Advance (Bank)</label><p>₹${fmtAmount(invoiceData.driverAdvanceBank || 0, 2)}</p></div>
           <div class="field"><label>Petrol Pump</label><p>${invoiceData.petrolPumpName || '—'}</p></div>
-          <div class="field"><label>Diesel Amount</label><p>₹${invoiceData.dieselAmount || '0'}</p></div>
+          <div class="field"><label>Diesel Amount</label><p>₹${fmtAmount(invoiceData.dieselAmount || 0, 2)}</p></div>
           <div class="field"><label>Insurance Details</label><p>${invoiceData.insuranceDetails || '—'}</p></div>
         </div>
         <table>
@@ -855,7 +864,7 @@ export default function MakeInvoicePage() {
           <tbody>${productRows}</tbody>
           <tfoot><tr class="total-row">
             <td style="border:1px solid #ddd;padding:8px" colspan="3">Total</td>
-            <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(invoiceData.billAmount || '0').toFixed(2)}</td>
+            <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(invoiceData.billAmount || '0'), 2)}</td>
           </tr></tfoot>
         </table>
         <div class="footer">
@@ -1082,7 +1091,7 @@ export default function MakeInvoicePage() {
           orderListKey="invoices"
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
-          mapRemarks={(order: any) => `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight (₹): ${order.freight_rate}` : ""}`}
+          mapRemarks={(order: any) => `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight (₹): ${fmtAmount(order.freight_rate, 2)}` : ""}`}
           getDate={(order: any) => order.actual_5 || order.timestamp || null}
         />
       }
@@ -1154,7 +1163,7 @@ export default function MakeInvoicePage() {
                   count={sortedDisplayRows.length}
                   labelColumnId={tableCols[0]?.id}
                   unit=""
-                  format={(n, id) => n.toFixed(NUM_DECIMALS[id] ?? 4)}
+                  format={(n, id) => isAmountCol(id) ? fmtAmount(n, NUM_DECIMALS[id] ?? 2) : fmtNum(n, NUM_DECIMALS[id] ?? 4)}
                   tones={{ actual_qty_dispatch: "blue" }}
                   align={Object.fromEntries(tableCols.map(c => [c.id, isRightCol(c.id) ? "right" as const : "left" as const]))}
                 />
@@ -1491,7 +1500,7 @@ export default function MakeInvoicePage() {
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Broker / Advance</p>
-                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{orderDetails.advanceAmount || "0"}</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{fmtAmount(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
 
                                     <div className="md:col-span-2">
@@ -1556,7 +1565,7 @@ export default function MakeInvoicePage() {
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.passing_weight != null && firstProd.passing_weight !== "" ? fmtNum(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Road Tax</p>
@@ -1638,16 +1647,16 @@ export default function MakeInvoicePage() {
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Gross / Tare / Net</p>
                                       <p className="text-sm font-bold text-slate-900 leading-tight">
-                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-bold">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
+                                        {fmtNum(firstProd.grossWeight || firstProd.gross_weight || 0, wd)} / {fmtNum(firstProd.tareWeight || firstProd.tare_weight || 0, wd)} / <span className="text-blue-600 font-bold">{fmtNum(Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff</p>
-                                      <p className="text-sm font-bold text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
+                                      <p className="text-sm font-bold text-amber-600">{fmtNum(firstProd.weightDiff || firstProd.difference || 0, wd)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Extra Weight</p>
-                                      <p className="text-sm font-bold text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
+                                      <p className="text-sm font-bold text-purple-600">{fmtNum(firstProd.extraWeight || firstProd.extra_weight || 0, wd)}</p>
                                     </div>
                                     <div className="md:col-span-2">
                                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff Reason</p>
@@ -1682,7 +1691,7 @@ export default function MakeInvoicePage() {
                                 const qty = parseFloat(p.qtyToDispatch) || 0;
                                 return sum + (skuWt * qty);
                               }, 0);
-                            return totalSelectedWt.toFixed(4);
+                            return totalSelectedWt.toFixed(wd);
                           })()}
                         </TableHead>
                         <TableHead className="px-4 h-10" />
@@ -1696,7 +1705,7 @@ export default function MakeInvoicePage() {
                                 const cdAmt = productCdData[p.id]?.isCd === 'yes' ? parseFloat(productCdData[p.id]?.cdAmount || '0') : 0;
                                 return { rate: (Number(p.rate) || 0) - cdAmt, qty: parseFloat(p.qtyToDispatch) || 0, product: p };
                               }));
-                            return total === null ? "—" : total.toFixed(2);
+                            return total === null ? "—" : fmtAmount(total);
                           })()}
                         </TableHead>
                       </TableRow>
@@ -1784,11 +1793,11 @@ export default function MakeInvoicePage() {
                               const qty = parseFloat(product.qtyToDispatch) || 0;
                               const totalWt = skuWt * qty;
                               if (!totalWt) return "—";
-                              return totalWt.toFixed(4);
+                              return totalWt.toFixed(wd);
                             })()}
                           </TableCell>
                           <TableCell className="px-4 py-2 text-right font-mono tabular-nums whitespace-nowrap">
-                            <span className="text-xs font-bold text-slate-700 font-mono tabular-nums">{fmtNum(product.qtyToDispatch || 0, 4)}</span>
+                            <span className="text-xs font-bold text-slate-700 font-mono tabular-nums">{fmtNum(product.qtyToDispatch || 0, 0)}</span>
                           </TableCell>
                           <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
@@ -1820,7 +1829,7 @@ export default function MakeInvoicePage() {
                               const adjustedRate = originalRate - cdAmt;
                               const qty = parseFloat(product.qtyToDispatch) || 0;
                               const taxableAmount = taxableOf(adjustedRate, qty, product);
-                              return taxableAmount ? taxableAmount.toFixed(2) : "—";
+                              return taxableAmount ? fmtAmount(taxableAmount) : "—";
                             })()}
                           </TableCell>
                         </TableRow>
@@ -1886,13 +1895,13 @@ export default function MakeInvoicePage() {
                                   const qty = parseFloat(product.qtyToDispatch) || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  return totalWt.toFixed(4);
+                                  return totalWt.toFixed(wd);
                                 })()}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty Dispatch</p>
-                              <p className="mt-1 font-mono font-bold text-blue-700">{fmtNum(product.qtyToDispatch || 0, 4)}</p>
+                              <p className="mt-1 font-mono font-bold text-blue-700">{fmtNum(product.qtyToDispatch || 0, 0)}</p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
@@ -1913,7 +1922,7 @@ export default function MakeInvoicePage() {
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? taxableAmount.toFixed(2) : "—"}</p>
+                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? fmtAmount(taxableAmount) : "—"}</p>
                             </div>
                           </div>
 
@@ -1969,14 +1978,14 @@ export default function MakeInvoicePage() {
                                 const qty = parseFloat(p.qtyToDispatch) || 0;
                                 return sum + (skuWt * qty);
                               }, 0);
-                            return totalSelectedWt.toFixed(4);
+                            return totalSelectedWt.toFixed(wd);
                           })()}
                         </p>
                       </div>
                       <div>
                         <p className="text-[9px] uppercase font-black text-slate-500">Total Amount (₹)</p>
                         <p className="mt-1 font-black text-blue-700 font-mono tabular-nums">
-                          {fmtNum(selectedGroups.flatMap(g => g._allProducts)
+                          {fmtAmount(selectedGroups.flatMap(g => g._allProducts)
                             .filter(p => selectedProducts.includes(p._rowKey))
                             .reduce((sum, p) => {
                               const originalRate = Number(p.rate) || 0;

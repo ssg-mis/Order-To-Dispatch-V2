@@ -36,7 +36,9 @@ import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
-import { fmtNum, fmtDate } from "@/lib/table-format"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight, getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -84,12 +86,12 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff === null ? "—" : roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${fmtAmount(roundOff)}` : roundOff < 0 ? `-₹${fmtAmount(Math.abs(roundOff))}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${invoiceTotal.toFixed(2)}`}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${fmtAmount(invoiceTotal)}`}</span>
         </div>
       </div>
     </div>
@@ -99,16 +101,19 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
 // Table standard: numeric + date columns right aligned, units in headings, plain fixed decimals.
 const NUM_DECIMALS: Record<string, number> = {
   products: 0,
-  actual_qty_dispatch: 4, orderQty: 4, qtyToDispatch: 4, actual_qty: 4, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
-  gross_weight: 4, tare_weight: 4, net_weight: 4, extra_weight: 4,
+  actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+  gross_weight: 3, tare_weight: 3, net_weight: 3, extra_weight: 3, // weight decimals come from the Units Master (WEIGHT_COL_IDS) - values here only mark the column as numeric
   rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
 }
 const DATE_COL_IDS = new Set(["partySoDate", "actual1Date", "deliveryDate", "invoice_date", "dispatch_date_confirmed", "fitness_end_date", "insurance_end_date", "tax_end_date", "pollution_end_date", "permit1_end_date", "permit2_end_date"])
 const MONEY_HEAD_IDS = new Set(["rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "bill_amount"])
+const WEIGHT_COL_IDS = new Set(["gross_weight", "tare_weight", "net_weight", "extra_weight"])
+const numDec = (id: string) => (WEIGHT_COL_IDS.has(id) ? getWeightDecimals() : NUM_DECIMALS[id])
 const isRightCol = (id: string) => id in NUM_DECIMALS || DATE_COL_IDS.has(id)
 const fmtCell = (id: string, v: any) => {
   if (v === "—" || v === null || v === undefined || v === "") return "—"
-  if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
+  if (isAmountCol(id)) return fmtAmount(v, NUM_DECIMALS[id] ?? 2)
+  if (id in NUM_DECIMALS) return fmtNum(v, numDec(id))
   if (DATE_COL_IDS.has(id)) return fmtDate(v)
   return String(v)
 }
@@ -134,6 +139,7 @@ export default function CheckInvoicePage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
 
@@ -786,7 +792,7 @@ export default function CheckInvoicePage() {
                 count={table.rows.length}
                 labelColumnId={orderedCols[0]?.id}
                 unit=""
-                format={(n, id) => fmtNum(n, NUM_DECIMALS[id] ?? 2)}
+                format={(n, id) => isAmountCol(id) ? fmtAmount(n, NUM_DECIMALS[id] ?? 2) : fmtNum(n, numDec(id) ?? 2)}
                 tones={{ products: "blue", actual_qty_dispatch: "purple", bill_amount: "emerald" }}
                 align={Object.fromEntries(orderedCols.map(c => [c.id, isRightCol(c.id) ? "right" : "left"])) as Record<string, "center" | "left" | "right">}
               />
@@ -971,7 +977,7 @@ export default function CheckInvoicePage() {
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Amount (₹)</p>
-                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtNum(display.amount, 2)}</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtAmount(display.amount, 2)}</p>
                       </div>
                     </div>
                     {dynamicColumns.length > 0 && (
@@ -1124,7 +1130,7 @@ export default function CheckInvoicePage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
                                       <p className="text-xs font-bold text-slate-900 leading-none">
-                                        {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{orderDetails.advanceAmount}
+                                        {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{fmtAmount(orderDetails.advanceAmount)}
                                       </p>
                                     </div>
 
@@ -1190,7 +1196,7 @@ export default function CheckInvoicePage() {
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight ? fmtWeight(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
@@ -1272,16 +1278,16 @@ export default function CheckInvoicePage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
                                       <p className="text-xs font-black text-slate-900 leading-tight">
-                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-black">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
+                                        {fmtWeight(firstProd.grossWeight || firstProd.gross_weight || 0, wd)} / {fmtWeight(firstProd.tareWeight || firstProd.tare_weight || 0, wd)} / <span className="text-blue-600 font-black">{fmtWeight(Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff</p>
-                                      <p className="text-xs font-black text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
+                                      <p className="text-xs font-black text-amber-600">{fmtWeight(firstProd.weightDiff || firstProd.difference || 0, wd)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Extra Weight</p>
-                                      <p className="text-xs font-black text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
+                                      <p className="text-xs font-black text-purple-600">{fmtWeight(firstProd.extraWeight || firstProd.extra_weight || 0, wd)}</p>
                                     </div>
                                     <div className="md:col-span-2">
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff Reason</p>
@@ -1327,7 +1333,7 @@ export default function CheckInvoicePage() {
                                 const q = parseFloat(p.actualQty) || 0;
                                 return sum + (skuWt * q);
                               }, 0);
-                            return fmtNum(totalSelectedWt, 4);
+                            return fmtWeight(totalSelectedWt, wd);
                           })()}
                         </TableCell>
                         <TableCell className="px-4" />
@@ -1338,7 +1344,7 @@ export default function CheckInvoicePage() {
                             const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
                               .map(p => ({ rate: Number(p.rate) || 0, qty: parseFloat(p.actualQty) || 0, product: p })));
-                            return total === null ? "—" : fmtNum(total, 2);
+                            return total === null ? "—" : fmtAmount(total, 2);
                           })()}
                         </TableCell>
                       </TableRow>
@@ -1405,11 +1411,11 @@ export default function CheckInvoicePage() {
                                 const skuWt = parseFloat(skuWtStr || "") || 0;
                                 const totalWt = skuWt * qty;
                                 if (!totalWt) return "—";
-                                return fmtNum(totalWt, 4);
+                                return fmtWeight(totalWt, wd);
                               })()}
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              {fmtNum(product.actualQty || 0, 4)}
+                              {fmtNum(product.actualQty || 0, 0)}
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               <RateInclusiveTaxPopover
@@ -1420,10 +1426,10 @@ export default function CheckInvoicePage() {
                               />
                             </TableCell>
                             <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              {netRateIncTaxes && rateWoGst !== null ? rateWoGst.toFixed(2) : "—"}
+                              {netRateIncTaxes && rateWoGst !== null ? fmtAmount(rateWoGst) : "—"}
                             </TableCell>
                             <TableCell className="pl-4 pr-6 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
-                              {taxableAmount ? taxableAmount.toFixed(2) : "—"}
+                              {taxableAmount ? fmtAmount(taxableAmount) : "—"}
                             </TableCell>
                           </TableRow>
                         );
@@ -1496,13 +1502,13 @@ export default function CheckInvoicePage() {
                                   const skuWt = parseFloat(skuWtStr || "") || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  return fmtNum(totalWt, 4);
+                                  return fmtWeight(totalWt, wd);
                                 })()}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                              <p className="mt-1 font-mono tabular-nums font-bold text-blue-700">{fmtNum(product.actualQty || 0, 4)}</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-blue-700">{fmtNum(product.actualQty || 0, 0)}</p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
@@ -1518,12 +1524,12 @@ export default function CheckInvoicePage() {
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
                               <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
-                                {rateWithoutGstText(netRateIncTaxes, product, (n) => fmtNum(n, 2))}
+                                {rateWithoutGstText(netRateIncTaxes, product, (n) => fmtAmount(n, 2))}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
-                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtNum(taxableAmount, 2) : "—"}</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtAmount(taxableAmount, 2) : "—"}</p>
                             </div>
                           </div>
                         </div>
@@ -1542,7 +1548,7 @@ export default function CheckInvoicePage() {
                                 const q = parseFloat(p.actualQty) || 0;
                                 return sum + (skuWt * q);
                               }, 0);
-                            return fmtNum(totalSelectedWt, 4);
+                            return fmtWeight(totalSelectedWt, wd);
                           })()}
                         </p>
                       </div>
@@ -1595,8 +1601,8 @@ export default function CheckInvoicePage() {
                     <tr>
                       <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
                       <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.actualQty || p.qtyToDispatch || '—'} ${p.unit || ''}</td>
-                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${parseFloat(p.rate || p.final_rate || 0).toFixed(2)}</td>
-                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${(parseFloat(p.actualQty || p.qtyToDispatch || 0) * parseFloat(p.rate || p.final_rate || 0)).toFixed(2)}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.rate || p.final_rate || 0), 2)}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.actualQty || p.qtyToDispatch || 0) * parseFloat(p.rate || p.final_rate || 0), 2)}</td>
                     </tr>
                   `).join('')
                   const printContent = `
@@ -1624,11 +1630,11 @@ export default function CheckInvoicePage() {
                         <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
                         <div class="field"><label>Invoice No.</label><p>${invoiceNo}</p></div>
                         <div class="field"><label>Invoice Date</label><p>${allProducts[0]?.invoice_date || '—'}</p></div>
-                        <div class="field"><label>Bill Amount</label><p>₹${parseFloat(allProducts[0]?.bill_amount || 0).toFixed(2)}</p></div>
+                        <div class="field"><label>Bill Amount</label><p>₹${fmtAmount(allProducts[0]?.bill_amount || 0, 2)}</p></div>
                         <div class="field"><label>Insurance</label><p>${allProducts[0]?.insurance_details || '—'}</p></div>
-                        <div class="field"><label>Driver Advance (Cash)</label><p>₹${allProducts[0]?.driver_advance_cash || 0}</p></div>
-                        <div class="field"><label>Driver Advance (Bank)</label><p>₹${allProducts[0]?.driver_advance_bank || 0}</p></div>
-                        <div class="field"><label>Diesel Amount</label><p>₹${allProducts[0]?.diesel_amount || 0}</p></div>
+                        <div class="field"><label>Driver Advance (Cash)</label><p>₹${fmtAmount(allProducts[0]?.driver_advance_cash || 0, 2)}</p></div>
+                        <div class="field"><label>Driver Advance (Bank)</label><p>₹${fmtAmount(allProducts[0]?.driver_advance_bank || 0, 2)}</p></div>
+                        <div class="field"><label>Diesel Amount</label><p>₹${fmtAmount(allProducts[0]?.diesel_amount || 0, 2)}</p></div>
                       </div>
                       ${invoiceCopy ? `<div class="inv-link">📎 Invoice Copy attached: <a href="${invoiceCopy}" target="_blank">${invoiceCopy.split('/').pop()}</a></div>` : '<div class="inv-link" style="color:#c00">⚠️ No Invoice Copy attached</div>'}
                       <table>
