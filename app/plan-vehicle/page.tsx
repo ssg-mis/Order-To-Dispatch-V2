@@ -25,7 +25,7 @@ import { TransporterMasterDialog } from "@/components/masters/modals/transporter
 import { getVehicleDocFileErrors } from "@/lib/vehicle-doc-validation"
 import { VehicleEffectiveDatesModalView } from "@/components/vehicle-effective-dates-modal-view"
 import { isStaleWriteError } from "@/lib/stale-write"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
+import { generateGatePassPdf } from "@/lib/gate-pass-pdf-lazy"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
@@ -42,6 +42,7 @@ import {
   StageActiveChips, StageSortIcon, type StageTotalTone, StageActionBar, StagePagination, StageDecisionFooter, StageActionFooter } from "@/components/stage-list"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { fmtNum } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "—";
@@ -193,6 +194,7 @@ const DRIVER_BADGE_CLASS: Record<DriverApprovalState, string> = {
 }
 
 export default function PlanVehiclePage() {
+  const wd = useWeightDecimals()
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -1455,6 +1457,7 @@ export default function PlanVehiclePage() {
         preApproveAt: firstProd.pre_approval_at || null,
         approveBy: firstProd.order_approval_user || "—",
         approveAt: firstProd.order_approval_at || null,
+        saudaNo: firstProd.manual_sauda_no || "",
         products: partyProducts.map((prod: any) => {
           const qty = parseFloat(prod.qtyToDispatch || "0");
           return {
@@ -1474,7 +1477,7 @@ export default function PlanVehiclePage() {
       toast({ title: "Error", description: "Please select products to download slip", variant: "destructive" });
       return;
     }
-    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { title: "Gate Pass" });
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf");
   };
 
   const handlePrintSlip = () => {
@@ -1482,7 +1485,7 @@ export default function PlanVehiclePage() {
       toast({ title: "Error", description: "Please select products to print slip", variant: "destructive" });
       return;
     }
-    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { print: true, title: "Gate Pass" });
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf", { print: true });
   };
 
   const closeSlipDialog = () => {
@@ -2090,7 +2093,7 @@ export default function PlanVehiclePage() {
                           <TableCell className="px-4" />
                           <TableCell className="px-4" />
                           <TableCell className="px-4" />
-                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-purple-700">{fmtNum(totalPackingWeightFromSku)}</TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-purple-700">{fmtNum(totalPackingWeightFromSku, wd)}</TableCell>
                         </TableRow>
                         <TableRow>
                           <TableHead className="w-12 text-left px-4">
@@ -2135,7 +2138,7 @@ export default function PlanVehiclePage() {
                               <TableCell className="px-4 text-[10px] font-bold uppercase text-slate-500">{prod.uom || "—"}</TableCell>
                               <TableCell className="px-4 text-[10px] font-black uppercase text-slate-400 tracking-tighter">{prod.deliveryFrom}</TableCell>
                               <TableCell className="px-4 text-right">
-                                <span className="font-black text-sm text-purple-700 font-mono tabular-nums">{fmtNum(calculateGrossWeight(prod.productName, prod.qtyToDispatch))}</span>
+                                <span className="font-black text-sm text-purple-700 font-mono tabular-nums">{fmtNum(calculateGrossWeight(prod.productName, prod.qtyToDispatch), wd)}</span>
                               </TableCell>
                             </TableRow>
                           )
@@ -2471,22 +2474,22 @@ export default function PlanVehiclePage() {
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
                           <p className={cn("text-[11px] font-black uppercase leading-none", isOverloaded ? "text-red-600" : "text-primary")}>
-                            {passingWt > 0 ? passingWt.toFixed(2) : '0.00'} KG
+                            {passingWt > 0 ? passingWt.toFixed(wd) : (0).toFixed(wd)} KG
                           </p>
                         </div>
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
-                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw || '---'} KG</p>
+                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw ? fmtNum(vehicleData.gvw, wd) : '---'} KG</p>
                         </div>
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">ULW</p>
-                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.ulw || '---'} KG</p>
+                          <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.ulw ? fmtNum(vehicleData.ulw, wd) : '---'} KG</p>
                         </div>
                         <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                           <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Avg Tare Wt</p>
                           <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
                             {vehicleTareStats && vehicleTareStats.count > 0
-                              ? <>{Number(vehicleTareStats.avgTare).toFixed(2)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
+                              ? <>{Number(vehicleTareStats.avgTare).toFixed(wd)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
                               : <>--- <span className="text-[9px] font-semibold text-slate-400 normal-case">{vehicleData.registration_no ? '(first trip, ULW used)' : ''}</span></>}
                           </p>
                         </div>
@@ -3005,7 +3008,7 @@ export default function PlanVehiclePage() {
                         <div className="flex items-center gap-2">
                           <Weight className="h-4 w-4 text-red-500" />
                           <p className="text-sm font-black text-red-600 uppercase tracking-tighter">
-                            Vehicle is overload! ({totalPackingWeightFromSku.toFixed(2)} KG planned vs {passingWt.toFixed(2)} KG capacity)
+                            Vehicle is overload! ({totalPackingWeightFromSku.toFixed(wd)} KG planned vs {passingWt.toFixed(wd)} KG capacity)
                           </p>
                         </div>
                         <div className="space-y-1.5">

@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 export interface SlipProduct {
   productName: string
@@ -34,6 +35,13 @@ export interface SlipPartyData {
   grossWt?: string | number
   inTime?: string
   outTime?: string
+  // Outgoing Gate Pass only (lib/gate-pass-pdf.ts)
+  serialNo?: string
+  outDate?: string
+  driverMobile?: string
+  rstNo?: string
+  saudaNo?: string
+  billNo?: string
 }
 
 const WHITE: [number, number, number] = [255, 255, 255]
@@ -56,7 +64,9 @@ function oilKey(name: string): string {
   return "other"
 }
 
-const wt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+const wt = (n: number) => { const d = getWeightDecimals(); return Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) }
+// pre-formatted weight strings from callers: re-format when numeric so decimals follow the Units Master
+const wtStr = (v: string | number) => (Number.isFinite(Number(String(v).replace(/,/g, ""))) ? wt(Number(String(v).replace(/,/g, ""))) : String(v))
 
 const pad = (n: number) => String(n).padStart(2, "0")
 const fmtDateTime = (s: string | null | undefined) => {
@@ -253,8 +263,8 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
           { content: `Driver Name: ${party.driverName ? party.driverName : "__________________________"}`, styles: { halign: "left" } },
         ],
         [
-          { content: `Tare Wt.: ${party.tareWt ? party.tareWt + " KGS" : "__________________________"}`, styles: { halign: "left" } },
-          { content: `Gross Wt.: ${party.grossWt ? party.grossWt + " KGS" : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Tare Wt.: ${party.tareWt ? wtStr(party.tareWt) + " KGS" : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Gross Wt.: ${party.grossWt ? wtStr(party.grossWt) + " KGS" : "__________________________"}`, styles: { halign: "left" } },
         ],
         [
           { content: `In Time: ${party.inTime ? party.inTime : "__________________________"}`, styles: { halign: "left" } },

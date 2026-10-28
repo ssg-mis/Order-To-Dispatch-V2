@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { useAuthContext } from "@/contexts/auth-context"
 import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, driverMasterApi, draftApi } from "@/lib/api-service"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
+import { generateGatePassPdf } from "@/lib/gate-pass-pdf-lazy"
 import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -29,7 +29,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
-import { fmtNum, fmtDateTime } from "@/lib/table-format"
+import { fmtNum, fmtDateTime, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -361,6 +363,7 @@ const GATE_TABLE_COLUMNS: StageColDef<GateGroup>[] = PAGE_COLUMNS.map(c => ({
 export default function GateInPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const { refreshUser } = useAuthContext()
 
@@ -747,6 +750,10 @@ const buildSlipParties = () => {
         preApproveAt: draft.pre_approval_at || null,
         approveBy: draft.order_approval_user || "—",
         approveAt: draft.order_approval_at || null,
+        vehicleNo: firstRec.vehicle_no || firstRec.registration_no || "",
+        driverName: firstRec.driver_name || "",
+        driverMobile: firstRec.driver_mobile_no || "",
+        saudaNo: firstRec.manual_sauda_no || "",
         products: partyRecords.map(r => {
           const qty = parseFloat(r.qty_to_be_dispatched) || 0
           const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
@@ -766,12 +773,12 @@ const buildSlipParties = () => {
 
   const handleDownloadSlip = () => {
     if (!selectedRecord) return
-    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { title: "Gate Pass" })
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf")
   }
 
   const handlePrintSlip = () => {
     if (!selectedRecord) return
-    generateDispatchSlipPdf(buildSlipParties(), "gate-pass.pdf", { print: true, title: "Gate Pass" })
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf", { print: true })
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -1102,7 +1109,7 @@ const buildSlipParties = () => {
                               return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
                             }
                             if (NUMBER_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{fmtNum(val, GATE_DECIMALS[col.id] ?? 2)}</TableCell>
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{isAmountCol(col.id, col.label) ? fmtAmount(val, GATE_DECIMALS[col.id] ?? 2) : fmtNum(val, GATE_DECIMALS[col.id] ?? 2)}</TableCell>
                             }
                             return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ?? "—"}</TableCell>
                           }
@@ -1276,11 +1283,11 @@ const buildSlipParties = () => {
                       },
                       {
                         label: "Gross Weight",
-                        value: getDraftField(selectedRecord, "totalPackingWeight") !== "—"
+                        value: fmtWeight(getDraftField(selectedRecord, "totalPackingWeight") !== "—"
                           ? getDraftField(selectedRecord, "totalPackingWeight")
-                          : getDraftField(selectedRecord, "loadData.grossWeight")
+                          : getDraftField(selectedRecord, "loadData.grossWeight"), wd)
                       },
-                      { label: "Tare Weight", value: getDraftField(selectedRecord, "loadData.tareWeight") },
+                      { label: "Tare Weight", value: fmtWeight(getDraftField(selectedRecord, "loadData.tareWeight"), wd) },
                       { label: "RST No.", value: getDraftField(selectedRecord, "loadData.rstNo") },
                     ].map(f => (
                       <div key={f.label} className="flex flex-col">
@@ -1310,14 +1317,14 @@ const buildSlipParties = () => {
                                     const grossWt = parseFloat(skuGrossWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
                                     const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                     return sum + grossWt * qty
-                                  }, 0))}
+                                  }, 0), wd)}
                             </TableCell>
                             <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
                               {fmtNum(selectedGroupRecords.reduce((sum, r) => {
                                     const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
                                     const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                     return sum + skuWt * qty
-                                  }, 0))}
+                                  }, 0), wd)}
                             </TableCell>
                             <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
                               {fmtNum(selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0))}
@@ -1342,13 +1349,13 @@ const buildSlipParties = () => {
                                   <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</span>
                                 </TableCell>
                                 <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
-                                  {grossWtRow ? fmtNum(grossWtRow) : "—"}
+                                  {grossWtRow ? fmtWeight(grossWtRow, wd) : "—"}
                                 </TableCell>
                                 <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
-                                  {totalWt ? fmtNum(totalWt) : "—"}
+                                  {totalWt ? fmtWeight(totalWt, wd) : "—"}
                                 </TableCell>
                                 <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-900">
-                                  {qty ? fmtNum(qty) : "—"}
+                                  {qty ? fmtNum(qty, 0) : "—"}
                                 </TableCell>
                               </TableRow>
                             )
@@ -1369,15 +1376,15 @@ const buildSlipParties = () => {
                               <div className="grid grid-cols-2 gap-3 text-xs">
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Gross Weight (KGS)</p>
-                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{grossWtRow ? fmtNum(grossWtRow) : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{grossWtRow ? fmtWeight(grossWtRow, wd) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
-                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{totalWt ? fmtNum(totalWt) : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{totalWt ? fmtWeight(totalWt, wd) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-900">{qty ? fmtNum(qty) : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-900">{qty ? fmtNum(qty, 0) : "—"}</p>
                                 </div>
                               </div>
                             </div>
@@ -1393,7 +1400,7 @@ const buildSlipParties = () => {
                                   const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                   return sum + skuWt * qty
                                 }, 0)
-                                return fmtNum(total)
+                                return fmtWeight(total, wd)
                               })()}
                             </p>
                           </div>
