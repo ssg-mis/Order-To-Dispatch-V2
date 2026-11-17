@@ -1,5 +1,6 @@
 "use client"
 
+import { sortNamesBanariFirst } from "@/lib/depot-sort"
 import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -59,6 +60,7 @@ type InventoryRow = {
   depot_name: string
   product_name: string
   sku_id: string
+  sku_pk?: number
   stock_in: number
   stock_out: number
   sales: number
@@ -67,6 +69,7 @@ type InventoryRow = {
   opening_qty: number
   opening_qty_updated_at: string | null
   production_qty: number
+  sku_status?: string
 }
 
 export default function InventoryPage() {
@@ -100,7 +103,7 @@ export default function InventoryPage() {
     setDetailRows([])
     try {
       const apiType = type === 'stockIn' ? 'stock_in' : type === 'stockOut' ? 'stock_out' : type === 'inTransit' ? 'in_transit' : type === 'damages' ? 'damages' : 'sales'
-      const res = await inventoryApi.getDetail(row.depot_name, row.product_name, apiType)
+      const res = await inventoryApi.getDetail(row.depot_name, row.product_name, apiType, row.sku_pk)
       setDetailRows(res.success ? res.data : [])
     } finally {
       setDetailLoading(false)
@@ -120,14 +123,18 @@ export default function InventoryPage() {
   const filteredRawData = useMemo(() => {
     const allowed = user?.depo_access?.['Inventory'] || []
     if (allowed.length === 0) return []
+    // An inactive SKU with nothing left to track is hidden; one that still holds stock stays visible (with an Inactive badge).
+    const hasActivity = (r: InventoryRow) =>
+      [r.opening_qty, r.production_qty, r.stock_in, r.stock_out, r.sales, r.in_transit, r.damages].some((v) => Number(v) !== 0)
     return (rawData || []).filter(r =>
-      allowed.some(d => d.toLowerCase() === r.depot_name.toLowerCase())
+      allowed.some(d => d.toLowerCase() === r.depot_name.toLowerCase()) &&
+      !(String(r.sku_status || '').toLowerCase() === 'inactive' && !hasActivity(r))
     )
   }, [rawData, user?.depo_access])
 
   // Unique depot options — derived from allowed access list so all granted depots appear even if they have no data
   const depoOptions = useMemo(() =>
-    [...(user?.depo_access?.['Inventory'] || [])].sort()
+    sortNamesBanariFirst(user?.depo_access?.['Inventory'] || [])
   , [user?.depo_access])
 
   // Product options — scoped to selected depot (for the Depo/Product filters)
@@ -164,7 +171,7 @@ export default function InventoryPage() {
   const rows = useMemo(() => {
     // ── SKU Wise mode: one row per unique product, totals across all depots ──
     if (skuWiseMode) {
-      const productMap = new Map<string, any>()
+      const productMap = new Map<string | number, any>()
       ;filteredRawData.forEach((r) => {
         const openingQty   = Number(r.opening_qty)    || 0
         const productionQt = Number(r.production_qty) || 0
@@ -173,17 +180,19 @@ export default function InventoryPage() {
         const sales        = Number(r.sales)          || 0
         const inTransit    = Number(r.in_transit)     || 0
         const damages      = Number(r.damages)        || 0
-        if (!productMap.has(r.product_name)) {
-          productMap.set(r.product_name, {
-            key: `sku-wise|||${r.product_name}`,
+        const skuKey = r.sku_pk ?? r.product_name
+        if (!productMap.has(skuKey)) {
+          productMap.set(skuKey, {
+            key: `sku-wise|||${skuKey}`,
             depot_name: "All Depots",
             product_name: r.product_name,
             sku_id: r.sku_id ?? "",
+            sku_status: r.sku_status,
             openingQty: 0, production: 0, stockIn: 0, stockOut: 0, sales: 0, inTransit: 0, damages: 0, closingStock: 0,
             _skuWise: true,
           })
         }
-        const entry = productMap.get(r.product_name)!
+        const entry = productMap.get(r.sku_pk ?? r.product_name)!
         entry.openingQty += openingQty
         entry.production += productionQt
         entry.stockIn    += stockIn
@@ -205,7 +214,7 @@ export default function InventoryPage() {
         return true
       })
       .map((row) => {
-        const key          = `${row.depot_name}|||${row.product_name}`
+        const key          = `${row.depot_name}|||${row.sku_pk ?? row.product_name}`
         const openingQty   = Number(row.opening_qty)    || 0
         const production   = Number(row.production_qty) || 0
         const stockIn      = Number(row.stock_in)       || 0
@@ -459,6 +468,9 @@ export default function InventoryPage() {
                       {isVis("product_name") && (
                       <TableCell className="text-slate-700 whitespace-nowrap">
                         {row.product_name}
+                        {String(row.sku_status || '').toLowerCase() === 'inactive' && (
+                          <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Inactive</span>
+                        )}
                       </TableCell>
                       )}
 
@@ -635,7 +647,7 @@ export default function InventoryPage() {
 
       {/* Formula note */}
       <p className="text-xs text-slate-400 text-center">
-        Closing Stock = Opening Qty + Production + Stock In − Stock Out − Sales. Sales and Stock Out are recognised at Gate Out; Stock in Transit is Gate Out done but Reach Vehicle (Stage 13) pending; Stock In (transfers) starts at Stage 13 and is reduced by Company-Admin-approved transit damages.
+        Closing Stock = Opening Qty + Production + Stock In \u2212 Stock Out \u2212 Sales. Sales column = Gate Out on a Sales order (source depot). Stock Out = Gate Out on a Stock Transfer (source depot). Stock in Transit = Stock Transfer gate-out done but Reach Vehicle (Stage 13) not yet complete (shown at destination depot). Stock In = Reach Vehicle completed on a Stock Transfer (destination depot, net of approved transit damages).
       </p>
 
       {/* Drill-down modal */}
