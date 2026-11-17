@@ -113,7 +113,7 @@ export function DepotForm({
           <div className="space-y-1.5">
             <Label htmlFor="state" className="text-xs font-semibold text-slate-800">State</Label>
             <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
               value={depotForm.state_id ? String(depotForm.state_id) : ""}
               onValueChange={val => {
                 const selected = activeStates.find((s: any) => String(s.id) === val)

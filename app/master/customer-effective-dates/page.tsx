@@ -30,6 +30,7 @@ import { PageHeader } from "@/components/page-header"
 import { customerApi, stateApi } from "@/lib/api-service"
 import { Combobox } from "@/components/ui/combobox"
 import { useToast } from "@/hooks/use-toast"
+import { AddressLocationFields } from "@/components/masters/forms/AddressLocationFields"
 
 type SectionType = "mailing" | "gst" | "msme" | "fssai"
 
@@ -89,8 +90,15 @@ function CustomerEffectiveDatesContent() {
           address_line_1: latest.address_line_1 || "",
           address_line_2: latest.address_line_2 || "",
           pincode: latest.pincode || "",
-          state: latest.state || "",
+          state: latest.state || latest.stateName || "",
+          state_id: latest.stateId || latest.state_id || null,
+          district: latest.district || "",
+          sub_district: latest.subDistrict || latest.sub_district || "",
+          thana: latest.thana || "",
+          post: latest.post || "",
+          city: latest.city || "",
           country: latest.country || "India",
+          status: latest.status || "Active",
         })
       } else if (activeSection === "gst") {
         setNewVersionForm({
@@ -220,7 +228,7 @@ function CustomerEffectiveDatesContent() {
           }`}
         >
           <Mail className="h-4 w-4" />
-          Mailing Details
+          Primary Address
         </button>
 
         <button
@@ -348,23 +356,12 @@ function CustomerEffectiveDatesContent() {
                         onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-700">State</Label>
-                      <Combobox
-                        options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
-                        value={newVersionForm.state_id ? String(newVersionForm.state_id) : ""}
-                        onValueChange={(val) => {
-                          const selected = activeStates.find((s: any) => String(s.id) === val)
-                          setNewVersionForm({
-                            ...newVersionForm,
-                            state_id: val ? parseInt(val, 10) : null,
-                            state: selected?.state_name || "",
-                            stateName: selected?.state_name || "",
-                          })
-                        }}
-                        placeholder="Select state"
-                        searchPlaceholder="Search state..."
-                        className="h-9 bg-white text-xs"
+                    <div className="space-y-3 sm:col-span-3">
+                      <AddressLocationFields
+                        value={newVersionForm}
+                        activeStates={activeStates}
+                        fieldClassName="bg-white"
+                        onChange={(patch) => setNewVersionForm((prev: any) => ({ ...prev, ...patch, ...(patch.state !== undefined ? { stateName: patch.state } : {}) }))}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -375,6 +372,17 @@ function CustomerEffectiveDatesContent() {
                         maxLength={6}
                         value={newVersionForm.pincode || ""}
                         onChange={(e) => setNewVersionForm({ ...newVersionForm, pincode: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-700">Status</Label>
+                      <Combobox
+                        options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                        value={newVersionForm.status || "Active"}
+                        onValueChange={(val) => val && setNewVersionForm({ ...newVersionForm, status: val })}
+                        placeholder="Status"
+                        searchPlaceholder="Search..."
+                        className="h-9 bg-white text-xs"
                       />
                     </div>
                   </>
@@ -508,8 +516,14 @@ function CustomerEffectiveDatesContent() {
                         <th className="py-3 px-4 border-r border-slate-300">Name</th>
                         <th className="py-3 px-4 border-r border-slate-300">Address Line 1</th>
                         <th className="py-3 px-4 border-r border-slate-300">State</th>
+                        <th className="py-3 px-4 border-r border-slate-300">District</th>
+                        <th className="py-3 px-4 border-r border-slate-300">Sub-District</th>
+                        <th className="py-3 px-4 border-r border-slate-300">Thana</th>
+                        <th className="py-3 px-4 border-r border-slate-300">Post</th>
+                        <th className="py-3 px-4 border-r border-slate-300">City</th>
                         <th className="py-3 px-4 border-r border-slate-300">Country</th>
                         <th className="py-3 px-4 border-r border-slate-300">Pincode</th>
+                        <th className="py-3 px-4 border-r border-slate-300">Status</th>
                       </>
                     )}
 
@@ -537,7 +551,8 @@ function CustomerEffectiveDatesContent() {
                       </>
                     )}
 
-                    <th className="py-3 px-4 text-right whitespace-nowrap">Logged By</th>
+                    <th className="py-3 px-4 text-right whitespace-nowrap border-r border-slate-300">Logged By</th>
+                    <th className="py-3 px-4 text-right whitespace-nowrap">Approved By</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -572,9 +587,19 @@ function CustomerEffectiveDatesContent() {
                             <td className="py-3 px-4 border-r border-slate-200">
                               {row.stateName || row.state || "Chhattisgarh"}
                             </td>
+                            {[row.district, row.subDistrict || row.sub_district, row.thana, row.post, row.city].map((v, i) => (
+                              <td key={i} className="py-3 px-4 border-r border-slate-200">{v || "—"}</td>
+                            ))}
                             <td className="py-3 px-4 border-r border-slate-200 text-center">India</td>
                             <td className="py-3 px-4 border-r border-slate-200 font-mono text-center">
                               {row.pincode || "—"}
+                            </td>
+                            <td className="py-3 px-4 border-r border-slate-200">
+                              <Badge variant="outline" className={`text-[10px] px-2 py-0.5 font-bold ${
+                                (row.status || "Active") === "Inactive" ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }`}>
+                                {row.status || "Active"}
+                              </Badge>
                             </td>
                           </>
                         )}
@@ -629,11 +654,29 @@ function CustomerEffectiveDatesContent() {
                           </>
                         )}
 
-                        <td className="py-3 px-4 text-right text-slate-500 whitespace-nowrap">
+                        <td className="py-3 px-4 text-right text-slate-500 whitespace-nowrap border-r border-slate-200">
                           <div className="flex items-center justify-end gap-1.5 text-[11px]">
                             <User className="h-3.5 w-3.5 text-slate-400" />
                             <span className="font-medium text-slate-700">{row.changedByName || "Admin"}</span>
                           </div>
+                        </td>
+
+                        <td className="py-3 px-4 text-right text-slate-500 whitespace-nowrap">
+                          {row.approvedByName ? (
+                            <div className="flex flex-col items-end gap-0.5 text-[11px]">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <User className="h-3.5 w-3.5 text-slate-400" />
+                                <span className="font-medium text-slate-700">{row.approvedByName}</span>
+                              </div>
+                              {row.approvedAt && (
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(row.approvedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                       </tr>
                     )

@@ -93,7 +93,7 @@ export function CustomerSectionalHistoryTable({ section, customerId, title, onOp
       <span>
         {title ||
           (section === "mailing"
-            ? "Mailing History"
+            ? "Primary Address History"
             : section === "gst"
             ? "GST History"
             : section === "msme"

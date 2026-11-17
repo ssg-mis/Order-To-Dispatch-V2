@@ -6,10 +6,14 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
+import { MultiCombobox } from "@/components/ui/multi-combobox"
+import { sortDepotsBanariFirst } from "@/lib/depot-sort"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, Users, MapPin, Receipt, Building2, ShieldCheck, FileText, Warehouse, Landmark, BookOpen } from "lucide-react"
 import { FileUploadField } from "@/components/file-upload-field"
+import { formatBankLabel, bankSearchKeywords } from "@/lib/dropdown-masters"
 import { CustomerSectionalHistoryTable } from "@/components/customer-sectional-history-table"
+import { AddressLocationFields } from "@/components/masters/forms/AddressLocationFields"
 import { Customer, CustomerAddress, STATUS_OPTIONS, formatDocDate } from "@/components/masters/types"
 
 export interface CustomerFormProps {
@@ -198,71 +202,77 @@ export function CustomerForm({
         </div>
       </div>
 
-      {/* Mailing Details */}
+      {/* Primary Address */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
           <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
             <MapPin className="h-4.5 w-4.5 text-blue-600" />
-            <span>Mailing Details</span>
+            <span>Primary Address</span>
           </Label>
           {editingItem?.id && (
             <CustomerSectionalHistoryTable
               section="mailing"
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
-              title="Mailing Details History"
+              title="Primary Address History"
               onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="address_line_1" className="text-xs font-semibold text-slate-800">Address Line 1</Label>
-          <Input
-            id="address_line_1"
-            value={customerForm.address_line_1 || ""}
-            onChange={e => {
-              const val = e.target.value
-              handleCustomerFieldChangeAttempt("Address Line 1", "mailing", () => {
-                setCustomerForm(prev => ({ ...prev, address_line_1: val }))
-              })
-            }}
-            placeholder="Street address"
-          />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div className="space-y-1.5">
-            <Label htmlFor="state" className="text-xs font-semibold text-slate-800">State</Label>
-            <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
-              value={customerForm.state_id ? String(customerForm.state_id) : ""}
-              onValueChange={val => {
-                const selected = activeStates.find((s: any) => String(s.id) === val)
-                handleCustomerFieldChangeAttempt("State", "mailing", () => {
-                  setCustomerForm(prev => ({ ...prev, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || prev.state }))
-                })
-              }}
-              placeholder="Select state"
-              searchPlaceholder="Search state..."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pincode" className="text-xs font-semibold text-slate-800">Pincode</Label>
-            <Input
-              id="pincode"
-              className={`font-mono ${customerFormErrors.pincode ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
-              value={customerForm.pincode || ""}
-              onChange={e => {
-                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6)
-                handleCustomerFieldChangeAttempt("Pincode", "mailing", () => {
-                  setCustomerForm(prev => ({ ...prev, pincode: val }))
-                })
-              }}
-              onBlur={handlePincodeBlur}
-              placeholder="6-digit PIN code"
-            />
-            {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
-          </div>
-        </div>
+        {/* Primary Address (stored on the customer record itself: address line, city, post, thana, state, district, sub-district, pincode) */}
+        {(() => {
+          const primaryState = activeStates.find((s: any) => String(s.id) === String(customerForm.state_id))
+          const setMailing = (label: string, patch: Record<string, any>) =>
+            handleCustomerFieldChangeAttempt(label, "mailing", () => {
+              setCustomerForm(prev => ({ ...prev, ...patch }))
+            })
+          return (
+            <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                <span className="text-xs font-bold text-slate-900">Primary Address</span>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="address_line_1" className="text-xs font-medium text-slate-800">Address Line</Label>
+                <Input
+                  id="address_line_1"
+                  className="text-xs"
+                  value={customerForm.address_line_1 || ""}
+                  onChange={e => setMailing("Address Line 1", { address_line_1: e.target.value })}
+                  placeholder="Address"
+                />
+              </div>
+              <AddressLocationFields
+                value={customerForm as any}
+                activeStates={activeStates}
+                onChange={(patch, label) => setMailing(label, patch)}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pincode" className="text-xs font-medium text-slate-800">Pincode</Label>
+                  <Input
+                    id="pincode"
+                    className={`font-mono text-xs ${customerFormErrors.pincode ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
+                    value={customerForm.pincode || ""}
+                    onChange={e => setMailing("Pincode", { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
+                    onBlur={handlePincodeBlur}
+                    placeholder="PIN Code (6 digits)"
+                  />
+                  {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-800">Status</Label>
+                  <Combobox
+                    options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                    value={customerForm.primary_address_status || "Active"}
+                    onValueChange={val => val && setMailing("Primary Address Status", { primary_address_status: val })}
+                    placeholder="Select status"
+                    searchPlaceholder="Search..."
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         <div className="flex justify-end pt-1">
           <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 flex items-center gap-1 shadow-2xs" onClick={addAddressRow}>
@@ -276,55 +286,24 @@ export function CustomerForm({
             <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
               <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
                 <span className="text-xs font-bold text-slate-900">
-                  {index === 0 ? "Primary Address" : `Additional Address ${index}`}
+                  {`Additional Address ${index + 1}`}
                 </span>
-                {index > 0 && (
+                <div className="flex items-center gap-2">
                   <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => removeAddressRow(index)}>Remove</Button>
-                )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-slate-800">Address Line</Label>
-                <Input className="bg-white text-xs" value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
+                <Input className="text-xs" value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">City</Label>
-                  <Input className="bg-white text-xs" value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Post</Label>
-                  <Input className="bg-white text-xs" value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Thana</Label>
-                  <Input className="bg-white text-xs" value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">State</Label>
-                  <Combobox
-                    options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
-                    value={addr.state_id ? String(addr.state_id) : ""}
-                    onValueChange={val => handleAddressStateChange(index, val)}
-                    placeholder="Select State" searchPlaceholder="Search state..."
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">District</Label>
-                  <Input className="bg-white text-xs" value={addr.district || ''} onChange={e => updateAddressRow(index, { district: e.target.value })} placeholder="District" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Sub-District</Label>
-                  <Input className="bg-white text-xs" value={addr.sub_district || ''} onChange={e => updateAddressRow(index, { sub_district: e.target.value })} placeholder="Sub-District" />
-                </div>
-              </div>
-              {rowState && (
-                <p className="text-[11px] text-slate-500">
-                  State Code: <span className="font-semibold text-slate-700">{rowState.gst_state_code}</span>
-                  {" · "}Short Name: <span className="font-semibold text-slate-700">{rowState.short_name || '—'}</span>
-                </p>
-              )}
+              <AddressLocationFields
+                value={addr as any}
+                activeStates={activeStates}
+                onChange={(patch) => {
+                  const { state: _stateName, ...rest } = patch
+                  updateAddressRow(index, rest)
+                }}
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-slate-800">Pincode</Label>
@@ -333,9 +312,19 @@ export function CustomerForm({
                     onChange={e => updateAddressRow(index, { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
                     onBlur={e => handleAddressPincodeBlur(index, e.target.value)}
                     placeholder="PIN Code (6 digits)"
-                    className={`bg-white font-mono text-xs ${addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
+                    className={`font-mono text-xs ${addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
                   />
                   {addressErrors[index] && <p className="text-xs text-red-500 mt-1">{addressErrors[index]}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-800">Status</Label>
+                  <Combobox
+                    options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                    value={addr.status || "Active"}
+                    onValueChange={val => val && updateAddressRow(index, { status: val })}
+                    placeholder="Select status"
+                    searchPlaceholder="Search..."
+                  />
                 </div>
               </div>
             </div>
@@ -464,6 +453,24 @@ export function CustomerForm({
             </Select>
           </div>
         
+          <div className="space-y-1.5">
+            <Label htmlFor="aadhaar_number" className="text-xs font-semibold text-slate-800">Aadhaar Card Number</Label>
+            <Input
+              id="aadhaar_number"
+              className="font-mono"
+              placeholder="12-digit Aadhaar"
+              inputMode="numeric"
+              maxLength={12}
+              value={customerForm.aadhaar_number || ""}
+              onChange={e => {
+                const val = e.target.value.replace(/\D/g, "").slice(0, 12)
+                handleCustomerFieldChangeAttempt("Aadhaar Card Number", "gst", () => {
+                  setCustomerForm(prev => ({ ...prev, aadhaar_number: val }))
+                })
+              }}
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-800">Aadhaar Card</Label>
             <FileUploadField
@@ -612,9 +619,6 @@ export function CustomerForm({
                 })
               }}
             />
-            {customerForm.msme_registration_wef && (
-              <p className="text-xs text-slate-500">{formatDocDate(customerForm.msme_registration_wef)}</p>
-            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="msme_status" className="text-xs font-semibold text-slate-800">MSME Status</Label>
@@ -714,6 +718,21 @@ export function CustomerForm({
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="fssai_registration_wef" className="text-xs font-semibold text-slate-800">FSSAI W.E.F. Date (Applicable From)</Label>
+            <Input
+              id="fssai_registration_wef"
+              type="date"
+              className={`font-medium ${!customerForm.fssai_registration_wef ? 'text-slate-500' : ''}`}
+              value={customerForm.fssai_registration_wef?.split('T')[0] || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("FSSAI W.E.F. Date", "fssai", () => {
+                  setCustomerForm(prev => ({ ...prev, fssai_registration_wef: val }))
+                })
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="fssai_valid_upto" className="text-xs font-semibold text-slate-800">FSSAI Valid Upto Date</Label>
             <Input
               id="fssai_valid_upto"
@@ -774,25 +793,21 @@ export function CustomerForm({
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-slate-800">Select Godown</Label>
-            <Select 
-              value={customerForm.godown_ids?.[0]?.toString() || godownDepots?.find(d => d.depot_name?.toLowerCase() === 'banari')?.id?.toString() || ""} 
-              onValueChange={val => {
+            <Label className="text-xs font-semibold text-slate-800">Select Godown(s)</Label>
+            <MultiCombobox
+              options={sortDepotsBanariFirst(godownDepots).map((d: any) => ({ value: d.id.toString(), label: d.depot_name }))}
+              values={(customerForm.godown_ids?.length ? customerForm.godown_ids : [godownDepots?.find(d => d.depot_name?.toLowerCase() === 'banari')?.id].filter(Boolean) as number[]).map(id => String(id))}
+              onValuesChange={vals => {
                 handleCustomerFieldChangeAttempt("Godown", "godown", () => {
                   setCustomerForm(prev => ({
                     ...prev,
-                    godown_ids: val ? [parseInt(val, 10)] : [],
+                    godown_ids: vals.map(v => parseInt(v, 10)),
                   }))
                 })
               }}
-            >
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select godown" /></SelectTrigger>
-              <SelectContent>
-                {[...(godownDepots || [])].sort((a: any, b: any) => (a.depot_name || "").localeCompare(b.depot_name || "")).map((d: any) => (
-                  <SelectItem key={d.id} value={d.id.toString()}>{d.depot_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Select godown(s)"
+              searchPlaceholder="Search godown..."
+            />
           </div>
 
         </div>
@@ -841,7 +856,7 @@ export function CustomerForm({
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-800">Bank Name</Label>
                 <Combobox
-                  options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                  options={activeBankNames.map((b: any) => ({ value: String(b.id), label: formatBankLabel(b), keywords: bankSearchKeywords(b) }))}
                   value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
                   onValueChange={val => {
                     handleCustomerFieldChangeAttempt(`Bank Name (Account ${index + 1})`, "bank", () => {

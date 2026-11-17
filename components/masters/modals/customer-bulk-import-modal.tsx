@@ -53,6 +53,7 @@ interface ParsedRow {
   msme_registration_wef: string
   fssai_no: string
   fssai_licence_type: string
+  fssai_registration_wef: string
   fssai_valid_upto: string
   ledger_group_name: string
   is_required_for_commitment: string
@@ -103,7 +104,7 @@ export function CustomerBulkImportModal({
   // Download CSV Template — one unified template; GSTIN is just an optional
   // column, so a single file can mix GST-registered and non-registered rows.
   const handleDownloadTemplate = () => {
-    const headers = "Customer Name,State,PAN,GSTIN,GST Registration Type,GST W.E.F. Date,Contact Person,Contact Number,Email,Address Line 1,Address Line 2,Pincode,MSME Reg No,MSME Reg Type,MSME W.E.F. Date,FSSAI No,FSSAI Licence Type,FSSAI Valid Upto,Ledger Group,Is Required For Commitment,Godown,Status"
+    const headers = "Customer Name,State,PAN,GSTIN,GST Registration Type,GST W.E.F. Date,Contact Person,Contact Number,Email,Address Line 1,Address Line 2,Pincode,MSME Reg No,MSME Reg Type,MSME W.E.F. Date,FSSAI No,FSSAI Licence Type,FSSAI W.E.F. Date,FSSAI Valid Upto,Ledger Group,Is Required For Commitment,Godown,Status"
     const registeredSample = `"Shree Balaji Traders","Chhattisgarh","ABCDE1234F","22ABCDE1234F1Z5","Regular","2024-04-01","Ramesh Kumar","9876543210","balaji@gmail.com","Main Road Sector 1","Near Railway Station","492001","UDYAM-CG-01-0012345","Micro","2024-01-01","10019011000123","State","2028-12-31","Sundry Debtors","No","Banari","Active"`
     const unregisteredSample = `"Gupta Kirana Store","Chhattisgarh","ABCDE5678G","","","","Suresh Gupta","9812345678","gupta@gmail.com","Bazaar Para","Opposite Bank","492001","","","","10019011000999","Central","2027-06-30","Sundry Debtors","No","Banari, Raigarh","Active"`
 
@@ -145,6 +146,7 @@ export function CustomerBulkImportModal({
       "MSME W.E.F. Date",
       "FSSAI No",
       "FSSAI Licence Type",
+      "FSSAI W.E.F. Date",
       "FSSAI Valid Upto",
       "Ledger Group",
       "Is Required For Commitment",
@@ -173,6 +175,7 @@ export function CustomerBulkImportModal({
         row.msme_registration_wef,
         row.fssai_no,
         row.fssai_licence_type,
+        row.fssai_registration_wef,
         row.fssai_valid_upto,
         row.ledger_group_name,
         row.is_required_for_commitment,
@@ -235,6 +238,7 @@ export function CustomerBulkImportModal({
       const msme_registration_wef = getVal(cleanArr, "msme w.e.f") || getVal(cleanArr, "msme wef")
       const fssai_no = getVal(cleanArr, "fssai no") || getVal(cleanArr, "fssai number")
       const fssai_licence_type = getVal(cleanArr, "fssai licence type") || getVal(cleanArr, "fssai type")
+      const fssai_registration_wef = getVal(cleanArr, "fssai w.e.f") || getVal(cleanArr, "fssai wef")
       const fssai_valid_upto = getVal(cleanArr, "fssai valid") || getVal(cleanArr, "fssai valid upto")
       const ledger_group_name = getVal(cleanArr, "ledger group") || getVal(cleanArr, "ledger")
       const is_required_for_commitment = getVal(cleanArr, "commitment") || getVal(cleanArr, "is required for commitment") || "No"
@@ -263,6 +267,7 @@ export function CustomerBulkImportModal({
         msme_registration_wef,
         fssai_no,
         fssai_licence_type,
+        fssai_registration_wef,
         fssai_valid_upto,
         ledger_group_name,
         is_required_for_commitment: is_required_for_commitment ? (is_required_for_commitment.toLowerCase().startsWith('y') ? 'Yes' : 'No') : 'No',

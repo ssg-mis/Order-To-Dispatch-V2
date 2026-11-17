@@ -55,14 +55,17 @@ export interface Customer {
   msme_activity_type?: string
   msme_status?: string
   fssai_no?: string | null
+  fssai_registration_wef?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
   msme_certificate_upload?: string | null
   fssai_certificate_upload?: string | null
   addresses?: CustomerAddress[]
+  primary_address_status?: string // Active / Inactive status of the Primary Address
   godown_ids?: number[]
   is_required_for_commitment?: string
   bank_accounts?: CustomerBankAccount[]
@@ -83,6 +86,7 @@ export interface PartyParityFields {
   fssai_no?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
@@ -311,6 +315,7 @@ export interface Transport extends PartyParityFields {
 
 export interface CustomerAddress {
   id?: number
+  status?: string // Active / Inactive (Inactive addresses are not offered for new orders)
   address_line_1?: string
   address_line_2?: string
   city?: string
@@ -345,7 +350,7 @@ export const normalizeGstField = (v: string) => v.trim().toUpperCase()
 
 export const blankCustomerAddress = (): CustomerAddress => ({
   address_line_1: "", address_line_2: "", city: "", post: "", thana: "",
-  sub_district: "", district: "", state_id: null, pincode: "",
+  sub_district: "", district: "", state_id: null, pincode: "", status: "Active",
 })
 
 export const blankCustomerBankAccount = (): CustomerBankAccount => ({
@@ -356,7 +361,7 @@ export const blankPartyParityFields = (): PartyParityFields => ({
   state: "", state_id: null, pan: "", gstin: "",
   gst_registered: "", gst_registration_type: "", gst_registration_wef: "",
   msme_registration_no: "", msme_registration_type: "", msme_registration_wef: "",
-  fssai_no: "", fssai_valid_upto: "", fssai_licence_type: "",
+  fssai_no: "", fssai_registration_wef: "", fssai_valid_upto: "", fssai_licence_type: "",
   aadhaar_upload: "", pan_upload: "", gst_certificate_upload: "", msme_certificate_upload: "", fssai_certificate_upload: "",
 })
 

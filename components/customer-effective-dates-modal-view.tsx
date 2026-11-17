@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Edit,
   Trash2,
+  ChevronRight,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,9 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
+import { MultiCombobox } from "@/components/ui/multi-combobox"
+import { sortDepotsBanariFirst } from "@/lib/depot-sort"
 import { customerApi, masterHistoryApi, depotApi, lookupApi, orderApi, ledgerGroupApi, stateApi } from "@/lib/api-service"
 import { FileUploadField } from "@/components/file-upload-field"
+import { formatBankLabel, bankSearchKeywords } from "@/lib/dropdown-masters"
 import { useToast } from "@/hooks/use-toast"
+import { AddressLocationFields } from "@/components/masters/forms/AddressLocationFields"
 
 type SectionType = "basic" | "mailing" | "gst" | "msme" | "fssai" | "godown" | "bank" | "ledger" | "documents"
 
@@ -137,6 +142,20 @@ export function CustomerEffectiveDatesModalView({
     const list = Array.isArray(raw) ? raw : []
     return list.filter((b: any) => b.status === "Active")
   }, [fssaiLicenceTypesRes])
+
+  // GST registration types (same Reference Data master + query key as the Master page)
+  const { data: gstRegTypesRes } = useQuery({
+    queryKey: ["lookup-gst_registration_type"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll("gst_registration_type", { page: 1, limit: 1000, all: "true" })
+      return res.success ? res.data?.items || [] : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const activeGstRegTypes = useMemo(
+    () => (gstRegTypesRes || []).filter((r: any) => r.status === "Active"),
+    [gstRegTypesRes]
+  )
 
   // Fetch MSME registration types for MSME section dropdown
   const { data: msmeRegTypesRes } = useQuery({
@@ -249,11 +268,21 @@ export function CustomerEffectiveDatesModalView({
           ...item,
           wefDate: key,
           allIds: item.id && !String(item.id).startsWith("baseline") ? [item.id] : [],
+          _maxId: item.id && !String(item.id).startsWith("baseline") ? Number(item.id) : 0,
         })
       } else {
         const existing = dateMap.get(key)
+        const itemNumId = item.id && !String(item.id).startsWith("baseline") ? Number(item.id) : 0
         if (item.id && !String(item.id).startsWith("baseline") && !existing.allIds.includes(item.id)) {
           existing.allIds.push(item.id)
+        }
+        // Always use the data from the highest-ID record for the same date,
+        // because that is the most-recently saved version (e.g. user saved 3
+        // godowns on the same date as an earlier 1-godown save — the newer
+        // record has the correct newValue and should win).
+        if (itemNumId > (existing._maxId || 0)) {
+          const { allIds, _maxId: _prev, ...rest } = existing
+          Object.assign(existing, { ...item, wefDate: key, allIds, _maxId: itemNumId })
         }
       }
     }
@@ -351,7 +380,13 @@ export function CustomerEffectiveDatesModalView({
         state_id: latest.stateId || latest.state_id || customerForm?.state_id || null,
         state: latest.stateName || latest.state_name || latest.state || customerForm?.state || "",
         pincode: latest.pincode || customerForm?.pincode || "",
+        district: latest.district || customerForm?.district || "",
+        sub_district: latest.subDistrict || latest.sub_district || customerForm?.sub_district || "",
+        thana: latest.thana || customerForm?.thana || "",
+        post: latest.post || customerForm?.post || "",
+        city: latest.city || customerForm?.city || "",
         country: latest.country || "India",
+        status: latest.status || customerForm?.primary_address_status || "Active",
       })
     } else if (activeSection === "gst") {
       const liveGstin = latest.gstin || customerForm?.gstin || ""
@@ -364,6 +399,10 @@ export function CustomerEffectiveDatesModalView({
         is_gst_registered: latest.isGstRegistered || latest.is_gst_registered || customerForm?.gst_registered || "Registered",
         place_of_supply: latest.placeOfSupply || latest.place_of_supply || customerForm?.place_of_supply || "",
         gst_status: latest.gstStatus || latest.gst_status || customerForm?.gst_status || "Active",
+        aadhaar_number: latest.aadhaarNumber || latest.aadhaar_number || customerForm?.aadhaar_number || "",
+        aadhaar_upload: latest.aadhaarUpload || latest.aadhaar_upload || customerForm?.aadhaar_upload || "",
+        pan_upload: latest.panUpload || latest.pan_upload || customerForm?.pan_upload || "",
+        gst_certificate_upload: latest.gstCertificateUpload || latest.gst_certificate_upload || customerForm?.gst_certificate_upload || "",
       })
     } else if (activeSection === "msme") {
       setNewVersionForm({
@@ -383,7 +422,7 @@ export function CustomerEffectiveDatesModalView({
       })
     } else if (activeSection === "godown") {
       const initialIds = Array.isArray(customerForm?.godown_ids) ? [...customerForm.godown_ids] : []
-      const initialNames = godownDepots.filter((d: any) => initialIds.includes(d.id)).map((d: any) => d.depot_name).join(", ")
+      const initialNames = sortDepotsBanariFirst(godownDepots).filter((d: any) => initialIds.includes(d.id)).map((d: any) => d.depot_name).join(", ")
       setNewVersionForm({
         wefDate: new Date().toISOString().split("T")[0],
         godown_ids: initialIds,
@@ -397,9 +436,12 @@ export function CustomerEffectiveDatesModalView({
         bank_accounts: JSON.parse(JSON.stringify(activeBanks)),
       })
     } else if (activeSection === "ledger") {
+      const rawVal = latest.newValue || customerForm?.ledger_group_id || ""
+      const matched = ledgerGroupOptions.find((g: any) => String(g.id) === String(rawVal) || String(g.group_name || "").toLowerCase() === String(rawVal).toLowerCase())
       setNewVersionForm({
         wefDate: new Date().toISOString().split("T")[0],
-        newValue: customerForm?.ledger_group_id || latest.newValue || "",
+        ledger_group_id: matched ? String(matched.id) : (rawVal ? String(rawVal) : ""),
+        newValue: matched ? matched.group_name : rawVal,
       })
     } else if (activeSection === "documents") {
       setNewVersionForm({
@@ -455,7 +497,13 @@ export function CustomerEffectiveDatesModalView({
           state_id: latest.stateId || latest.state_id || customerForm?.state_id || null,
           state: latest.stateName || latest.state_name || latest.state || customerForm?.state || "",
           pincode: latest.pincode || customerForm?.pincode || "",
+          district: latest.district || customerForm?.district || "",
+          sub_district: latest.subDistrict || latest.sub_district || customerForm?.sub_district || "",
+          thana: latest.thana || customerForm?.thana || "",
+          post: latest.post || customerForm?.post || "",
+          city: latest.city || customerForm?.city || "",
           country: latest.country || "India",
+          status: latest.status || customerForm?.primary_address_status || "Active",
         })
       } else if (activeSection === "gst") {
         const liveGstin = latest.gstin || customerForm?.gstin || ""
@@ -468,6 +516,10 @@ export function CustomerEffectiveDatesModalView({
           is_gst_registered: latest.isGstRegistered || latest.is_gst_registered || customerForm?.gst_registered || "Registered",
           place_of_supply: latest.placeOfSupply || latest.place_of_supply || "",
           gst_status: latest.gstStatus || latest.gst_status || customerForm?.gst_status || "Active",
+          aadhaar_number: latest.aadhaarNumber || latest.aadhaar_number || customerForm?.aadhaar_number || "",
+          aadhaar_upload: latest.aadhaarUpload || latest.aadhaar_upload || customerForm?.aadhaar_upload || "",
+          pan_upload: latest.panUpload || latest.pan_upload || customerForm?.pan_upload || "",
+          gst_certificate_upload: latest.gstCertificateUpload || latest.gst_certificate_upload || customerForm?.gst_certificate_upload || "",
         })
       } else if (activeSection === "msme") {
         setNewVersionForm({
@@ -493,7 +545,7 @@ export function CustomerEffectiveDatesModalView({
               initialIds = [banariId]
            }
         }
-        const initialNames = godownDepots.filter((d: any) => initialIds.includes(d.id)).map((d: any) => d.depot_name).join(", ")
+        const initialNames = sortDepotsBanariFirst(godownDepots).filter((d: any) => initialIds.includes(d.id)).map((d: any) => d.depot_name).join(", ")
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
           godown_ids: initialIds,
@@ -513,9 +565,12 @@ export function CustomerEffectiveDatesModalView({
           bank_accounts: JSON.parse(JSON.stringify(activeBanks)),
         })
       } else if (activeSection === "ledger") {
+        const rawVal = latest.newValue || customerForm?.ledger_group_id || ""
+        const matched = ledgerGroupOptions.find((g: any) => String(g.id) === String(rawVal) || String(g.group_name || "").toLowerCase() === String(rawVal).toLowerCase())
         setNewVersionForm({
           wefDate: new Date().toISOString().split("T")[0],
-          newValue: latest.newValue || customerForm?.ledger_group_id || "",
+          ledger_group_id: matched ? String(matched.id) : (rawVal ? String(rawVal) : ""),
+          newValue: matched ? matched.group_name : rawVal,
         })
       } else if (activeSection === "documents") {
         setNewVersionForm({
@@ -636,7 +691,7 @@ export function CustomerEffectiveDatesModalView({
       })
       toast({
         title: "Version Added Successfully",
-        description: `New ${activeSection.toUpperCase()} version logged with W.E.F. date ${newVersionForm.wefDate}`,
+        description: `New ${activeSection === "mailing" ? "PRIMARY ADDRESS" : activeSection.toUpperCase()} version logged with W.E.F. date ${newVersionForm.wefDate}`,
       })
 
       // If this save was editing an existing version (via "Edit") and its
@@ -676,18 +731,19 @@ export function CustomerEffectiveDatesModalView({
   }
 
   return (
-    <div ref={topRef} className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
+    <div ref={topRef} className="w-full min-w-0 max-w-full space-y-4 pt-0 pb-8 min-h-[480px] flex flex-col justify-between">
+      {/* Fixed top block: Back button + heading + history tabs stay pinned; everything below scrolls */}
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
       {/* Standalone Top Back Button */}
-      <div className="flex items-center justify-between pb-1">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-6 px-2 text-[11px] font-semibold bg-white border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 flex items-center gap-1 shadow-2xs rounded-md"
           onClick={onBack}
+          className="h-8 px-2.5 text-xs font-semibold bg-white border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 flex items-center gap-1.5 shadow-2xs rounded-md"
         >
-          <ArrowLeft className="h-3 w-3 text-slate-500" />
-          <span>Back to Form</span>
+          <ArrowLeft className="h-4 w-4" /> Back to Customer Form
         </Button>
       </div>
 
@@ -698,7 +754,7 @@ export function CustomerEffectiveDatesModalView({
           {activeSection === "basic"
             ? "Customer Details History"
             : activeSection === "mailing"
-              ? "Mailing Address History"
+              ? "Primary Address History"
               : activeSection === "gst"
                 ? "GST Registration History"
                 : activeSection === "msme"
@@ -745,7 +801,7 @@ export function CustomerEffectiveDatesModalView({
             }`}
         >
           <Mail className="h-3.5 w-3.5" />
-          Mailing History
+          Primary Address History
         </button>
 
         <button
@@ -839,9 +895,10 @@ export function CustomerEffectiveDatesModalView({
           Ledger Group History
         </button>
       </div>
+      </div>
 
       {/* Section Action Bar */}
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           {activeSection === "basic" && <User className="h-3.5 w-3.5 text-slate-900" />}
           {activeSection === "mailing" && <Mail className="h-3.5 w-3.5 text-blue-600" />}
@@ -854,7 +911,7 @@ export function CustomerEffectiveDatesModalView({
           {activeSection === "basic"
             ? "Customer Details History Table"
             : activeSection === "mailing"
-              ? "Mailing History Table"
+              ? "Primary Address History Table"
               : activeSection === "gst"
                 ? "GST History Table"
                 : activeSection === "msme"
@@ -893,12 +950,12 @@ export function CustomerEffectiveDatesModalView({
           <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
             <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5 text-emerald-600" />
-              Log New {activeSection === "basic" ? "CUSTOMER DETAILS" : activeSection.toUpperCase()} Version (Applicable From Date)
+              Log New {activeSection === "basic" ? "CUSTOMER DETAILS" : activeSection === "mailing" ? "PRIMARY ADDRESS" : activeSection.toUpperCase()} Version (Applicable From Date)
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="space-y-1">
+          <div className={activeSection === "gst" ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 items-start gap-x-4 gap-y-3 text-xs" : "grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs"}>
+            <div className={`space-y-1 `}>
               <Label className="text-[11px] font-bold text-slate-700">Applicable From (W.E.F Date) *</Label>
               <Input
                 ref={wefDateInputRef}
@@ -972,78 +1029,6 @@ export function CustomerEffectiveDatesModalView({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card</Label>
-                  <FileUploadField
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.aadhaar_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    triggerClassName="h-8 bg-white text-xs"
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, aadhaar_upload: res.data.url }))
-                            toast({ title: "Success", description: "Aadhaar Card uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, aadhaar_upload: "" }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">PAN Card</Label>
-                  <FileUploadField
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.pan_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    triggerClassName="h-8 bg-white text-xs"
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, pan_upload: res.data.url }))
-                            toast({ title: "Success", description: "PAN Card uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, pan_upload: "" }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">GST Certificate</Label>
-                  <FileUploadField
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                    value={newVersionForm.gst_certificate_upload || ""}
-                    helperText="Max file size: 20 MB"
-                    uploading={false}
-                    triggerClassName="h-8 bg-white text-xs"
-                    onFilesSelected={async (files) => {
-                      if (files[0]) {
-                        try {
-                          const res = await orderApi.uploadFile(files[0])
-                          if (res.success && res.data?.url) {
-                            setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: res.data.url }))
-                            toast({ title: "Success", description: "GST Certificate uploaded successfully" })
-                          }
-                        } catch (err: any) {
-                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
-                        }
-                      }
-                    }}
-                    onRemove={() => setNewVersionForm(prev => ({ ...prev, gst_certificate_upload: "" }))}
-                  />
-                </div>
               </>
             )}
 
@@ -1059,23 +1044,12 @@ export function CustomerEffectiveDatesModalView({
                     onChange={(e) => setNewVersionForm({ ...newVersionForm, address_line_1: e.target.value })}
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">State</Label>
-                  <Combobox
-                    options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
-                    value={newVersionForm.state_id ? String(newVersionForm.state_id) : ""}
-                    onValueChange={(val) => {
-                      const selected = activeStates.find((s: any) => String(s.id) === val)
-                      setNewVersionForm({
-                        ...newVersionForm,
-                        state_id: val ? parseInt(val, 10) : null,
-                        state: selected?.state_name || "",
-                        stateName: selected?.state_name || "",
-                      })
-                    }}
-                    placeholder="Select state"
-                    searchPlaceholder="Search state..."
-                    className="h-8 bg-white text-xs"
+                <div className="space-y-3 sm:col-span-3">
+                  <AddressLocationFields
+                    value={newVersionForm}
+                    activeStates={activeStates}
+                    fieldClassName="bg-white"
+                    onChange={(patch) => setNewVersionForm((prev: any) => ({ ...prev, ...patch, ...(patch.state !== undefined ? { stateName: patch.state } : {}) }))}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1089,23 +1063,37 @@ export function CustomerEffectiveDatesModalView({
                     onChange={(e) => setNewVersionForm({ ...newVersionForm, pincode: e.target.value })}
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Status</Label>
+                  <Combobox
+                    options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                    value={newVersionForm.status || "Active"}
+                    onValueChange={(val) => val && setNewVersionForm({ ...newVersionForm, status: val })}
+                    placeholder="Status"
+                    searchPlaceholder="Search..."
+                    className="h-8 bg-white text-xs"
+                  />
+                </div>
               </>
             )}
 
-            {activeSection === "gst" && (
+            {activeSection === "gst" && (() => {
+              const gstinVal: string = newVersionForm.gstin || ""
+              // PAN is always the 10 characters inside the GSTIN (positions 3-12)
+              const derivedPan = gstinVal.length >= 12 ? gstinVal.slice(2, 12) : ""
+              return (
               <>
                 <div className="space-y-1">
                   <Label className="text-[11px] font-semibold text-slate-700">GSTIN / UIN *</Label>
                   <Input
                     data-field-name="GSTIN"
-                    className="h-8 text-xs font-mono uppercase bg-white"
+                    className="md:text-xs h-8 text-xs font-mono uppercase bg-white"
                     placeholder="Enter GSTIN / UIN"
                     maxLength={15}
-                    value={newVersionForm.gstin || ""}
+                    value={gstinVal}
                     onChange={(e) => {
                       const val = e.target.value.toUpperCase()
-                      const autoPan = val.length === 15 ? val.slice(2, 12) : (newVersionForm.pan || "")
-                      setNewVersionForm({ ...newVersionForm, gstin: val, pan: autoPan })
+                      setNewVersionForm({ ...newVersionForm, gstin: val, pan: val.length >= 12 ? val.slice(2, 12) : "" })
                     }}
                   />
                 </div>
@@ -1113,11 +1101,11 @@ export function CustomerEffectiveDatesModalView({
                   <Label className="text-[11px] font-semibold text-slate-700">PAN Number</Label>
                   <Input
                     data-field-name="PAN"
-                    className="h-8 text-xs font-mono uppercase bg-white"
-                    placeholder="ABCDE1234F"
+                    className="md:text-xs h-8 text-xs font-mono uppercase bg-slate-50"
+                    placeholder="Auto from GSTIN"
                     maxLength={10}
-                    value={newVersionForm.pan || ""}
-                    onChange={(e) => setNewVersionForm({ ...newVersionForm, pan: e.target.value.toUpperCase() })}
+                    readOnly
+                    value={derivedPan}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1126,7 +1114,7 @@ export function CustomerEffectiveDatesModalView({
                     value={newVersionForm.is_gst_registered || "Registered"}
                     onValueChange={(val) => setNewVersionForm({ ...newVersionForm, is_gst_registered: val })}
                   >
-                    <SelectTrigger className="h-8 bg-white text-xs">
+                    <SelectTrigger className="h-8 w-full bg-white text-xs">
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1137,12 +1125,19 @@ export function CustomerEffectiveDatesModalView({
                 </div>
                 <div className="space-y-1">
                   <Label className="text-[11px] font-semibold text-slate-700">Registration Type</Label>
-                  <Input
-                    data-field-name="GST Registration Type"
-                    className="h-8 text-xs bg-white"
-                    placeholder="Regular / Composition"
+                  <Combobox
+                    options={(() => {
+                      const opts = activeGstRegTypes.map((r: any) => ({ value: r.name, label: r.name }))
+                      const cur = newVersionForm.gst_registration_type
+                      // keep a saved value that is not in the master list visible
+                      if (cur && !opts.some((o: any) => o.value === cur)) opts.unshift({ value: cur, label: cur })
+                      return opts
+                    })()}
                     value={newVersionForm.gst_registration_type || ""}
-                    onChange={(e) => setNewVersionForm({ ...newVersionForm, gst_registration_type: e.target.value })}
+                    onValueChange={(val) => setNewVersionForm({ ...newVersionForm, gst_registration_type: val })}
+                    placeholder="Select type"
+                    searchPlaceholder="Search..."
+                    className="h-8 bg-white text-xs"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1151,7 +1146,7 @@ export function CustomerEffectiveDatesModalView({
                     value={newVersionForm.gst_status || "Active"}
                     onValueChange={(val) => setNewVersionForm({ ...newVersionForm, gst_status: val })}
                   >
-                    <SelectTrigger className="h-8 bg-white text-xs">
+                    <SelectTrigger className="h-8 w-full bg-white text-xs">
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1160,8 +1155,93 @@ export function CustomerEffectiveDatesModalView({
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card Number</Label>
+                  <Input
+                    data-field-name="Aadhaar Card Number"
+                    className="md:text-xs h-8 text-xs font-mono bg-white"
+                    placeholder="12-digit Aadhaar"
+                    inputMode="numeric"
+                    maxLength={12}
+                    value={newVersionForm.aadhaar_number || ""}
+                    onChange={(e) => setNewVersionForm({ ...newVersionForm, aadhaar_number: e.target.value.replace(/\D/g, "").slice(0, 12) })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">Aadhaar Card</Label>
+                  <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.aadhaar_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm((prev: any) => ({ ...prev, aadhaar_upload: res.data.url }))
+                            toast({ title: "Success", description: "Aadhaar Card uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm((prev: any) => ({ ...prev, aadhaar_upload: "" }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">PAN Card</Label>
+                  <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.pan_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm((prev: any) => ({ ...prev, pan_upload: res.data.url }))
+                            toast({ title: "Success", description: "PAN Card uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm((prev: any) => ({ ...prev, pan_upload: "" }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">GST Certificate</Label>
+                  <FileUploadField
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                    value={newVersionForm.gst_certificate_upload || ""}
+                    helperText="Max file size: 20 MB"
+                    uploading={false}
+                    triggerClassName="h-8 bg-white text-xs"
+                    onFilesSelected={async (files) => {
+                      if (files[0]) {
+                        try {
+                          const res = await orderApi.uploadFile(files[0])
+                          if (res.success && res.data?.url) {
+                            setNewVersionForm((prev: any) => ({ ...prev, gst_certificate_upload: res.data.url }))
+                            toast({ title: "Success", description: "GST Certificate uploaded successfully" })
+                          }
+                        } catch (err: any) {
+                          toast({ title: "Upload Failed", description: err.message || "Failed to upload file", variant: "destructive" })
+                        }
+                      }
+                    }}
+                    onRemove={() => setNewVersionForm((prev: any) => ({ ...prev, gst_certificate_upload: "" }))}
+                  />
+                </div>
               </>
-            )}
+              )
+            })()}
 
             {activeSection === "msme" && (
               <>
@@ -1316,29 +1396,25 @@ export function CustomerEffectiveDatesModalView({
               <>
                 <div className="space-y-1 sm:col-span-2">
                   <Label className="text-[11px] font-semibold text-slate-700">Belongs to Which Godown *</Label>
-                  <Select 
-                    value={
-                      (newVersionForm.godown_ids !== undefined ? newVersionForm.godown_ids?.[0]?.toString() : customerForm?.godown_ids?.[0]?.toString()) 
-                      || godownDepots?.find((d: any) => d.depot_name?.toLowerCase() === 'banari')?.id?.toString() 
-                      || ""
-                    }
-                    onValueChange={(val) => {
-                      const nextIds = val ? [parseInt(val, 10)] : []
-                      const selectedNames = godownDepots?.find((dep: any) => String(dep.id) === val)?.depot_name
+                  <MultiCombobox
+                    options={sortDepotsBanariFirst(godownDepots).map((d: any) => ({ value: d.id.toString(), label: d.depot_name }))}
+                    values={((newVersionForm.godown_ids !== undefined ? newVersionForm.godown_ids : customerForm?.godown_ids) || []).map((id: any) => String(id))}
+                    onValuesChange={(vals) => {
+                      const nextIds = vals.map((v) => parseInt(v, 10))
+                      const selectedNames = sortDepotsBanariFirst(godownDepots)
+                        .filter((dep: any) => nextIds.includes(dep.id))
+                        .map((dep: any) => dep.depot_name)
+                        .join(", ")
                       setNewVersionForm({
                         ...newVersionForm,
                         godown_ids: nextIds,
                         newValue: selectedNames || "None",
                       })
                     }}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue placeholder="Select godown" /></SelectTrigger>
-                    <SelectContent>
-                      {[...(godownDepots || [])].sort((a: any, b: any) => (a.depot_name || "").localeCompare(b.depot_name || "")).map((d: any) => (
-                        <SelectItem key={d.id} value={d.id.toString()}>{d.depot_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select godown(s)"
+                    searchPlaceholder="Search godown..."
+                    className="h-8 text-xs bg-white"
+                  />
                 </div>
 
               </>
@@ -1375,7 +1451,7 @@ export function CustomerEffectiveDatesModalView({
                       <div className="space-y-1">
                         <Label className="text-[11px] font-semibold text-slate-600">Bank Name</Label>
                         <Combobox
-                          options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                          options={activeBankNames.map((b: any) => ({ value: String(b.id), label: formatBankLabel(b), keywords: bankSearchKeywords(b) }))}
                           value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
                           onValueChange={(val) => {
                             const next = (newVersionForm.bank_accounts || []).map((b: any, i: number) =>
@@ -1457,22 +1533,28 @@ export function CustomerEffectiveDatesModalView({
               </div>
             )}
 
-            {activeSection === "ledger" && (
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-[11px] font-semibold text-slate-700">Ledger Group</Label>
-                <Combobox
-                  options={ledgerGroupOptions.map((g: any) => ({ value: String(g.id), label: g.group_name }))}
-                  value={newVersionForm.ledger_group_id ? String(newVersionForm.ledger_group_id) : (newVersionForm.newValue || "")}
-                  onValueChange={(val) => {
-                    const sel = ledgerGroupOptions.find((g: any) => String(g.id) === val)
-                    setNewVersionForm({ ...newVersionForm, ledger_group_id: val, newValue: sel?.group_name || val })
-                  }}
-                  placeholder="Select ledger group"
-                  searchPlaceholder="Search ledger group..."
-                  className="h-8 bg-white text-xs"
-                />
-              </div>
-            )}
+            {activeSection === "ledger" && (() => {
+              const rawVal = newVersionForm.ledger_group_id || newVersionForm.newValue || ""
+              const matched = ledgerGroupOptions.find((g: any) => String(g.id) === String(rawVal) || String(g.group_name || "").toLowerCase() === String(rawVal).toLowerCase())
+              const selectedVal = matched ? String(matched.id) : String(rawVal)
+
+              return (
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-[11px] font-semibold text-slate-700">Ledger Group</Label>
+                  <Combobox
+                    options={ledgerGroupOptions.map((g: any) => ({ value: String(g.id), label: g.group_name }))}
+                    value={selectedVal}
+                    onValueChange={(val) => {
+                      const sel = ledgerGroupOptions.find((g: any) => String(g.id) === val)
+                      setNewVersionForm({ ...newVersionForm, ledger_group_id: val, newValue: sel?.group_name || val })
+                    }}
+                    placeholder="Select ledger group"
+                    searchPlaceholder="Search ledger group..."
+                    className="h-8 bg-white text-xs"
+                  />
+                </div>
+              )
+            })()}
 
 
           </div>
@@ -1519,8 +1601,8 @@ export function CustomerEffectiveDatesModalView({
           <table className="w-full text-xs text-left border-collapse">
             <thead>
               <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
-                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 border-r border-slate-300 w-32 font-bold">
-                  Applicable From (W.E.F)
+                <th className="py-2.5 px-2 bg-amber-50/80 text-slate-900 border-r border-slate-300 whitespace-nowrap font-bold">
+                  Applicable From<br />(W.E.F)
                 </th>
 
                 {activeSection === "basic" && (
@@ -1535,10 +1617,16 @@ export function CustomerEffectiveDatesModalView({
 
                 {activeSection === "mailing" && (
                   <>
-                    <th className="py-2.5 px-3 border-r border-slate-300">Address Line 1</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300 min-w-[20rem]">Address Line 1</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">State</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">District</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Sub-District</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Thana</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Post</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">City</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Country</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Pincode</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Status</th>
                   </>
                 )}
 
@@ -1550,6 +1638,7 @@ export function CustomerEffectiveDatesModalView({
                     <th className="py-2.5 px-3 border-r border-slate-300">GST Registration Status</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Status</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Place of Supply</th>
+                    <th className="py-2.5 px-3 border-r border-slate-300">Aadhaar No</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">Aadhaar Card</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">PAN Card</th>
                     <th className="py-2.5 px-3 border-r border-slate-300">GST Certificate</th>
@@ -1599,6 +1688,7 @@ export function CustomerEffectiveDatesModalView({
 
 
                 <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300">Updated By</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300">Approved By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[90px]">Actions</th>
               </tr>
             </thead>
@@ -1640,11 +1730,9 @@ export function CustomerEffectiveDatesModalView({
                       : (row.id && !String(row.id).startsWith("baseline") ? [row.id] : [])
 
                     if (idsToDelete.length === 0) {
-                      toast({
-                        title: "Notice",
-                        description: "Initial baseline versions cannot be deleted directly.",
-                        variant: "default",
-                      })
+                      toast({ title: "Removed", description: "Version removed." })
+                      await queryClient.invalidateQueries({ queryKey: ["customer-sectional-history"] })
+                      await queryClient.invalidateQueries({ queryKey: ["master-edit-history"] })
                       return
                     }
 
@@ -1689,6 +1777,16 @@ export function CustomerEffectiveDatesModalView({
                   if (activeSection === "mailing") {
                     formState.state_id = row.stateId || row.state_id || null
                     formState.state = row.stateName || row.state_name || row.state || ""
+                    formState.sub_district = row.subDistrict || row.sub_district || ""
+                    formState.status = row.status || "Active"
+                  }
+                  if (activeSection === "ledger") {
+                    const rawVal = row.newValue || row.ledger_group_id || ""
+                    const matched = ledgerGroupOptions.find((g: any) => String(g.id) === String(rawVal) || String(g.group_name || "").toLowerCase() === String(rawVal).toLowerCase())
+                    if (matched) {
+                      formState.ledger_group_id = String(matched.id)
+                      formState.newValue = matched.group_name
+                    }
                   }
                   setNewVersionForm(formState)
                   setEditingVersion({ ids: row.allIds || [], wefDate: itemDateStr })
@@ -1702,7 +1800,7 @@ export function CustomerEffectiveDatesModalView({
                 return (
                   <tr key={rowId} className={`hover:bg-amber-50/30 transition-colors text-xs text-slate-800 ${isActive ? "bg-emerald-50/20" : ""}`}>
                     <td className="py-2 px-3 font-bold text-slate-900 bg-amber-50/50 border-r border-slate-300 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-1">
+                      <div className="flex flex-row items-center justify-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                         <span>{formattedWef}</span>
                         
@@ -1763,15 +1861,25 @@ export function CustomerEffectiveDatesModalView({
                       const stateVal = row.stateName || row.state_name || row.state || activeStates.find((s: any) => String(s.id) === String(row.stateId || row.state_id))?.state_name || "—"
                       return (
                         <>
-                          <td className="py-2 px-3 border-r border-slate-200 font-medium text-slate-900">
+                          <td className="py-2 px-3 border-r border-slate-200 font-medium text-slate-900 min-w-[20rem]">
                             {row.addressLine1 || row.address_line_1 || "—"}
                           </td>
                           <td className="py-2 px-3 border-r border-slate-200 text-slate-700 font-medium">
                             {stateVal}
                           </td>
+                          {[row.district, row.subDistrict || row.sub_district, row.thana, row.post, row.city].map((v, i) => (
+                            <td key={i} className="py-2 px-3 border-r border-slate-200 text-slate-700">{v || "—"}</td>
+                          ))}
                           <td className="py-2 px-3 border-r border-slate-200 text-slate-600">India</td>
                           <td className="py-2 px-3 border-r border-slate-200 text-slate-600 font-mono">
                             {row.pincode || "—"}
+                          </td>
+                          <td className="py-2 px-3 border-r border-slate-200">
+                            <Badge variant="outline" className={`text-[10px] px-2 py-0.5 font-bold ${
+                              (row.status || "Active") === "Inactive" ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            }`}>
+                              {row.status || "Active"}
+                            </Badge>
                           </td>
                         </>
                       )
@@ -1803,6 +1911,30 @@ export function CustomerEffectiveDatesModalView({
                         <td className="py-2 px-3 border-r border-slate-200 text-slate-600">
                           {row.gstin ? row.gstin.slice(0, 2) : "—"}
                         </td>
+                        <td className="py-2 px-3 border-r border-slate-200 font-mono text-slate-600">
+                          {row.aadhaarNumber || row.aadhaar_number || "—"}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200 text-center">
+                          {(row.aadhaarUpload || row.aadhaar_upload) ? (
+                            <a href={row.aadhaarUpload || row.aadhaar_upload} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200 text-center">
+                          {(row.panUpload || row.pan_upload) ? (
+                            <a href={row.panUpload || row.pan_upload} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200 text-center">
+                          {(row.gstCertificateUpload || row.gst_certificate_upload) ? (
+                            <a href={row.gstCertificateUpload || row.gst_certificate_upload} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
                       </>
                     )}
 
@@ -1824,6 +1956,13 @@ export function CustomerEffectiveDatesModalView({
                             {row.msmeStatus || row.msme_status || "Active"}
                           </Badge>
                         </td>
+                        <td className="py-2 px-3 border-r border-slate-200">
+                          {(row.msmeCertificateUpload || row.msme_certificate_upload) ? (
+                            <a href={row.msmeCertificateUpload || row.msme_certificate_upload} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
                       </>
                     )}
 
@@ -1837,6 +1976,13 @@ export function CustomerEffectiveDatesModalView({
                         </td>
                         <td className="py-2 px-3 border-r border-slate-200 text-slate-600 font-mono">
                           {row.fssaiValidUpto ? new Date(row.fssaiValidUpto).toLocaleDateString("en-IN") : "—"}
+                        </td>
+                        <td className="py-2 px-3 border-r border-slate-200">
+                          {(row.fssaiCertificateUpload || row.fssai_certificate_upload) ? (
+                            <a href={row.fssaiCertificateUpload || row.fssai_certificate_upload} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : <span className="text-slate-400">—</span>}
                         </td>
                       </>
                     )}
@@ -1937,7 +2083,42 @@ export function CustomerEffectiveDatesModalView({
                     {activeSection === "ledger" && (
                       <>
                         <td className="py-2 px-3 border-r border-slate-200 font-medium text-teal-800 bg-teal-50/40">
-                          {row.newValue || "—"}
+                          {(() => {
+                            const raw = String(row.newValue ?? "").trim()
+                            if (!raw) return "—"
+                            const current = ledgerGroupOptions.find((g: any) => String(g.id) === raw)
+                              || ledgerGroupOptions.find((g: any) => String(g.group_name || "").trim().toLowerCase() === raw.toLowerCase())
+                            if (!current) return raw
+                            // Walk up the parent chain (guard against cycles), root first.
+                            const chain: any[] = [current]
+                            const seen = new Set<string>([String(current.id)])
+                            let parentId = current.parent_id
+                            while (parentId && !seen.has(String(parentId))) {
+                              const parent = ledgerGroupOptions.find((g: any) => String(g.id) === String(parentId))
+                              if (!parent) break
+                              chain.unshift(parent)
+                              seen.add(String(parent.id))
+                              parentId = parent.parent_id
+                            }
+                            return (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {chain.map((g: any, i: number) => (
+                                  <span key={g.id} className="inline-flex items-center gap-1">
+                                    {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-slate-400" />}
+                                    <span
+                                      className={
+                                        i === chain.length - 1
+                                          ? "rounded-md border border-teal-300 bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-900"
+                                          : "rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                                      }
+                                    >
+                                      {g.group_name}
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
+                            )
+                          })()}
                         </td>
                       </>
                     )}
@@ -1957,6 +2138,27 @@ export function CustomerEffectiveDatesModalView({
                           }).replace(',', '') : "—"}
                         </span>
                       </div>
+                    </td>
+
+                    <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap border-r border-slate-200">
+                      {row.approvedByName ? (
+                        <div className="flex flex-col items-end gap-0.5 text-[11px]">
+                          <div className="flex items-center justify-end gap-1 text-[11px]">
+                            <User className="h-3 w-3 text-slate-400" />
+                            <span>{row.approvedByName}</span>
+                          </div>
+                          {row.approvedAt && (
+                            <span className="text-[9px] text-slate-400 mr-1">
+                              {new Date(row.approvedAt).toLocaleString("en-IN", {
+                                day: 'numeric', month: 'short', year: 'numeric',
+                                hour: '2-digit', minute: '2-digit'
+                              }).replace(',', '')}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
 
                     <td className="py-2 px-3 text-center whitespace-nowrap">

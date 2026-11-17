@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { customerApi } from "@/lib/api-service"
 import type { StateInfo } from "@/hooks/use-states-map"
+import { formatAddressForPrint } from "@/lib/address"
 
 export type CustomerAddressOption = {
   id: "default" | number
@@ -10,13 +11,28 @@ export type CustomerAddressOption = {
   addressLine1: string | null
   addressLine2: string | null
   city: string | null
+  post?: string | null
+  thana?: string | null
+  subDistrict?: string | null
+  district?: string | null
   stateName: string | null
   pincode: string | null
 }
 
 export function formatCustomerAddress(a: CustomerAddressOption | undefined | null): string {
   if (!a) return ""
-  return [a.addressLine1, a.addressLine2, a.city, a.stateName, a.pincode].filter(Boolean).join(", ")
+  // Print order: address line, City, Post, Thana, Sub-District, District, State, Pincode
+  return formatAddressForPrint({
+    address_line_1: a.addressLine1,
+    address_line_2: a.addressLine2,
+    city: a.city,
+    post: a.post,
+    thana: a.thana,
+    sub_district: a.subDistrict,
+    district: a.district,
+    state: a.stateName,
+    pincode: a.pincode,
+  })
 }
 
 /**
@@ -49,20 +65,31 @@ export function useCustomerAddresses(customerId: number | null | undefined, stat
           label: "Registered Address (Default)",
           addressLine1: c.address_line_1 || null,
           addressLine2: c.address_line_2 || null,
-          city: null,
+          city: c.city || null,
+          post: c.post || null,
+          thana: c.thana || null,
+          subDistrict: c.sub_district || null,
+          district: c.district || null,
           stateName: c.state || null,
           pincode: c.pincode || null,
         }
-        const extra: CustomerAddressOption[] = (c.addresses || []).map((a: any) => ({
+        const extra: CustomerAddressOption[] = (c.addresses || []).filter((a: any) => a.status !== "Inactive").map((a: any) => ({
           id: a.id,
           label: [a.city, a.address_line_1].filter(Boolean).join(" - ") || `Address #${a.id}`,
           addressLine1: a.address_line_1 || null,
           addressLine2: a.address_line_2 || null,
           city: a.city || null,
+          post: a.post || null,
+          thana: a.thana || null,
+          subDistrict: a.sub_district || null,
+          district: a.district || null,
           stateName: a.state_id ? statesById.get(a.state_id)?.name || null : null,
           pincode: a.pincode || null,
         }))
-        setAddresses([defaultOpt, ...extra])
+        // Inactive addresses are not offered for new orders. (If everything is inactive, still offer the
+        // Registered Address so an order can always be placed.)
+        const primaryInactive = c.primary_address_status === "Inactive"
+        setAddresses(primaryInactive && extra.length > 0 ? extra : [defaultOpt, ...extra])
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false)

@@ -45,6 +45,7 @@ const initialCustomerForm = (): Partial<Customer> => ({
   msme_registration_type: "",
   msme_registration_wef: "",
   fssai_no: "",
+  fssai_registration_wef: "",
   fssai_valid_upto: "",
   fssai_licence_type: "",
   aadhaar_upload: "",
