@@ -333,58 +333,18 @@ export default function UnloadingPage() {
     if (!selectedGroup) return
 
     const lines: any[] = selectedGroup._allProducts
-    const totalDispatched = lines.reduce((sum, l) => sum + (Number(l.actualQty) || 0), 0)
-    const shortage = formData.shortageQty === "" ? 0 : Number(formData.shortageQty)
-    if (!formData.receivedDate) {
-      toast({ title: "Validation Error", description: "Enter the date unloading was completed.", variant: "destructive" })
+    // Shortage / damage are validated per product inside the form; only the receipt time is checked here.
+    if (!formData.receivedDate || !formData.receivedTime) {
+      toast({ title: "Validation Error", description: "Enter the date and time unloading was completed.", variant: "destructive" })
       return
     }
-    if (!Number.isFinite(shortage) || shortage < 0) {
-      toast({ title: "Validation Error", description: "Shortage quantity cannot be negative.", variant: "destructive" })
+    if (new Date(`${formData.receivedDate}T${formData.receivedTime}`).getTime() > Date.now()) {
+      toast({ title: "Validation Error", description: "Unloading completion time cannot be in the future.", variant: "destructive" })
       return
-    }
-    if (totalDispatched > 0 && shortage > totalDispatched) {
-      toast({ title: "Validation Error", description: `Shortage (${shortage}) cannot exceed the dispatched quantity (${totalDispatched}).`, variant: "destructive" })
-      return
-    }
-    if (shortage > 0 && !formData.shortageCause) {
-      toast({ title: "Validation Error", description: "Select the cause of the shortage.", variant: "destructive" })
-      return
-    }
-    if (formData.damagedContainers.length > 0 && formData.damagePhotoFiles.length === 0) {
-      toast({ title: "Validation Error", description: "Upload at least one photo of the damage.", variant: "destructive" })
-      return
-    }
-    for (const [i, c] of formData.damagedContainers.entries()) {
-      if (!c.containerSerialNumber.trim()) {
-        toast({ title: "Validation Error", description: `Damaged container #${i + 1}: serial number is required.`, variant: "destructive" })
-        return
-      }
-      if (!c.cause) {
-        toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: select the cause of the damage.`, variant: "destructive" })
-        return
-      }
-      if (c.damageType === "partial") {
-        if (c.items.length === 0) {
-          toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: add the affected internal items.`, variant: "destructive" })
-          return
-        }
-        for (const item of c.items) {
-          if (!item.sfgSerialNumber.trim()) {
-            toast({ title: "Validation Error", description: `Container ${c.containerSerialNumber}: every internal item needs a serial number.`, variant: "destructive" })
-            return
-          }
-          if (item.lossType === "partial" && !(Number(item.oilWeightLost) > 0)) {
-            toast({ title: "Validation Error", description: `Item ${item.sfgSerialNumber}: enter the oil weight lost.`, variant: "destructive" })
-            return
-          }
-        }
-      }
     }
 
-    // One unloading record exists per product line. The damage report is filed on
-    // the first line; the shortage is spread across the lines (each capped at what
-    // was dispatched on it); every line gets the received date and proof.
+    // One unloading record exists per product line. Each line is reported on its own: its shortage, its damaged
+    // TINs / Boxes, its cause. Every line gets the received date, time and proof.
     setIsProcessing(true)
     try {
       const uploadOne = async (file: File) => {
@@ -396,41 +356,29 @@ export default function UnloadingPage() {
       const damagePhotos: string[] = []
       for (const f of formData.damagePhotoFiles) damagePhotos.push(await uploadOne(f))
 
-      let shortageLeft = shortage
       let succeeded = 0
       let needsApproval = 0
       let stale = 0
       let failed = 0
-      for (const [idx, line] of lines.entries()) {
-        const lineCap = Number(line.actualQty) || Infinity
-        const lineShortage = idx === lines.length - 1 ? shortageLeft : Math.min(shortageLeft, lineCap)
-        shortageLeft -= lineShortage
-        const common = {
+      for (const line of lines) {
+        const report = formData.lines[String(line.id)]
+        const damagedContainers = report?.damagedContainers ?? []
+        const payload = {
           receivedDate: formData.receivedDate,
+          receivedTime: formData.receivedTime,
           receivedProof,
-          shortageCause: formData.shortageCause || null,
+          shortageQty: report?.shortageQty ?? 0,
+          shortageCause: report?.shortageCause || null,
           remarks: formData.remarks || null,
           userId: user?.id || null,
+          damagePhotos,
+          damagedContainers: damagedContainers.map((c) => ({
+            containerSerialNumber: c.containerSerialNumber,
+            damageType: c.damageType,
+            cause: c.cause,
+            items: c.items,
+          })),
         }
-        const payload = idx === 0
-          ? {
-              ...common,
-              shortageQty: lineShortage,
-              damagePhotos,
-              damagedContainers: formData.damagedContainers.map(c => ({
-                containerSerialNumber: c.containerSerialNumber.trim(),
-                damageType: c.damageType,
-                cause: c.cause,
-                items: c.damageType === "partial"
-                  ? c.items.map(item => ({
-                      sfgSerialNumber: item.sfgSerialNumber.trim(),
-                      lossType: item.lossType,
-                      oilWeightLost: item.lossType === "partial" ? Number(item.oilWeightLost) : null,
-                    }))
-                  : [],
-              })),
-            }
-          : { ...common, shortageQty: lineShortage, damagePhotos: [], damagedContainers: [] }
 
         try {
           const response = await unloadingApi.submit(line.id, payload)
@@ -760,11 +708,12 @@ export default function UnloadingPage() {
                     </ul>
                   </div>
                   <UnloadingForm
+                    key={selectedGroup._rowKey}
+                    lines={selectedGroup._allProducts}
+                    invoiceNo={selectedGroup.invoiceNo}
                     onSubmit={handleSubmit}
                     onCancel={() => setIsDialogOpen(false)}
                     isSubmitting={isProcessing || isReadOnly}
-                    dispatchedQty={selectedGroup._allProducts.reduce((sum: number, p: any) => sum + (Number(p.actualQty) || 0), 0)}
-                    sfgOilKg={Number(selectedGroup._allProducts[0]?.sfg_oil_kg) || null}
                   />
                 </div>
               )}

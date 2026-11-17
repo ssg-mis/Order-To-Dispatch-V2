@@ -363,7 +363,7 @@ export default function GateOutPage() {
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]) // State to manage expanded sections
-  const [commonOpen, setCommonOpen] = useState(false) // Common Details card (vehicle / driver / load) - closed by default
+  const [commonOpen, setCommonOpen] = useState(true) // Common Details card (vehicle / driver / load) - open by default
 
   // Gate Out Form State
   const [isUploading, setIsUploading] = useState<string | null>(null)
@@ -730,7 +730,7 @@ export default function GateOutPage() {
       vehicleLoadedImageName: ""
     })
     setExpandedOrders(sections.map((sec: any) => sec._rowKey)) // every party block starts expanded
-    setCommonOpen(false) // common details start collapsed
+    setCommonOpen(true) // common details start expanded
 
     setIsDialogOpen(true)
   }

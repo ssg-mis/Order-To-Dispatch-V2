@@ -23,6 +23,7 @@ import { fetchCustomerDropdownOptions, customerApprovalState } from "@/component
 import { CustomerMasterDialog } from "@/components/masters/modals/customer-master-dialog"
 import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress, type CustomerAddressOption } from "@/hooks/use-customer-addresses"
+import { formatAddressForPrint } from "@/lib/address"
 import { format } from "date-fns"
 import { cn, fuzzyMatch } from "@/lib/utils"
 import { fmtNum, fmtAmount } from "@/lib/table-format"
@@ -454,15 +455,8 @@ type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
         setContactPerson(selectedCustomer.contact_person || "")
         setWhatsappNo(selectedCustomer.contact || "") // Using 'contact' field for WhatsApp
 
-        // Construct full address
-        const parts = [
-          selectedCustomer.address_line_1,
-          selectedCustomer.address_line_2,
-          selectedCustomer.state,
-          selectedCustomer.pincode
-        ].filter(Boolean)
-
-        setCustomerAddress(parts.join(", "))
+        // Construct full address (print order: line, City, Post, Thana, Sub-District, District, State, Pincode)
+        setCustomerAddress(formatAddressForPrint(selectedCustomer))
       }
     } else if (customerType === "new") {
         setGst("")

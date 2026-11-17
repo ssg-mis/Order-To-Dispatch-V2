@@ -45,6 +45,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useStatesMap } from "@/hooks/use-states-map"
 import { useCustomerAddresses, formatCustomerAddress } from "@/hooks/use-customer-addresses"
+import { formatAddressForPrint } from "@/lib/address"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { fmtAmount } from "@/lib/table-format"
@@ -1058,7 +1059,7 @@ export default function CommitmentPunchPage() {
           overrideCustomerId = foundCustomer.id
           overrideContactPerson = foundCustomer.contact_person || null
           overrideWhatsappNo = foundCustomer.contact || null
-          overrideAddress = [foundCustomer.address_line_1, foundCustomer.address_line_2, foundCustomer.state, foundCustomer.pincode].filter(Boolean).join(", ") || null
+          overrideAddress = formatAddressForPrint(foundCustomer) || null
         } else {
           const res = await customerApi.getAll({ search: processCustomerName, limit: 5, is_required_for_commitment: "Yes" })
           const items = res.success ? (res.data.customers || (Array.isArray(res.data) ? res.data : [])) : []
@@ -1067,7 +1068,7 @@ export default function CommitmentPunchPage() {
             overrideCustomerId = matched.id
             overrideContactPerson = matched.contact_person || null
             overrideWhatsappNo = matched.contact || null
-            overrideAddress = [matched.address_line_1, matched.address_line_2, matched.state, matched.pincode].filter(Boolean).join(", ") || null
+            overrideAddress = formatAddressForPrint(matched) || null
           }
         }
       }
@@ -1880,8 +1881,7 @@ export default function CommitmentPunchPage() {
                       const c = opt.original
                       setContactPerson(c.contact_person || "")
                       setWhatsappNo(c.contact || "")
-                      const parts = [c.address_line_1, c.address_line_2, c.state, c.pincode].filter(Boolean)
-                      const fullAddr = parts.join(", ")
+                      const fullAddr = formatAddressForPrint(c)
                       setCustomerAddress(fullAddr)
                       setShipToAddress(fullAddr)
                       setAddCustomerId(typeof c.id === "number" ? c.id : null)

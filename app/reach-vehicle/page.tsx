@@ -8,7 +8,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -19,7 +18,9 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { MapPin, AlertTriangle, RefreshCcw, CheckCircle, ChevronLeft, ChevronRight } from "lucide-react"
+import { DateTime12hField } from "@/components/ui/datetime-12h-field"
+import { useObjectUrls } from "@/hooks/use-object-urls"
+import { MapPin, AlertTriangle, RefreshCcw, CheckCircle, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { reachVehicleApi, vehicleMasterApi, transportMasterApi, driverMasterApi, orderApi, depotApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -36,15 +37,136 @@ import { StageListHeader, StageToolbar, StageFilterSelect, StageDivider, StageCo
 import { stageColumnChips } from "@/components/stage-list-extras"
 import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
 
+// One list row per INVOICE: every product line / order of the same invoice reaches together.
 const RV_COLUMNS: StageColDef<any>[] = [
-  { id: "orderNo", label: "Order No.", accessor: (r) => r.order?.orderNo },
-  { id: "customerName", label: "Customer Name", accessor: (r) => r.customer?.customerName },
-  { id: "vehicleNo", label: "Vehicle No.", accessor: (r) => r.vehicle?.registrationNo },
-  { id: "driver", label: "Driver", accessor: (r) => r.driver?.driverName },
-  { id: "transporter", label: "Transporter", accessor: (r) => r.transporter?.transporterName },
+  { id: "invoiceNo", label: "Invoice No.", accessor: (r) => r.invoiceNo },
+  { id: "orderNo", label: "Order No.", accessor: (r) => r.orderNos.join(", ") },
+  { id: "customerName", label: "Customer Name", accessor: (r) => r.customerNames.join(", ") },
+  { id: "vehicleNo", label: "Vehicle No.", accessor: (r) => r.vehicleNo },
+  { id: "driver", label: "Driver", accessor: (r) => r.driverName },
+  { id: "transporter", label: "Transporter", accessor: (r) => r.transporterName },
   { id: "status", label: "Status", accessor: () => "Ready" },
 ]
 const RV_COLUMN_IDS = RV_COLUMNS.map((c) => c.id)
+
+const fmtDocDate = (v?: string | null) => {
+  if (!v) return "—"
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return "—"
+  return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`
+}
+
+// Opens the document / link in a new tab; renders plain text when there is nothing to open.
+function DocLink({ href, children }: { href?: string | null; children: React.ReactNode }) {
+  if (!href) return <span className="text-slate-700">{children}</span>
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900">
+      {children}
+      <ExternalLink className="h-3 w-3 shrink-0" />
+    </a>
+  )
+}
+
+function PrevField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+      <div className="mt-0.5 break-words text-sm font-medium text-slate-800">{children}</div>
+    </div>
+  )
+}
+
+// Everything captured at the earlier stages for this invoice (Actual Dispatch, Make Invoice, vehicle / driver masters).
+function PreviousStageDetails({ group }: { group: any }) {
+  const rows: any[] = group?.rows || []
+  const first = rows[0] || {}
+  const dispatch = first.dispatch || {}
+  const invoice = first.invoice || {}
+  const vehicle = first.vehicle || first.dispatchVehicle || {}
+  const driver = first.driver || first.dispatchDriver || {}
+  const transporter = first.transporter || first.dispatchTransporter || {}
+
+  const rstList = Array.from(
+    new Map(rows.filter((r) => r.dispatch?.rstNo).map((r) => [r.dispatch.rstNo, r.dispatch.weightmentSlipCopy])).entries()
+  )
+
+  const today = new Date().setHours(0, 0, 0, 0)
+  // Expiry comes from the Vehicle Master (current), falling back to what was recorded at dispatch.
+  const docs = [
+    { label: "Fitness", date: vehicle.fitness || dispatch.fitnessEndDate, img: vehicle.fitnessImage || dispatch.fitnessImage },
+    { label: "Insurance", date: vehicle.insurance || dispatch.insuranceEndDate, img: vehicle.insuranceImage || dispatch.insuranceImage },
+    { label: "Road Tax", date: vehicle.roadTax || vehicle.lifeTimeTax || dispatch.taxEndDate, img: vehicle.roadTaxImage || vehicle.lifeTimeTaxImage || dispatch.taxCopyImage },
+    { label: "Pollution", date: vehicle.pollution || dispatch.pollutionEndDate, img: vehicle.pollutionImage || dispatch.pollutionImage },
+    { label: "Permit 1 (State)", date: vehicle.statePermit || dispatch.permit1EndDate, img: vehicle.statePermitImage || dispatch.permit1Image },
+    { label: "Permit 2 (National / Out State)", date: vehicle.nationalPermit || dispatch.permit2EndDate, img: vehicle.nationalPermitImage || dispatch.permit2OutStateImage },
+  ]
+
+  const card = "rounded-lg border border-slate-200 bg-white p-4"
+  const title = "mb-3 text-xs font-black uppercase tracking-[0.15em] text-slate-700"
+  return (
+    <div className="mb-6 space-y-3">
+      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">From previous stages</p>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className={card}>
+          <p className={title}>Vehicle &amp; Driver Details</p>
+          <div className="grid grid-cols-2 gap-3">
+            <PrevField label="Vehicle No.">{vehicle.registrationNo || "—"}</PrevField>
+            <PrevField label="Transporter">{transporter.transporterName || "—"}</PrevField>
+            <PrevField label="Driver">{driver.driverName || "—"}</PrevField>
+            <PrevField label="Driver Mobile">{driver.mobileNo || "—"}</PrevField>
+            <PrevField label="GPS Tracking">
+              {vehicle.gpsApiTrackingLink ? <DocLink href={vehicle.gpsApiTrackingLink}>Track vehicle{vehicle.gpsCompany ? ` (${vehicle.gpsCompany})` : ""}</DocLink> : "—"}
+            </PrevField>
+            <PrevField label="GPS Valid Upto">{fmtDocDate(vehicle.gpsValidUpto)}</PrevField>
+          </div>
+        </div>
+
+        <div className={card}>
+          <p className={title}>Invoice &amp; Details</p>
+          <div className="grid grid-cols-2 gap-3">
+            <PrevField label="Invoice No.">
+              <DocLink href={invoice.invoiceCopy}>{invoice.invoiceNo || group?.invoiceNo || "—"}</DocLink>
+            </PrevField>
+            <PrevField label="Invoice Date">{fmtDocDate(invoice.invoiceDate)}</PrevField>
+            <PrevField label="RST No.">
+              {rstList.length > 0
+                ? rstList.map(([no, slip]: any) => (
+                    <span key={no} className="mr-3 inline-block"><DocLink href={slip}>{no}</DocLink></span>
+                  ))
+                : "—"}
+            </PrevField>
+            <PrevField label="E-Invoice / E-Way Bill">
+              {invoice.eInvoiceFile || invoice.eWayBillFile ? (
+                <span className="flex flex-wrap gap-x-3">
+                  {invoice.eInvoiceFile && <DocLink href={invoice.eInvoiceFile}>E-Invoice</DocLink>}
+                  {invoice.eWayBillFile && <DocLink href={invoice.eWayBillFile}>E-Way Bill</DocLink>}
+                </span>
+              ) : "—"}
+            </PrevField>
+          </div>
+        </div>
+      </div>
+
+      <div className={card}>
+        <p className={title}>Vehicle Expiry</p>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          {docs.map((d) => {
+            const expired = d.date && new Date(d.date).getTime() < today
+            return (
+              <div key={d.label} className="flex items-center justify-between gap-3 border-b border-slate-100 py-1.5 text-sm">
+                <span className="text-slate-600">{d.label}</span>
+                <span className="flex items-center gap-2">
+                  <span className={expired ? "font-bold text-red-600" : "font-medium text-slate-800"}>{fmtDocDate(d.date)}</span>
+                  {d.img ? <DocLink href={d.img}>View</DocLink> : <span className="text-xs text-slate-300">no file</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const FREIGHT_RATE_TYPES = ["PER TON", "PER LTR", "PER TIN", "PER KG", "FIXED"]
 
@@ -73,7 +195,7 @@ export default function ReachVehiclePage() {
   })
   const [pendingPage, setPendingPage] = useState(1)
   const limit = 20
-  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [selectedGroup, setSelectedGroup] = useState<any | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
@@ -86,6 +208,19 @@ export default function ReachVehiclePage() {
   // Modal State
   const [reachMode, setReachMode] = useState<'normal' | 'accident' | 'change_vehicle'>('normal')
   const [accidentPhotoFiles, setAccidentPhotoFiles] = useState<File[]>([])
+  const [truckImageFile, setTruckImageFile] = useState<File | null>(null)
+  const accidentPhotoPreviews = useObjectUrls(accidentPhotoFiles)
+  // Local preview of the chosen truck photo (it is uploaded on Confirm & Save).
+  const [truckImagePreview, setTruckImagePreview] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (!truckImageFile || !truckImageFile.type.startsWith("image/") || /hei[cf]/i.test(truckImageFile.type)) {
+      setTruckImagePreview(undefined)
+      return
+    }
+    const url = URL.createObjectURL(truckImageFile)
+    setTruckImagePreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [truckImageFile])
   const [formData, setFormData] = useState({
     arrivalDate: new Date().toISOString().split('T')[0],
     arrivalTime: new Date().toTimeString().split(' ')[0].substring(0, 5),
@@ -136,10 +271,41 @@ export default function ReachVehiclePage() {
     },
   })
 
-  const data = useMemo(
-    () => (pendingData?.orders || []).map((r: any) => ({ ...r, id: r.reachVehicle?.id })),
-    [pendingData]
-  )
+  // Group the pending lines by invoice number (a line with no invoice number stays on its own).
+  const data = useMemo(() => {
+    const groups = new Map<string, any>()
+    for (const r of pendingData?.orders || []) {
+      const invoiceNo = r.reachVehicle?.invoiceNo || r.invoice?.invoiceNo || ""
+      const key = invoiceNo ? `inv:${invoiceNo}` : `rv:${r.reachVehicle?.id}`
+      let g = groups.get(key)
+      if (!g) {
+        g = {
+          id: key,
+          invoiceNo: invoiceNo || "—",
+          rows: [] as any[],
+          reachVehicleIds: [] as number[],
+          orderNos: [] as string[],
+          customerNames: [] as string[],
+        }
+        groups.set(key, g)
+      }
+      g.rows.push(r)
+      g.reachVehicleIds.push(r.reachVehicle?.id)
+      const orderNo = r.order?.orderNo
+      if (orderNo && !g.orderNos.includes(orderNo)) g.orderNos.push(orderNo)
+      const customer = r.customer?.customerName
+      if (customer && !g.customerNames.includes(customer)) g.customerNames.push(customer)
+    }
+    return Array.from(groups.values()).map((g) => {
+      const first = g.rows[0]
+      return {
+        ...g,
+        vehicleNo: first.vehicle?.registrationNo || first.dispatchVehicle?.registrationNo || "",
+        driverName: first.driver?.driverName || first.dispatchDriver?.driverName || "",
+        transporterName: first.transporter?.transporterName || first.dispatchTransporter?.transporterName || "",
+      }
+    })
+  }, [pendingData])
 
   const fetchMasterData = async () => {
     try {
@@ -159,16 +325,14 @@ export default function ReachVehiclePage() {
   }
 
   const handleSubmit = async () => {
-    if (selectedItems.length === 0) return
+    if (!selectedGroup) return
 
     const missing: string[] = []
     if (reachMode === 'normal') {
-      if (!formData.arrivalDate) missing.push("Arrival Date")
-      if (!formData.arrivalTime) missing.push("Arrival Time")
+      if (!formData.arrivalDate || !formData.arrivalTime) missing.push("Arrival Date & Time")
     } else {
       if (reachMode === 'accident') {
-        if (!formData.accidentDate) missing.push("Date of Accident")
-        if (!formData.accidentTime) missing.push("Time of Accident")
+        if (!formData.accidentDate || !formData.accidentTime) missing.push("Date & Time of Accident")
         if (!formData.accidentLocation.trim()) missing.push("Location of Accident")
         if (!formData.accidentDescription.trim()) missing.push("Accident Description")
         if (!formData.accidentCause.trim()) missing.push("Cause of Accident")
@@ -195,6 +359,12 @@ export default function ReachVehiclePage() {
         userId: user?.id
       }
       
+      if (truckImageFile) {
+        const response = await orderApi.uploadFile(truckImageFile)
+        if (!response.success) throw new Error(response.message || "Failed to upload truck image")
+        payload.truckImage = response.data.url
+      }
+
       if (reachMode === 'normal') {
         payload.arrivalDate = formData.arrivalDate
         payload.arrivalTime = formData.arrivalTime
@@ -228,15 +398,16 @@ export default function ReachVehiclePage() {
         payload.returnDepotId = formData.routeDecision === 'return_to_factory' ? (formData.returnDepotId || null) : null
       }
 
-      // Submit sequentially for all selected records
-      for (const id of selectedItems) {
+      // Submit sequentially for every line of the invoice
+      for (const id of selectedGroup.reachVehicleIds) {
         await reachVehicleApi.submit(parseInt(id), payload)
       }
 
       toast({ title: "Success", description: "Reach Vehicle recorded successfully" })
       setIsDialogOpen(false)
-      setSelectedItems([])
+      setSelectedGroup(null)
       setAccidentPhotoFiles([])
+      setTruckImageFile(null)
       await refetchPending()
       queryClient.invalidateQueries({ queryKey: ["reach-vehicle-history"] })
     } catch (err: any) {
@@ -246,25 +417,21 @@ export default function ReachVehiclePage() {
     }
   }
 
-  const selectedRows = data.filter((d: any) => selectedItems.includes(d.id?.toString()))
   const shipAddresses = Array.from(new Set(
-    selectedRows
+    (selectedGroup?.rows || [])
       .map((r: any) => r.order?.shipToAddress || r.order?.shipAddress || [r.customer?.addressLine1, r.customer?.addressLine2].filter(Boolean).join(', '))
       .filter(Boolean)
   )) as string[]
 
-  const toggleSelectItem = (id?: string) => {
-    if (!id) return
-    setSelectedItems(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id])
+  // Clicking a row opens the Record Reach Vehicle dialog for that invoice.
+  const openGroup = (group: any) => {
+    setSelectedGroup(group)
+    setTruckImageFile(null)
+    setReachMode('normal')
+    setIsDialogOpen(true)
   }
 
-  const toggleSelectAll = () => {
-    const visibleIds = table.rows.map((r: any) => r.id?.toString()).filter(Boolean) as string[]
-    if (visibleIds.length > 0 && visibleIds.every((id) => selectedItems.includes(id))) setSelectedItems([])
-    else setSelectedItems(visibleIds)
-  }
-
-  const customerNames = Array.from(new Set(data.map((r: any) => r.customer?.customerName).filter(Boolean))) as string[]
+  const customerNames = Array.from(new Set(data.flatMap((r: any) => r.customerNames))) as string[]
   const totalPages = pendingData?.pagination?.totalPages || 1
 
   // ── Stage list table (search / filters / sort / totals) ──
@@ -283,7 +450,7 @@ export default function ReachVehiclePage() {
   )
   const baseFilter = useCallback(
     (r: any) => {
-      if (customerFilter !== "ALL" && r.customer?.customerName !== customerFilter) return false
+      if (customerFilter !== "ALL" && !r.customerNames.includes(customerFilter)) return false
       const q = quickSearch.trim().toLowerCase()
       if (q && !RV_COLUMNS.some((c) => String(c.accessor?.(r) ?? "").toLowerCase().includes(q))) return false
       return true
@@ -304,16 +471,18 @@ export default function ReachVehiclePage() {
 
   const renderCell = (item: any, id: string) => {
     switch (id) {
+      case "invoiceNo":
+        return <TableCell key={id} className="px-4 text-left text-xs text-green-700 font-bold font-mono whitespace-nowrap">{item.invoiceNo}</TableCell>
       case "orderNo":
-        return <TableCell key={id} className="px-4 text-left text-xs text-blue-700 font-bold whitespace-nowrap">{item.order?.orderNo}</TableCell>
+        return <TableCell key={id} className="px-4 text-left text-xs text-blue-700 font-bold">{item.orderNos.join(", ") || "—"}</TableCell>
       case "customerName":
-        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600"><span className="font-medium text-slate-700">{item.customer?.customerName}</span></TableCell>
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600"><span className="font-medium text-slate-700">{item.customerNames.join(", ") || "—"}</span></TableCell>
       case "vehicleNo":
-        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600 whitespace-nowrap">{item.vehicle?.registrationNo || "—"}</TableCell>
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600 whitespace-nowrap">{item.vehicleNo || "—"}</TableCell>
       case "driver":
-        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.driver?.driverName || "—"}</TableCell>
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.driverName || "—"}</TableCell>
       case "transporter":
-        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.transporter?.transporterName || "—"}</TableCell>
+        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{item.transporterName || "—"}</TableCell>
       case "status":
         return (
           <TableCell key={id} className="px-4 text-left">
@@ -360,18 +529,6 @@ export default function ReachVehiclePage() {
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <StageActionBar>
-          <Button
-            onClick={() => setIsDialogOpen(true)}
-            disabled={selectedItems.length === 0}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Record Reach Vehicle ({selectedItems.length})
-          </Button>
-                </StageActionBar>
-
         <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
           <StageListHeader
             title="Pending Loads"
@@ -409,12 +566,6 @@ export default function ReachVehiclePage() {
                 <StageTableHeaderRows
                   columns={orderedVisibleCols}
                   table={table}
-                  leading={
-                    <Checkbox
-                      checked={table.rows.length > 0 && table.rows.every((r: any) => selectedItems.includes(r.id?.toString()))}
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  }
                   onReorder={handleColumnReorder}
                   dragDisabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
                 />
@@ -422,7 +573,6 @@ export default function ReachVehiclePage() {
                   {isPendingLoading && data.length === 0 ? (
                     [...Array(5)].map((_, i) => (
                       <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                        <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                         {orderedVisibleCols.map((c) => (
                           <TableCell key={c.id} className="text-center py-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
                         ))}
@@ -434,22 +584,16 @@ export default function ReachVehiclePage() {
                       return (
                         <TableRow
                           key={id}
-                          className={cn(
-                            "cursor-pointer transition-colors",
-                            selectedItems.includes(id) ? "bg-blue-50/40" : "hover:bg-slate-50/60"
-                          )}
-                          onClick={() => toggleSelectItem(id)}
+                          className="cursor-pointer transition-colors hover:bg-slate-50/60"
+                          onClick={() => openGroup(item)}
                         >
-                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                            <Checkbox checked={selectedItems.includes(id)} onCheckedChange={() => toggleSelectItem(id)} />
-                          </TableCell>
                           {orderedVisibleCols.map((c) => renderCell(item, c.id))}
                         </TableRow>
                       )
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={orderedVisibleCols.length} className="text-center py-12 text-muted-foreground">
                         {data.length === 0 ? "No orders pending for reach vehicle stage" : "No matching records found for the filters"}
                       </TableCell>
                     </TableRow>
@@ -479,32 +623,22 @@ export default function ReachVehiclePage() {
                     return (
                       <Card
                         key={id}
-                        className={cn(
-                          "p-4 border-2 transition-all shadow-sm bg-white cursor-pointer",
-                          selectedItems.includes(id) ? "border-blue-500 bg-blue-50/30 shadow-md" : "border-slate-100 hover:border-blue-200"
-                        )}
-                        onClick={() => toggleSelectItem(id)}
+                        className="p-4 border-2 transition-all shadow-sm bg-white cursor-pointer border-slate-100 hover:border-blue-200"
+                        onClick={() => openGroup(item)}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <h3 className="text-sm font-bold text-slate-900 leading-tight break-words">{item.customer?.customerName}</h3>
-                          </div>
-                          <Checkbox
-                            checked={selectedItems.includes(id)}
-                            onCheckedChange={() => toggleSelectItem(id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-1 h-5 w-5"
-                          />
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="text-sm font-bold text-slate-900 leading-tight break-words">{item.customerNames.join(", ")}</h3>
                         </div>
 
                         <div className="mt-4 flex flex-col gap-1">
-                          <p className="font-mono text-sm font-black text-blue-700 break-all">{item.order?.orderNo}</p>
+                          <p className="font-mono text-sm font-black text-green-700 break-all">{item.invoiceNo}</p>
+                          <p className="font-mono text-xs font-bold text-blue-700 break-all">{item.orderNos.join(", ")}</p>
                         </div>
 
                         <div className="mt-4 grid grid-cols-2 gap-3 border-y border-slate-100 py-3">
                           <div>
                             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Vehicle No.</p>
-                            <p className="text-xs font-bold text-slate-700">{item.vehicle?.registrationNo || "—"}</p>
+                            <p className="text-xs font-bold text-slate-700">{item.vehicleNo || "—"}</p>
                           </div>
                         </div>
 
@@ -541,12 +675,15 @@ export default function ReachVehiclePage() {
         />
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) setSelectedGroup(null) }}>
         <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:!max-w-[95vw] max-h-[95vh] overflow-y-auto p-0 [overflow-wrap:anywhere]">
           <div className="p-4 sm:p-6">
             <DialogHeader className="pr-8">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
-                Record Reach Vehicle - {selectedItems.length} Selected
+                Record Reach Vehicle - Invoice {selectedGroup?.invoiceNo ?? "—"}
+                <span className="ml-2 text-xs font-semibold text-slate-500">
+                  {selectedGroup?.customerNames?.join(", ")} · {selectedGroup?.reachVehicleIds?.length ?? 0} line(s)
+                </span>
               </DialogTitle>
             </DialogHeader>
 
@@ -574,6 +711,8 @@ export default function ReachVehiclePage() {
               </Button>
             </div>
 
+            {selectedGroup && <PreviousStageDetails group={selectedGroup} />}
+
             <div className="space-y-6">
               {reachMode === 'normal' && (
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm">
@@ -591,17 +730,26 @@ export default function ReachVehiclePage() {
               )}
 
               {reachMode === 'normal' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Arrival Date <span className="text-red-500">*</span></Label>
-                    <Input type="date" value={formData.arrivalDate} onChange={e => setFormData({ ...formData, arrivalDate: e.target.value })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Arrival Time <span className="text-red-500">*</span></Label>
-                    <Input type="time" value={formData.arrivalTime} onChange={e => setFormData({ ...formData, arrivalTime: e.target.value })} />
-                  </div>
+                <div className="space-y-2">
+                  <Label>Arrival Date &amp; Time <span className="text-red-500">*</span></Label>
+                  <DateTime12hField
+                    date={formData.arrivalDate}
+                    time={formData.arrivalTime}
+                    onChange={({ date, time }) => setFormData({ ...formData, arrivalDate: date, arrivalTime: time })}
+                  />
                 </div>
               )}
+
+              <FileUploadField
+                label="Upload Truck Image"
+                accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
+                variant="dropzone"
+                helperText="Photo of the truck on arrival. Max file size: 20 MB"
+                buttonText="Click to select truck image"
+                fileName={truckImageFile?.name || ""}
+                value={truckImagePreview}
+                onFilesSelected={(files) => files[0] && setTruckImageFile(files[0])}
+              />
 
               {reachMode === 'accident' && (
                 <div className="space-y-4">
@@ -610,13 +758,13 @@ export default function ReachVehiclePage() {
                     Accident Details
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Date of Accident <span className="text-red-500">*</span></Label>
-                      <Input type="date" value={formData.accidentDate} onChange={e => setFormData({ ...formData, accidentDate: e.target.value })} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Time of Accident <span className="text-red-500">*</span></Label>
-                      <Input type="time" value={formData.accidentTime} onChange={e => setFormData({ ...formData, accidentTime: e.target.value })} />
+                    <div className="sm:col-span-2 space-y-2">
+                      <Label>Date &amp; Time of Accident <span className="text-red-500">*</span></Label>
+                      <DateTime12hField
+                        date={formData.accidentDate}
+                        time={formData.accidentTime}
+                        onChange={({ date, time }) => setFormData({ ...formData, accidentDate: date, accidentTime: time })}
+                      />
                     </div>
                     <div className="sm:col-span-2 space-y-2">
                       <Label>Location of Accident <span className="text-red-500">*</span></Label>
@@ -643,6 +791,7 @@ export default function ReachVehiclePage() {
                         helperText="Max file size: 20 MB"
                         buttonText="Click to select photos"
                         fileName={accidentPhotoFiles.map(f => f.name)}
+                        value={accidentPhotoPreviews}
                         onFilesSelected={(files) => setAccidentPhotoFiles(prev => [...prev, ...files])}
                         onRemove={(index) => setAccidentPhotoFiles(prev => prev.filter((_, i) => i !== index))}
                       />
@@ -738,7 +887,7 @@ export default function ReachVehiclePage() {
 
             <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 pt-4 sm:flex-col sm:justify-start">
               <StageActionFooter
-                onCancel={() => setIsDialogOpen(false)}
+                onCancel={() => { setIsDialogOpen(false); setSelectedGroup(null) }}
                 cancelDisabled={isProcessing}
                 actions={[
                   {

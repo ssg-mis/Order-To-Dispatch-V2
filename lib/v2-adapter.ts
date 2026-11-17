@@ -74,6 +74,7 @@ function base(row: any): Record<string, any> {
   // Order header
   r.order_no = o.orderNo ?? r.order_no ?? null;
   r.so_no = o.orderNo ?? null; // legacy lift_receiving_confirmation name
+  r.line_code = row.lineCode ?? null; // readable order-line ID: <order_no>/<sku_code>[-n]
   r.order_type = o.orderType ?? null;
   r.order_category = o.orderCategory ?? null;
   r.customer_type = o.customerType ?? null;
@@ -407,6 +408,7 @@ export function flattenGateOutStage(row: any): Record<string, any> {
 // Unloading: submit key = unloadings id.
 export function flattenUnloadingStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
   const ul = row.unloading || {};
   const inv = row.invoice || {};
@@ -422,6 +424,7 @@ export function flattenUnloadingStage(row: any): Record<string, any> {
   r.actual_qty_dispatch = dsp.actualQtyDispatch ?? r.actual_qty_dispatch ?? null;
   r.shortage_qty = ul.shortageQty ?? null;
   r.received_date = ul.receivedDate ?? null;
+  r.received_time = ul.receivedTime ?? null;
   r.received_proof = ul.receivedProof ?? null;
   r.damage_photos = ul.damagePhotos ?? null;
   r.sfg_oil_kg = row.sfgOilKg ?? null;

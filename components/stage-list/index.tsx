@@ -166,7 +166,7 @@ export function StageFilterSelect({
       </SelectTrigger>
       <SelectContent className="max-h-64">
         <SelectItem value="ALL">{allLabel}</SelectItem>
-        {options.map((o) => (
+        {[...options.filter((o) => o.trim().toLowerCase() === "banari"), ...options.filter((o) => o.trim().toLowerCase() !== "banari")].map((o) => (
           <SelectItem key={o} value={o} className="text-xs truncate">
             {o}
           </SelectItem>

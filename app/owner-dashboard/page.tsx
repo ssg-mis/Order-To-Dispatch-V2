@@ -1,5 +1,6 @@
 "use client"
 
+import { sortByNameBanariFirst } from "@/lib/depot-sort"
 import { useState, useMemo, Fragment, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ownerDashboardApi } from "@/lib/api-service"
@@ -251,7 +252,7 @@ export default function OwnerDashboardPage() {
   const partyRes              = raw?.partyView       ?? { data: [], total: 0 }
   const oilTypes:  any[]      = raw?.oilTypeView     ?? []
   const agingRes              = raw?.agingReport     ?? { data: [], total: 0 }
-  const depots:    {id:number;name:string}[] = raw?.depots          ?? []
+  const depots:    {id:number;name:string}[] = sortByNameBanariFirst(raw?.depots ?? [], (d: {id:number;name:string}) => d.name)
   const clientFreq:any[]      = raw?.clientFreq      ?? []
   const productFreq:any[]     = raw?.productFreq     ?? []
   const deliveryPerf:any      = raw?.deliveryPerf    ?? { avg_delivery_hours: 0, on_time_percent: 0 }

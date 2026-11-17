@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { depotApi, returnApi } from "@/lib/api-service"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, FileText, Loader2, Printer, Truck } from "lucide-react"
+import { formatAddressForPrint } from "@/lib/address"
 
 const COMPANY = "Shree Shyam Oil Extractions"
 const TYPES = ["Customer Return", "Depot Return"]
@@ -187,7 +188,7 @@ export default function ReturnGatePassPage() {
   const reprint = async (p: any) => {
     // The list rows carry the essentials; the printout reuses them as-is.
     const customer = customerRec && customerRec.id === p.customer_id ? customerRec : null
-    printGatePass({ ...p, customer_address: customer?.address_line_1 || "" })
+    printGatePass({ ...p, customer_address: formatAddressForPrint(customer) })
   }
 
   return (

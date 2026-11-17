@@ -8,13 +8,11 @@ import { getWeightDecimals } from "@/lib/weight-format"
 // knows is filled in; everything else stays a dotted blank for the guard / weighbridge / office to write by hand.
 // One page per party, same as the old slip.
 
-const OIL_LABEL: Record<string, string> = { rice: "Rice Oil", soya: "Soya Oil", palm: "Palm Oil", other: "Oil" }
-function oilLabel(name: string): string {
-  const u = (name || "").toUpperCase()
-  if (u.includes("RBO") || u.includes("RICE")) return OIL_LABEL.rice
-  if (u.includes("SBO") || u.includes("SOYA")) return OIL_LABEL.soya
-  if (u.includes("PALM")) return OIL_LABEL.palm
-  return OIL_LABEL.other
+// Material on the slip is the kind of oil dispatched: CP oil (consumer packs - box / tin / jar / bucket) or loose oil
+// (bulk, sold by metric ton / litre / kg). There is no CP / loose flag on the SKU, so it is read from the line's UOM.
+const LOOSE_UOMS = new Set(["metric ton", "metric tonne", "mt", "ton", "tonne", "ltr", "ltrs", "litre", "litres", "liter", "liters", "kg", "kgs"])
+function materialLabel(uom: string): string {
+  return LOOSE_UOMS.has((uom || "").trim().toLowerCase()) ? "Loose Oil" : "CP Oil"
 }
 
 const num = (v: any) => {
@@ -23,7 +21,28 @@ const num = (v: any) => {
 }
 const wt = (n: number) => { const d = getWeightDecimals(); return n.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) }
 
-export function generateGatePassPdf(parties: SlipPartyData[], filename = "gate-pass.pdf", opts?: { print?: boolean }) {
+// One gate pass per vehicle load: all parties are combined on a single pass, party names separated by commas.
+function mergeParties(parties: SlipPartyData[]): SlipPartyData {
+  const uniq = (values: (string | undefined)[]) => Array.from(new Set(values.filter((v): v is string => !!v && v !== "—")))
+  const firstOf = <K extends keyof SlipPartyData>(key: K) => parties.map((x) => x[key]).find((v) => v !== undefined && v !== null && v !== "")
+  return {
+    ...parties[0],
+    party: uniq(parties.map((x) => x.party)).join(", "),
+    place: uniq(parties.map((x) => x.place)).join("; "),
+    rstNo: uniq(parties.map((x) => x.rstNo)).join(", "),
+    billNo: uniq(parties.map((x) => x.billNo)).join(", "),
+    vehicleNo: firstOf("vehicleNo") as string | undefined,
+    driverName: firstOf("driverName") as string | undefined,
+    driverMobile: firstOf("driverMobile") as string | undefined,
+    tareWt: firstOf("tareWt") as string | number | undefined,
+    grossWt: firstOf("grossWt") as string | number | undefined,
+    products: parties.flatMap((x) => x.products),
+  }
+}
+
+export function generateGatePassPdf(allParties: SlipPartyData[], filename = "gate-pass.pdf", opts?: { print?: boolean }) {
+  if (allParties.length === 0) return
+  const parties = [mergeParties(allParties)]
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   const pageW = doc.internal.pageSize.getWidth()
   const L = 14
@@ -74,8 +93,12 @@ export function generateGatePassPdf(parties: SlipPartyData[], filename = "gate-p
     doc.text("OUT GOING GATE PASS", cx, 46.7, { align: "center" })
 
     // ---- derived values ----
-    const totalQty = p.products.reduce((s, x) => s + (x.qty || 0), 0)
-    const material = Array.from(new Set(p.products.map((x) => oilLabel(x.productName)))).join(", ")
+    // Bags = total quantity of the whole load (the Gate Out grand total, all parties);
+    // Qty = gross weight of those SKUs (SKU gross weight x quantity), also for the whole load.
+    const allProducts = parties.flatMap((x) => x.products)
+    const loadQty = allProducts.reduce((s, x) => s + (x.qty || 0), 0)
+    const loadGrossWeight = allProducts.reduce((s, x) => s + (x.grossWeight || 0), 0)
+    const material = Array.from(new Set(p.products.map((x) => materialLabel(x.uom)))).join(", ")
     const tare = num(p.tareWt)
     const gross = num(p.grossWt)
     const net = tare !== null && gross !== null && gross >= tare ? gross - tare : null
@@ -100,8 +123,8 @@ export function generateGatePassPdf(parties: SlipPartyData[], filename = "gate-p
     field("Mob. No.", L + 104, y, R - L - 104, driver)
     next()
     field("Material", L, y, 80, material)
-    field("Bags", L + 84, y, 40)
-    field("Qty.", L + 128, y, R - L - 128, totalQty ? String(totalQty) : "")
+    field("Bags", L + 84, y, 40, loadQty ? String(loadQty) : "")
+    field("Qty.", L + 128, y, R - L - 128, loadGrossWeight ? wt(loadGrossWeight) : "")
     next()
     field("Moist", L, y, 90)
     field("GCV", L + 94, y, R - L - 94)
@@ -114,10 +137,10 @@ export function generateGatePassPdf(parties: SlipPartyData[], filename = "gate-p
     field("Weight Short", L, y, 88)
     field("Weight Bridge Supervisor Name/Sign.", L + 92, y, R - L - 92)
     next()
-    field("Sauda No.", L, y, 88, p.saudaNo)
+    field("Sauda No.", L, y, 88)
     field("Freight", L + 92, y, R - L - 92)
     next()
-    field("Order No.", L, y, 88, p.commitmentNo && p.commitmentNo !== "—" ? p.commitmentNo : "")
+    field("Order No.", L, y, 88)
     field("Person", L + 92, y, R - L - 92)
     next()
     field("Sampling No.", L, y, 88)
