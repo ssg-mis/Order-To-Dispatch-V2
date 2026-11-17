@@ -230,7 +230,7 @@ export function formatDropdownLabel(type: LookupType, item: any): string {
     case 'state': {
       const stateName = item.state_name || item.name || '';
       const code = item.gst_state_code || item.state_code || '';
-      return code ? `${stateName} (Code: ${code})` : stateName;
+      return [code, item.short_name, stateName].filter(Boolean).join(' ');
     }
 
     case 'district': {
@@ -245,14 +245,58 @@ export function formatDropdownLabel(type: LookupType, item: any): string {
       return distName ? `${subName} (Dist: ${distName})` : subName;
     }
 
+    case 'bank_name':
+      return formatBankLabel(item);
+
     case 'fuel_type': {
       const pucc = item.pucc_applicable ?? item.puccApplicable;
-      return pucc ? `${item.name} (PUCC: ${pucc})` : item.name;
+      if (pucc === undefined || pucc === null || pucc === '') return item.name;
+      const puccText = pucc === false || pucc === 'false' || pucc === 'Not Applicable' ? 'Not Applicable' : 'Applicable';
+      return `${item.name} (PUCC: ${puccText})`;
     }
 
     default:
       return item.name || item.label || String(item.id || '');
   }
+}
+
+/** Bank dropdown label: "State Bank of India (India)" - the country in brackets when one is set. */
+export function formatBankLabel(item: any): string {
+  const name = String(item?.name ?? '').trim();
+  const country = String(item?.country ?? '').trim();
+  return country ? `${name} (${country})` : name;
+}
+
+/** Hidden search text for a bank option, so typing the short name (SBI, PNB...) finds the bank. */
+export function bankSearchKeywords(item: any): string {
+  return [item?.short_name, item?.shortName].filter(Boolean).join(' ');
+}
+
+/** Masters whose natural order is NOT alphabetical (lower number = listed first; unknown names go last). */
+const FIXED_ORDER: Partial<Record<LookupType, string[]>> = {
+  msme_registration_type: ['not applicable', 'micro', 'small', 'medium'],
+  fssai_licence_type: ['registration', 'state licence', 'national licence'],
+};
+
+/** System rows shown with a "Primary" badge and locked (no edit / deactivate). */
+const PRIMARY_ROWS: Partial<Record<LookupType, string[]>> = {
+  msme_registration_type: ['not applicable'],
+};
+
+export function isPrimaryMasterRecord(type: LookupType, item: any): boolean {
+  const names = PRIMARY_ROWS[type];
+  return !!names && names.includes(String(item?.name ?? '').trim().toLowerCase());
+}
+
+/** Comparator that applies a master's fixed business order; returns 0 for masters without one. */
+export function compareMasterRecords(type: LookupType, a: any, b: any): number {
+  const order = FIXED_ORDER[type];
+  if (!order) return 0;
+  const rank = (item: any) => {
+    const i = order.indexOf(String(item?.name ?? '').trim().toLowerCase());
+    return i === -1 ? order.length : i;
+  };
+  return rank(a) - rank(b);
 }
 
 /**
@@ -293,7 +337,9 @@ export async function getActiveDropdownOptions(
     }
 
     // Filter to only ACTIVE records for new dropdown selections
-    const activeItems = items.filter((item: any) => item.status === 'Active' || item.status === undefined);
+    const activeItems = items
+      .filter((item: any) => item.status === 'Active' || item.status === undefined)
+      .sort((a: any, b: any) => compareMasterRecords(type, a, b));
 
     return activeItems.map((item: any) => ({
       value: String(item.id),

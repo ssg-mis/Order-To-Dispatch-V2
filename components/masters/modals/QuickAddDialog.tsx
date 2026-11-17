@@ -64,6 +64,16 @@ export function QuickAddDialog({
               <Label htmlFor="qa_unit_name">UOM *</Label>
               <Input id="qa_unit_name" value={quickAddForm.unit_name || ''} onChange={e => setQuickAddForm((prev: any) => ({ ...prev, unit_name: e.target.value }))} placeholder="e.g. Kilograms" />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="qa_unit_short_name">Short name (symbol) *</Label>
+                <Input id="qa_unit_short_name" maxLength={20} value={quickAddForm.short_name || ''} onChange={e => setQuickAddForm((prev: any) => ({ ...prev, short_name: e.target.value }))} placeholder="e.g. KG" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qa_unit_decimals">Number of decimal places</Label>
+                <Input id="qa_unit_decimals" type="number" min={0} max={6} step={1} value={quickAddForm.decimal_places ?? 2} onChange={e => setQuickAddForm((prev: any) => ({ ...prev, decimal_places: e.target.value }))} />
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <Checkbox id="qa_unit_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm((prev: any) => ({ ...prev, status: checked === true ? 'Active' : 'Inactive' }))} />
               <Label htmlFor="qa_unit_is_active" className="cursor-pointer">Is Active?</Label>

@@ -5,6 +5,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Pencil, Trash2, CheckCircle2, Check, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 interface SemiFinishedGoodMasterTableProps {
   subTab: string
@@ -54,6 +56,7 @@ export const SemiFinishedGoodMasterTable: React.FC<SemiFinishedGoodMasterTablePr
   setRejectDialogContext,
   unitOptions = [],
 }) => {
+  const wd = useWeightDecimals()
   if (subTab === 'pending') {
     return (
       <div className="flex flex-col h-[600px]">
@@ -155,7 +158,7 @@ export const SemiFinishedGoodMasterTable: React.FC<SemiFinishedGoodMasterTablePr
                     <TableCell className="font-medium pl-6">{item.semi_finished_good_code}</TableCell>
                     <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
                     <TableCell>{unitOptions.find((u: any) => u.id === item.main_uom_id)?.unit_name || "—"}</TableCell>
-                    <TableCell>{item.converted_kg ?? "—"}</TableCell>
+                    <TableCell>{fmtWeight(item.converted_kg, wd)}</TableCell>
                     <TableCell>
                       <Badge variant={item.status === 'Active' ? 'default' : 'secondary'} className={item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none' : ''}>
                         {item.status}

@@ -4,6 +4,7 @@ import {
   Warehouse,
   Briefcase,
   BookOpen,
+  BookText,
   Layers,
   Ruler,
   FlaskConical,
@@ -34,26 +35,37 @@ export interface Customer {
   email: string
   address_line_1: string
   address_line_2: string
+  city?: string
+  post?: string
+  thana?: string
+  district?: string
+  sub_district?: string
   state: string
   state_id?: number | null
   pincode: string
   pan: string
   gstin: string
   gst_registered: string
+  gst_status?: string
   gst_registration_type?: string | null
   gst_registration_wef?: string | null
   msme_registration_no?: string | null
   msme_registration_type?: string | null
   msme_registration_wef?: string | null
+  msme_activity_type?: string
+  msme_status?: string
   fssai_no?: string | null
+  fssai_registration_wef?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
   msme_certificate_upload?: string | null
   fssai_certificate_upload?: string | null
   addresses?: CustomerAddress[]
+  primary_address_status?: string // Active / Inactive status of the Primary Address
   godown_ids?: number[]
   is_required_for_commitment?: string
   bank_accounts?: CustomerBankAccount[]
@@ -74,6 +86,7 @@ export interface PartyParityFields {
   fssai_no?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
@@ -142,6 +155,11 @@ export interface Unit {
   id: number
   unit_code: string
   unit_name: string
+  short_name?: string | null
+  decimal_places?: number
+  uqc_id?: number | null
+  uqc_code?: string | null
+  uqc_name?: string | null
   status: string
 }
 
@@ -297,6 +315,7 @@ export interface Transport extends PartyParityFields {
 
 export interface CustomerAddress {
   id?: number
+  status?: string // Active / Inactive (Inactive addresses are not offered for new orders)
   address_line_1?: string
   address_line_2?: string
   city?: string
@@ -314,6 +333,7 @@ export interface CustomerBankAccount {
   account_holder_name?: string
   account_number?: string
   ifsc_code?: string
+  status?: "Active" | "Inactive"
 }
 
 // --- Constants & Defaults ---
@@ -330,7 +350,7 @@ export const normalizeGstField = (v: string) => v.trim().toUpperCase()
 
 export const blankCustomerAddress = (): CustomerAddress => ({
   address_line_1: "", address_line_2: "", city: "", post: "", thana: "",
-  sub_district: "", district: "", state_id: null, pincode: "",
+  sub_district: "", district: "", state_id: null, pincode: "", status: "Active",
 })
 
 export const blankCustomerBankAccount = (): CustomerBankAccount => ({
@@ -341,14 +361,14 @@ export const blankPartyParityFields = (): PartyParityFields => ({
   state: "", state_id: null, pan: "", gstin: "",
   gst_registered: "", gst_registration_type: "", gst_registration_wef: "",
   msme_registration_no: "", msme_registration_type: "", msme_registration_wef: "",
-  fssai_no: "", fssai_valid_upto: "", fssai_licence_type: "",
+  fssai_no: "", fssai_registration_wef: "", fssai_valid_upto: "", fssai_licence_type: "",
   aadhaar_upload: "", pan_upload: "", gst_certificate_upload: "", msme_certificate_upload: "", fssai_certificate_upload: "",
 })
 
 export const ALL_MASTER_TABS = [
   "customers", "depots", "brokers", "salespersons",
   "sku_details", "sku_selling_price", "vehicle_master", "driver_master", "transport_master",
-  "ledger_groups", "stock_groups", "units", "raw_materials", "semi_finished_goods",
+  "ledger_groups", "ledgers", "stock_groups", "units", "raw_materials", "semi_finished_goods",
   "insurance_details", "conversion_formulas", "price_levels", "petrol_pumps", "cd_rules",
   "tds_rules", "oil_tags", "bhada_rates",
   "reference_data"
@@ -360,6 +380,7 @@ export const TAB_META: Record<string, { label: string; icon: ComponentType<{ cla
   brokers: { label: "Brokers", icon: Briefcase, desc: "Manage your broker records and details" },
   salespersons: { label: "Salesperson", icon: Users, desc: "Manage your salesperson records and details" },
   ledger_groups: { label: "Ledger Groups", icon: BookOpen, desc: "Categorize party masters under Ledger Groups" },
+  ledgers: { label: "Ledgers", icon: BookText, desc: "Accounting heads for order charges, fuel stations and default ledgers" },
   stock_groups: { label: "Stock Groups", icon: Layers, desc: "Categorize stock item masters under Stock Groups" },
   units: { label: "Units", icon: Ruler, desc: "Manage units of measurement (UOM)" },
   raw_materials: { label: "Raw Materials", icon: FlaskConical, desc: "Manage your raw material records and details" },

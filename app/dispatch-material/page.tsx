@@ -4,9 +4,9 @@ import { Input } from "@/components/ui/input"
 
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -16,15 +16,16 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Settings2, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Settings2, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Info } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { dispatchPlanningApi, customerApi, depotApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -33,11 +34,52 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum, fmtDateTime, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
+  StageActiveChips, StageHeadCell, StageTotalsRow, type StageTotalTone, StagePagination, StageDecisionFooter, StageActionFooter } from "@/components/stage-list"
+
+// Formatted display strings ("1,234.50", "₹1,234.50", "—") -> number.
+const parseDisplayNumber = (v: unknown): number => {
+  const n = parseFloat(String(v ?? "").replace(/[^0-9.-]+/g, ""))
+  return isNaN(n) ? 0 : n
+}
+// partySoDate is pre-formatted dd/mm/yyyy on grouped rows; convert to ISO for the date-range filter.
+const dmyToIso = (row: any): string | null => {
+  const raw = row.party_so_date ?? row.partySoDate
+  if (!raw || raw === "—") return null
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(raw))
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`
+  return String(raw)
+}
+const dashToEmpty = (v: unknown): string => (v === undefined || v === null || v === "—" ? "" : String(v))
+
+const DISPATCH_TABLE_COLUMNS: StageColDef<any>[] = [
+  { id: "partySoDate", label: "DO Date", type: "date", accessor: dmyToIso },
+  { id: "orderNo", label: "DO Number", accessor: (r) => dashToEmpty(r.orderNo) },
+  { id: "processId", label: "Manual Sauda No.", accessor: (r) => dashToEmpty(r.processId) },
+  { id: "customerName", label: "Customer Name", accessor: (r) => dashToEmpty(r.customerName) },
+  { id: "totalQtyBox", label: "Total Qty (Box)", type: "number", accessor: (r) => parseDisplayNumber(r.totalQtyBox), total: true },
+  { id: "totalQtyKgs", label: "Total Qty (KGS)", type: "number", accessor: (r) => parseDisplayNumber(r.totalQtyKgs), total: true },
+  { id: "totalOrderAmount", label: "Total Order Amount (₹)", type: "number", accessor: (r) => parseDisplayNumber(r.totalOrderAmount), total: true },
+  { id: "deliveryFrom", label: "Dispatch from", accessor: (r) => dashToEmpty(r.deliveryFrom) },
+  { id: "remarks", label: "Remarks", accessor: (r) => dashToEmpty(r.remarks) },
+  { id: "brokerName", label: "Broker", accessor: (r) => dashToEmpty(r.brokerName) },
+  { id: "punchBy", label: "Order Punch By", accessor: (r) => dashToEmpty(r.punchBy) },
+  { id: "actualDatetime", label: "Actual Datetime", type: "date", accessor: (r) => r.actual_3 || r.timestamp || null },
+]
+const DISPATCH_RIGHT_ALIGN = new Set(["partySoDate", "actualDatetime", "totalQtyBox", "totalQtyKgs", "totalOrderAmount"])
+const DISPATCH_NUM_DECIMALS: Record<string, number> = { totalQtyBox: 0, totalOrderAmount: 2 }  // totalQtyKgs uses the Units Master KG decimals (wd)
+const DISPATCH_TOTAL_TONES: Record<string, StageTotalTone> = { totalQtyBox: "blue", totalQtyKgs: "purple", totalOrderAmount: "emerald" }
 
 export default function DispatchMaterialPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled, role } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1);
@@ -52,7 +94,20 @@ export default function DispatchMaterialPage() {
     manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
-  const [selectedDepoTab, setSelectedDepoTab] = useState("")
+  // Depot tab is remembered permanently; quick search / customer-broker-punch selects only for the session. Stale depot values are re-validated against availableDepos below.
+  const [listView, patchListView] = usePersistedFilters("dispatch-material", {
+    selectedDepoTab: "",
+    quickSearch: "",
+    customerFilter: "ALL",
+    brokerFilter: "ALL",
+    punchByFilter: "ALL",
+  }, { permanentKeys: ["selectedDepoTab"] })
+  const { selectedDepoTab, quickSearch, customerFilter, brokerFilter, punchByFilter } = listView
+  const setSelectedDepoTab = (v: string) => patchListView({ selectedDepoTab: v })
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setBrokerFilter = (v: string) => patchListView({ brokerFilter: v })
+  const setPunchByFilter = (v: string) => patchListView({ punchByFilter: v })
   const [isProcessing, setIsProcessing] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -122,6 +177,128 @@ export default function DispatchMaterialPage() {
     const quantity = typeof qty === 'string' ? parseFloat(qty) || 0 : qty
     return getSkuGrossWeight(productName) * quantity
   }
+
+  const getNosPerMainUom = useCallback((prod: any): number => {
+    const raw = prod?.nos_per_main_uom ?? prod?.nosPerMainUom;
+    if (raw != null && !isNaN(parseFloat(raw)) && parseFloat(raw) > 0) {
+      return parseFloat(raw);
+    }
+    const productName = prod?.productName || prod?.product_name || prod?.sku_name;
+    if (productName && skus.length > 0) {
+      const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim();
+      const norm = normalize(productName);
+      const sku = skus.find((s: any) => s.sku_name?.toUpperCase() === productName.toUpperCase())
+        || skus.find((s: any) => normalize(s.sku_name || '') === norm)
+        || skus.find((s: any) => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) });
+      if (sku?.nos_per_main_uom && parseFloat(sku.nos_per_main_uom) > 0) {
+        return parseFloat(sku.nos_per_main_uom);
+      }
+    }
+    return 1;
+  }, [skus]);
+
+  const getGstRatePercent = useCallback((prod: any): number | null => {
+    const raw = prod?.gst_rate_percent ?? prod?.gstRatePercent;
+    if (raw != null && !isNaN(parseFloat(raw))) {
+      return parseFloat(raw);
+    }
+    const productName = prod?.productName || prod?.product_name || prod?.sku_name;
+    if (productName && skus.length > 0) {
+      const normalize = (n: string) => n.toUpperCase().replace(/KGS/g, 'KG').replace(/LTRS/g, 'LTR').replace(/\s+/g, ' ').trim();
+      const norm = normalize(productName);
+      const sku = skus.find((s: any) => s.sku_name?.toUpperCase() === productName.toUpperCase())
+        || skus.find((s: any) => normalize(s.sku_name || '') === norm)
+        || skus.find((s: any) => { const n = normalize(s.sku_name || ''); return n.includes(norm) || norm.includes(n) });
+      if (sku?.gst_rate != null) return parseFloat(sku.gst_rate);
+      if (sku?.gstRatePercent != null) return parseFloat(sku.gstRatePercent);
+    }
+    return null;
+  }, [skus]);
+
+  const getProductTaxableAmt = useCallback((prod: any, qty: number | string): number => {
+    const quantity = parseFloat(String(qty)) || 0;
+    const rate = parseFloat(prod?.rate) || 0;
+    const nos = getNosPerMainUom(prod);
+    const pct = getGstRatePercent(prod) || 0;
+    const rateWoGst = pct > 0 ? rate / (1 + pct / 100) : rate;
+    return quantity * nos * rateWoGst;
+  }, [getNosPerMainUom, getGstRatePercent]);
+
+  const renderCalculationInfo = (prod: any, qty: number | string) => {
+    const quantity = parseFloat(String(qty)) || 0;
+    const nos = getNosPerMainUom(prod);
+    const rate = parseFloat(prod?.rate) || 0;
+    const pct = getGstRatePercent(prod) || 0;
+    const totalUnits = quantity * nos;
+    const grossTotal = totalUnits * rate;
+    const rateWoGst = pct > 0 ? rate / (1 + pct / 100) : rate;
+    const taxableAmt = totalUnits * rateWoGst;
+    const totalGst = grossTotal - taxableAmt;
+
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex items-center justify-center h-4 w-4 rounded-full text-slate-400 hover:text-blue-600 hover:bg-blue-100 transition-colors ml-1.5 align-middle cursor-pointer"
+            title="Click to view calculation breakdown"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Info className="h-3 w-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-3.5 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-2.5 z-50 text-left" align="end">
+          <div className="flex items-center justify-between border-b pb-2">
+            <span className="font-bold text-slate-900 text-xs truncate max-w-[200px]" title={prod.productName}>{prod.productName || "Product"}</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">GST {pct}%</span>
+          </div>
+          
+          <div className="space-y-1.5 text-slate-600 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Plan Qty:</span>
+              <span className="font-mono font-semibold text-slate-800">{fmtNum(quantity, 4)} {prod.uom || "Box"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Packing Multiplier:</span>
+              <span className="font-mono font-semibold text-slate-800">× {nos} pcs / {prod.uom || "Box"}</span>
+            </div>
+            <div className="flex justify-between font-medium text-blue-700 bg-blue-50/60 px-1.5 py-0.5 rounded">
+              <span>Total Units (Pieces):</span>
+              <span className="font-mono font-bold">{fmtNum(totalUnits, 2)} pcs</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Entered Rate (Gross incl. GST):</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtAmount(rate, 2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Total Gross Amount:</span>
+              <span className="font-mono font-semibold text-slate-800">₹{fmtAmount(grossTotal, 2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-dashed pt-1.5">
+              <span className="text-slate-500">Ex-GST Base Rate:</span>
+              <span className="font-mono text-slate-700">₹{fmtAmount(rate, 2)} ÷ {1 + pct/100} = ₹{fmtAmount(rateWoGst, 4)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-200 text-amber-900 font-bold">
+              <span>Taxable Amount:</span>
+              <span className="font-mono text-sm text-amber-700">₹{fmtAmount(taxableAmt, 2)}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-500 pt-0.5">
+              <span>GST ({pct}%):</span>
+              <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(totalGst, 2)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 text-blue-900 font-bold">
+              <span>Final Line Amount:</span>
+              <span className="font-mono text-blue-700">₹{fmtAmount(grossTotal, 2)}</span>
+            </div>
+          </div>
+
+          <div className="border-t pt-2 text-[10px] text-slate-400 italic leading-tight">
+            Formula: (Plan Qty × Nos × Rate) ÷ (1 + GST%)
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  };
 
   const getProductQty = (prod: any) => {
     const rowKey = prod._rowKey
@@ -198,7 +375,7 @@ export default function DispatchMaterialPage() {
     })
     const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" }
     const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" }
-    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: wd, maximumFractionDigits: wd })
     const fmtDT = (s: any) => {
       if (!s) return ""
       const d = new Date(s)
@@ -383,50 +560,21 @@ export default function DispatchMaterialPage() {
   const PAGE_COLUMNS = [
     { id: "partySoDate", label: "DO Date" },
     { id: "orderNo", label: "DO Number" },
-    // { id: "processId", label: "Manual Sauda No." },
-    { id: "deliveryPurpose", label: "Order Type (Delivery Purpose)" },
-    { id: "orderType", label: "Order Type" },
-    { id: "customerType", label: "Customer Type" },
-    { id: "startDate", label: "Start Date" },
-    { id: "endDate", label: "End Date" },
-    { id: "deliveryDate", label: "Delivery Date" },
+    { id: "processId", label: "Manual Sauda No." },
     { id: "customerName", label: "Customer Name" },
-    { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr" },
-    { id: "rateOfMaterial", label: "Rate of Material" },
-    { id: "rate", label: "Rate" },
-    { id: "productName", label: "Product Name" },
-    { id: "uom", label: "UOM" },
-    { id: "orderQty", label: "Order Qty" },
-    { id: "altUom", label: "Alt UOM" },
-    { id: "altQty", label: "Alt Qty (Kg)" },
-    { id: "skuName", label: "SKU Name" },
-    { id: "approvalQty", label: "Approval Qty" },
-    { id: "qtyToDispatch", label: "Qty to Dispatch" },
-    { id: "deliveryFrom", label: "Delivery From" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
-    { id: "transportType", label: "Type of Transporting" },
-    { id: "contactPerson", label: "Customer Contact Person Name" },
-    { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
-    { id: "address", label: "Customer Address" },
-    { id: "paymentTerms", label: "Payment Terms" },
-    { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
-    { id: "isBroker", label: "Is this order Through Broker" },
-    { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
-    { id: "uploadSo", label: "Upload DO" },
-    { id: "orderPunchRemarks", label: "Order Punch Remarks" },
-    { id: "remark", label: "Remark" },
-    { id: "revertSecurityRemarks", label: "Revert(Security-Guard) Remarks" },
-    { id: "revertDispatchRemarks", label: "Revert(Dispatch-Planning) Remarks" },
-    { id: "revertPlanningRemarks", label: "Revert(Pre-Approval) Remarks" },
-    { id: "status", label: "Status" },
+    { id: "totalQtyBox", label: "Total Qty (Box)" },
+    { id: "totalQtyKgs", label: "Total Qty (KGS)" },
+    { id: "totalOrderAmount", label: "Total Order Amount" },
+    { id: "deliveryFrom", label: "Dispatch from" },
+    { id: "remarks", label: "Remarks" },
+    { id: "brokerName", label: "Broker" },
+    { id: "punchBy", label: "Order Punch By" },
+    { id: "actualDatetime", label: "Actual Datetime" },
   ]
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns(
-    "dispatch-material",
-    ["partySoDate", "orderNo", "processId", "customerName", "productName", "transportType", "orderPunchRemarks", "revertDispatchRemarks", "status"]
+    "dispatch-material-columns",
+    ["partySoDate", "orderNo", "processId", "customerName", "totalQtyBox", "totalQtyKgs", "totalOrderAmount", "deliveryFrom", "remarks", "brokerName", "punchBy", "actualDatetime"]
   )
   const [columnOrder, setColumnOrder] = useColumnOrder("dispatch-material", PAGE_COLUMNS.map(c => c.id))
   const orderedVisibleCols = columnOrder
@@ -590,6 +738,13 @@ export default function DispatchMaterialPage() {
     return selectedItems.flatMap(group => group._allProducts || [])
   }, [selectedItems])
 
+  // Ledger charges of the orders in the dialog (one set per order, counted once)
+  const dialogOrderNos = useMemo(
+    () => Array.from(new Set(allProductsFromSelectedGroups.map((p: any) => p.orderNo).filter(Boolean))) as string[],
+    [allProductsFromSelectedGroups]
+  )
+  const dialogCharges = useOrderCharges(dialogOrderNos)
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "—";
     try {
@@ -659,7 +814,7 @@ export default function DispatchMaterialPage() {
               billAddress: tData?.billTo?.address || item.bill_address || null,
               shipCompanyName: (tData?.shipTo?.company ? tData.shipTo.company.split('|')[0] : item.ship_company_name) || null,
               shipAddress: tData?.shipTo?.address || item.ship_address || null,
-              freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0)
+              freightRate: tData?.freightRate !== undefined ? tData.freightRate : (item.freight_rate || 0),
             };
 
             const response = await dispatchPlanningApi.submit(orderId, dispatchData);
@@ -691,9 +846,9 @@ export default function DispatchMaterialPage() {
         await refetchPending();
         queryClient.invalidateQueries({ queryKey: ["dispatch-history"] });
 
-        // setTimeout(() => {
-        //   router.push("/actual-dispatch")
-        // }, 1500)
+        setTimeout(() => {
+          router.push("/plan-vehicle")
+        }, 1500)
       }
 
       // Split failures: stale-write conflicts (row already processed/moved by another
@@ -964,7 +1119,7 @@ export default function DispatchMaterialPage() {
   const displayRows = useMemo(() => {
     const grouped: { [key: string]: any } = {}
 
-    filteredPendingOrders.forEach((order: any) => {
+    filteredPendingOrders.forEach((order: any, index: number) => {
       const orderId = order.order_no || order.orderNo || "DO/26-27/0001"
       // Group by Base DO (e.g. DO/26-27/0001 from DO/26-27/0001A)
       const baseDoMatch = orderId.match(/^(DO[-\/](?:\d{2}-\d{2}\/)?\d+)/i)
@@ -1034,7 +1189,7 @@ export default function DispatchMaterialPage() {
       // Add product to the group
       const productWithMeta = {
         ...order,
-        _rowKey: `${baseDo}-${order.id}`,
+        _rowKey: `${baseDo}-${order.id}-${index}`,
         id: order.id,
         customerName,
         customer_name: customerName,
@@ -1047,6 +1202,10 @@ export default function DispatchMaterialPage() {
         rate: order.final_rate || order.rate_of_material || order.rate || order._product?.rate,
         approvalQty: order.approval_qty || order.order_quantity,
         remainingDispatchQty: order.remaining_dispatch_qty !== null ? order.remaining_dispatch_qty : (order.approval_qty || order.order_quantity),
+        nos_per_main_uom: order.nos_per_main_uom || order.nosPerMainUom || order.sku?.nos_per_main_uom || order.sku?.nosPerMainUom,
+        gst_rate_percent: order.gst_rate_percent !== undefined ? order.gst_rate_percent : order.gstRatePercent,
+        depot_gst_state_code: order.depot_gst_state_code || order.depotGstStateCode,
+        customer_gst_state_code: order.customer_gst_state_code || order.customerGstStateCode,
       }
 
       grouped[groupKey]._ordersMap[baseDo]._products.push(productWithMeta)
@@ -1055,6 +1214,33 @@ export default function DispatchMaterialPage() {
 
     return Object.values(grouped).map((group: any) => {
       const firstOrderDetails = Object.values(group._ordersMap)[0] as any || {};
+      const allProds = group._allProducts || [];
+
+      // Calculate totals
+      let totalQtyBox = 0;
+      let totalQtyKgs = 0;
+      let totalOrderAmount = 0;
+
+      allProds.forEach((p: any) => {
+        const qty = parseFloat(p.orderQty) || 0;
+        const rate = parseFloat(p.rate) || 0;
+        const nos = getNosPerMainUom(p);
+        totalOrderAmount += qty * nos * rate;
+        
+        const uom = String(p.uom || "").toUpperCase();
+        if (["BOX", "TIN", "CARTON", "PCS", "JAR", "BOTTLE"].some(u => uom.includes(u))) {
+          totalQtyBox += qty;
+        } else if (uom.includes("KG")) {
+          totalQtyKgs += qty;
+        }
+        
+        // Also add alt qty if exists
+        const altQty = parseFloat(p.altQty || p.alt_qty) || 0;
+        const altUom = String(p.altUom || p.alt_uom || "").toUpperCase();
+        if (["BOX", "TIN", "CARTON", "PCS"].some(u => altUom.includes(u))) totalQtyBox += altQty;
+        else if (altUom.includes("KG")) totalQtyKgs += altQty;
+      });
+
       return {
         ...group,
         ...firstOrderDetails, // Flatten all detail fields into the group object
@@ -1062,77 +1248,51 @@ export default function DispatchMaterialPage() {
         processId: group.processid || group._allProducts[0]?.processid || "—",
         transportType: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.transportType))).filter(t => t && t !== "—").join(", ") || "—",
         orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
+        remarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
         uploadSo: Object.values(group._ordersMap).map((o: any) => o.uploadSo).find(Boolean) || null,
-        _productCount: group._allProducts.length
+        _productCount: group._allProducts.length,
+        totalQtyBox: totalQtyBox > 0 ? fmtNum(totalQtyBox, 0) : "—",
+        totalQtyKgs: totalQtyKgs > 0 ? fmtNum(totalQtyKgs, wd) : "—",
+        totalOrderAmount: totalOrderAmount > 0 ? fmtAmount(totalOrderAmount, 2) : "—",
+        deliveryFrom: firstOrderDetails.depoName || "—",
+        punchBy: firstOrderDetails.order_punch_user || "—",
+        actualDatetime: firstOrderDetails.actual_3 ? fmtDateTime(firstOrderDetails.actual_3) : (firstOrderDetails.timestamp ? fmtDateTime(firstOrderDetails.timestamp) : "—")
       };
     }).filter(group => {
       if (group._productCount <= 0) return false;
       if (!selectedDepoTab) return true;
       return (group.depoName || "").trim().toUpperCase() === selectedDepoTab.trim().toUpperCase();
     })
-  }, [filteredPendingOrders, selectedDepoTab])
+  }, [filteredPendingOrders, selectedDepoTab, wd])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Shared stage-list table state (column search / date range / sort / totals over loaded rows) ──
+  const uniqueRowCustomers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.customerName)).filter(Boolean))).sort() as string[], [displayRows])
+  const uniqueBrokers = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.brokerName)).filter(Boolean))).sort() as string[], [displayRows])
+  const uniquePunchBy = useMemo(() => Array.from(new Set(displayRows.map((r: any) => dashToEmpty(r.punchBy)).filter(Boolean))).sort() as string[], [displayRows])
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
+  const baseFilter = useCallback((row: any) => {
+    if (customerFilter !== "ALL" && dashToEmpty(row.customerName) !== customerFilter) return false
+    if (brokerFilter !== "ALL" && dashToEmpty(row.brokerName) !== brokerFilter) return false
+    if (punchByFilter !== "ALL" && dashToEmpty(row.punchBy) !== punchByFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [row.orderNo, row.processId, row.customerName, row.brokerName, row.deliveryFrom, row.remarks, row.punchBy].map(dashToEmpty).filter(Boolean).join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
     }
+    return true
+  }, [customerFilter, brokerFilter, punchByFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: DISPATCH_TABLE_COLUMNS, baseFilter, persistKey: "dispatch-material" })
+  const sortedDisplayRows = table.rows
+  const activeFiltersCount =
+    (customerFilter !== "ALL" ? 1 : 0) + (brokerFilter !== "ALL" ? 1 : 0) + (punchByFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ customerFilter: "ALL", brokerFilter: "ALL", punchByFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
   }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (row: any, colId: string): string => {
-    if (colId === "status") {
-      return "Pending"
-    }
-    if (colId === "productName") {
-      return String(row._allProducts?.[0]?.productName || "—")
-    }
-    const firstProd = row._allProducts?.[0] || {}
-    if (colId === "oilType") return String(firstProd.oilType || "—")
-    if (colId === "ratePer15Kg") return String(firstProd.ratePer15Kg || "—")
-    if (colId === "ratePerLtr") return String(firstProd.ratePerLtr || "—")
-    if (colId === "rateOfMaterial") return String(firstProd.rateOfMaterial || "—")
-    if (colId === "rate") return String(firstProd.rate || "—")
-    if (colId === "uom") return String(firstProd.uom || "—")
-    if (colId === "orderQty") return String(firstProd.orderQty || "—")
-    if (colId === "altUom") return String(firstProd.altUom || "—")
-    if (colId === "altQty") return String(firstProd.altQty || "—")
-    if (colId === "skuName") return String(firstProd.skuName || "—")
-    if (colId === "approvalQty") return String(firstProd.approvalQty || "—")
-    if (colId === "qtyToDispatch") return String(row.qtyToDispatch || 0)
-    if (colId === "deliveryFrom") return String(firstProd.deliveryFrom || "—")
-
-    const directVal = row[colId]
-    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
-
-    return "—"
-  }
-
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
-
-
+  const totalsColumns = orderedVisibleCols.map(c => DISPATCH_TABLE_COLUMNS.find(t => t.id === c.id)!)
+  const totalsAlign = Object.fromEntries(totalsColumns.map(c => [c.id, DISPATCH_RIGHT_ALIGN.has(c.id) ? "right" as const : "left" as const]))
 
   const customerNames = Array.from(new Set((pendingOrders as any[]).map(order =>
     (order.transfer === 'yes' && order.bill_company_name)
@@ -1165,6 +1325,7 @@ export default function DispatchMaterialPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="dispatch-material"
       partyNames={customerNames}
       title="Stage 4: Dispatch Planning"
       description="Prepare and Dispatch Plannings for delivery."
@@ -1195,30 +1356,6 @@ export default function DispatchMaterialPage() {
         />
       }
     >
-      <div className="flex flex-col justify-end gap-2 sm:flex-row">
-        <Button
-          onClick={handleOpenDialog}
-          disabled={selectedItems.length === 0}
-          className="w-full sm:w-auto"
-        >
-          {`Dispatch Selected (${selectedItems.length})`}
-        </Button>
-
-        {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full bg-transparent sm:w-auto">
-                <Settings2 className="mr-2 h-4 w-4" />
-                Columns
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-              <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-
       {activeDepots.length > 0 && (
         <div className="mt-4 mb-2">
           <Tabs value={selectedDepoTab} onValueChange={setSelectedDepoTab} className="w-full overflow-hidden">
@@ -1237,69 +1374,117 @@ export default function DispatchMaterialPage() {
         </div>
       )}
 
-      <Card className="border-none shadow-sm overflow-hidden md:max-h-[600px] md:overflow-auto">
-        <Table className="hidden md:table">
-          <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-            <TableRow>
-              <TableHead className="w-12 text-center">
-                <Checkbox
-                  checked={displayRows.length > 0 && selectedItems.length === displayRows.length}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label="Select all"
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+        <StageListHeader
+          title="Dispatch Planning List"
+          shown={sortedDisplayRows.length}
+          total={displayRows.length}
+          description="Orders approved and waiting to be planned for dispatch"
+          searchValue={quickSearch}
+          onSearchChange={setQuickSearch}
+          searchPlaceholder="Search DO, Customer, Broker..."
+        >
+          <StageToolbar
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueRowCustomers} />
+                <StageFilterSelect value={brokerFilter} onChange={setBrokerFilter} allLabel="All Brokers" options={uniqueBrokers} />
+                <StageFilterSelect value={punchByFilter} onChange={setPunchByFilter} allLabel="All Punch By" options={uniquePunchBy} />
+                <StageDivider />
+                <StageColumnsMenu
+                  columns={PAGE_COLUMNS}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled('can_toggle_columns')}
                 />
-              </TableHead>
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+              ...(brokerFilter !== "ALL" ? [{ label: `Broker: ${brokerFilter}`, onClear: () => setBrokerFilter("ALL") }] : []),
+              ...(punchByFilter !== "ALL" ? [{ label: `Punch By: ${punchByFilter}`, onClear: () => setPunchByFilter("ALL") }] : []),
+              ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+            ]}
+          />
+        </StageListHeader>
+        <CardContent className="p-0">
+        <div className="hidden overflow-x-auto md:block">
+        <Table>
+          <TableHeader className="bg-slate-50 border-b">
+            <TableRow>
               <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
                 {orderedVisibleCols.map((col) => (
-                  <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                    {col.label}<PendingSortIcon field={col.id} />
-                  </SortableTableHead>
+                  <StageHeadCell key={col.id} col={DISPATCH_TABLE_COLUMNS.find(c => c.id === col.id)!} table={table} align={DISPATCH_RIGHT_ALIGN.has(col.id) ? "right" : "left"} />
                 ))}
               </ColumnDragProvider>
-
             </TableRow>
           </TableHeader>
           <TableBody>
+            <StageTotalsRow
+              columns={totalsColumns}
+              totals={table.totals}
+              count={sortedDisplayRows.length}
+              format={(n, id) => (isAmountCol(id) ? fmtAmount(n, DISPATCH_NUM_DECIMALS[id] ?? 2) : fmtNum(n, id === "totalQtyKgs" ? wd : (DISPATCH_NUM_DECIMALS[id] ?? 4)))}
+              unit=""
+              tones={DISPATCH_TOTAL_TONES}
+              align={totalsAlign}
+            />
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                  <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                   {orderedVisibleCols.map(col => (
-                    <TableCell key={col.id} className="py-4">
+                    <TableCell key={col.id} className="px-4 py-4">
                       <div className={cn(
-                        "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
+                        "h-3 bg-slate-200 animate-pulse rounded-full",
                         col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-24" : "w-16"
                       )} />
                     </TableCell>
                   ))}
                 </TableRow>
               ))
+            ) : displayRows.length > 0 && sortedDisplayRows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={orderedVisibleCols.length || 1} className="text-center py-12 text-muted-foreground">
+                  <p className="font-medium text-slate-500">No matching records found</p>
+                  <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                </TableCell>
+              </TableRow>
             ) : displayRows.length > 0 ? (
               sortedDisplayRows.map((row: any) => {
                 const isSelected = selectedItems.some(i => i._rowKey === row._rowKey);
 
                 return (
-                  <TableRow key={row._rowKey} className={isSelected ? "bg-blue-50/50" : ""}>
-                    <TableCell className="text-center">
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelectItem(row)}
-                      />
-                    </TableCell>
-
+                  <TableRow 
+                    key={row._rowKey} 
+                    className="cursor-pointer hover:bg-slate-50 transition-colors"
+                    onClick={() => {
+                      setSelectedItems([row]);
+                      setDialogSelectedProducts(row._allProducts.map((p: any) => p._rowKey));
+                      setExpandedOrders(Object.keys(row._ordersMap));
+                      setIsDialogOpen(true);
+                    }}
+                  >
                     {orderedVisibleCols.map((col) => (
                       <TableCell key={col.id} className={cn(
-                        "whitespace-nowrap text-center text-xs",
+                        "whitespace-nowrap text-xs px-4",
+                        DISPATCH_RIGHT_ALIGN.has(col.id) ? "text-right font-mono tabular-nums" : "text-left",
                         col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                       )}>
                         {col.id === "status" ? (
-                          <div className="flex justify-center flex-col items-center gap-1">
+                          <div className="flex items-center gap-2">
                             <Badge className="bg-orange-100 text-orange-700">Pending</Badge>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500 font-medium">({row._productCount} Items)</span>
                             )}
                           </div>
                         ) : col.id === "productName" ? (
-                          <div className="flex flex-col items-center">
+                          <div className="flex items-center gap-2">
                             <span className="font-medium text-slate-700">{row._allProducts[0]?.productName}</span>
                             {row._productCount > 1 && (
                               <span className="text-[10px] text-slate-500">+ {row._productCount - 1} more types</span>
@@ -1315,13 +1500,14 @@ export default function DispatchMaterialPage() {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={orderedVisibleCols.length || 1} className="text-center py-8 text-muted-foreground">
                   No orders pending for dispatch
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
+        </div>
         <div className="space-y-3 p-3 md:hidden">
           {isPendingLoading && pendingOrders.length === 0 ? (
             [...Array(5)].map((_, i) => (
@@ -1332,8 +1518,13 @@ export default function DispatchMaterialPage() {
                 </div>
               </div>
             ))
+          ) : displayRows.length > 0 && sortedDisplayRows.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground">
+              <p className="font-medium text-slate-500">No matching records found</p>
+              <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+            </div>
           ) : displayRows.length > 0 ? (
-            displayRows.map((row: any) => {
+            sortedDisplayRows.map((row: any) => {
               const display = buildDispatchDisplayRow(row)
               const isSelected = selectedItems.some(i => i._rowKey === row._rowKey)
               return (
@@ -1373,11 +1564,11 @@ export default function DispatchMaterialPage() {
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Approval Qty</p>
-                      <p className="mt-1 font-mono font-bold">{display.approvalQty}</p>
+                      <p className="mt-1 font-mono font-bold">{fmtNum(display.approvalQty, 4)}</p>
                     </div>
                     <div className="rounded-md bg-slate-50 p-2">
                       <p className="text-[10px] font-black uppercase text-slate-400">Remaining</p>
-                      <p className="mt-1 font-mono font-bold">{display.remainingQty}</p>
+                      <p className="mt-1 font-mono font-bold">{fmtNum(display.remainingQty, 4)}</p>
                     </div>
                   </div>
 
@@ -1402,38 +1593,17 @@ export default function DispatchMaterialPage() {
           )}
         </div>
 
-        <div className="px-3 sm:px-6 py-4 border-t bg-slate-50/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-            Showing Page <span className="text-slate-900 mx-1">{pendingPage}</span>
-            {pendingData?.pagination?.totalPages && (
-              <> of <span className="text-slate-900 mx-1">{pendingData.pagination.totalPages}</span></>
-            )}
-            <span className="ml-2 text-slate-300">|</span>
-            <span className="ml-2">{pendingData?.pagination?.total || 0} order{(pendingData?.pagination?.total || 0) !== 1 ? 's' : ''} in this depot</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-              disabled={pendingPage === 1 || isPendingLoading}
-              className="h-8 rounded-lg gap-1 px-3 font-bold shadow-sm"
-            >
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => p + 1)}
-              disabled={isPendingLoading || pendingPage >= (pendingData?.pagination?.totalPages || 1)}
-              className="h-8 rounded-lg gap-1 px-3 font-bold shadow-sm"
-            >
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingData?.pagination?.totalPages || 1}
+          total={pendingData?.pagination?.total || 0}
+          noun="Orders"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1 || isPendingLoading}
+          nextDisabled={isPendingLoading || pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+        />
+        </CardContent>
       </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -1469,7 +1639,7 @@ export default function DispatchMaterialPage() {
                     <h2 className="text-base sm:text-xl font-black text-blue-900 border-b-4 border-blue-100 pb-2 mt-4 uppercase tracking-tight flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="break-words">{custName}</span>
                       <Badge className="w-fit bg-blue-600 text-white px-3 py-1 font-black sm:ml-3">
-                        {group._productCount} PRODUCTS
+                        {(group._allProducts || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length} SELECTED
                       </Badge>
                     </h2>
 
@@ -1489,7 +1659,7 @@ export default function DispatchMaterialPage() {
                               </Badge>
                               <div className="flex flex-col">
                                 <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">Section {orderIdx + 1}</span>
-                                <span className="text-xs text-blue-100 font-bold leading-none">{orderDetails._products?.length || 0} Items Selected</span>
+                                <span className="text-xs text-blue-100 font-bold leading-none">{(orderDetails._products || []).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length} Items Selected</span>
                               </div>
                             </div>
                             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
@@ -1517,6 +1687,10 @@ export default function DispatchMaterialPage() {
                                     <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.orderType}</p>
                                   </div>
                                   <div>
+                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">DO Date</p>
+                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.partySoDate || "—"}</p>
+                                  </div>
+                                  <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Dates</p>
                                     <p className="text-xs font-bold text-slate-900">S: {formatDate(orderDetails.startDate)} | E: {formatDate(orderDetails.endDate)}</p>
                                   </div>
@@ -1526,7 +1700,7 @@ export default function DispatchMaterialPage() {
                                   </div>
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Transport</p>
-                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType}</p>
+                                    <p className="text-sm font-bold text-slate-900 leading-tight">{orderDetails.transportType || orderDetails.type_of_transporting || "—"}</p>
                                   </div>
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Contact Person</p>
@@ -1547,7 +1721,7 @@ export default function DispatchMaterialPage() {
                                   <div>
                                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
                                     <p className="text-base font-black text-blue-700 leading-tight">
-                                      ₹{orderDetails.advanceAmount || 0} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}
+                                      ₹{fmtAmount(orderDetails.advanceAmount || 0)} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}
                                     </p>
                                   </div>
                                   <div>
@@ -1614,12 +1788,85 @@ export default function DispatchMaterialPage() {
                         <h3 className="text-base sm:text-lg font-bold text-slate-800 flex items-center gap-2 break-words">
                           Consolidated Product List - {custName}
                         </h3>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200 flex items-center gap-1.5 rounded-xl shadow-xs"
+                            >
+                              <Info className="h-3.5 w-3.5 text-blue-600" />
+                              <span>How are things calculated?</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-88 p-4 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-3 z-50 text-left" align="end">
+                            <div className="border-b pb-2 flex items-center justify-between">
+                              <span className="font-bold text-slate-900 text-sm">Calculation Guide</span>
+                              <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-[10px]">Formulas & Rules</Badge>
+                            </div>
+
+                            <div className="space-y-2 text-slate-600 text-[11px] leading-relaxed">
+                              <div>
+                                <span className="font-bold text-slate-800">1. Total Pieces (Packing Multiplier):</span>
+                                <p className="font-mono text-[10px] bg-slate-50 p-1.5 rounded border border-slate-200 text-slate-700 mt-0.5">
+                                  Total Pieces = Plan Qty × Nos per Main UOM
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., 250 Boxes × 12 = 3,000 pcs</span>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">2. Taxable Amount (Base Price):</span>
+                                <p className="text-[10px] text-slate-500 mb-0.5">Entered Rate is Gross (inclusive of GST):</p>
+                                <p className="font-mono text-[10px] bg-amber-50 p-1.5 rounded border border-amber-200 text-amber-800">
+                                  Taxable = (Plan Qty × Nos × Rate) ÷ (1 + GST Rate / 100)
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., (250 × 12 × 135) ÷ 1.05 = ₹3,85,714.29</span>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">3. GST Breakdown:</span>
+                                <p className="text-[10px] text-slate-500 mb-0.5">Decided by Depot vs Customer State Code:</p>
+                                <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-600">
+                                  <li><strong>Same State:</strong> CGST (half) + SGST (half)</li>
+                                  <li><strong>Other State:</strong> IGST (full)</li>
+                                </ul>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-slate-800">4. Total Order Amount:</span>
+                                <p className="font-mono text-[10px] bg-blue-50 p-1.5 rounded border border-blue-200 text-blue-800">
+                                  Total = Taxable Value + CGST + SGST + Rounding Off
+                                </p>
+                                <span className="text-[10px] text-slate-500 italic">E.g., ₹3,85,714.29 + ₹9,642.86 + ₹9,642.86 = ₹4,05,000.00</span>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                        <Table className="hidden md:table">
-                          <TableHeader className="bg-slate-50">
-                            <TableRow>
-                              <TableHead className="w-12 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                      <div className="border border-slate-200 rounded-2xl shadow-sm bg-white min-w-0">
+                        <Table className="hidden md:table relative">
+                          <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+
+                            <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                              <TableHead colSpan={3} className="px-4 text-left font-black text-slate-900">
+                                Total ({allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).length})
+                              </TableHead>
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4" />
+                              <TableHead className="px-4 text-right font-mono tabular-nums font-bold text-amber-700">
+                                {fmtNum(allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum: number, p: any) => {
+                                    const rowKey = p._rowKey;
+                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                                    return sum + getProductTaxableAmt(p, currentDispatchQty);
+                                  }, 0), 2)}
+                              </TableHead>
+                            </TableRow>
+                            <TableRow className="bg-slate-50 hover:bg-slate-50">
+                              <TableHead className="w-12 px-4 text-left">
                                 <Checkbox
                                   checked={allProducts.length > 0 && allProducts.every((p: any) => dialogSelectedProducts.includes(p._rowKey))}
                                   onCheckedChange={(checked) => {
@@ -1629,16 +1876,36 @@ export default function DispatchMaterialPage() {
                                   }}
                                 />
                               </TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Sub-Order</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Product Name</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Rate</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Approval</TableHead>
-                              <TableHead className="w-32 text-[10px] uppercase font-black text-slate-500 tracking-wider">Qty to Dispatch</TableHead>
-                              <TableHead className="w-40 text-[10px] uppercase font-black text-slate-500 tracking-wider">Delivery From</TableHead>
-                              <TableHead className="w-24 text-[10px] uppercase font-black text-slate-500 tracking-wider">Transfer</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Remaining</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Status</TableHead>
-                              <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">Actions</TableHead>
+                              <TableHead className="px-4 text-left">Item Name</TableHead>
+                              <TableHead className="px-4 text-right">Rate (₹)</TableHead>
+                              <TableHead className="px-4 text-right">Approved Qty</TableHead>
+                              <TableHead className="px-4 text-right">Remaining Qty</TableHead>
+                              <TableHead className="min-w-[120px] px-4 text-right">Plan Qty</TableHead>
+                              <TableHead className="w-28 px-4 text-center">Transfer</TableHead>
+                              <TableHead className="min-w-[150px] px-4 text-right">
+                                <div className="inline-flex items-center justify-end gap-1">
+                                  <span>Taxable Amount (₹)</span>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center justify-center h-4 w-4 rounded-full text-slate-400 hover:text-blue-600 hover:bg-blue-100 transition-colors cursor-pointer"
+                                        title="Taxable Amount Formula"
+                                      >
+                                        <Info className="h-3 w-3" />
+                                      </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-72 p-3 shadow-xl border border-blue-200 bg-white text-xs rounded-xl space-y-1.5 z-50 text-left" align="end">
+                                      <div className="font-bold text-slate-800 border-b pb-1 text-xs">Taxable Amount Formula</div>
+                                      <p className="text-[11px] text-slate-600">Rate entered is <strong>GST-inclusive</strong>:</p>
+                                      <p className="font-mono text-[10px] bg-slate-50 p-1.5 rounded border text-slate-700">
+                                        (Plan Qty × Nos × Rate) ÷ (1 + GST%)
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 italic">Click the (i) on any row for its itemized values.</p>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                              </TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1646,56 +1913,42 @@ export default function DispatchMaterialPage() {
                               const rowKey = prod._rowKey;
                               const maxLimit = prod.remainingDispatchQty !== undefined ? prod.remainingDispatchQty : prod.approvalQty;
                               const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
+                              const taxableAmt = getProductTaxableAmt(prod, currentDispatchQty);
+                              const currentTransfer = dispatchDetails[rowKey]?.transfer || prod.transfer || "no";
 
                               return (
                                 <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
-                                  <TableCell className="text-center p-3">
+                                  <TableCell className="px-4 py-3 text-left">
                                     <Checkbox checked={dialogSelectedProducts.includes(rowKey)} onCheckedChange={() => toggleSelectDialogProduct(rowKey)} />
                                   </TableCell>
-                                  <TableCell className="text-[10px] font-semibold text-slate-700 p-1">{prod.orderNo || "—"}</TableCell>
-                                  <TableCell className="font-medium text-[11px] p-2">{prod.productName || "—"}</TableCell>
-                                  <TableCell className="text-[10px] font-bold text-slate-600 p-2 text-center">₹{prod.rate || "—"}</TableCell>
-                                  <TableCell className="text-[10px] font-bold text-blue-600 p-2 text-center">{prod.approvalQty || "—"}</TableCell>
-                                  <TableCell className="p-2">
-                                    <Input type="number" className="h-7 text-[10px] font-bold" value={currentDispatchQty} onChange={(e) => {
+                                  <TableCell className="px-4 py-3 text-left">
+                                    <div className="font-semibold text-sm text-slate-800">{prod.productName || "—"}</div>
+                                    <div className="text-xs text-slate-400 mt-0.5">{prod.orderNo || "—"}</div>
+                                  </TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-600 px-4 py-3 text-right font-mono tabular-nums">{prod.rate ? fmtAmount(prod.rate, 2) : "—"}</TableCell>
+                                  <TableCell className="text-sm font-semibold text-blue-600 px-4 py-3 text-right font-mono tabular-nums">{prod.approvalQty ? fmtNum(prod.approvalQty, 4) : "—"}</TableCell>
+                                  <TableCell className="text-sm font-medium text-slate-500 px-4 py-3 text-right font-mono tabular-nums">{fmtNum(maxLimit, 4)}</TableCell>
+                                  <TableCell className="px-4 py-3">
+                                    <Input type="number" className="h-8 text-sm font-semibold text-right font-mono tabular-nums" value={currentDispatchQty} onChange={(e) => {
                                       let val = Number(e.target.value);
                                       const maxVal = Number(maxLimit);
                                       if (val > maxVal) val = maxVal;
                                       setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], qty: val.toString() } }));
                                     }} />
                                   </TableCell>
-                                  <TableCell className="p-2">
-                                    <Select value={dispatchDetails[rowKey]?.deliveryFrom || "in-stock"} onValueChange={(val) => setDispatchDetails((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], deliveryFrom: val } }))}>
-                                      <SelectTrigger className="h-7 text-[10px] font-bold"><SelectValue placeholder="Source" /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="in-stock" className="text-[10px]">In Stock</SelectItem>
-                                        <SelectItem value="production" className="text-[10px]">Production</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="p-2">
-                                    <div className="flex items-center gap-1 justify-center">
+                                  <TableCell className="px-4 py-3 text-center">
+                                    <div className="flex items-center justify-center gap-1.5">
                                       <Select
-                                        value={dispatchDetails[rowKey]?.transfer || prod.transfer || "no"}
+                                        value={currentTransfer}
                                         onValueChange={(val) => {
                                           setDispatchDetails((prev) => {
                                             const existing = prev[rowKey] || {};
-                                            // Initialize transferData from prod if not already present in state
                                             const transferData = existing.transferData || {
-                                              billTo: {
-                                                company: prod.bill_company_name || "",
-                                                address: prod.bill_address || ""
-                                              },
-                                              shipTo: {
-                                                company: prod.ship_company_name || "",
-                                                address: prod.ship_address || ""
-                                              },
-                                              freightRate: prod.freight_rate?.toString() || ""
+                                              billTo: { company: prod.bill_company_name || "", address: prod.bill_address || "" },
+                                              shipTo: { company: prod.ship_company_name || "", address: prod.ship_address || "" },
+                                              freightRate: prod.freight_rate?.toString() || "0.00"
                                             };
-                                            return {
-                                              ...prev,
-                                              [rowKey]: { ...existing, transfer: val, transferData }
-                                            };
+                                            return { ...prev, [rowKey]: { ...existing, transfer: val, transferData } };
                                           });
                                           if (val === "yes") {
                                             setCurrentTransferRowKey(rowKey);
@@ -1703,86 +1956,179 @@ export default function DispatchMaterialPage() {
                                           }
                                         }}
                                       >
-                                        <SelectTrigger className="h-7 text-[10px] font-bold w-20"><SelectValue placeholder="Transfer" /></SelectTrigger>
+                                        <SelectTrigger className="h-8 w-20 text-xs font-semibold rounded-lg border-slate-200 bg-white">
+                                          <SelectValue placeholder="No" />
+                                        </SelectTrigger>
                                         <SelectContent>
-                                          <SelectItem value="yes" className="text-[10px]">Yes</SelectItem>
-                                          <SelectItem value="no" className="text-[10px]">No</SelectItem>
+                                          <SelectItem value="no" className="text-xs">No</SelectItem>
+                                          <SelectItem value="yes" className="text-xs">Yes</SelectItem>
                                         </SelectContent>
                                       </Select>
-                                      {(dispatchDetails[rowKey]?.transfer === "yes" || (!dispatchDetails[rowKey]?.transfer && prod.transfer === "yes")) && (
+                                      {currentTransfer === "yes" && (
                                         <Button
-                                          variant="ghost"
+                                          type="button"
+                                          variant="outline"
                                           size="icon"
-                                          className="h-6 w-6 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                          className="h-8 w-8 rounded-lg text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shrink-0 cursor-pointer"
+                                          title="Edit Transfer Details"
                                           onClick={() => {
                                             setCurrentTransferRowKey(rowKey);
                                             setIsTransferPopupOpen(true);
                                           }}
-                                          title="View Transfer Details"
                                         >
-                                          <Settings2 className="h-3.5 w-3.5" />
+                                          <Settings2 className="h-4 w-4" />
                                         </Button>
                                       )}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-[10px] font-bold text-slate-500 p-2 text-center">{maxLimit}</TableCell>
-                                  <TableCell className="p-2 text-center text-[10px] font-bold text-slate-500">
-                                    {custName.toLowerCase().includes("reliance") ? (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 text-[10px] font-bold text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
-                                        onClick={() => {
-                                          setPrecloseDialogProduct({ ...prod, maxLimit });
-                                          setPrecloseInputs(prev => ({ ...prev, [prod.id]: maxLimit.toString() }));
-                                          setPrecloseAction("close");
-                                          setPrecloseRemarks("");
-                                          setPrecloseDialogOpen(true);
-                                        }}
-                                      >
-                                        <XCircle className="h-3.5 w-3.5 mr-1" />
-                                        Preclose
-                                      </Button>
-                                    ) : "—"}
+                                  <TableCell className="text-sm font-bold text-amber-700 px-4 py-3 text-right font-mono tabular-nums bg-amber-50/30">
+                                    <span className="inline-flex items-center justify-end">
+                                      {fmtAmount(taxableAmt, 2)}
+                                      {renderCalculationInfo(prod, currentDispatchQty)}
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               );
                             })}
-                          </TableBody>
-                          <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
-                            <TableRow>
-                              <TableCell colSpan={3} className="p-3 text-right">
-                                <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Totals:</span>
+                            <TableRow className="bg-slate-50/50">
+                              <TableCell colSpan={8} className="px-4 py-3">
+                                {/* The order's ledger charges: one set per order, shown here; added once only if the order has none yet. */}
+                                <OrderChargesPanel orderNos={Array.from(new Set(allProducts.map((p: any) => p.orderNo).filter(Boolean))) as string[]} />
                               </TableCell>
-
-                              <TableCell className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-blue-100 text-blue-800 font-black px-2 shadow-sm border-blue-200">
-                                  {allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="p-3">
-                                <Badge variant="secondary" className="bg-green-100 text-green-800 font-black px-2 shadow-sm border-green-200 w-full justify-center">
-                                  {allProducts.reduce((sum: number, p: any) => {
-                                    const rowKey = p._rowKey;
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                    return sum + (parseFloat(currentDispatchQty) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell />
-                              <TableCell />
-                              <TableCell className="p-3 text-center">
-                                <Badge variant="secondary" className="bg-slate-200 text-slate-700 font-black px-2 shadow-sm border-slate-300">
-                                  {allProducts.reduce((sum: number, p: any) => {
-                                    const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                    return sum + (parseFloat(maxLimit) || 0);
-                                  }, 0)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell />
                             </TableRow>
-                          </tfoot>
+                          </TableBody>
+                          {(() => {
+                            // Ticked lines with the quantity being dispatched now
+                            const lines = allProducts.filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).map((p: any) => {
+                              const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
+                              const qty = dispatchDetails[p._rowKey]?.qty !== undefined ? dispatchDetails[p._rowKey].qty : maxLimit;
+                              const taxable = getProductTaxableAmt(p, qty);
+                              const pct = getGstRatePercent(p);
+                              return { taxable, pct };
+                            });
+                            const itemsTaxable = lines.reduce((n: number, l: any) => n + l.taxable, 0);
+                            // Ledger charges come from the order (counted once) and carry no GST of their own.
+                            const groupOrderNos = Array.from(new Set(allProducts.map((p: any) => p.orderNo).filter(Boolean))) as string[];
+                            const dialogChargesTotal = groupOrderNos.reduce((n: number, no: string) => n + (dialogCharges.infoByNo[no]?.total || 0), 0);
+                            const totalTaxable = itemsTaxable + dialogChargesTotal;
+
+                            // Same state / other state: depot vs customer GST state, both from the masters.
+                            const first = selectedItems[0] || allProducts[0] || {};
+                            const stateKnown = !!first.depot_gst_state_code && !!first.customer_gst_state_code;
+                            const isIgstSelected = stateKnown && first.depot_gst_state_code !== first.customer_gst_state_code;
+
+                            // GST only on the item amounts, each at its own master rate.
+                            const gstTotal = lines.reduce((n: number, l: any) => n + (l.taxable * (l.pct || 0)) / 100, 0);
+                            const missingRate = lines.some((l: any) => l.pct == null);
+                            const rates = Array.from(new Set(lines.map((l: any) => l.pct ?? 0)));
+                            const uniformRate = rates.length === 1 ? (rates[0] as number) : null;
+                            const cgst = isIgstSelected ? 0 : gstTotal / 2;
+                            const sgst = isIgstSelected ? 0 : gstTotal / 2;
+                            const igst = isIgstSelected ? gstTotal : 0;
+
+                            const grandTotal = totalTaxable + cgst + sgst + igst;
+                            const roundedTotal = Math.round(grandTotal);
+                            const roundingOff = roundedTotal - grandTotal;
+                            const rateTag = (d: number) => (uniformRate == null ? "" : ` @ ${fmtNum(uniformRate / d, 2)}%`);
+
+                            return (
+                              <tfoot className="bg-slate-100/80 border-t-2 border-slate-200">
+                                <TableRow className="border-b border-slate-200 bg-slate-50/50">
+                                  <TableCell colSpan={7} className="py-2 pr-4 text-right">
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${stateKnown ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700"}`}>
+                                        {stateKnown ? (isIgstSelected ? "Other state · IGST" : "Same state · CGST + SGST") : "State not set in master · CGST + SGST shown"}
+                                      </span>
+                                      {missingRate && (
+                                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">GST rate missing in SKU master</span>
+                                      )}
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                                            title="View summary calculation details"
+                                          >
+                                            <Info className="h-3 w-3 text-blue-600" />
+                                            <span>Summary Info</span>
+                                          </button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-80 p-3.5 shadow-2xl border border-blue-200 bg-white rounded-2xl text-xs space-y-2 z-50 text-left" align="end">
+                                          <div className="font-bold text-slate-800 border-b pb-1.5 flex items-center justify-between">
+                                            <span>Summary Calculation</span>
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                              {stateKnown ? (isIgstSelected ? "Inter-State (IGST)" : "Intra-State (CGST+SGST)") : "Intra-State"}
+                                            </span>
+                                          </div>
+                                          <div className="space-y-1.5 text-slate-600 text-[11px]">
+                                            <div className="flex justify-between">
+                                              <span>Total Taxable Value:</span>
+                                              <span className="font-mono font-bold text-slate-800">₹{fmtAmount(totalTaxable, 2)}</span>
+                                            </div>
+                                            {!isIgstSelected ? (
+                                              <>
+                                                <div className="flex justify-between">
+                                                  <span>CGST {rateTag(2)}:</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(cgst, 2)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span>SGST {rateTag(2)}:</span>
+                                                  <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(sgst, 2)}</span>
+                                                </div>
+                                              </>
+                                            ) : (
+                                              <div className="flex justify-between">
+                                                <span>IGST {rateTag(1)}:</span>
+                                                <span className="font-mono font-semibold text-slate-700">₹{fmtAmount(igst, 2)}</span>
+                                              </div>
+                                            )}
+                                            <div className="flex justify-between">
+                                              <span>Rounding Off:</span>
+                                              <span className="font-mono font-semibold text-slate-600">{fmtAmount(roundingOff, 2)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-200 text-blue-900 font-bold text-xs mt-1">
+                                              <span>Total Order Amount:</span>
+                                              <span className="font-mono text-sm text-blue-700">₹{fmtAmount(roundedTotal, 2)}</span>
+                                            </div>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="px-4 py-2" />
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-semibold text-slate-500">Total Taxable Value (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-bold text-slate-800">{fmtAmount(totalTaxable, 2)}</TableCell>
+                                </TableRow>
+                                {!isIgstSelected ? (
+                                  <>
+                                    <TableRow>
+                                      <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">CGST{rateTag(2)} (₹):</span></TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(cgst, 2)}</TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">SGST{rateTag(2)} (₹):</span></TableCell>
+                                      <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(sgst, 2)}</TableCell>
+                                    </TableRow>
+                                  </>
+                                ) : (
+                                  <TableRow>
+                                    <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">IGST{rateTag(1)} (₹):</span></TableCell>
+                                    <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(igst, 2)}</TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow>
+                                  <TableCell colSpan={7} className="py-1.5 pr-4 text-right"><span className="text-xs font-medium text-slate-500">Rounding Off (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-1.5 text-right font-mono tabular-nums text-sm font-medium text-slate-600">{fmtAmount(roundingOff, 2)}</TableCell>
+                                </TableRow>
+                                <TableRow className="bg-blue-50/50">
+                                  <TableCell colSpan={7} className="py-3 pr-4 text-right"><span className="text-sm font-bold text-blue-900 tracking-wider">Total Order Amount (₹):</span></TableCell>
+                                  <TableCell className="px-4 py-3 text-right font-mono tabular-nums text-base font-bold text-blue-700">{fmtAmount(roundedTotal, 2)}</TableCell>
+                                </TableRow>
+                              </tfoot>
+                            )
+                          })()}
                         </Table>
                         <div className="space-y-3 p-3 md:hidden">
                           <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
@@ -1818,43 +2164,23 @@ export default function DispatchMaterialPage() {
 
                                 <div className="grid grid-cols-2 gap-3 text-xs">
                                   <div className="rounded-md bg-slate-50 p-2">
-                                    <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                    <p className="mt-1 font-mono font-bold text-slate-700">₹{prod.rate || "—"}</p>
+                                    <p className="text-[10px] font-black uppercase text-slate-400">Rate (₹)</p>
+                                    <p className="mt-1 font-mono font-bold text-slate-700">{prod.rate ? fmtAmount(prod.rate, 2) : "—"}</p>
                                   </div>
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Approval</p>
-                                    <p className="mt-1 font-mono font-bold text-blue-600">{prod.approvalQty || "—"}</p>
+                                    <p className="mt-1 font-mono font-bold text-blue-600">{prod.approvalQty ? fmtNum(prod.approvalQty, 4) : "—"}</p>
                                   </div>
                                   <div className="rounded-md bg-slate-50 p-2">
                                     <p className="text-[10px] font-black uppercase text-slate-400">Remaining</p>
-                                    <p className="mt-1 font-mono font-bold text-slate-700">{maxLimit}</p>
+                                    <p className="mt-1 font-mono font-bold text-slate-700">{fmtNum(maxLimit, 4)}</p>
                                   </div>
-                                  {custName.toLowerCase().includes("reliance") && (
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Preclose</p>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="mt-1 h-7 text-[10px] font-bold text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
-                                        onClick={() => {
-                                          setPrecloseDialogProduct({ ...prod, maxLimit });
-                                          setPrecloseInputs(prev => ({ ...prev, [prod.id]: maxLimit.toString() }));
-                                          setPrecloseAction("close");
-                                          setPrecloseRemarks("");
-                                          setPrecloseDialogOpen(true);
-                                        }}
-                                      >
-                                        <XCircle className="h-3.5 w-3.5 mr-1" />
-                                        Preclose
-                                      </Button>
-                                    </div>
-                                  )}
                                 </div>
 
                                 <div className="grid grid-cols-1 gap-3">
                                   <div className="space-y-2">
                                     <Label className="text-[10px] font-black uppercase text-slate-400">Qty to Dispatch</Label>
-                                    <Input type="number" className="h-9 text-xs font-bold" value={currentDispatchQty} onChange={(e) => {
+                                    <Input type="number" className="h-9 text-xs font-bold text-right font-mono tabular-nums" value={currentDispatchQty} onChange={(e) => {
                                       let val = Number(e.target.value);
                                       const maxVal = Number(maxLimit);
                                       if (val > maxVal) val = maxVal;
@@ -1917,29 +2243,6 @@ export default function DispatchMaterialPage() {
                               </div>
                             );
                           })}
-
-                          <div className="grid grid-cols-3 gap-2 rounded-lg border bg-slate-50 p-3 text-xs">
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Approval</p>
-                              <p className="mt-1 font-black text-blue-700">{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.approvalQty) || 0), 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Dispatch</p>
-                              <p className="mt-1 font-black text-green-700">{allProducts.reduce((sum: number, p: any) => {
-                                const rowKey = p._rowKey;
-                                const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                const currentDispatchQty = dispatchDetails[rowKey]?.qty !== undefined ? dispatchDetails[rowKey].qty : maxLimit;
-                                return sum + (parseFloat(currentDispatchQty) || 0);
-                              }, 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] uppercase font-black text-slate-500">Remaining</p>
-                              <p className="mt-1 font-black text-slate-700">{allProducts.reduce((sum: number, p: any) => {
-                                const maxLimit = p.remainingDispatchQty !== undefined ? p.remainingDispatchQty : p.approvalQty;
-                                return sum + (parseFloat(maxLimit) || 0);
-                              }, 0)}</p>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     </div>
@@ -1949,42 +2252,32 @@ export default function DispatchMaterialPage() {
             </div>
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-1 sm:px-8 pb-4 sm:pb-8 flex flex-col gap-4 sm:flex-col w-full">
-            <div className="flex flex-col sm:flex-row sm:items-end gap-3 w-full">
-              <div className="flex-1 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Remarks <span className="text-red-500">*</span></Label>
-                <Input
-                  className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white focus:border-red-400 transition-colors"
-                  placeholder="Enter reason for reverting or cancelling..."
-                  value={revertRemarks}
-                  onChange={(e) => setRevertRemarks(e.target.value)}
-                />
-              </div>
-              {role === 'super_admin' && (
-                <Button
-                  variant="outline"
-                  onClick={handleCancel}
-                  disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                  className="w-full sm:w-auto font-black uppercase tracking-tight whitespace-normal sm:whitespace-nowrap border-2 border-red-600 text-red-600 hover:bg-red-50"
-                >
-                  {isProcessing ? "Processing..." : `Cancel Order (${dialogSelectedProducts.length})`}
-                </Button>
-              )}
-              <Button
-                variant="destructive"
-                onClick={handleRevert}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                className="w-full sm:w-auto font-black uppercase tracking-tight whitespace-normal sm:whitespace-nowrap"
-              >
-                {isProcessing ? "Processing..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-              <Button onClick={handleBulkDispatch} disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly} className="w-full sm:w-auto">
-                {isProcessing ? "Processing..." : `Dispatch ${dialogSelectedProducts.length} Item(s)`}
-              </Button>
-            </div>
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              remarksPlaceholder="Enter reason for reverting or cancelling..."
+              revertActions={[
+                ...(role === 'super_admin'
+                  ? [{
+                      label: isProcessing ? "Processing..." : `Cancel Order (${dialogSelectedProducts.length})`,
+                      onClick: handleCancel,
+                      disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                    }]
+                  : []),
+                {
+                  label: isProcessing ? "Processing..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`,
+                  onClick: handleRevert,
+                  disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                },
+              ]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Processing..." : `Proceed to Plan Vehicle (${dialogSelectedProducts.length})`,
+                onClick: handleBulkDispatch,
+                disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2002,21 +2295,21 @@ export default function DispatchMaterialPage() {
           isSavingTransferRef.current = false;
         }
       }}>
-        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto p-3 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Transfer Details</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] sm:max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto p-4 sm:p-6 rounded-2xl">
+          <DialogHeader className="pb-2 border-b border-slate-100">
+            <DialogTitle className="text-xl font-bold text-slate-900">Transfer Details</DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
               Provide Bill-to and Ship-to details for the material transfer.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 py-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 py-4">
             {/* Bill To Column */}
             <div className="space-y-4">
-              <h3 className="font-bold text-blue-800 border-b pb-1 uppercase text-sm">Bill To</h3>
+              <h3 className="font-bold text-blue-800 border-b pb-1 uppercase text-xs tracking-wider">BILL TO</h3>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Company Name <span className="text-red-500">*</span></Label>
+                  <Label className="text-xs font-bold text-slate-700">Company Name <span className="text-red-500">*</span></Label>
                   <AsyncCombobox
                     placeholder="Select Company"
                     searchPlaceholder="Search customers..."
@@ -2062,7 +2355,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2079,14 +2372,14 @@ export default function DispatchMaterialPage() {
                         };
                       });
                     }}
-                    className="h-9 text-xs"
+                    className="h-10 text-xs rounded-xl"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Address</Label>
+                  <Label className="text-xs font-bold text-slate-700">Address</Label>
                   <Input
                     placeholder="Enter Address"
-                    className="h-9 text-xs font-medium"
+                    className="h-10 text-xs font-medium rounded-xl border-slate-200"
                     value={
                       currentTransferRowKey
                         ? (dispatchDetails[currentTransferRowKey]?.transferData?.billTo?.address ||
@@ -2098,7 +2391,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2114,15 +2407,51 @@ export default function DispatchMaterialPage() {
                     }}
                   />
                 </div>
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-xs font-bold text-slate-700">Freight Rate <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0.00"
+                    className="h-10 text-sm font-bold rounded-xl border-slate-200 max-w-[200px]"
+                    value={
+                      currentTransferRowKey
+                        ? (dispatchDetails[currentTransferRowKey]?.transferData?.freightRate ??
+                          allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey)?.freight_rate?.toString() ?? "0.00")
+                        : "0.00"
+                    }
+                    onChange={(e) => {
+                      if (!currentTransferRowKey) return;
+                      let val = e.target.value;
+                      if (Number(val) < 0) val = "0";
+                      const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
+                        billTo: { company: "", address: "" },
+                        shipTo: { company: "", address: "" },
+                        freightRate: "0.00"
+                      };
+                      setDispatchDetails(prev => {
+                        const rowKey = currentTransferRowKey!;
+                        const rowDetail = prev[rowKey] || { qty: "0" };
+                        return {
+                          ...prev,
+                          [rowKey]: {
+                            ...rowDetail,
+                            transferData: { ...prevData, freightRate: val }
+                          }
+                        };
+                      });
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
             {/* Ship To Column */}
             <div className="space-y-4">
-              <h3 className="font-bold text-green-800 border-b pb-1 uppercase text-sm">Ship To</h3>
+              <h3 className="font-bold text-green-800 border-b pb-1 uppercase text-xs tracking-wider">SHIP TO</h3>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Company Name <span className="text-red-500">*</span></Label>
+                  <Label className="text-xs font-bold text-slate-700">Company Name <span className="text-red-500">*</span></Label>
                   <AsyncCombobox
                     placeholder="Select Company"
                     searchPlaceholder="Search customers..."
@@ -2168,7 +2497,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2185,14 +2514,14 @@ export default function DispatchMaterialPage() {
                         };
                       });
                     }}
-                    className="h-9 text-xs"
+                    className="h-10 text-xs rounded-xl"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Address</Label>
+                  <Label className="text-xs font-bold text-slate-700">Address</Label>
                   <Input
                     placeholder="Enter Address"
-                    className="h-9 text-xs font-medium"
+                    className="h-10 text-xs font-medium rounded-xl border-slate-200"
                     value={
                       currentTransferRowKey
                         ? (dispatchDetails[currentTransferRowKey]?.transferData?.shipTo?.address ||
@@ -2204,7 +2533,7 @@ export default function DispatchMaterialPage() {
                       const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
                         billTo: { company: "", address: "" },
                         shipTo: { company: "", address: "" },
-                        freightRate: ""
+                        freightRate: "0.00"
                       };
                       setDispatchDetails(prev => {
                         const rowKey = currentTransferRowKey!;
@@ -2224,67 +2553,66 @@ export default function DispatchMaterialPage() {
             </div>
           </div>
 
-          <div className="px-0 sm:px-8 pb-4">
-            <div className="space-y-1.5 max-w-xs">
-              <Label className="text-xs font-bold">Freight Rate <span className="text-red-500">*</span></Label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="0.00"
-                className="h-10 text-sm font-bold border-2 focus:border-blue-400"
-                value={
-                  currentTransferRowKey
-                    ? (dispatchDetails[currentTransferRowKey]?.transferData?.freightRate ||
-                      allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey)?.freight_rate?.toString() || "")
-                    : ""
+          <DialogFooter className="mt-6 border-t border-slate-100 pt-4 flex flex-row items-center justify-end gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 px-5 rounded-xl border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+              onClick={() => {
+                if (currentTransferRowKey) {
+                  setDispatchDetails(prev => ({
+                    ...prev,
+                    [currentTransferRowKey]: { ...prev[currentTransferRowKey], transfer: "no" }
+                  }));
                 }
-                onChange={(e) => {
-                  if (!currentTransferRowKey) return;
-                  let val = e.target.value;
-                  if (Number(val) < 0) val = "0";
-                  const prevData = dispatchDetails[currentTransferRowKey]?.transferData || {
-                    billTo: { company: "", address: "" },
-                    shipTo: { company: "", address: "" },
-                    freightRate: ""
-                  };
+                setIsTransferPopupOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="h-9 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+              onClick={() => {
+                const data = currentTransferRowKey ? dispatchDetails[currentTransferRowKey]?.transferData : null;
+                const currentProd = allProductsFromSelectedGroups.find(p => p._rowKey === currentTransferRowKey);
+                const billCompany = data?.billTo?.company || currentProd?.bill_company_name;
+                const shipCompany = data?.shipTo?.company || currentProd?.ship_company_name;
+                const freightRate = data?.freightRate !== undefined ? data.freightRate : (currentProd?.freight_rate?.toString() || "0.00");
+
+                if (!billCompany || !shipCompany || freightRate === "") {
+                  toast({ title: "Validation Error", description: "Bill-To Company, Ship-To Company, and Freight Rate are mandatory.", variant: "destructive" });
+                  return;
+                }
+
+                // Ensure transfer is confirmed as yes and saved
+                if (currentTransferRowKey) {
                   setDispatchDetails(prev => {
-                    const rowKey = currentTransferRowKey!;
-                    const rowDetail = prev[rowKey] || { qty: "0" };
+                    const rowDetail = prev[currentTransferRowKey] || { qty: "0" };
                     return {
                       ...prev,
-                      [rowKey]: {
+                      [currentTransferRowKey]: {
                         ...rowDetail,
-                        transferData: { ...prevData, freightRate: val }
+                        transfer: "yes",
+                        transferData: {
+                          billTo: {
+                            company: billCompany,
+                            address: data?.billTo?.address || currentProd?.bill_address || ""
+                          },
+                          shipTo: {
+                            company: shipCompany,
+                            address: data?.shipTo?.address || currentProd?.ship_address || ""
+                          },
+                          freightRate: freightRate
+                        }
                       }
                     };
                   });
-                }}
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="mt-6 border-t pt-4 gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => {
-              if (currentTransferRowKey) {
-                setDispatchDetails(prev => ({
-                  ...prev,
-                  [currentTransferRowKey]: { ...prev[currentTransferRowKey], transfer: "no" }
-                }));
-              }
-              setIsTransferPopupOpen(false);
-            }} className="w-full sm:w-auto">Cancel</Button>
-            <Button
-              onClick={() => {
-                // Validation
-                const data = currentTransferRowKey ? dispatchDetails[currentTransferRowKey]?.transferData : null;
-                if (!data || !data.billTo.company || !data.shipTo.company || data.freightRate === "") {
-                  toast({ title: "Validation Error", description: "Companies and Freight Rate (>=0) are mandatory.", variant: "destructive" });
-                  return;
                 }
+
                 isSavingTransferRef.current = true;
                 setIsTransferPopupOpen(false);
               }}
-              className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
             >
               OK
             </Button>

@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 export interface SlipProduct {
   productName: string
@@ -28,6 +29,19 @@ export interface SlipPartyData {
   preApproveAt?: string | null
   approveBy?: string
   approveAt?: string | null
+  vehicleNo?: string
+  driverName?: string
+  tareWt?: string | number
+  grossWt?: string | number
+  inTime?: string
+  outTime?: string
+  // Outgoing Gate Pass only (lib/gate-pass-pdf.ts)
+  serialNo?: string
+  outDate?: string
+  driverMobile?: string
+  rstNo?: string
+  saudaNo?: string
+  billNo?: string
 }
 
 const WHITE: [number, number, number] = [255, 255, 255]
@@ -50,7 +64,9 @@ function oilKey(name: string): string {
   return "other"
 }
 
-const wt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+const wt = (n: number) => { const d = getWeightDecimals(); return Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) }
+// pre-formatted weight strings from callers: re-format when numeric so decimals follow the Units Master
+const wtStr = (v: string | number) => (Number.isFinite(Number(String(v).replace(/,/g, ""))) ? wt(Number(String(v).replace(/,/g, ""))) : String(v))
 
 const pad = (n: number) => String(n).padStart(2, "0")
 const fmtDateTime = (s: string | null | undefined) => {
@@ -91,18 +107,35 @@ function layoutInfoCell(
     const spaceW = doc.getTextWidth(" ")
     curX += labelW + spaceW
     const words = String(value ?? "").split(/\s+/).filter(Boolean)
-    for (const w of words) {
+    for (let w of words) {
       const wW = doc.getTextWidth(w)
-      if (curX + wW > x0 + availW && curX > x0) { lineNo++; curX = x0 }
-      if (draw) doc.text(w, curX, baselineFor(lineNo))
-      curX += wW + spaceW
+      if (curX + wW > x0 + availW && curX > x0) { 
+        lineNo++; 
+        curX = x0; 
+      }
+      
+      if (doc.getTextWidth(w) > availW) {
+        // If a single word is wider than the entire column, let jsPDF split it exactly
+        const chunks = doc.splitTextToSize(w, availW);
+        for (let i = 0; i < chunks.length; i++) {
+          if (draw) doc.text(chunks[i], x0, baselineFor(lineNo));
+          if (i < chunks.length - 1) {
+            lineNo++;
+          } else {
+            curX = x0 + doc.getTextWidth(chunks[i]) + spaceW;
+          }
+        }
+      } else {
+        if (draw) doc.text(w, curX, baselineFor(lineNo))
+        curX += doc.getTextWidth(w) + spaceW
+      }
     }
     lineNo++
   }
   return lineNo
 }
 
-export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean }) {
+export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "dispatch-slip.pdf", opts?: { print?: boolean; title?: string }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 10
@@ -135,7 +168,7 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
     const headerBody = [
       [banner("SHRI SHYAM OIL EXTRACTIONS PVT LTD", { halign: "center", valign: "middle", fontStyle: "bold", fontSize: 15 })],
       [banner("Vill: Banari, PO: Banari, Dist: Janjgir-Champa (CG)", { halign: "center", fontStyle: "normal", fontSize: 8, textColor: [90, 90, 90] })],
-      [banner("Oil Dispatch Voucher", { halign: "center", fontStyle: "bold", fontSize: 12 })],
+      [banner(opts?.title || "Oil Dispatch Voucher", { halign: "center", fontStyle: "bold", fontSize: 12 })],
       [info([{ label: "DO no.:", value: party.commitmentNo }]), info([{ label: "DO Date:", value: party.date }])],
       [info([{ label: "Customer:", value: party.party }]), info([{ label: party.referenceLabel ? `${party.referenceLabel}:` : "", value: party.referenceValue || "—" }])],
       [
@@ -220,6 +253,33 @@ export function generateDispatchSlipPdf(parties: SlipPartyData[], filename = "di
         else if (meta.type === "grand") { data.cell.styles.fillColor = BLACK; data.cell.styles.textColor = WHITE; data.cell.styles.fontStyle = "bold" }
         else { data.cell.styles.fillColor = WHITE }
       },
+    })
+
+    // ---- 2.5) Blank Space for Manual Entries (Or pre-filled if provided) ----
+    autoTable(doc, {
+      body: [
+        [
+          { content: `Vehicle No.: ${party.vehicleNo ? party.vehicleNo : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Driver Name: ${party.driverName ? party.driverName : "__________________________"}`, styles: { halign: "left" } },
+        ],
+        [
+          { content: `Tare Wt.: ${party.tareWt ? wtStr(party.tareWt) + " KGS" : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Gross Wt.: ${party.grossWt ? wtStr(party.grossWt) + " KGS" : "__________________________"}`, styles: { halign: "left" } },
+        ],
+        [
+          { content: `In Time: ${party.inTime ? party.inTime : "__________________________"}`, styles: { halign: "left" } },
+          { content: `Out Time: ${party.outTime ? party.outTime : "__________________________"}`, styles: { halign: "left" } },
+        ],
+        [
+          { content: "Guard Sign: __________________________", styles: { halign: "left" } },
+          { content: "Driver Sign: __________________________", styles: { halign: "left" } },
+        ]
+      ],
+      startY: (doc as any).lastAutoTable.finalY + 2,
+      margin: { top: margin, left: sideMargin, right: sideMargin, bottom: margin },
+      tableWidth: tableW,
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 2.5, textColor: BLACK },
     })
 
     // ---- 3) Footer: three equal columns (Punch / Pre-Approve / Approve) ----

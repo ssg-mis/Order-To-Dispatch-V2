@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 // ── Types (mirror /reports/pending-sauda-detailed) ──────────────────────────
 interface DetailedItem { item_name: string; uom: string; rate: number; billed: number[] }
@@ -50,8 +51,8 @@ const q = (n: number) => (n && n > 0 ? inIN(n) : "")
 const qT = (n: number) => inIN(n || 0)
 const rate = (n: number) =>
   n && n > 0 ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""
-const wtKg = (n: number) => `${Number(n || 0).toFixed(3)}  KGS`
-const diffKg = (n: number) => (n < 0 ? `(-)${Math.abs(n).toFixed(3)}` : `${Number(n || 0).toFixed(3)}`) + "  KGS"
+const wtKg = (n: number) => `${Number(n || 0).toFixed(getWeightDecimals())}  KGS`
+const diffKg = (n: number) => (n < 0 ? `(-)${Math.abs(n).toFixed(getWeightDecimals())}` : `${Number(n || 0).toFixed(getWeightDecimals())}`) + "  KGS"
 
 export function generateCustomerWiseDetailedPdf(customers: DetailedCustomer[], filename?: string) {
   const maxDocs = Math.max(0, ...customers.flatMap((c) => c.dos.map((d) => d.docs.length)))

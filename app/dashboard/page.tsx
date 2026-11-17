@@ -58,8 +58,8 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-8 p-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-slate-900">Dashboard</h1>
-          <p className="text-slate-500 mt-1 font-medium">Monitoring your order dispatch workflow in real-time</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Monitoring your order dispatch workflow in real-time</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-sm font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
@@ -81,8 +81,8 @@ export default function DashboardPage() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {[
           { title: "Total Orders", key: "totalOrders", icon: Package, color: "text-indigo-600", bg: "bg-indigo-50", desc: "Across all stages" },
-          { title: "Pending Pre-Approval", key: "pendingPreApproval", icon: Clock, color: "text-orange-500", bg: "bg-orange-50", desc: "Awaiting Stage 1" },
-          { title: "Pending Approval", key: "pendingApproval", icon: FileText, color: "text-blue-500", bg: "bg-blue-50", desc: "Awaiting Stage 2" },
+          { title: "Pending Pre-Approval", key: "pendingPreApproval", icon: Clock, color: "text-orange-500", bg: "bg-orange-50", desc: "Awaiting Stage 2" },
+          { title: "Pending Approval", key: "pendingApproval", icon: FileText, color: "text-blue-500", bg: "bg-blue-50", desc: "Awaiting Stage 3" },
           { title: "Completed", key: "completedOrders", icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-50", desc: "Processed orders" }
         ].map((item, idx) => (
           <Card key={idx} className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
@@ -124,7 +124,7 @@ export default function DashboardPage() {
               <TableRow className="border-none">
                 <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400 pl-8">Order No</TableHead>
                 <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400">Customer</TableHead>
-                <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400">Date</TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Date</TableHead>
                 <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-400 pr-8">Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -143,7 +143,7 @@ export default function DashboardPage() {
                   <TableRow key={order.id} className="group hover:bg-indigo-50/30 transition-colors border-slate-50">
                     <TableCell className="font-black text-slate-800 text-sm pl-8">{order.order_no}</TableCell>
                     <TableCell className="font-medium text-slate-600">{order.customer_name}</TableCell>
-                    <TableCell className="text-slate-400 text-sm">{new Date(order.created_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}</TableCell>
+                    <TableCell className="text-slate-400 text-sm text-right tabular-nums">{new Date(order.created_at).toLocaleDateString("en-GB")}</TableCell>
                     <TableCell className="pr-8">
                       <Badge variant="outline" className={`rounded-full px-3 py-0.5 border-none font-black text-[10px] uppercase tracking-tighter ${
                         order.overall_status_of_order?.includes('Completed') ? 'bg-emerald-100 text-emerald-700' : 

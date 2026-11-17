@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -26,6 +27,7 @@ export function LedgerGroupForm({
   handleLedgerGroupFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setLedgerGroupEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleLedgerGroupFieldChangeAttempt) {
       handleLedgerGroupFieldChangeAttempt(fieldName, applyChange)
@@ -46,7 +48,7 @@ export function LedgerGroupForm({
         {editingItem?.id && (
           <LedgerGroupSectionalHistoryTable
             ledgerGroupId={editingItem.id}
-            onOpenView={() => setLedgerGroupEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setLedgerGroupEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -142,6 +144,7 @@ export function StockGroupForm({
   handleStockGroupFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setStockGroupEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleStockGroupFieldChangeAttempt) {
       handleStockGroupFieldChangeAttempt(fieldName, applyChange)
@@ -162,7 +165,7 @@ export function StockGroupForm({
         {editingItem?.id && (
           <StockGroupSectionalHistoryTable
             stockGroupId={editingItem.id}
-            onOpenView={() => setStockGroupEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setStockGroupEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -230,13 +233,16 @@ export function UnitForm({
   editingItem,
   handleUnitFieldChangeAttempt,
   setUnitEffectiveDatesOpen,
+  uqcOptions = [],
 }: {
+  uqcOptions?: any[]
   unitForm: any
   setUnitForm: React.Dispatch<React.SetStateAction<any>>
   editingItem?: any | null
   handleUnitFieldChangeAttempt?: (fieldName: string, applyChange: () => void) => void
   setUnitEffectiveDatesOpen?: (open: boolean) => void
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleUnitFieldChangeAttempt) {
       handleUnitFieldChangeAttempt(fieldName, applyChange)
@@ -255,7 +261,7 @@ export function UnitForm({
         {editingItem?.id && (
           <UnitSectionalHistoryTable
             unitId={editingItem.id}
-            onOpenView={() => setUnitEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setUnitEffectiveDatesOpen?.(true))}
           />
         )}
       </div>
@@ -266,7 +272,7 @@ export function UnitForm({
           <Input id="unit_code" value={unitForm.unit_code} readOnly className="bg-slate-100 font-mono text-xs cursor-not-allowed" placeholder="Auto-generated" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="unit_name" className="text-xs font-semibold text-slate-800">UOM *</Label>
+          <Label htmlFor="unit_name" className="text-xs font-semibold text-slate-800">Name of unit (formal name) *</Label>
           <Input
             id="unit_name"
             className="text-xs font-medium"
@@ -281,6 +287,54 @@ export function UnitForm({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <Label htmlFor="unit_short_name" className="text-xs font-semibold text-slate-800">Short name (symbol) *</Label>
+          <Input
+            id="unit_short_name"
+            className="text-xs font-medium"
+            maxLength={20}
+            value={unitForm.short_name ?? ""}
+            onChange={e => {
+              const val = e.target.value
+              attemptChange("Short Name", () => setUnitForm((prev: any) => ({...prev, short_name: val})))
+            }}
+            placeholder="e.g. KG"
+          />
+          <p className="text-[10px] text-slate-500">This is what shows everywhere, not the formal name.</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="unit_decimal_places" className="text-xs font-semibold text-slate-800">Number of decimal places</Label>
+          <Input
+            id="unit_decimal_places"
+            type="number"
+            min={0}
+            max={6}
+            step={1}
+            className="text-xs font-medium"
+            value={unitForm.decimal_places ?? 2}
+            onChange={e => {
+              const val = e.target.value
+              attemptChange("Decimal Places", () => setUnitForm((prev: any) => ({...prev, decimal_places: val})))
+            }}
+          />
+          <p className="text-[10px] text-slate-500">0 for units counted in whole numbers (Box, Pcs); 2-3 for weights and volumes.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <Label htmlFor="unit_uqc" className="text-xs font-semibold text-slate-800">UQC – Unit Quantity Code</Label>
+          <Select
+            value={unitForm.uqc_id ? String(unitForm.uqc_id) : ""}
+            onValueChange={val => attemptChange("UQC", () => setUnitForm((prev: any) => ({...prev, uqc_id: val})))}
+          >
+            <SelectTrigger id="unit_uqc" className="w-full text-xs"><SelectValue placeholder="Select UQC" /></SelectTrigger>
+            <SelectContent>
+              {uqcOptions.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-slate-500">Required for GST compliance; sent to eInvoice / eWay Bill.</p>
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="unit_status" className="text-xs font-semibold text-slate-800">Status</Label>
           <Select
@@ -308,6 +362,8 @@ export function OilTagForm({
   oilTagForm: any
   setOilTagForm: React.Dispatch<React.SetStateAction<any>>
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -336,6 +392,8 @@ export function BhadaRateForm({
   bhadaRateForm: any
   setBhadaRateForm: React.Dispatch<React.SetStateAction<any>>
 }) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="grid gap-4 py-4 px-1">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

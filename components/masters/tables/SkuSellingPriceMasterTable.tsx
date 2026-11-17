@@ -5,6 +5,9 @@ import { TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/compon
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Pencil, Trash2, SortAsc, SortDesc } from "lucide-react"
+import { fmtAmount } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 interface SkuSellingPriceMasterTableProps {
   isLoading: boolean
@@ -44,6 +47,7 @@ export const SkuSellingPriceMasterTable: React.FC<SkuSellingPriceMasterTableProp
   setDeletingItem,
   setIsDeleteDialogOpen,
 }) => {
+  const wd = useWeightDecimals()
   return (
     <>
       {/* Mobile card view */}
@@ -66,7 +70,7 @@ export const SkuSellingPriceMasterTable: React.FC<SkuSellingPriceMasterTableProp
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-800 truncate">{item.packing_material}</p>
-                    <p className="text-xs text-emerald-600 font-bold">Selling: {item.selling_cost}</p>
+                    <p className="text-xs text-emerald-600 font-bold">Selling: {fmtAmount(item.selling_cost)}</p>
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <Button
@@ -97,15 +101,15 @@ export const SkuSellingPriceMasterTable: React.FC<SkuSellingPriceMasterTableProp
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
                   <div>
                     <span className="font-medium text-slate-600">Weight: </span>
-                    {item.sku_weight} {item.sku_unit}
+                    {fmtWeight(item.sku_weight, wd)} {item.sku_unit}
                   </div>
                   <div>
                     <span className="font-medium text-slate-600">Landing Cost: </span>
-                    {item.landing_cost}
+                    {fmtAmount(item.landing_cost)}
                   </div>
                   <div>
                     <span className="font-medium text-slate-600">Pack Cost: </span>
-                    {item.packing_cost}
+                    {fmtAmount(item.packing_cost)}
                   </div>
                   <div>
                     <span className="font-medium text-slate-600">Margin: </span>
@@ -286,22 +290,22 @@ export const SkuSellingPriceMasterTable: React.FC<SkuSellingPriceMasterTableProp
                   {sortedItems.map((item) => (
                     <TableRow key={item.id} className="hover:bg-slate-50/30 transition-colors border-b border-slate-50 h-16">
                       <TableCell className="font-semibold text-slate-900 pl-6">{item.packing_material}</TableCell>
-                      <TableCell className="text-slate-600 font-medium">{item.sku_weight}</TableCell>
+                      <TableCell className="text-slate-600 font-medium">{fmtWeight(item.sku_weight, wd)}</TableCell>
                       <TableCell className="text-slate-500">{item.sku_unit}</TableCell>
                       <TableCell className="text-slate-500">{item.conversion_formula}</TableCell>
                       <TableCell className="text-slate-500">{item.sku_weight_in_gm}</TableCell>
                       <TableCell className="text-slate-500">{item.packing_material_weight_in_gm}</TableCell>
                       <TableCell className="text-slate-500">{item.net_oil_in_gm}</TableCell>
-                      <TableCell className="text-slate-500">{item.packing_cost}</TableCell>
+                      <TableCell className="text-slate-500">{fmtAmount(item.packing_cost)}</TableCell>
                       <TableCell className="text-slate-500">{item.var}</TableCell>
                       <TableCell className="font-bold text-slate-700 underline decoration-slate-200 decoration-2 underline-offset-4">
-                        {item.landing_cost}
+                        {fmtAmount(item.landing_cost)}
                       </TableCell>
                       <TableCell className="text-slate-600">{item.margin}</TableCell>
                       <TableCell className="text-slate-600 font-medium">{item.actual_margin}</TableCell>
                       <TableCell>
                         <span className="font-bold text-emerald-600 bg-emerald-50/50 rounded-lg px-2 py-1 inline-block">
-                          {item.selling_cost}
+                          {fmtAmount(item.selling_cost)}
                         </span>
                       </TableCell>
                       <TableCell>

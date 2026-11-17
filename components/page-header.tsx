@@ -21,11 +21,11 @@ export function PageHeader({ title, description, children }: PageHeaderProps) {
         <SidebarTrigger className="-ml-1 shrink-0" />
         <Separator orientation="vertical" className="h-6 hidden sm:block shrink-0" />
         <div className="mr-4 min-w-0">
-          <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 whitespace-nowrap">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight whitespace-nowrap">
             {title}
           </h1>
           {description && (
-            <p className="text-[11px] sm:text-xs md:text-sm text-slate-500 font-medium mt-0.5">
+            <p className="text-xs sm:text-sm text-muted-foreground">
               {description}
             </p>
           )}

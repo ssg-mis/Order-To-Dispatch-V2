@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -35,6 +36,8 @@ export function DriverForm({
   handleDriverFieldChangeAttempt,
   setDriverEffectiveDatesSection,
 }: DriverFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, section: DriverSectionType, applyChange: () => void) => {
     if (handleDriverFieldChangeAttempt) {
       handleDriverFieldChangeAttempt(fieldName, section, applyChange)
@@ -61,7 +64,7 @@ export function DriverForm({
         <DriverSectionalHistoryTable
           section={section}
           driverId={editingItem.id}
-          onOpenView={(sec) => setDriverEffectiveDatesSection?.(sec)}
+          onOpenView={handleOpenEffectiveDatesView((sec: any) => setDriverEffectiveDatesSection?.(sec))}
         />
       )}
     </div>
@@ -330,7 +333,7 @@ export function DriverForm({
           <div className="space-y-1.5 min-w-0">
             <Label htmlFor="state_id" className="text-xs font-semibold text-slate-800">State</Label>
             <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
               value={driverForm.state_id ? String(driverForm.state_id) : ""}
               onValueChange={val => {
                 const selected = activeStates.find((s: any) => String(s.id) === val)

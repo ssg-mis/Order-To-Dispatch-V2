@@ -1,6 +1,10 @@
 "use client"
 
 import { useEffect, useState, useMemo, useCallback } from "react"
+import { CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageActionFooter } from "@/components/stage-list"
 import { matchesSearch } from "@/lib/search-utils"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
@@ -20,133 +24,93 @@ import {
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, Settings2, FileText, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, Settings2, FileText, Plus, X, Truck, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Printer } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { makeInvoiceApi, orderApi, skuApi, depotApi } from "@/lib/api-service"
+import { makeInvoiceApi, orderApi, skuApi, petrolPumpApi, insuranceDetailApi } from "@/lib/api-service"
+import { Combobox } from "@/components/ui/combobox"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel, useOrderCharges } from "@/components/order-punch/order-charges-panel"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 import { useAuth } from "@/hooks/use-auth"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { useInView } from "react-intersection-observer"
 import { Loader2 } from "lucide-react"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
 
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
-
-function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
-  selectedGroups: any[]
-  selectedProducts: string[]
-  productCdData: Record<string, { isCd: string; cdAmount: string }>
-}) {
+/**
+ * The invoice total shown in the GST Breakdown (taxable + GST + ledger charges, rounded). Make Invoice's
+ * Bill Amount uses this same figure so every later stage (Check / Final Invoice) shows the same amount.
+ * invoiceTotal is null when a GST rate or the state split is missing: no honest total, so don't guess.
+ */
+function calcInvoiceAmounts(
+  selectedGroups: any[],
+  selectedProducts: string[],
+  productCdData: Record<string, { isCd: string; cdAmount: string }>,
+  chargesBillable = 0,
+) {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf((Number(p.rate) || 0) - (productCdData[p.id]?.isCd === "yes" ? parseFloat(productCdData[p.id]?.cdAmount || "0") : 0), parseFloat(p.qtyToDispatch) || 0, p),
+    product: p,
+  }))
+  // GST % per product and the same-state / other-state split come from the masters, carried from Dispatch Planning.
   const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-  const shippingState = extractState(shippingAddr) || ""
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + chargesBillable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  return { gst, totalTaxable, invoiceTotal, roundOff }
+}
 
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const cd = productCdData[p.id]?.isCd === "yes" ? parseFloat(productCdData[p.id]?.cdAmount || "0") : 0
-    const rateWoGst = parseFloat(((rate - cd) / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.qtyToDispatch) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+function InvoiceSummary({ selectedGroups, selectedProducts, productCdData, chargesBillable = 0 }: {
+  selectedGroups: any[]
+  selectedProducts: string[]
+  productCdData: Record<string, { isCd: string; cdAmount: string }>
+  /** Ledger charges still to be billed (an order's charges ride on its FIRST invoice only). No GST on them. */
+  chargesBillable?: number
+}) {
+  const { gst, invoiceTotal, roundOff } = calcInvoiceAmounts(selectedGroups, selectedProducts, productCdData, chargesBillable)
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+      {/* pr-6 matches the Taxable Amount column's right padding so both right edges line up. */}
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
+        {chargesBillable > 0 && (
+          <div className="flex justify-between items-center text-xs">
+            <span className="font-black uppercase text-slate-500 text-[10px]">Ledger Charges (no GST)</span>
+            <span className="font-mono font-bold text-slate-700">₹{fmtAmount(chargesBillable)}</span>
+          </div>
+        )}
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${fmtAmount(roundOff)}` : roundOff < 0 ? `-₹${fmtAmount(Math.abs(roundOff))}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${fmtAmount(invoiceTotal)}`}</span>
         </div>
       </div>
     </div>
@@ -155,11 +119,12 @@ function InvoiceSummary({ selectedGroups, selectedProducts, productCdData }: {
 
 export default function MakeInvoicePage() {
   const queryClient = useQueryClient()
+  const wd = useWeightDecimals()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const { ref: pendingEndRef, inView: pendingInView } = useInView()
+  const [pendingPage, setPendingPage] = useState(1)
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -272,6 +237,22 @@ export default function MakeInvoicePage() {
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+
+  // Ledger charges: one set per order, billed ONCE (on the order's first invoice).
+  const invoiceOrderNos = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedGroups
+            .flatMap((g: any) => g._allProducts || [])
+            .filter((p: any) => selectedProducts.includes(p._rowKey))
+            .map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, ""))
+            .filter((n: string) => n && n !== "—")
+        )
+      ) as string[],
+    [selectedGroups, selectedProducts]
+  )
+  const invoiceCharges = useOrderCharges(invoiceOrderNos)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
 
@@ -283,24 +264,89 @@ export default function MakeInvoicePage() {
     qty: "",
     billAmount: "",
     invoiceFile: "" as string,
-    invoiceFileName: ""
+    invoiceFileName: "",
+    driverAdvanceCash: "",
+    driverAdvanceBank: "",
+    dieselParchiFile: "" as string,
+    dieselParchiFileName: "",
+    petrolPumpName: "",
+    dieselAmount: "",
+    insuranceDetails: ""
   })
 
   // CD Amount State for products
   const [productCdData, setProductCdData] = useState<{[key: string]: {isCd: string, cdAmount: string}}>({})
 
+
+  // Fetch Petrol Pumps
+  const { data: petrolPumpsRes } = useQuery({
+    queryKey: ['petrol-pumps'],
+    queryFn: () => petrolPumpApi.getAll({ all: "true" }),
+    staleTime: 5 * 60 * 1000,
+  })
+  const petrolPumpOptions = useMemo(() => {
+    return (petrolPumpsRes?.data?.petrol_pumps || []).map((p: any) => ({
+      value: p.petrol_pump_name,
+      label: p.petrol_pump_name
+    }))
+  }, [petrolPumpsRes])
+
+  // Fetch Insurance Details
+  const { data: insuranceRes } = useQuery({
+    queryKey: ['insurance-details'],
+    queryFn: () => insuranceDetailApi.getAll({ all: "true" }),
+    staleTime: 5 * 60 * 1000,
+  })
+  const insuranceOptions = useMemo(() => {
+    return (insuranceRes?.data?.insurance_details || [])
+      .filter((ins: any) =>
+        String(ins.status || '').toLowerCase() === 'active' ||
+        ins.insurance_company_name === invoiceData.insuranceDetails
+      )
+      .map((ins: any) => ({
+        value: ins.insurance_company_name,
+        label: ins.insurance_company_name,
+        subLabel: `${ins.short_name ? `${ins.short_name}  •  ` : ''}Policy No: ${ins.policy_number || '—'}  •  Expires: ${ins.valid_upto ? formatDate(ins.valid_upto) : '—'}  •  Sum Insured: ${ins.sum_insured != null && ins.sum_insured !== '' ? `₹${fmtAmount(ins.sum_insured, 2)}` : '—'}`
+      }))
+  }, [insuranceRes, invoiceData.insuranceDetails])
+
   // Fetch pending invoices
-  const handleFileUpload = async (file: File) => {
+  const [isUploadingObj, setIsUploadingObj] = useState<Record<string, boolean>>({})
+
+  const handleFileUpload = async (file: File, keyName: string = 'invoiceFile', fileNameKey: string = 'invoiceFileName') => {
     if (!file) return;
 
-    setIsUploading(true);
+    // 1. File Size Validation (Max 20 MB)
+    const MAX_SIZE_BYTES = 20 * 1024 * 1024;
+    if (file.size > MAX_SIZE_BYTES) {
+      toast({
+        title: "File Too Large",
+        description: `Selected file is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Maximum allowed size is 20 MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 2. File Type Validation (PDF & Images only)
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif'];
+    const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    if (!allowedExtensions.includes(ext) && !file.type.startsWith('image/')) {
+      toast({
+        title: "Unsupported File Format",
+        description: `Only PDF and image files (JPG, PNG, WEBP, etc.) are supported.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploadingObj(prev => ({ ...prev, [keyName]: true }));
     try {
       const response = await orderApi.uploadFile(file);
       if (response.success) {
         setInvoiceData(p => ({
           ...p,
-          invoiceFile: response.data.url,
-          invoiceFileName: file.name
+          [keyName]: response.data.url,
+          [fileNameKey]: file.name
         }));
         toast({
           title: "Upload Successful",
@@ -315,23 +361,20 @@ export default function MakeInvoicePage() {
         variant: "destructive",
       });
     } finally {
-      setIsUploading(false);
+      setIsUploadingObj(prev => ({ ...prev, [keyName]: false }));
     }
   };
 
-  // Pending query with infinite pagination
+  // Pending query (numbered pages)
   const {
     data: pendingData,
-    fetchNextPage: fetchNextPending,
-    hasNextPage: hasNextPending,
-    isFetchingNextPage: isFetchingNextPending,
     isLoading: isPendingLoading,
     refetch: refetchPending,
-  } = useInfiniteQuery({
-    queryKey: ["make-invoice-pending", filterValues],
-    queryFn: async ({ pageParam = 1 }) => {
+  } = useQuery({
+    queryKey: ["make-invoice-pending", filterValues, pendingPage],
+    queryFn: async () => {
       const response = await makeInvoiceApi.getPending({
-        page: pageParam,
+        page: pendingPage,
         limit: 20,
         search: filterValues.search,
         manual_sauda_no: filterValues.manualSaudaNo,
@@ -339,24 +382,16 @@ export default function MakeInvoicePage() {
         do_date_to: filterValues.endDate,
         party_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
-      return response.success ? response.data : { invoices: [], pagination: { total: 0 } };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const currentCount = allPages.reduce((sum, page) => sum + (page.invoices?.length || 0), 0);
-      return currentCount < (lastPage.pagination?.total || 0) ? allPages.length + 1 : undefined;
+      return response.success ? response.data : { invoices: [], pagination: { total: 0, totalPages: 1 } };
     },
   });
 
-  const pendingOrders = useMemo(() => {
-    return pendingData?.pages.flatMap((page) => page.invoices) || [];
-  }, [pendingData]);
+  const pendingOrders: any[] = useMemo(() => pendingData?.invoices || [], [pendingData]);
+  const pendingTotalPages: number = pendingData?.pagination?.totalPages || 1;
+  const pendingTotal: number = pendingData?.pagination?.total ?? pendingOrders.length;
 
-  useEffect(() => {
-    if (pendingInView && hasNextPending) {
-      fetchNextPending();
-    }
-  }, [pendingInView, hasNextPending, fetchNextPending]);
+  // New filters narrow the result set, so go back to page 1.
+  useEffect(() => { setPendingPage(1) }, [filterValues]);
 
   /* Filter Logic */
 
@@ -387,8 +422,14 @@ export default function MakeInvoicePage() {
       // Normalize vehicle no: trim, uppercase, and remove ALL spaces for consistent grouping
       const vehicleNo = (order.truck_no || "—").trim().toUpperCase().replace(/\s+/g, '')
 
-      // Group by normalized Company Name, date, and Vehicle No.
-      const groupKey = `${partyName}-${actual1Str}-${vehicleNo}`;
+      // Stage 9 grouping: Vehicle No. + Actual Dispatch date + Customer ID + Address.
+      // Orders keep no address ID (the address is stored as text on the order), so the delivery address
+      // (falling back to ship / billing address), normalised, identifies the address. The party name only
+      // stands in for the Customer ID when an order has none.
+      const customerKey = order.customer_id != null && order.customer_id !== "" ? `C${order.customer_id}` : `N${partyName}`
+      const addressKey = String(order.customer_delivery_address || order.ship_address || order.customer_address || "—")
+        .trim().toUpperCase().replace(/\s+/g, ' ')
+      const groupKey = `${vehicleNo}|${actual1Str}|${customerKey}|${addressKey}`;
 
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
@@ -468,7 +509,14 @@ export default function MakeInvoicePage() {
         reasonForDiff: order.reason_of_difference_in_weight_if_any_speacefic,
         reason_of_difference_in_weight_if_any_speacefic: order.reason_of_difference_in_weight_if_any_speacefic,
         bilty_no: order.bilty_no,
-        processid: order.processid || null
+        processid: order.processid || null,
+        driver_advance_cash: order.driver_advance_cash ?? order.advance_bhada_cash ?? null,
+        driver_advance_bank: order.driver_advance_bank ?? order.advance_bhada_bank ?? null,
+        diesel_amount: order.diesel_amount ?? order.advance_bhada_diesel_advance ?? null,
+        petrol_pump_name: order.petrol_pump_name ?? null,
+        advance_bhada_cash: order.advance_bhada_cash ?? null,
+        advance_bhada_bank: order.advance_bhada_bank ?? null,
+        advance_bhada_diesel_advance: order.advance_bhada_diesel_advance ?? null,
       }
 
       grouped[groupKey]._ordersMap[orderKey]._products.push(product)
@@ -510,52 +558,117 @@ export default function MakeInvoicePage() {
     }))
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Stage table (column search / date range / sort / totals) ──
+  // Status is remembered permanently; the rest is session-scoped (usePersistedFilters). Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("make-invoice", {
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "PENDING" | "ISSUE",
+    customerFilter: "ALL",
+  }, { permanentKeys: ["statusFilter"] })
+  const { quickSearch, statusFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "PENDING" | "ISSUE") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const NUMERIC_TOTAL_COLS = new Set(["actual_qty_dispatch"])
+  // Table standard: numeric + date columns right aligned, units in headings, plain fixed decimals.
+  const NUM_DECIMALS: Record<string, number> = {
+    actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+    gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd,
+    rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
+  }
+  // Summable columns (quantities, weights, bill amount). Rates are never totalled.
+  const SUM_COL_IDS = new Set([
+    "altQty", "gross_weight", "tare_weight", "net_weight", "extra_weight", "bill_amount",
+  ])
+  const DATE_COL_IDS = new Set(["partySoDate","actual1Date", "deliveryDate", "invoice_date"])
+  const MONEY_HEAD_IDS = new Set(["rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "bill_amount"])
+  const isRightCol = (id: string) => id in NUM_DECIMALS || DATE_COL_IDS.has(id)
+  const fmtCell = (id: string, v: any) => {
+    if (v === "—" || v === null || v === undefined || v === "") return "—"
+    if (isAmountCol(id)) return fmtAmount(v, NUM_DECIMALS[id] ?? 2)
+    if (id in NUM_DECIMALS) return fmtNum(v, NUM_DECIMALS[id])
+    if (DATE_COL_IDS.has(id)) return fmtDate(v)
+    return String(v)
+  }
+  const joinDo = (g: any, key: string) =>
+    (g.doDetails || []).map((d: any) => d[key]).filter((v: any) => v && v !== "—").join(" ") || ""
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
+  const tableCols = useMemo<StageColDef<any>[]>(() => {
+    const out: StageColDef<any>[] = []
+    for (const id of orderedVisible) {
+      switch (id) {
+        case "partySoDate":
+          out.push({ id, label: "DO Date", type: "date", accessor: g => g._allProducts[0]?.party_so_date || g._allProducts[0]?.partySoDate })
+          break
+        case "actual1Date":
+          out.push({ id, label: "Dispatched Date", type: "date", accessor: g => g._allProducts[0]?.lrc_actual_1 || g._allProducts[0]?.actual_1 })
+          break
+        case "orderNo":
+          out.push({ id, label: "DO Number", accessor: g => joinDo(g, "doNumber") || g.doNumber })
+          break
+        case "processid":
+          out.push({ id, label: "Manual Sauda No.", accessor: g => joinDo(g, "processId") || g.processId })
+          break
+        case "customerName":
+          out.push({ id, label: "Customer Name", accessor: g => g.customerName })
+          break
+        case "vehicleNo":
+          out.push({ id, label: "Vehicle No.", accessor: g => g.vehicleNo })
+          break
+        case "orderPunchRemarks":
+          out.push({ id, label: "Order Punch Remarks", accessor: g => joinDo(g, "orderPunchRemarks") || g.orderPunchRemarks })
+          break
+        case "status":
+          out.push({ id, label: "Status", accessor: g => (g.isReverted ? "Issue Reported" : "Pending Invoice") })
+          break
+        case "products":
+          out.push({ id, label: "Items", accessor: g => g._allProducts[0]?.productName || "" })
+          break
+        default: {
+          const dyn = ALL_COLUMNS.find(c => c.id === id)
+          if (!dyn) break
+          const numeric = id in NUM_DECIMALS
+          out.push({
+            id,
+            label: MONEY_HEAD_IDS.has(id) ? `${dyn.label} (₹)` : dyn.label,
+            type: numeric ? "number" : DATE_COL_IDS.has(id) ? "date" : "text",
+            total: numeric && SUM_COL_IDS.has(id),
+            accessor: (g: any) => {
+              const v = getDynamicColumnValue(g, id)
+              return numeric ? Number(v) || 0 : String(v)
+            },
+          })
+        }
+      }
     }
-  }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedVisible.join("|")])
 
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
-    if (colId === "processId" || colId === "processid") return group.processId || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "actual1Date") return group.actual1Date || ""
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group.isReverted ? "Issue Reported" : "Pending"
+  const baseFilter = useCallback((g: any) => {
+    if (statusFilter === "ISSUE" && !g.isReverted) return false
+    if (statusFilter === "PENDING" && g.isReverted) return false
+    if (customerFilter !== "ALL" && g.customerName !== customerFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [joinDo(g, "doNumber"), g.doNumber, joinDo(g, "processId"), g.customerName, g.vehicleNo, joinDo(g, "orderPunchRemarks")].join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
     }
-    if (colId === "products") return String(group._productCount || 0)
-    return String(getDynamicColumnValue(group, colId))
-  }
+    return true
+  }, [statusFilter, customerFilter, quickSearch])
 
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
+  const table = useStageTable<any>({ rows: displayRows, columns: tableCols, baseFilter, persistKey: "make-invoice" })
+  const sortedDisplayRows = table.rows
+  const uniqueCustomerNames = useMemo(
+    () => Array.from(new Set(displayRows.map((g: any) => g.customerName as string))).sort(),
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllTableFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
 
   const toggleSelectItem = (itemKey: string) => {
     setSelectedItems(prev =>
@@ -566,18 +679,19 @@ export default function MakeInvoicePage() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length) {
-      setSelectedItems([])
+    const keys = sortedDisplayRows.map(r => r._rowKey)
+    if (keys.length > 0 && keys.every(k => selectedItems.includes(k))) {
+      setSelectedItems(prev => prev.filter(k => !keys.includes(k)))
     } else {
-      setSelectedItems(displayRows.map(r => r._rowKey))
+      setSelectedItems(prev => Array.from(new Set([...prev, ...keys])))
     }
   }
 
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    // Collect and consolidate selected party groups BY COMPANY
-    const targetGroups = displayRows.filter(r => selectedItems.includes(r._rowKey))
+  const handleOpenDialog = (targetGroup?: any) => {
+    const targetGroups = targetGroup
+      ? [targetGroup]
+      : displayRows.filter(r => selectedItems.includes(r._rowKey))
+    if (targetGroups.length === 0) return
     if (targetGroups.length > 0) {
       // Consolidate targetGroups by company
       const consolidatedMap: { [key: string]: any } = {}
@@ -611,13 +725,37 @@ export default function MakeInvoicePage() {
         }
       })
       
+      setSelectedItems(targetGroups.map(g => g._rowKey))
       setSelectedGroups(Object.values(consolidatedMap))
       
       // Select all products for all selected groups by default
       const allProdKeys = targetGroups.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
       setSelectedProducts(allProdKeys)
 
-      // Reset form
+      // Pre-fill advances from previous stages (Actual Dispatch / Plan Vehicle)
+      const allProds = targetGroups.flatMap(g => g._allProducts || [])
+      const foundCash = allProds.find((p: any) => p.driver_advance_cash != null || p.advance_bhada_cash != null)
+      const prefillCash = foundCash
+        ? String(foundCash.driver_advance_cash ?? foundCash.advance_bhada_cash ?? "")
+        : ""
+
+      const foundBank = allProds.find((p: any) => p.driver_advance_bank != null || p.advance_bhada_bank != null)
+      const prefillBank = foundBank
+        ? String(foundBank.driver_advance_bank ?? foundBank.advance_bhada_bank ?? "")
+        : ""
+
+      const foundDiesel = allProds.find((p: any) => p.diesel_amount != null || p.advance_bhada_diesel_advance != null)
+      const prefillDiesel = foundDiesel
+        ? String(foundDiesel.diesel_amount ?? foundDiesel.advance_bhada_diesel_advance ?? "")
+        : ""
+
+      const foundPump = allProds.find((p: any) => p.petrol_pump_name)
+      const prefillPetrolPump = foundPump?.petrol_pump_name || ""
+
+      const foundIns = allProds.find((p: any) => p.insurance_details)
+      const prefillInsurance = foundIns?.insurance_details || ""
+
+      // Pre-fill form (values can still be freely edited before confirmation)
       setInvoiceData({
         invoiceNo: "",
         invoiceDate: new Date().toISOString().split('T')[0],
@@ -625,6 +763,13 @@ export default function MakeInvoicePage() {
         billAmount: "",
         invoiceFile: "",
         invoiceFileName: "",
+        driverAdvanceCash: prefillCash,
+        driverAdvanceBank: prefillBank,
+        dieselParchiFile: "",
+        dieselParchiFileName: "",
+        petrolPumpName: prefillPetrolPump,
+        dieselAmount: prefillDiesel,
+        insuranceDetails: prefillInsurance,
       })
       setInvoiceType("independent")
 
@@ -637,39 +782,131 @@ export default function MakeInvoicePage() {
     if (!isDialogOpen || selectedGroups.length === 0) return;
 
     let totalQty = 0;
-    let totalBillAmount = 0;
-
     selectedGroups.forEach(group => {
       group._allProducts.forEach((product: any) => {
         if (selectedProducts.includes(product._rowKey)) {
-          const qty = parseFloat(product.qtyToDispatch) || 0;
-          // Use final_rate if available, and ADD freight_rate
-          const baseRate = parseFloat(product.final_rate || product.rate_per_ltr || product.rate_per_15kg || product.rate_of_material || 0);
-          const freightRate = parseFloat(product.freight_rate || 0);
-          
-          // CD Amount adjustment
-          const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
-          
-          const rate = baseRate + freightRate - cdAmt;
-          totalQty += qty;
-          totalBillAmount += qty * rate;
+          totalQty += parseFloat(product.qtyToDispatch) || 0;
         }
       });
     });
 
+    // Bill Amount = the Total Invoice Amount of the GST Breakdown (ledger charges ride on the order's first
+    // invoice only), so Check / Final Invoice show the same figure the user saw here.
+    const { invoiceTotal } = calcInvoiceAmounts(selectedGroups, selectedProducts, productCdData, invoiceCharges.billableTotal)
+
     setInvoiceData(prev => ({
       ...prev,
       qty: totalQty.toString(),
-      billAmount: totalBillAmount.toFixed(2)
+      billAmount: invoiceTotal === null ? "" : invoiceTotal.toFixed(2)
     }));
-  }, [selectedProducts, isDialogOpen, selectedGroups, productCdData]);
+  }, [selectedProducts, isDialogOpen, selectedGroups, productCdData, invoiceCharges.billableTotal]);
+
+  const handlePrint = () => {
+    const group = selectedGroups[0]
+    if (!group) return
+
+    const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
+    const customerName = group.customerName || "—"
+    const vehicleNo = group.vehicleNo || "—"
+    const doNumber = group.doNumber || "—"
+    const date = invoiceData.invoiceDate || new Date().toLocaleDateString('en-GB')
+
+    const productRows = allProducts.map((p: any) => `
+      <tr>
+        <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.qtyToDispatch || '—'} ${p.unit || ''}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0), 2)}</td>
+        <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount((parseFloat(p.qtyToDispatch||0)) * parseFloat(p.final_rate || p.rate_per_ltr || p.rate_per_15kg || p.rate_of_material || 0), 2)}</td>
+      </tr>
+    `).join('')
+
+    const printContent = `
+      <html>
+      <head>
+        <title>Invoice Data - ${doNumber}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+          h1 { font-size: 20px; margin-bottom: 4px; }
+          .subtitle { color: #555; font-size: 13px; margin-bottom: 20px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+          .field { background: #f8f8f8; padding: 10px 14px; border-radius: 6px; }
+          .field label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+          .field p { font-size: 14px; font-weight: 600; margin: 2px 0 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-size: 13px; }
+          td { font-size: 13px; }
+          .total-row td { font-weight: bold; background: #f1f5f9; }
+          .footer { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+          .sig-box { border-top: 2px solid #333; padding-top: 8px; text-align: center; font-size: 12px; color: #444; }
+          @media print { button { display: none; } }
+        </style>
+      </head>
+      <body>
+        <h1>Shree Shyam Oil Extractions</h1>
+        <div class="subtitle">Invoice Data Sheet — For Tally Entry</div>
+        <div class="grid">
+          <div class="field"><label>Customer Name</label><p>${customerName}</p></div>
+          <div class="field"><label>DO Number</label><p>${doNumber}</p></div>
+          <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
+          <div class="field"><label>Invoice Date</label><p>${date}</p></div>
+          <div class="field"><label>Invoice No.</label><p>${invoiceData.invoiceNo || '—'}</p></div>
+          <div class="field"><label>Total Bill Amount</label><p>₹${fmtAmount(parseFloat(invoiceData.billAmount || '0'), 2)}</p></div>
+          <div class="field"><label>Driver Advance (Cash)</label><p>₹${fmtAmount(invoiceData.driverAdvanceCash || 0, 2)}</p></div>
+          <div class="field"><label>Driver Advance (Bank)</label><p>₹${fmtAmount(invoiceData.driverAdvanceBank || 0, 2)}</p></div>
+          <div class="field"><label>Petrol Pump</label><p>${invoiceData.petrolPumpName || '—'}</p></div>
+          <div class="field"><label>Diesel Amount</label><p>₹${fmtAmount(invoiceData.dieselAmount || 0, 2)}</p></div>
+          <div class="field"><label>Insurance Details</label><p>${invoiceData.insuranceDetails || '—'}</p></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th>
+          </tr></thead>
+          <tbody>${productRows}</tbody>
+          <tfoot><tr class="total-row">
+            <td style="border:1px solid #ddd;padding:8px" colspan="3">Total</td>
+            <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(invoiceData.billAmount || '0'), 2)}</td>
+          </tr></tfoot>
+        </table>
+        <div class="footer">
+          <div class="sig-box">Driver Signature</div>
+          <div class="sig-box">Accounts Signature</div>
+          <div class="sig-box">Authorised Signature</div>
+        </div>
+      </body>
+      </html>
+    `
+
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(printContent)
+      win.document.close()
+      win.focus()
+      win.print()
+    }
+  }
 
   const handleSubmit = async () => {
-    if (selectedGroups.length === 0 || !invoiceData.invoiceNo || !invoiceData.invoiceFile) {
+    const validationErrors = [];
+    if (selectedGroups.length === 0) validationErrors.push("No order selected for invoice generation");
+    if (!invoiceData.invoiceNo) validationErrors.push("Invoice Number is missing");
+    if (!invoiceData.invoiceFile) validationErrors.push("Invoice Copy is not uploaded");
+    if (!invoiceData.dieselParchiFile) validationErrors.push("Diesel Parchi is not uploaded");
+
+    if (validationErrors.length > 0) {
       toast({
         title: "Validation Error",
-        description: "Please fill all required invoice details (Invoice Number and Copy).",
-        variant: "destructive"
+        description: (
+          <div className="flex flex-col gap-1 mt-1">
+            <p className="font-semibold text-sm">Please resolve the following before submitting:</p>
+            <ul className="list-disc pl-5 text-xs space-y-0.5 font-medium">
+              {validationErrors.map((err, idx) => (
+                <li key={idx}>{err}</li>
+              ))}
+            </ul>
+          </div>
+        ),
+        variant: "destructive",
+        duration: 8000, // Increased duration so user has time to read
       })
       return
     }
@@ -703,7 +940,13 @@ export default function MakeInvoicePage() {
           billAmount: invoiceType === 'independent' ? invoiceData.billAmount : null,
           invoiceCopy: invoiceData.invoiceFile || null,
           userId: user?.id || null, // Track acting user's login id
-          cdAmount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
+          cdAmount: productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0,
+          driverAdvanceCash: invoiceData.driverAdvanceCash ? parseFloat(invoiceData.driverAdvanceCash) : null,
+          driverAdvanceBank: invoiceData.driverAdvanceBank ? parseFloat(invoiceData.driverAdvanceBank) : null,
+          dieselParchiFile: invoiceData.dieselParchiFile || null,
+          petrolPumpName: invoiceData.petrolPumpName || null,
+          dieselAmount: invoiceData.dieselAmount ? parseFloat(invoiceData.dieselAmount) : null,
+          insuranceDetails: invoiceData.insuranceDetails || null
         };
 
         try {
@@ -814,6 +1057,7 @@ export default function MakeInvoicePage() {
 
   return (
     <WorkflowStageShell
+      persistKey="make-invoice"
       partyNames={customerNames}
       title="Stage 9: Make Invoice (Proforma)"
       description="Create proforma invoice grouped by DO Number."
@@ -847,91 +1091,108 @@ export default function MakeInvoicePage() {
           orderListKey="invoices"
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
-          mapRemarks={(order: any) => `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight: ₹${order.freight_rate}` : ""}`}
+          mapRemarks={(order: any) => `${order.invoice_no || "Generated"} ${order.freight_rate ? `| Freight (₹): ${fmtAmount(order.freight_rate, 2)}` : ""}`}
           getDate={(order: any) => order.actual_5 || order.timestamp || null}
         />
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <div className="flex flex-col justify-end gap-2 sm:flex-row">
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Create Invoice ({selectedItems.length})
-          </Button>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full bg-transparent sm:w-auto">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-
         {/* Main Table (Grouped) */}
-        <Card className="border-none shadow-sm overflow-hidden md:max-h-[600px] md:overflow-auto">
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Invoice Queue"
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            description="Dispatched loads ready for proforma invoice creation"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Vehicle..."
+          >
+            <StageToolbar
+              shown={sortedDisplayRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllTableFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "PENDING", label: "Pending Invoice" },
+                      { value: "ISSUE", label: "Issue Reported" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusFilter === "PENDING" ? "Pending Invoice" : "Issue Reported"}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
-                </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisible.map(id => {
-                    const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                    if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                    if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
-                    if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("doNumber")}>DO Number<PendingSortIcon field="doNumber" /></SortableTableHead>
-                    if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processId")}>Manual Sauda No.<PendingSortIcon field="processId" /></SortableTableHead>
-                    if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
-                    if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
-                    if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                    if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
-                    const dynCol = ALL_COLUMNS.find(c => c.id === id)
-                    if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
-                    return null
-                  })}
+                  {tableCols.map(col => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={isRightCol(col.id) ? "right" : "left"} />
+                  ))}
                 </ColumnDragProvider>
               </TableRow>
             </TableHeader>
             <TableBody>
+              {sortedDisplayRows.length > 0 && (
+                <StageTotalsRow
+                  columns={tableCols}
+                  totals={table.totals}
+                  count={sortedDisplayRows.length}
+                  labelColumnId={tableCols[0]?.id}
+                  unit=""
+                  format={(n, id) => isAmountCol(id) ? fmtAmount(n, NUM_DECIMALS[id] ?? 2) : fmtNum(n, NUM_DECIMALS[id] ?? 4)}
+                  tones={{ actual_qty_dispatch: "blue" }}
+                  align={Object.fromEntries(tableCols.map(c => [c.id, isRightCol(c.id) ? "right" as const : "left" as const]))}
+                />
+              )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                     {orderedVisible.map(id => (
-                      <TableCell key={id} className="text-center py-4">
-                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-24" : id === "products" ? "w-32" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-32" : id === "orderNo" || id === "processid" ? "w-24" : "w-20")} />
+                      <TableCell key={id} className="px-4 text-left py-4">
+                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", id === "status" ? "h-5 w-24" : id === "products" ? "w-32" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-32" : id === "orderNo" || id === "processid" ? "w-24" : "w-20")} />
                       </TableCell>
                     ))}
                   </TableRow>
                 ))
               ) : sortedDisplayRows.length > 0 ? (
                 sortedDisplayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""}>
-                    <TableCell className="text-center">
-                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
+                  <TableRow
+                    key={group._rowKey}
+                    className="cursor-pointer transition-colors hover:bg-blue-50/50 select-none"
+                    onClick={() => handleOpenDialog(group)}
+                  >
                     {orderedVisible.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
+                      if (id === "partySoDate") return <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{group.partySoDate}</TableCell>
                       if (id === "actual1Date") {
                         const dispatchedDates = group.doDetails && group.doDetails.length > 0
                           ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
                           : [group.actual1Date]
                         return (
-                          <TableCell key={id} className="text-center text-xs text-slate-600">
+                          <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">
                             <div className="flex flex-col gap-1.5">
                               {dispatchedDates.map((date: any, idx: number) => (
                                 <span key={`${date}-${idx}`}>{date}</span>
@@ -941,7 +1202,7 @@ export default function MakeInvoicePage() {
                         )
                       }
                       if (id === "orderNo") return (
-                        <TableCell key={id} className="text-center text-xs">
+                        <TableCell key={id} className="px-4 text-left text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-blue-700 font-bold">{d.doNumber}</span>
@@ -950,7 +1211,7 @@ export default function MakeInvoicePage() {
                         </TableCell>
                       )
                       if (id === "processid") return (
-                        <TableCell key={id} className="text-center text-xs">
+                        <TableCell key={id} className="px-4 text-left text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", processId: group.processId }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-slate-600">{d.processId}</span>
@@ -958,10 +1219,10 @@ export default function MakeInvoicePage() {
                           </div>
                         </TableCell>
                       )
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.customerName}</TableCell>
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
+                      if (id === "customerName") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.customerName}</TableCell>
+                      if (id === "vehicleNo") return <TableCell key={id} className="px-4 text-left"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
@@ -970,9 +1231,9 @@ export default function MakeInvoicePage() {
                         </TableCell>
                       )
                       if (id === "status") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           {group.isReverted ? (
-                            <div className="flex flex-col items-center gap-1">
+                            <div className="flex flex-col items-start gap-1">
                               <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Issue Reported</Badge>
                               {group.issueRemarks && (
                                 <span className="text-[10px] text-red-600 font-medium italic max-w-[180px] leading-tight" title={group.issueRemarks}>
@@ -986,25 +1247,31 @@ export default function MakeInvoicePage() {
                         </TableCell>
                       )
                       if (id === "products") return (
-                        <TableCell key={id} className="text-center">
-                          <span className="text-xs font-medium text-slate-700 leading-tight block max-w-[150px] mx-auto">
+                        <TableCell key={id} className="px-4 text-left">
+                          <span className="text-xs font-medium text-slate-700 leading-tight block max-w-[150px]">
                             {group._allProducts[0]?.productName || "—"}
                           </span>
                         </TableCell>
                       )
-                      return <TableCell key={id} className="text-center text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
+                      return isRightCol(id)
+                        ? <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{fmtCell(id, getDynamicColumnValue(group, id))}</TableCell>
+                        : <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                     })}
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={1 + orderedVisible.length} className="text-center py-8 text-muted-foreground">
-                    No orders pending for invoice creation
+                  <TableCell colSpan={orderedVisible.length} className="text-center py-8 text-muted-foreground">
+                    {displayRows.length > 0 ? "No matching records found for the applied filters" : "No orders pending for invoice creation"}
+                    {displayRows.length > 0 && (
+                      <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </div>
           <div className="space-y-3 p-3 md:hidden">
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
@@ -1015,14 +1282,14 @@ export default function MakeInvoicePage() {
                   </div>
                 </div>
               ))
-            ) : displayRows.length > 0 ? (
-              displayRows.map((group) => {
+            ) : sortedDisplayRows.length > 0 ? (
+              sortedDisplayRows.map((group) => {
                 const display = buildInvoiceGroupDisplay(group)
-                const selected = selectedItems.includes(group._rowKey)
                 return (
                   <div
                     key={group._rowKey}
-                    className={cn("rounded-lg border bg-white p-4 shadow-sm", selected && "border-blue-200 bg-blue-50")}
+                    className="rounded-lg border bg-white p-4 shadow-sm cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-colors"
+                    onClick={() => handleOpenDialog(group)}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1033,7 +1300,6 @@ export default function MakeInvoicePage() {
                         </div>
                         <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>
                       </div>
-                      <Checkbox checked={selected} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
                     </div>
 
                     <div className="mt-3">
@@ -1074,8 +1340,8 @@ export default function MakeInvoicePage() {
                         <p className="mt-1 font-bold break-words">{display.vehicleNo}</p>
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                        <p className="mt-1 font-mono font-bold">{display.qty}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Qty to Dispatch</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtNum(display.qty, 4)}</p>
                       </div>
                     </div>
 
@@ -1096,8 +1362,8 @@ export default function MakeInvoicePage() {
                           if (!col) return null
                           return (
                             <div key={colId} className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">{col.label}</p>
-                              <p className="mt-1 font-bold break-words">{String(getDynamicColumnValue(group, colId))}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">{MONEY_HEAD_IDS.has(colId) ? `${col.label} (₹)` : col.label}</p>
+                              <p className="mt-1 font-bold break-words">{fmtCell(colId, getDynamicColumnValue(group, colId))}</p>
                             </div>
                           )
                         })}
@@ -1118,18 +1384,26 @@ export default function MakeInvoicePage() {
               })
             ) : (
               <div className="py-10 text-center text-muted-foreground">
-                No orders pending for invoice creation
+                {displayRows.length > 0 ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="font-medium text-slate-500">No matching records found for the applied filters</p>
+                    <button onClick={clearAllTableFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                  </div>
+                ) : "No orders pending for invoice creation"}
               </div>
             )}
           </div>
-          <div ref={pendingEndRef} className="py-2 flex justify-center">
-            {isFetchingNextPending && (
-              <div className="flex items-center gap-2 text-blue-600 font-bold animate-pulse text-[10px]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>LOADING MORE...</span>
-              </div>
-            )}
-          </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingTotalPages}
+            total={pendingTotal}
+            noun="Invoices"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || pendingOrders.length === 0}
+            nextDisabled={pendingOrders.length === 0 || pendingPage >= pendingTotalPages}
+          />
+          </CardContent>
         </Card>
       </div>
 
@@ -1189,204 +1463,204 @@ export default function MakeInvoicePage() {
                                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                                     {/* Order Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Delivery Purpose</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.deliveryPurpose}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Delivery Purpose</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.deliveryPurpose || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Start Date / End Date</p>
-                                      <p className="text-xs font-bold text-slate-700 leading-none">
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Start Date / End Date</p>
+                                      <p className="text-sm font-semibold text-slate-800 leading-none">
                                         {formatDate(orderDetails.startDate)} / {formatDate(orderDetails.endDate)}
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">DO Date</p>
-                                      <p className="text-xs font-bold text-slate-700">{orderDetails.partySoDate || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">DO Date</p>
+                                      <p className="text-sm font-semibold text-slate-800">{orderDetails.partySoDate || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Actual Dispatch Date</p>
-                                      <p className="text-xs font-bold text-blue-700 leading-none">{formatDate(firstProd.lrc_actual_1 || firstProd.actual_1)}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Actual Dispatch Date</p>
+                                      <p className="text-sm font-semibold text-blue-700 leading-none">{formatDate(firstProd.lrc_actual_1 || firstProd.actual_1)}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transport Type</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.transportType}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Transport Type</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.transportType || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Credit Status</p>
-                                      <Badge className={cn("text-[10px] font-black px-2 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-                                        {orderDetails.partyCredit}
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Credit Status</p>
+                                      <Badge className={cn("text-[11px] font-bold px-2.5 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+                                        {orderDetails.partyCredit || "—"}
                                       </Badge>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Customer Address</p>
-                                      <p className="text-[10px] font-medium text-slate-600 leading-tight break-words" title={orderDetails.address}>{orderDetails.address}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Customer Address</p>
+                                      <p className="text-xs font-medium text-slate-600 leading-tight break-words" title={orderDetails.address}>{orderDetails.address || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact Person</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-tight break-words">{orderDetails.contactPerson} ({orderDetails.whatsapp})</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Contact Person</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-tight break-words">{orderDetails.contactPerson || "—"} ({orderDetails.whatsapp || "—"})</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName} / ₹{orderDetails.advanceAmount}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Broker / Advance</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{fmtAmount(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
 
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Order Punch Remarks</p>
-                                      <p className="text-[10px] font-medium text-slate-600 leading-tight italic break-words">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Order Punch Remarks</p>
+                                      <p className="text-xs font-medium text-slate-600 leading-tight italic break-words">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
                                     </div>
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">PO Copy (SO Upload)</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">PO Copy (SO Upload)</p>
                                       {orderDetails.uploadSo ? (
                                         <a
                                           href={orderDetails.uploadSo}
                                           target="_blank" 
                                           rel="noopener noreferrer"
-                                          className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
                                         >
-                                          <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
-                                          <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
-                                          <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                          <FileText className="h-3.5 w-3.5 group-hover:scale-110 transition-transform" />
+                                          <span className="text-xs font-bold uppercase tracking-tight">VIEW PO COPY</span>
+                                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                         </a>
                                       ) : (
-                                        <p className="text-[10px] font-black text-slate-400 leading-none">NOT UPLOADED</p>
+                                        <p className="text-xs font-bold text-slate-400 leading-none mt-1">NOT UPLOADED</p>
                                       )}
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Dispatch Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Truck No</p>
-                                      <p className="text-sm font-black text-blue-800">{(firstProd.truckNo || "—").toUpperCase()}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Truck No</p>
+                                      <p className="text-base font-bold text-blue-800">{(firstProd.truckNo || "—").toUpperCase()}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Bilty No</p>
-                                      <p className="text-xs font-black text-blue-600">{firstProd.bilty_no || firstProd.biltyNo || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Bilty No</p>
+                                      <p className="text-sm font-bold text-blue-600">{firstProd.bilty_no || firstProd.biltyNo || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transporter</p>
-                                      <p className="text-xs font-bold text-slate-700 leading-none">{firstProd.transporterName || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Transporter</p>
+                                      <p className="text-sm font-semibold text-slate-800 leading-none">{firstProd.transporterName || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Audit Status</p>
-                                      <Badge variant="outline" className={cn("text-[9px] font-black px-2 py-0.5 uppercase", firstProd.check_status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200')}>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Audit Status</p>
+                                      <Badge variant="outline" className={cn("text-[10px] font-bold px-2 py-0.5 uppercase", firstProd.check_status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200')}>
                                         {firstProd.check_status || "Pending"}
                                       </Badge>
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Vehicle Info */}
-                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-8px]">
-                                      <div className="h-3 w-1 bg-blue-600 rounded-full" />
-                                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-900/60">Vehicle Specifications</p>
+                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-4px]">
+                                      <div className="h-3.5 w-1 bg-blue-600 rounded-full" />
+                                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-900/60">Vehicle Specifications</p>
                                     </div>
 
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Vehicle Type</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.vehicle_type || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Vehicle Type</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.vehicle_type || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">RTO</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.rto || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">RTO</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.rto || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Passing Weight</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.passing_weight != null && firstProd.passing_weight !== "" ? fmtNum(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.road_tax || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Road Tax</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.road_tax || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">GVW</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.gvw || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">GVW</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.gvw || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">ULW</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.ulw || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">ULW</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.ulw || "—"}</p>
                                     </div>
 
                                     {/* Driver Info */}
-                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-8px] mt-2">
-                                      <div className="h-3 w-1 bg-amber-600 rounded-full" />
-                                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-amber-900/60">Driver Information</p>
+                                    <div className="md:col-span-4 flex items-center gap-2 mb-[-4px] mt-2">
+                                      <div className="h-3.5 w-1 bg-amber-600 rounded-full" />
+                                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-900/60">Driver Information</p>
                                     </div>
 
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Driver Name</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driver_name || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Driver Name</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driver_name || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact No</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driver_contact_no || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Contact No</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driver_contact_no || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">License No</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.driving_license_no || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">License No</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{firstProd.driving_license_no || "—"}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Valid Upto</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{formatDate(firstProd.dl_valid_upto)}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Valid Upto</p>
+                                      <p className="text-sm font-semibold text-slate-900 leading-none">{formatDate(firstProd.dl_valid_upto)}</p>
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Security Audit Info */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Fitness</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Fitness</p>
                                       {renderPartyDetailLink(firstProd.fitness, firstProd.fitness_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Insurance</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Insurance</p>
                                       {renderPartyDetailLink(firstProd.insurance, firstProd.insurance_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Pollution</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Pollution</p>
                                       {renderPartyDetailLink(firstProd.polution, firstProd.pollution_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Tax Copy</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Tax Copy</p>
                                       {renderPartyDetailLink(firstProd.tax_copy, firstProd.tax_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Permit 1</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Permit 1</p>
                                       {renderPartyDetailLink(firstProd.permit1, firstProd.permit1_end_date)}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Permit 2 (Out State)</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Permit 2 (Out State)</p>
                                       {renderPartyDetailLink(firstProd.permit2_out_state, firstProd.permit2_end_date)}
                                     </div>
 
-                                    <div className="md:col-span-4 h-px bg-slate-200 my-1" />
+                                    <div className="md:col-span-4 h-px bg-slate-200 my-2" />
 
                                     {/* Weight Details */}
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">RST No</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">RST No</p>
                                       {firstProd.weightment_slip_copy ? (
-                                        <a href={firstProd.weightment_slip_copy} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-blue-600 hover:text-blue-800 underline">
+                                        <a href={firstProd.weightment_slip_copy} target="_blank" rel="noopener noreferrer" className="text-base font-bold text-blue-600 hover:text-blue-800 underline">
                                           #{firstProd.rst_no || firstProd.rstNo || "—"}
                                         </a>
                                       ) : (
-                                        <p className="text-sm font-black text-slate-900 tracking-tight">#{firstProd.rst_no || firstProd.rstNo || "—"}</p>
+                                        <p className="text-base font-bold text-slate-900 tracking-tight">#{firstProd.rst_no || firstProd.rstNo || "—"}</p>
                                       )}
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
-                                      <p className="text-xs font-black text-slate-900 leading-tight">
-                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-black">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Gross / Tare / Net</p>
+                                      <p className="text-sm font-bold text-slate-900 leading-tight">
+                                        {fmtNum(firstProd.grossWeight || firstProd.gross_weight || 0, wd)} / {fmtNum(firstProd.tareWeight || firstProd.tare_weight || 0, wd)} / <span className="text-blue-600 font-bold">{fmtNum(Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff</p>
-                                      <p className="text-xs font-black text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff</p>
+                                      <p className="text-sm font-bold text-amber-600">{fmtNum(firstProd.weightDiff || firstProd.difference || 0, wd)}</p>
                                     </div>
                                     <div>
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Extra Weight</p>
-                                      <p className="text-xs font-black text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Extra Weight</p>
+                                      <p className="text-sm font-bold text-purple-600">{fmtNum(firstProd.extraWeight || firstProd.extra_weight || 0, wd)}</p>
                                     </div>
                                     <div className="md:col-span-2">
-                                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff Reason</p>
-                                      <p className="text-[10px] font-bold text-red-500 italic">{firstProd.reason_of_difference_in_weight_if_any_speacefic || firstProd.reasonForDiff || "—"}</p>
+                                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 leading-none">Weight Diff Reason</p>
+                                      <p className="text-xs font-medium text-red-600 italic">{firstProd.reason_of_difference_in_weight_if_any_speacefic || firstProd.reasonForDiff || "—"}</p>
                                     </div>
                                   </div>
                                 </div>
@@ -1402,8 +1676,41 @@ export default function MakeInvoicePage() {
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
                   <Table className="hidden md:table">
                     <TableHeader className="bg-slate-50">
+                      <TableRow className="bg-slate-100/90 hover:bg-slate-100/90 border-b-2 border-slate-300">
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="px-4 text-left h-10 text-xs font-black text-slate-900 uppercase tracking-wider">Total ({selectedProducts.length})</TableHead>
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="px-4 text-right h-10 font-mono tabular-nums font-black text-blue-700">
+                          {(() => {
+                            const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .reduce((sum, p) => {
+                                const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
+                                const skuWt = parseFloat(skuWtStr || "") || 0;
+                                const qty = parseFloat(p.qtyToDispatch) || 0;
+                                return sum + (skuWt * qty);
+                              }, 0);
+                            return totalSelectedWt.toFixed(wd);
+                          })()}
+                        </TableHead>
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="px-4 h-10" />
+                        <TableHead className="pl-4 pr-6 text-right h-10 font-mono tabular-nums font-black text-blue-700">
+                          {(() => {
+                            const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .map(p => {
+                                const cdAmt = productCdData[p.id]?.isCd === 'yes' ? parseFloat(productCdData[p.id]?.cdAmount || '0') : 0;
+                                return { rate: (Number(p.rate) || 0) - cdAmt, qty: parseFloat(p.qtyToDispatch) || 0, product: p };
+                              }));
+                            return total === null ? "—" : fmtAmount(total);
+                          })()}
+                        </TableHead>
+                      </TableRow>
                       <TableRow>
-                        <TableHead className="w-12 text-center h-10">
+                        <TableHead className="w-12 text-left px-4 h-10">
                           <Checkbox
                             checked={selectedGroups.every(g => g._allProducts.every((p: any) => selectedProducts.includes(p._rowKey)))}
                             onCheckedChange={(checked) => {
@@ -1416,20 +1723,20 @@ export default function MakeInvoicePage() {
                             }}
                           />
                         </TableHead>
-                        <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">IS CD</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">CD AMOUNT</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT(KGS)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY DISPATCH</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">TAXABLE AMOUNT</TableHead>
+                        <TableHead className="px-4 text-left h-10">Product Info</TableHead>
+                        <TableHead className="px-4 text-left h-10">Is CD</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap">CD Amount (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Weight (KGS)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Actual Qty Dispatch</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-nowrap min-w-[110px]"><RateWithoutGstHeading /></TableHead>
+                        <TableHead className="pl-4 pr-6 text-right h-10 whitespace-nowrap min-w-[110px]">Taxable Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {selectedGroups.flatMap(g => g._allProducts).map((product: any) => (
                         <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                          <TableCell className="text-center p-2">
+                          <TableCell className="text-left px-4 py-2">
                             <Checkbox
                               checked={selectedProducts.includes(product._rowKey)}
                               onCheckedChange={() => {
@@ -1441,14 +1748,14 @@ export default function MakeInvoicePage() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="p-2">
+                          <TableCell className="px-4 py-2">
                             <div className="flex flex-col">
                               <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
                               <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="text-center p-2">
+                          <TableCell className="px-4 py-2 text-left">
                             <Select
                               value={productCdData[product.id]?.isCd || "no"}
                               onValueChange={(val) => setProductCdData(prev => ({
@@ -1465,11 +1772,11 @@ export default function MakeInvoicePage() {
                               </SelectContent>
                             </Select>
                           </TableCell>
-                          <TableCell className="text-center p-2">
+                          <TableCell className="px-4 py-2 text-right">
                             {productCdData[product.id]?.isCd === 'yes' && (
                               <Input
                                 type="number"
-                                className="h-8 text-[10px] font-bold w-20 mx-auto"
+                                className="h-8 text-[10px] font-bold w-20 ml-auto text-right font-mono tabular-nums"
                                 value={productCdData[product.id]?.cdAmount || ""}
                                 onChange={(e) => setProductCdData(prev => ({
                                   ...prev,
@@ -1479,106 +1786,54 @@ export default function MakeInvoicePage() {
                               />
                             )}
                           </TableCell>
-                          <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                          <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
                               const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                               const skuWt = parseFloat(skuWtStr || "") || 0;
                               const qty = parseFloat(product.qtyToDispatch) || 0;
                               const totalWt = skuWt * qty;
                               if (!totalWt) return "—";
-                              return totalWt.toFixed(4);
+                              return totalWt.toFixed(wd);
                             })()}
                           </TableCell>
-                          <TableCell className="text-center p-2">
-                            <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                              {product.qtyToDispatch || "0"}
-                            </Badge>
+                          <TableCell className="px-4 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                            <span className="text-xs font-bold text-slate-700 font-mono tabular-nums">{fmtNum(product.qtyToDispatch || 0, 0)}</span>
                           </TableCell>
-                          <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                  {(() => {
-                                    const originalRate = Number(product.rate) || 0;
-                                    const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
-                                    const adjustedRate = originalRate - cdAmt;
-                                    return adjustedRate ? `₹${adjustedRate.toFixed(2)}` : "—";
-                                  })()}
-                                </span>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                <div className="space-y-1.5">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                  <p className="text-sm font-black text-blue-700 leading-none">
-                                    {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                  </p>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </TableCell>
-                          <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                          <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
                               const originalRate = Number(product.rate) || 0;
                               const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
                               const adjustedRate = originalRate - cdAmt;
-                              return adjustedRate ? `₹${(adjustedRate / 1.05).toFixed(2)}` : "—";
+                              return (
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={cdAmt}
+                                  displayRate={adjustedRate}
+                                  align="end"
+                                />
+                              );
                             })()}
                           </TableCell>
-                          <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                          <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                             {(() => {
                               const originalRate = Number(product.rate) || 0;
                               const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
                               const adjustedRate = originalRate - cdAmt;
-                              const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2));
+                              return rateWithoutGstText(adjustedRate, product);
+                            })()}
+                          </TableCell>
+                          <TableCell className="pl-4 pr-6 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                            {(() => {
+                              const originalRate = Number(product.rate) || 0;
+                              const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0;
+                              const adjustedRate = originalRate - cdAmt;
                               const qty = parseFloat(product.qtyToDispatch) || 0;
-                              const taxableAmount = rateWoGst * qty;
-                              return taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—";
+                              const taxableAmount = taxableOf(adjustedRate, qty, product);
+                              return taxableAmount ? fmtAmount(taxableAmount) : "—";
                             })()}
                           </TableCell>
                         </TableRow>
                       ))}
-
-                      {/* Summary Row */}
-                      <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                        <TableCell />
-                        <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {(() => {
-                              const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
-                                .filter(p => selectedProducts.includes(p._rowKey))
-                                .reduce((sum, p) => {
-                                  const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
-                                  const skuWt = parseFloat(skuWtStr || "") || 0;
-                                  const qty = parseFloat(p.qtyToDispatch) || 0;
-                                  return sum + (skuWt * qty);
-                                }, 0);
-                              return totalSelectedWt.toFixed(4);
-                            })()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.qtyToDispatch) || 0), 0)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-center text-xs text-blue-700 font-black">
-                          ₹{selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => {
-                              const originalRate = Number(p.rate) || 0;
-                              const cdAmt = productCdData[p.id]?.isCd === 'yes' ? parseFloat(productCdData[p.id]?.cdAmount || '0') : 0;
-                              const adjustedRate = originalRate - cdAmt;
-                              const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2));
-                              const qty = parseFloat(p.qtyToDispatch) || 0;
-                              return sum + (rateWoGst * qty);
-                            }, 0).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
                     </TableBody>
                   </Table>
                   <div className="space-y-3 p-3 md:hidden">
@@ -1604,9 +1859,8 @@ export default function MakeInvoicePage() {
                       const originalRate = Number(product.rate) || 0
                       const cdAmt = productCdData[product.id]?.isCd === 'yes' ? parseFloat(productCdData[product.id]?.cdAmount || '0') : 0
                       const adjustedRate = originalRate - cdAmt
-                      const rateWoGst = parseFloat((adjustedRate / 1.05).toFixed(2))
                       const qty = parseFloat(product.qtyToDispatch) || 0
-                      const taxableAmount = rateWoGst * qty
+                      const taxableAmount = taxableOf(adjustedRate, qty, product)
 
                       return (
                         <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
@@ -1633,7 +1887,7 @@ export default function MakeInvoicePage() {
 
                           <div className="grid grid-cols-2 gap-3 text-xs">
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Weight(KGS)</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
                               <p className="mt-1 font-mono font-bold text-slate-700">
                                 {(() => {
                                   const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
@@ -1641,41 +1895,34 @@ export default function MakeInvoicePage() {
                                   const qty = parseFloat(product.qtyToDispatch) || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  return totalWt.toFixed(4);
+                                  return totalWt.toFixed(wd);
                                 })()}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                              <p className="mt-1 font-mono font-bold text-blue-700">{product.qtyToDispatch || "0"}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty Dispatch</p>
+                              <p className="mt-1 font-mono font-bold text-blue-700">{fmtNum(product.qtyToDispatch || 0, 0)}</p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">
-                                    {adjustedRate ? `₹${adjustedRate.toFixed(2)}` : "—"}
-                                  </p>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
+                              <div className="mt-1">
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={productCdData[product.id]?.isCd === 'yes' ? productCdData[product.id]?.cdAmount : 0}
+                                  displayRate={adjustedRate}
+                                  align="center"
+                                />
+                              </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
                               <p className="mt-1 font-mono font-bold text-slate-700">
-                                {adjustedRate ? `₹${(adjustedRate / 1.05).toFixed(2)}` : "—"}
+                                {rateWithoutGstText(adjustedRate, product)}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
+                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? fmtAmount(taxableAmount) : "—"}</p>
                             </div>
                           </div>
 
@@ -1718,16 +1965,10 @@ export default function MakeInvoicePage() {
                         </div>
                       )
                     })}
-                    <div className="grid grid-cols-3 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
-                      <div>
-                        <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                        <p className="mt-1 font-black text-blue-700">
-                          {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.qtyToDispatch) || 0), 0)}
-                        </p>
-                      </div>
+                    <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
                       <div>
                         <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
-                        <p className="mt-1 font-black text-blue-700">
+                        <p className="mt-1 font-black text-blue-700 font-mono tabular-nums">
                           {(() => {
                             const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
@@ -1737,14 +1978,14 @@ export default function MakeInvoicePage() {
                                 const qty = parseFloat(p.qtyToDispatch) || 0;
                                 return sum + (skuWt * qty);
                               }, 0);
-                            return totalSelectedWt.toFixed(4);
+                            return totalSelectedWt.toFixed(wd);
                           })()}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[9px] uppercase font-black text-slate-500">Total Amount</p>
-                        <p className="mt-1 font-black text-blue-700">
-                          ₹{Math.round(selectedGroups.flatMap(g => g._allProducts)
+                        <p className="text-[9px] uppercase font-black text-slate-500">Total Amount (₹)</p>
+                        <p className="mt-1 font-black text-blue-700 font-mono tabular-nums">
+                          {fmtAmount(selectedGroups.flatMap(g => g._allProducts)
                             .filter(p => selectedProducts.includes(p._rowKey))
                             .reduce((sum, p) => {
                               const originalRate = Number(p.rate) || 0;
@@ -1752,7 +1993,7 @@ export default function MakeInvoicePage() {
                               const adjustedRate = originalRate - cdAmt;
                               const qty = parseFloat(p.qtyToDispatch) || 0;
                               return sum + (adjustedRate * qty);
-                            }, 0))}
+                            }, 0), 2)}
                         </p>
                       </div>
                     </div>
@@ -1764,7 +2005,10 @@ export default function MakeInvoicePage() {
                   selectedGroups={selectedGroups}
                   selectedProducts={selectedProducts}
                   productCdData={productCdData}
+                  chargesBillable={invoiceCharges.billableTotal}
                 />
+
+                <OrderChargesPanel orderNos={invoiceOrderNos} />
 
                 {/* 3. Invoice Form */}
                 <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
@@ -1783,19 +2027,6 @@ export default function MakeInvoicePage() {
                         placeholder="Enter Invoice No"
                       />
                     </div>
-
-                    <div className="space-y-2">
-                      <FileUploadField
-                        label={<>Upload Invoice Copy <span className="text-red-500">*</span></>}
-                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                        fileName={invoiceData.invoiceFileName}
-                        helperText="Max file size: 20 MB"
-                        uploading={isUploading}
-                        buttonText="Select Invoice Document"
-                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0])}
-                      />
-                    </div>
-
                     <div className="space-y-2">
                       <Label>Invoice Date <span className="text-red-500">*</span></Label>
                       <Input
@@ -1805,23 +2036,145 @@ export default function MakeInvoicePage() {
                         onChange={(e) => setInvoiceData({ ...invoiceData, invoiceDate: e.target.value })}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <FileUploadField
+                        label={<Label>Upload Invoice Copy <span className="text-red-500">*</span></Label>}
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                        helperText="Supported: PDF, JPG, PNG, WEBP · Max size: 20 MB"
+                        value={invoiceData.invoiceFile}
+                        fileName={invoiceData.invoiceFileName}
+                        uploading={isUploadingObj['invoiceFile'] || false}
+                        buttonText={invoiceData.invoiceFileName ? 'REPLACE' : 'UPLOAD'}
+                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'invoiceFile', 'invoiceFileName')}
+                        onRemove={() => setInvoiceData(p => ({ ...p, invoiceFile: "", invoiceFileName: "" }))}
+                        capture="environment"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Driver Advance & Diesel Form */}
+                <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm mt-4">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                    <Truck className="h-4 w-4 text-purple-600" />
+                    Driver Advance & Diesel Details
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Driver Advance (Cash)
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
+                        value={invoiceData.driverAdvanceCash}
+                        readOnly
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Driver Advance (Bank)
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
+                        value={invoiceData.driverAdvanceBank}
+                        readOnly
+                        placeholder="0.00"
+                      />
+                    </div>
+                    {/* Empty div to force Diesel fields to a new row on large screens */}
+                    <div className="hidden lg:block"></div>
+                    <div className="space-y-2">
+                      <Label>Petrol Pump Name</Label>
+                      <Combobox
+                        value={invoiceData.petrolPumpName}
+                        onValueChange={(v) => setInvoiceData({ ...invoiceData, petrolPumpName: v })}
+                        options={petrolPumpOptions}
+                        placeholder="Select Petrol Pump"
+                        searchPlaceholder="Search pump..."
+                        emptyText="No pump found."
+                        className="h-10 w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1.5 text-slate-700">
+                        Diesel Amount
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">From Actual Dispatch</span>
+                      </Label>
+                      <Input
+                        type="number"
+                        className="h-10 bg-slate-50 text-slate-700 font-semibold cursor-not-allowed border-slate-200"
+                        value={invoiceData.dieselAmount}
+                        readOnly
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FileUploadField
+                        label={<Label>Upload Diesel Parchi <span className="text-red-500">*</span></Label>}
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.pdf"
+                        helperText="Supported: PDF, JPG, PNG, WEBP · Max size: 20 MB"
+                        value={invoiceData.dieselParchiFile}
+                        fileName={invoiceData.dieselParchiFileName}
+                        uploading={isUploadingObj['dieselParchiFile'] || false}
+                        buttonText={invoiceData.dieselParchiFileName ? 'REPLACE' : 'UPLOAD'}
+                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'dieselParchiFile', 'dieselParchiFileName')}
+                        onRemove={() => setInvoiceData(p => ({ ...p, dieselParchiFile: "", dieselParchiFileName: "" }))}
+                        capture="environment"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Insurance Details Form */}
+                <div className="space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm mt-4">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                    <FileText className="h-4 w-4 text-emerald-600" />
+                    Insurance Details
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    <div className="space-y-2">
+                      <Label>Select Insurance Company</Label>
+                      <Combobox
+                        value={invoiceData.insuranceDetails}
+                        onValueChange={(v) => setInvoiceData({ ...invoiceData, insuranceDetails: v })}
+                        options={insuranceOptions}
+                        placeholder="Select Insurance Details"
+                        searchPlaceholder="Search insurance..."
+                        emptyText="No insurance found."
+                        className="h-10 w-full bg-white border-2 rounded-xl"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || !invoiceData.invoiceNo || isReadOnly}
-                className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-                title={isReadOnly ? "View Only Access" : "Generate Invoice"}
-              >
-                {isProcessing ? "Processing..." : "Generate Invoice"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                // Cancel stays inert while a submit is running (it used to be a disabled button).
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    variant: "outline",
+                    label: <><Printer className="h-4 w-4" />Print Data</>,
+                    title: "Print Invoice Data Sheet",
+                    onClick: handlePrint,
+                  },
+                  {
+                    label: isProcessing ? "Processing..." : "Generate Invoice",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || !invoiceData.invoiceNo || isReadOnly,
+                    title: isReadOnly ? "View Only Access" : "Generate Invoice",
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

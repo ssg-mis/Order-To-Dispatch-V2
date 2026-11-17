@@ -79,6 +79,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/system-flow": "System Flow",
         "/commitment-punch": "Commitment Punch",
         "/order-punch": "Order Punch",
+        "/order-punch/create": "Order Punch",
         "/pre-approval": "Pre Approval",
         "/approval-of-order": "Approval of Order",
         "/dispatch-material": "Dispatch Planning",
@@ -87,8 +88,15 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         "/make-invoice": "Make Invoice",
         "/check-invoice": "Check Invoice",
         "/gate-out": "Gate Out",
-        "/material-receipt": "Confirm Material Receipt",
+        "/reach-vehicle": "Reach Vehicle",
+        "/unloading": "Unloading",
         "/damage-adjustment": "Damage Adjustment",
+        "/return": "Return",
+        "/return-gate-pass": "Return",
+        "/unload-returned-stock": "Unload Returned Stock",
+        "/issue-return-documents": "Issue Documents Against Returned Stock",
+        "/transport-bills": "Transport Bills",
+        "/diesel-bills": "Diesel Bills",
         "/gate-in": "Gate In",
         "/variable-parameters": "Variable Parameters",
         "/settings": "Settings",
@@ -103,7 +111,11 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
         return !!(pageAccess as Record<string, string>)[permissionName]
       }
 
+      // Order Punch's row-detail route is dynamic (/order-punch/[id]) - the map
+      // above only matches exact paths, so it's gated by prefix instead of a
+      // literal entry (the app's first dynamic detail route).
       const requiredPermission = urlToPermission[pathname]
+        ?? (pathname.startsWith("/order-punch/") && pathname !== "/order-punch/create" ? "Order Punch" : undefined)
       if (requiredPermission && !hasAccess(requiredPermission)) {
         console.warn(`Unauthorized access attempt to ${pathname}`)
         const firstAvailable = Object.entries(urlToPermission).find(([, perm]) => hasAccess(perm))
@@ -137,7 +149,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
           <div className="flex min-h-screen w-full">
             <AppSidebar />
             <main
-              className="flex-1 overflow-y-auto overflow-x-hidden"
+              className="min-w-0 flex-1 overflow-x-clip"
               style={{ background: "oklch(0.97 0.012 245)" }}
             >
               {children}

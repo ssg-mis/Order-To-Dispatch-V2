@@ -1,11 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, X } from "lucide-react"
+import { Check, ChevronsUpDown, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Command,
   CommandEmpty,
@@ -51,14 +50,14 @@ export function MultiCombobox({
 }: MultiComboboxProps) {
   const [open, setOpen] = React.useState(false)
 
-  const toggleValue = (val: string) => {
-    onValuesChange(values.includes(val) ? values.filter((v) => v !== val) : [...values, val])
+  const selectedOptions = options.filter((o) => values.includes(o.value))
+
+  const toggle = (value: string) => {
+    onValuesChange(values.includes(value) ? values.filter((v) => v !== value) : [...values, value])
   }
 
-  const selected = options.filter((o) => values.includes(o.value))
-
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -80,52 +79,72 @@ export function MultiCombobox({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-full p-0"
+          className="p-0"
+          style={{ width: "var(--radix-popover-trigger-width)" }}
           align="start"
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
         >
           <Command>
             <CommandInput placeholder={searchPlaceholder} />
-            <CommandList className="max-h-[300px] overflow-y-auto overscroll-contain">
+            <CommandList className="max-h-[260px] overflow-y-auto overscroll-contain p-1.5">
               <CommandEmpty>{emptyText}</CommandEmpty>
-              <CommandGroup>
-                {options.map((option, index) => {
+              <CommandGroup className="p-0">
+                {options.map((option) => {
                   const checked = values.includes(option.value)
                   return (
                     <CommandItem
-                      key={`${option.value}-${index}`}
-                      value={option.label ? `${option.label} ${option.value}` : option.value}
-                      onSelect={() => toggleValue(option.value)}
-                      className="gap-2"
+                      key={option.value}
+                      value={option.label}
+                      onSelect={() => toggle(option.value)}
+                      className={cn(
+                        "gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-slate-700 data-[selected=true]:bg-slate-100 data-[selected=true]:text-slate-900",
+                        checked && "bg-emerald-50/70 font-medium text-emerald-900 data-[selected=true]:bg-emerald-100/70 data-[selected=true]:text-emerald-900"
+                      )}
                     >
-                      <Checkbox checked={checked} className="shrink-0 pointer-events-none" />
-                      <span>{option.label}</span>
+                      <span
+                        className={cn(
+                          "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors",
+                          checked ? "border-emerald-600 bg-emerald-600" : "border-slate-300 bg-white"
+                        )}
+                      >
+                        {checked && <Check className="size-3 text-white" strokeWidth={3.5} />}
+                      </span>
+                      <span className="truncate">{option.label}</span>
                     </CommandItem>
                   )
                 })}
               </CommandGroup>
             </CommandList>
+            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-3 py-1.5 text-[11px] text-slate-500">
+              <span>{values.length} selected</span>
+              {values.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onValuesChange([])}
+                  className="font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
           </Command>
         </PopoverContent>
       </Popover>
 
-      {showSelectedList && selected.length > 0 && (
+      {showSelectedList && selectedOptions.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {selected.map((option) => (
+          {selectedOptions.map((o) => (
             <span
-              key={option.value}
-              className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded-full pl-2.5 pr-1.5 py-1"
+              key={o.value}
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800"
             >
-              {option.label}
-              <button
-                type="button"
-                onClick={() => toggleValue(option.value)}
-                className="rounded-full p-0.5 hover:bg-blue-200/60 transition-colors"
-                aria-label={`Remove ${option.label}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
+              {o.label}
+              {!disabled && (
+                <button type="button" onClick={() => toggle(o.value)} className="rounded-full hover:bg-emerald-100" aria-label={`Remove ${o.label}`}>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </span>
           ))}
         </div>

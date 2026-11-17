@@ -1,25 +1,37 @@
 "use client"
 
-import { useRef, useState, useMemo, useCallback, useEffect } from "react"
+import { useVehicleTareStats } from "@/hooks/use-vehicle-tare-stats"
+import { useState, useMemo, useCallback, useEffect, useId } from "react"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
-import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, depotApi } from "@/lib/api-service"
+import { useAuthContext } from "@/contexts/auth-context"
+import { gateInApi, orderApi, vehicleMasterApi, skuDetailsApi, driverMasterApi, draftApi } from "@/lib/api-service"
+import { generateGatePassPdf } from "@/lib/gate-pass-pdf-lazy"
+import { Combobox } from "@/components/ui/combobox"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Truck, X, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu"
-import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
+import { Camera, Image as ImageIcon, CheckCircle2, Loader2, Truck, X, Printer, Download } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
-import { SortableTableHead } from "@/components/ui/sortable-table-head"
-import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageDivider,
+  StageActiveChips, type StageTotalTone, StagePagination, StageDecisionFooter } from "@/components/stage-list"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
+import { fmtNum, fmtDateTime, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -32,13 +44,23 @@ function formatDate(dateStr: string) {
   }
 }
 
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
+const ALLOWED_IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|heic|heif)$/i
+const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+const MAX_UPLOAD_FILE_BYTES = 15 * 1024 * 1024
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
 
 async function compressImageForUpload(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file
 
-  const bitmap = await createImageBitmap(file)
+  // Browsers that can't decode the format (e.g. HEIC outside Safari) upload the original file.
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(file)
+  } catch {
+    return file
+  }
   const canvas = document.createElement("canvas")
 
   const context = canvas.getContext("2d")
@@ -87,20 +109,24 @@ async function compressImageForUpload(file: File): Promise<File> {
 
 interface ImageUploadCardProps {
   label: string
-  capture?: "environment" | "user" // optional camera hint
   value: string
   fileName: string
   isUploading: boolean
+  required?: boolean
   onFile: (file: File) => void
   onClear: () => void
 }
 
-function ImageUploadCard({ label, capture, value, fileName, isUploading, onFile, onClear }: ImageUploadCardProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+function ImageUploadCard({ label, value, fileName, isUploading, required, onFile, onClear }: ImageUploadCardProps) {
+  const inputId = useId()
+  const cameraInputId = useId()
 
   return (
-    <div className="flex flex-col items-center gap-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-4 hover:border-blue-300 transition-colors">
-      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</span>
+    <div className="flex flex-col items-center gap-3 bg-slate-50 border-2 border-dashed border-slate-200 hover:border-blue-300 rounded-2xl p-4 transition-colors">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</span>
+        {required && <span className="text-red-500 font-black text-xs">*</span>}
+      </div>
 
       {value ? (
         <div className="relative w-full">
@@ -115,43 +141,85 @@ function ImageUploadCard({ label, capture, value, fileName, isUploading, onFile,
             type="button"
             onClick={onClear}
             className="absolute top-1 right-1 bg-red-500 text-white rounded-full h-6 w-6 flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+            title="Remove image"
           >
             <X className="h-3 w-3" />
           </button>
           <p className="text-[10px] text-slate-500 font-semibold mt-1 text-center truncate">{fileName}</p>
         </div>
       ) : (
-        <button
-          type="button"
-          disabled={isUploading}
-          onClick={() => inputRef.current?.click()}
-          className="flex flex-col items-center gap-2 w-full h-40 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500"
+        <div
+          className={cn(
+            "flex w-full h-40 gap-2",
+            isUploading && "pointer-events-none opacity-50"
+          )}
         >
           {isUploading ? (
-            <Loader2 className="h-8 w-8 animate-spin" />
+            <div className="flex flex-1 items-center justify-center rounded-xl border-2 border-slate-200 bg-white text-slate-400">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
           ) : (
             <>
-              <Camera className="h-8 w-8" />
-              <span className="text-xs font-bold">Tap to open camera</span>
-              <span className="text-[10px] font-medium text-slate-400">or choose from gallery</span>
+              {/* Camera: only on touch devices. `capture` forces the camera on mobile
+                  (the plain image picker often shows gallery only). */}
+              <label
+                htmlFor={cameraInputId}
+                className="hidden [@media(pointer:coarse)]:flex flex-1 flex-col items-center gap-2 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500 cursor-pointer select-none"
+              >
+                <Camera className="h-8 w-8" />
+                <span className="text-xs font-bold text-slate-600">Take Photo</span>
+                <span className="text-[10px] font-medium text-slate-400">Open camera</span>
+              </label>
+
+              {/* Gallery on mobile / File Explorer on desktop */}
+              <label
+                htmlFor={inputId}
+                className="flex flex-1 flex-col items-center gap-2 justify-center rounded-xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-400 hover:text-blue-500 cursor-pointer select-none"
+              >
+                <ImageIcon className="h-8 w-8 hidden [@media(pointer:coarse)]:block" />
+                <Camera className="h-8 w-8 [@media(pointer:coarse)]:hidden" />
+                <span className="text-xs font-bold text-slate-600">
+                  <span className="[@media(pointer:coarse)]:hidden">Click to choose file</span>
+                  <span className="hidden [@media(pointer:coarse)]:inline">Gallery</span>
+                </span>
+                <span className="text-[10px] font-medium text-slate-400 [@media(pointer:coarse)]:hidden">
+                  Opens file manager
+                </span>
+                <span className="text-[10px] font-medium text-slate-400">JPG, PNG, WEBP, HEIC · Max 15 MB</span>
+                <span className="text-[10px] font-medium text-slate-400 hidden [@media(pointer:coarse)]:block">
+                  Choose existing photo
+                </span>
+              </label>
             </>
           )}
-        </button>
-      )}
 
-      {/* Hidden file input — capture attribute opens camera on mobile */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture={capture}
-        className="hidden"
-        onChange={e => {
-          const file = e.target.files?.[0]
-          if (file) onFile(file)
-          e.target.value = "" // allow re-selecting same file
-        }}
-      />
+          <input
+            id={cameraInputId}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            capture="environment"
+            disabled={isUploading}
+            className="sr-only"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) onFile(file)
+              e.target.value = ""
+            }}
+          />
+          <input
+            id={inputId}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            disabled={isUploading}
+            className="sr-only"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) onFile(file)
+              e.target.value = "" // allow re-selecting same file
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -167,16 +235,16 @@ const PAGE_COLUMNS = [
   { id: "endDate",               label: "End Date" },
   { id: "deliveryDate",          label: "Delivery Date" },
   { id: "oilType",               label: "Oil Type" },
-  { id: "ratePer15Kg",           label: "Rate Per 15 kg" },
-  { id: "ratePerLtr",            label: "Rate Per Ltr." },
+  { id: "ratePer15Kg",           label: "Rate Per 15 kg (₹)" },
+  { id: "ratePerLtr",            label: "Rate Per Ltr. (₹)" },
   { id: "productName",           label: "Product Name" },
-  { id: "products",              label: "Products" },
+  { id: "products",              label: "Products (Items)" },
   { id: "uom",                   label: "UOM" },
   { id: "orderQty",              label: "Order Qty" },
   { id: "altUom",                label: "Alt UOM" },
   { id: "altQty",                label: "Alt Qty (Kg)" },
-  { id: "rateOfMaterial",        label: "Rate of Material" },
-  { id: "rate",                  label: "Rate" },
+  { id: "rateOfMaterial",        label: "Rate of Material (₹)" },
+  { id: "rate",                  label: "Rate (₹)" },
   { id: "skuName",               label: "SKU Name" },
   { id: "approvalQty",           label: "Approval Qty" },
   { id: "qtyToDispatch",         label: "Qty to Dispatch" },
@@ -184,14 +252,14 @@ const PAGE_COLUMNS = [
   { id: "processId",             label: "Manual Sauda No." },
   { id: "vehicle_no",            label: "Vehicle No." },
   { id: "driver_name",           label: "Driver Name" },
-  { id: "totalWithGst",          label: "Total Amount with GST" },
+  { id: "totalWithGst",          label: "Total Amount with GST (₹)" },
   { id: "transportType",         label: "Type of Transporting" },
   { id: "contactPerson",         label: "Customer Contact Person Name" },
   { id: "whatsapp",              label: "Customer Contact Person Whatsapp No." },
   { id: "address",               label: "Customer Address" },
   { id: "paymentTerms",          label: "Payment Terms" },
   { id: "advanceTaken",          label: "Advance Payment to be Taken" },
-  { id: "advanceAmount",         label: "Advance Amount" },
+  { id: "advanceAmount",         label: "Advance Amount (₹)" },
   { id: "isBroker",              label: "Is this order Through Broker" },
   { id: "brokerName",            label: "Broker Name (If Order Through Broker)" },
   { id: "orderPunchRemarks",     label: "Order Punch Remarks" },
@@ -243,114 +311,61 @@ const COL_FIELD_MAP: Partial<Record<ColId, string>> = {
 }
 const DATE_COL_IDS = new Set<ColId>(["partySoDate", "startDate", "endDate", "deliveryDate"])
 const BOOL_COL_IDS = new Set<ColId>(["advanceTaken", "isBroker"])
-
-// ─── GST helpers ─────────────────────────────────────────────────────────────
-
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
+const NUMBER_COL_IDS = new Set<ColId>(["ratePer15Kg", "ratePerLtr", "rateOfMaterial", "rate", "orderQty", "altQty", "approvalQty", "qtyToDispatch", "totalWithGst", "advanceAmount"])
+const GATE_DECIMALS: Record<string, number> = {
+  ratePer15Kg: 2, ratePerLtr: 2, rateOfMaterial: 2, rate: 2, totalWithGst: 2, advanceAmount: 2,
+  orderQty: 4, altQty: 4, approvalQty: 4, qtyToDispatch: 4, products: 0,
+}
+const TOTAL_COL_TONES: Record<string, StageTotalTone> = {
+  altQty: "blue",
+  totalWithGst: "emerald", advanceAmount: "emerald",
 }
 
-function GateInGSTSummary({ records }: { records: any[] }) {
-  const depoName = records[0]?.depo_name || ""
-  const shippingState = extractState(records[0]?.customer_address || "") || ""
-
-  const { data: billingRes } = useQuery({
-    queryKey: ["billing-depot-state", depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = records.reduce((sum, r) => {
-    const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
-    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-    const qty = parseFloat(r.qty_to_be_dispatched) || 0
-    return sum + rateWoGst * qty
-  }, 0)
-
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (!billingState || !shippingState) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() !== shippingState.trim().toLowerCase()) {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
-
-  return (
-    <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
-      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Estimate)</p>
-      </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
-          <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
-          </span>
-        </div>
-        <div className="flex justify-between items-center border-t border-slate-200 pt-2">
-          <span className="font-black uppercase text-slate-800 text-[11px]">Estimated Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
-        </div>
-      </div>
-    </div>
-  )
+// One table row = one vehicle/date group of gate-in records.
+interface GateGroup {
+  key: string
+  vehicleNumber: string
+  date: string
+  records: any[]
+  first: any
+  orderKeys: string[]
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+const gateAccessor = (colId: ColId) => (g: GateGroup): string | number | null => {
+  const first = g.first
+  switch (colId) {
+    case "orderNo": return g.orderKeys.join(", ")
+    case "vehicle_no": return first.draft_data?.vehicleNumber || ""
+    case "driver_name": return first.draft_data?.driverName || ""
+    case "saved_by": return first.username || ""
+    case "saved_at": return first.saved_at || null
+    case "products": return first.draft_data?.dialogSelectedProducts?.length || 0
+    default: {
+      const f = COL_FIELD_MAP[colId]
+      if (!f) return null
+      const v = first[f]
+      if (BOOL_COL_IDS.has(colId)) return v ? "Yes" : "No"
+      if (v === undefined || v === null) return null
+      if (NUMBER_COL_IDS.has(colId)) return parseFloat(v) || 0
+      return v
+    }
+  }
+}
+
+const GATE_TABLE_COLUMNS: StageColDef<GateGroup>[] = PAGE_COLUMNS.map(c => ({
+  id: c.id,
+  label: c.label,
+  type: DATE_COL_IDS.has(c.id) || c.id === "saved_at" ? "date" : (NUMBER_COL_IDS.has(c.id) || c.id === "products") ? "number" : "text",
+  accessor: gateAccessor(c.id),
+  total: TOTAL_COL_TONES[c.id] !== undefined,
+}))
 
 export default function GateInPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
+  const { refreshUser } = useAuthContext()
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
@@ -369,15 +384,23 @@ export default function GateInPage() {
     setPendingPage(1)
   }, [filterValues])
 
-  const [selectedRows, setSelectedRows] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<any>(null)
   const [selectedGroupKeys, setSelectedGroupKeys] = useState<string[]>([])
   const [selectedGroupRecords, setSelectedGroupRecords] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [revertRemarks, setRevertRemarks] = useState("")
 
   // Vehicle master state
   const [vehicleData, setVehicleData] = useState<any>(null)
+  // Same payload limit as Plan Vehicle / Actual Dispatch: GVW - average tare (ULW on the first trip).
+  const { data: gateInTareStats } = useVehicleTareStats(vehicleData?.id)
+  const gateInPassing = useMemo(() => {
+    const gvw = Number(vehicleData?.gvw) || 0
+    const avg = gateInTareStats && gateInTareStats.count > 0 ? Number(gateInTareStats.avgTare) || 0 : 0
+    const baseTare = avg > 0 ? avg : Number(vehicleData?.ulw) || 0
+    return gvw > 0 && baseTare > 0 ? (gvw - baseTare).toFixed(2) : vehicleData?.passing
+  }, [vehicleData, gateInTareStats])
   const [isLoadingVehicle, setIsLoadingVehicle] = useState(false)
 
   // Image state
@@ -394,6 +417,62 @@ export default function GateInPage() {
   const [gatepassPhotoFileName, setGatepassPhotoFileName] = useState("")
   const [gatepassPhotoFile, setGatepassPhotoFile] = useState<File | null>(null)
   const [uploadingField, setUploadingField] = useState<string | null>(null)
+
+  // Check if photos are mandatory for the current user (configured in Settings -> Edit User Access -> Features)
+  const isPhotosMandatory = Boolean(user?.features?.gate_in_photos_mandatory)
+
+  // Masters for editing vehicle/driver
+  const [vehicleMasterList, setVehicleMasterList] = useState<any[]>([])
+  const [driverMasterList, setDriverMasterList] = useState<any[]>([])
+  const [editableVehicle, setEditableVehicle] = useState("")
+  const [editableDriver, setEditableDriver] = useState("")
+
+  useEffect(() => {
+    vehicleMasterApi.getAll({ all: "true" }).then((res: any) => {
+      const data = res?.data?.vehicles || res?.vehicles || res?.data || res;
+      setVehicleMasterList(Array.isArray(data) ? data : [])
+    }).catch(() => setVehicleMasterList([]))
+    
+    driverMasterApi.getAll({ all: "true" }).then((res: any) => {
+      const data = res?.data?.drivers || res?.drivers || res?.data || res;
+      setDriverMasterList(Array.isArray(data) ? data : [])
+    }).catch(() => setDriverMasterList([]))
+  }, [])
+
+  // Vehicle dropdown: only the vehicles attached to the DO's transporter (primary
+  // or additional). With no transporter on the DO, or while it loads, all vehicles.
+  const doTransporterName: string = selectedRecord?.draft_data?.transporterName || ""
+  const [transporterVehicles, setTransporterVehicles] = useState<any[] | null>(null)
+  useEffect(() => {
+    if (!isDialogOpen || !doTransporterName) { setTransporterVehicles(null); return }
+    let cancelled = false
+    setTransporterVehicles(null)
+    vehicleMasterApi.getAll({ all: "true", transporter_name: doTransporterName }).then(res => {
+      if (cancelled) return
+      const list = res?.data?.vehicles
+      setTransporterVehicles(Array.isArray(list) ? list : null)
+    }).catch(() => { if (!cancelled) setTransporterVehicles(null) })
+    return () => { cancelled = true }
+  }, [isDialogOpen, doTransporterName])
+
+  const vehicleOptions = useMemo(() => {
+    const source = transporterVehicles ?? (Array.isArray(vehicleMasterList) ? vehicleMasterList : [])
+    const options = source
+      .filter(v => v.registration_no && v.status === "Active")
+      .map(v => ({ value: v.registration_no, label: v.registration_no }))
+    // keep the currently chosen vehicle selectable even if it isn't in the filtered set
+    if (editableVehicle && !options.some(o => o.value === editableVehicle)) {
+      options.push({ value: editableVehicle, label: editableVehicle })
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }))
+  }, [transporterVehicles, vehicleMasterList, editableVehicle])
+
+  const driverOptions = useMemo(() => (
+    (Array.isArray(driverMasterList) ? driverMasterList : [])
+      .filter(d => d.driver_name && d.status === "Active")
+      .map(d => ({ value: d.driver_name, label: d.driver_name, subLabel: [d.mobile_no, d.driving_licence_no].filter(Boolean).join(" · ") }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }))
+  ), [driverMasterList])
 
   // ── Pending ────────────────────────────────────────────────────────────────
   const {
@@ -433,70 +512,86 @@ export default function GateInPage() {
     return map
   }, [skuDetailsData])
 
+  const skuGrossWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          // Same rule as Plan Vehicle: the SKU's gross weight, else its plain weight when gross isn't set.
+          const gross = parseFloat(sku.gross_weight) > 0 ? sku.gross_weight : sku.sku_weight
+          map.set(sku.sku_name.trim().toLowerCase(), gross ? String(gross) : "")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+
 
 
   // ── Select helpers ─────────────────────────────────────────────────────────
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Pending table: one row per vehicle/date group, with shared column search / sort / totals ──
+  // Session-scoped (usePersistedFilters): survives refresh, cleared on a new session. Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("gate-in", {
+    quickSearch: "",
+    vehicleFilter: "ALL",
+    driverFilter: "ALL",
+    customerFilter: "ALL",
+  })
+  const { quickSearch, vehicleFilter, driverFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setVehicleFilter = (v: string) => patchListView({ vehicleFilter: v })
+  const setDriverFilter = (v: string) => patchListView({ driverFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts pendingRecords by any field key
-  const getSortValue = (record: any, colId: string): string => {
-    if (colId === "vehicle_no") {
-      return String(record.draft_data?.vehicleNumber || "—")
-    }
-    if (colId === "driver_name") {
-      return String(record.draft_data?.driverName || "—")
-    }
-    if (colId === "saved_at") {
-      return record.saved_at ? new Date(record.saved_at).toISOString() : ""
-    }
-    const directVal = record[colId]
-    if (directVal !== undefined && directVal !== null && directVal !== "") return String(directVal)
-    return "—"
-  }
-
-  const sortedPendingRecords = useMemo(() => {
-    if (!pendingSortField || !pendingRecords || pendingRecords.length === 0) return pendingRecords
-    return [...pendingRecords].sort((a: any, b: any) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [pendingRecords, pendingSortField, pendingSortDir])
-
-  const groupedPendingRecords = useMemo(() => {
-    const groups = new Map<string, { vehicleNumber: string; date: string; records: any[] }>()
-    for (const record of sortedPendingRecords) {
+  const allGroups = useMemo<GateGroup[]>(() => {
+    const groups = new Map<string, GateGroup>()
+    for (const record of pendingRecords) {
       const vehicleNo = record.draft_data?.vehicleNumber || "—"
       const dateOnly = record.saved_at
         ? new Date(record.saved_at).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
         : "—"
       const key = `${vehicleNo}|${dateOnly}`
-      if (!groups.has(key)) groups.set(key, { vehicleNumber: vehicleNo, date: dateOnly, records: [] })
-      groups.get(key)!.records.push(record)
+      if (!groups.has(key)) groups.set(key, { key, vehicleNumber: vehicleNo, date: dateOnly, records: [], first: record, orderKeys: [] })
+      const g = groups.get(key)!
+      g.records.push(record)
+      g.orderKeys.push(record.order_key)
     }
     return Array.from(groups.values())
-  }, [sortedPendingRecords])
+  }, [pendingRecords])
+
+  const uniqueVehicles = useMemo(() => Array.from(new Set(allGroups.map(g => g.first.draft_data?.vehicleNumber).filter(Boolean))).sort() as string[], [allGroups])
+  const uniqueDrivers = useMemo(() => Array.from(new Set(allGroups.map(g => g.first.draft_data?.driverName).filter(Boolean))).sort() as string[], [allGroups])
+  const uniqueCustomers = useMemo(() => Array.from(new Set(allGroups.flatMap(g => g.records.map((r: any) => r.party_name)).filter(Boolean))).sort() as string[], [allGroups])
+
+  const baseFilter = useCallback((g: GateGroup) => {
+    if (vehicleFilter !== "ALL" && g.first.draft_data?.vehicleNumber !== vehicleFilter) return false
+    if (driverFilter !== "ALL" && g.first.draft_data?.driverName !== driverFilter) return false
+    if (customerFilter !== "ALL" && !g.records.some((r: any) => r.party_name === customerFilter)) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [
+        ...g.orderKeys,
+        g.first.draft_data?.vehicleNumber,
+        g.first.draft_data?.driverName,
+        g.first.username,
+        ...g.records.map((r: any) => r.party_name),
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  }, [vehicleFilter, driverFilter, customerFilter, quickSearch])
+
+  const table = useStageTable<GateGroup>({ rows: allGroups, columns: GATE_TABLE_COLUMNS, baseFilter, persistKey: "gate-in" })
+  const groupedPendingRecords = table.rows
+
+  const activeFiltersCount =
+    (vehicleFilter !== "ALL" ? 1 : 0) + (driverFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ vehicleFilter: "ALL", driverFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
 
   const [visibleColumns, setVisibleColumns] = usePersistedColumns("gate-in", ["partySoDate", "orderNo", "vehicle_no", "driver_name", "saved_by", "saved_at", "products"])
   const [columnOrder, setColumnOrder] = useColumnOrder("gate-in", PAGE_COLUMNS.map(c => c.id))
@@ -511,38 +606,20 @@ export default function GateInPage() {
     setColumnOrder([...newVisibleOrder, ...hiddenCols])
   }, [columnOrder, visibleColumns, setColumnOrder])
 
-  const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    vehicle_no:  "vehicle_no",
-    driver_name: "driver_name",
-    saved_by:    "saved_by",
-    saved_at:    "saved_at",
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedRows.length === pendingRecords.length) setSelectedRows([])
-    else setSelectedRows(pendingRecords.map((r: any) => r.order_key))
-  }
-
-  const toggleRow = (key: string) => {
-    setSelectedRows(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    )
-  }
-
-  // ── Open dialog (bulk, from toolbar) ───────────────────────────────────────
-  const handleOpenSelectedDialog = () => {
-    const selectedGroups = groupedPendingRecords.filter(group =>
-      group.records.some((r: any) => selectedRows.includes(r.order_key))
-    )
-    if (selectedGroups.length === 0) return
-
-    const groupRecords = selectedGroups.flatMap(group => group.records)
-    const groupKeys = groupRecords.map((r: any) => r.order_key)
-    handleOpenDialog(groupRecords[0], groupKeys, groupRecords)
+  // ── Open the Gate In form for a clicked row (its whole DO group) ──────────
+  const openGateInGroup = (group: { records: any[] }) => {
+    if (isReadOnly) return
+    const groupRecs = group.records
+    if (groupRecs.length === 0) return
+    handleOpenDialog(groupRecs[0], groupRecs.map((r: any) => r.order_key), groupRecs)
+    setEditableVehicle(groupRecs[0]?.draft_data?.vehicleNumber || "")
+    setEditableDriver(groupRecs[0]?.draft_data?.driverName || "")
   }
 
   // ── Open dialog ────────────────────────────────────────────────────────────
   const handleOpenDialog = (record: any, groupKeys: string[] = [record.order_key], groupRecords: any[] = [record]) => {
+    refreshUser?.()
+    setRevertRemarks("")
     setSelectedRecord(record)
     setSelectedGroupKeys(groupKeys)
     setSelectedGroupRecords(groupRecords)
@@ -588,6 +665,15 @@ export default function GateInPage() {
     setName: (n: string) => void,
     setFile: (f: File | null) => void
   ) => {
+    // HEIC from iPhones/Windows often has an empty MIME type, so fall back to the extension.
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type) && !ALLOWED_IMAGE_EXTENSIONS.test(file.name)) {
+      toast({ title: "Invalid file type", description: "Only JPG, PNG, WEBP or HEIC images are allowed.", variant: "destructive" })
+      return
+    }
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      toast({ title: "File too large", description: "Maximum file size is 15 MB.", variant: "destructive" })
+      return
+    }
     if (currentPreview.startsWith("blob:")) URL.revokeObjectURL(currentPreview)
     const previewUrl = URL.createObjectURL(file)
     setPreview(previewUrl)
@@ -613,7 +699,7 @@ export default function GateInPage() {
     setUploadingField(fieldKey)
     try {
       const uploadFile = await compressImageForUpload(file)
-      const res = await orderApi.uploadFile(uploadFile)
+      const res = await orderApi.uploadFile(uploadFile, file)
       if (res.success) {
         return res.data.url
       } else {
@@ -626,9 +712,104 @@ export default function GateInPage() {
     }
   }
 
+
+
+  
+const buildSlipParties = () => {
+    const partyGroups: Record<string, any[]> = {}
+    selectedGroupRecords.forEach(r => {
+      const pName = r.party_name || "Unknown Party"
+      if (!partyGroups[pName]) partyGroups[pName] = []
+      partyGroups[pName].push(r)
+    })
+
+    return Object.entries(partyGroups).map(([party, partyRecords]) => {
+      const firstRec = partyRecords[0]
+      const draft = firstRec.draft_data || {}
+      
+      const referenceLabel = firstRec.order_through === "Broker" ? "Broker" : firstRec.order_through === "Salesperson" ? "Salesperson" : ""
+      const referenceValue = firstRec.order_through === "Broker" 
+        ? (firstRec.broker_name || "—") 
+        : firstRec.order_through === "Salesperson" 
+          ? (firstRec.salesperson_name || "—") 
+          : "Direct"
+
+      return {
+        party,
+        commitmentNo: firstRec.base_do_no || firstRec.order_key || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        referenceLabel,
+        referenceValue,
+        place: firstRec.delivery_address || "—",
+        partyMo: firstRec.whatsapp_no || "—",
+        status: "Original",
+        processId: firstRec.process_id || "—",
+        punchBy: draft.order_punch_user || "—",
+        punchAt: draft.order_punch_at || null,
+        preApproveBy: draft.pre_approval_user || "—",
+        preApproveAt: draft.pre_approval_at || null,
+        approveBy: draft.order_approval_user || "—",
+        approveAt: draft.order_approval_at || null,
+        vehicleNo: firstRec.vehicle_no || firstRec.registration_no || "",
+        driverName: firstRec.driver_name || "",
+        driverMobile: firstRec.driver_mobile_no || "",
+        saudaNo: firstRec.manual_sauda_no || "",
+        products: partyRecords.map(r => {
+          const qty = parseFloat(r.qty_to_be_dispatched) || 0
+          const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+          const skuGrossWt = parseFloat(skuGrossWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+          
+          return {
+            productName: r.product_name || "—",
+            uom: r.uom || "PCS",
+            qty,
+            weight: skuWt * qty,
+            grossWeight: (skuGrossWt > 0 ? skuGrossWt : skuWt) * qty
+          }
+        })
+      }
+    })
+  }
+
+  const handleDownloadSlip = () => {
+    if (!selectedRecord) return
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf")
+  }
+
+  const handlePrintSlip = () => {
+    if (!selectedRecord) return
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf", { print: true })
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!selectedRecord) return
+
+    if (!editableVehicle.trim()) {
+      toast({
+        title: "Vehicle No. is required",
+        description: "Select a Vehicle No. before completing Gate In (mandatory when only a Transporter was chosen at Plan Vehicle).",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (isPhotosMandatory) {
+      const missing: string[] = []
+      if (!frontVehicleFile && !frontVehicleImage) missing.push("Front Vehicle Image")
+      if (!backVehicleFile && !backVehicleImage) missing.push("Back Vehicle Image")
+      if (!driverPhotoFile && !driverPhoto) missing.push("Driver Photo")
+      if (!gatepassPhotoFile && !gatepassPhoto) missing.push("Vehicle Gate Pass")
+
+      if (missing.length > 0) {
+        toast({
+          title: "Photos are Compulsory",
+          description: `Please upload all required photos before confirming Gate In: ${missing.join(", ")}.`,
+          variant: "destructive"
+        })
+        return
+      }
+    }
 
     setIsProcessing(true)
     try {
@@ -644,7 +825,18 @@ export default function GateInPage() {
         uploadSelectedImage(gatepassPhotoFile, "gatepass"),
       ])
 
+
+      // First update draft with new vehicle/driver
+      if (editableVehicle || editableDriver) {
+        await Promise.all(selectedGroupKeys.map(orderKey => {
+          const rec = selectedGroupRecords.find(r => r.order_key === orderKey)
+          const newDraft = { ...(rec?.draft_data || {}), vehicleNumber: editableVehicle, driverName: editableDriver }
+          return draftApi.save(user?.username || "system", orderKey, newDraft)
+        }))
+      }
+
       const results = await Promise.allSettled(
+
         selectedGroupKeys.map(orderKey =>
           gateInApi.submit({
             orderKey,
@@ -653,6 +845,8 @@ export default function GateInPage() {
             backVehicleImage: uploadedBackVehicleImage,
             driverPhoto: uploadedDriverPhoto,
             gatepassPhoto: uploadedGatepassPhoto,
+            vehicleNumber: editableVehicle,
+            driverName: editableDriver,
           }).then(res => {
             if (!res.success) throw new Error(res.message)
             return orderKey
@@ -680,10 +874,52 @@ export default function GateInPage() {
 
       toast({ title: "Gate-In Submitted", description: `${succeeded.length > 1 ? `Orders ${succeeded.join(", ")}` : `Order ${succeeded[0]}`} gate-in recorded.` })
       setIsDialogOpen(false)
-      setSelectedRows([])
     } catch (err: any) {
       await refetchPending()
       toast({ title: "Submission Failed", description: err?.message || "Could not submit gate-in.", variant: "destructive" })
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // ── Revert to Plan Vehicle (one stage back), remarks mandatory ────────────
+  const handleRevert = async () => {
+    if (!revertRemarks.trim()) {
+      toast({ title: "Validation Error", description: "Revert remarks are required", variant: "destructive" })
+      return
+    }
+    setIsProcessing(true)
+    try {
+      const results = await Promise.allSettled(
+        selectedGroupKeys.map(orderKey =>
+          gateInApi.revertToPlanVehicle(orderKey, revertRemarks.trim()).then(res => {
+            if (!res.success) throw new Error(res.message)
+            return orderKey
+          })
+        )
+      )
+      const failed = results.map((r, i) => (r.status === "rejected" ? selectedGroupKeys[i] : null)).filter(Boolean) as string[]
+      const succeeded = results.map((r, i) => (r.status === "fulfilled" ? selectedGroupKeys[i] : null)).filter(Boolean) as string[]
+
+      await refetchPending()
+      queryClient.invalidateQueries({ queryKey: ["plan-vehicle-pending"] })
+
+      if (failed.length > 0) {
+        const firstError = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined
+        toast({
+          title: "Revert Incomplete",
+          description: failed.length === selectedGroupKeys.length
+            ? (firstError?.reason?.message || "Could not revert to Plan Vehicle.")
+            : `Reverted: ${succeeded.join(", ")}. Failed: ${failed.join(", ")}.`,
+          variant: "destructive",
+        })
+        return
+      }
+      toast({ title: "Revert Successful", description: `${succeeded.length > 1 ? `Orders ${succeeded.join(", ")}` : `Order ${succeeded[0]}`} sent back to Plan Vehicle.` })
+      setRevertRemarks("")
+      setIsDialogOpen(false)
+    } catch (err: any) {
+      toast({ title: "Revert Failed", description: err?.message || "Could not revert to Plan Vehicle.", variant: "destructive" })
     } finally {
       setIsProcessing(false)
     }
@@ -704,7 +940,9 @@ export default function GateInPage() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <WorkflowStageShell
-      title="Gate In"
+      persistKey="gate-in"
+      rememberTab={false}
+      title="Stage 6: Gate In"
       description="Record vehicle gate-in photos before Actual Dispatch confirmation."
       pendingCount={pendingRecords.length}
       historyData={[]}
@@ -714,10 +952,26 @@ export default function GateInPage() {
       historyContent={
         <StageHistoryTab
           queryKeyPrefix="gate-in-history"
-          getHistoryApi={(params: any) => gateInApi.getHistory({
-            page: params.page,
-            limit: params.limit,
-          })}
+          getHistoryApi={async (params: any) => {
+            const res = await gateInApi.getHistory({ page: params.page, limit: params.limit })
+            const list = res?.data?.records
+            if (!Array.isArray(list)) return res
+            // Shape each record for the "View" audit dialog (draft_data carries the vehicle / driver chosen at Gate In).
+            return {
+              ...res,
+              data: {
+                ...res.data,
+                records: list.map((r: any) => ({
+                  ...r,
+                  gate_in_do: r.order_key,
+                  gate_in_vehicle_no: r.draft_data?.vehicleNumber ?? null,
+                  gate_in_driver_name: r.draft_data?.driverName ?? null,
+                  gate_in_by: r.username,
+                  gate_in_at: r.submitted_at,
+                })),
+              },
+            }
+          }}
           filterValues={{
             search: "",
             partyName: "all",
@@ -726,7 +980,7 @@ export default function GateInPage() {
           }}
           activeTab={activeTab}
           stageName="Gate In"
-          stageLevel={1}
+          stageLevel={12}
           remarksColName="Remarks"
           orderListKey="records"
           mapOrderNo={(r: any) => r.order_key}
@@ -737,32 +991,139 @@ export default function GateInPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex justify-end gap-2">
-          <Button
-            onClick={handleOpenSelectedDialog}
-            disabled={selectedRows.length === 0 || isReadOnly}
-            className="bg-blue-600 hover:bg-blue-700"
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Gate In List"
+            shown={groupedPendingRecords.length}
+            total={allGroups.length}
+            description="Vehicles waiting for gate-in photos"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Vehicle, Driver..."
           >
-            <Truck className="mr-2 h-4 w-4" />
-            Gate In Selected ({selectedRows.length})
-          </Button>
+            <StageToolbar
+              shown={groupedPendingRecords.length}
+              total={allGroups.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllFilters}
+              filters={
+                <>
+                  <StageFilterSelect value={vehicleFilter} onChange={setVehicleFilter} allLabel="All Vehicles" options={uniqueVehicles} />
+                  <StageFilterSelect value={driverFilter} onChange={setDriverFilter} allLabel="All Drivers" options={uniqueDrivers} />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                  <StageDivider />
+                  <StageColumnsMenu
+                    columns={[...PAGE_COLUMNS]}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={(isAdmin || isFeatureEnabled('can_toggle_columns'))}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(vehicleFilter !== "ALL" ? [{ label: `Vehicle: ${vehicleFilter}`, onClear: () => setVehicleFilter("ALL") }] : []),
+                ...(driverFilter !== "ALL" ? [{ label: `Driver: ${driverFilter}`, onClear: () => setDriverFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+            <div className="hidden overflow-x-auto md:block">
+              <Table>
+              <StageTableHeaderRows
+                columns={orderedVisibleCols.map(c => GATE_TABLE_COLUMNS.find(t => t.id === c.id)!)}
+                table={table}
+                alwaysShowTotals
+                decimals={GATE_DECIMALS}
+                tones={TOTAL_COL_TONES}
+                onReorder={handleColumnReorder}
+                dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+              />
+            <TableBody>
+              {isPendingLoading && pendingRecords.length === 0 ? (
+                [...Array(5)].map((_, i) => (
+                  <TableRow key={i} className="opacity-40">
+                    {[...Array(orderedVisibleCols.length + 1)].map((_, j) => (
+                      <TableCell key={j} className="py-4">
+                        <div className="h-4 w-full bg-slate-200 animate-pulse rounded" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : pendingRecords.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
+                    No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
+                  </TableCell>
+                </TableRow>
+              ) : groupedPendingRecords.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                    <p className="font-medium text-slate-500">No matching records found</p>
+                    <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                      Clear Filters
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                groupedPendingRecords.map(group => {
+                  const first = group.records[0]
+                  const draft = first.draft_data || {}
+                  const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
+                  const orderKeys = group.records.map((r: any) => r.order_key)
+                  return (
+                    <TableRow
+                      key={orderKeys.join(",")}
+                      className="transition-colors cursor-pointer hover:bg-blue-50/50"
+                      onClick={() => openGateInGroup(group)}
+                    >
+                      {orderedVisibleCols.map(col => {
+                        switch (col.id) {
+                          case "orderNo":
+                            return (
+                              <TableCell key={col.id} className="px-4 text-xs text-blue-700 font-bold">
+                                {orderKeys.map(k => <div key={k} className="whitespace-nowrap">{k}</div>)}
+                              </TableCell>
+                            )
+                          case "vehicle_no":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{draft.vehicleNumber || "—"}</TableCell>
+                          case "driver_name":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{draft.driverName || "—"}</TableCell>
+                          case "saved_by":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{first.username}</TableCell>
+                          case "saved_at":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right tabular-nums">{group.date}</TableCell>
+                          case "products":
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{fmtNum(totalProducts, 0)}</TableCell>
+                          default: {
+                            const fieldName = COL_FIELD_MAP[col.id as ColId]
+                            if (!fieldName) return null
+                            const val = first[fieldName]
+                            if (DATE_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right tabular-nums">{formatDate(val)}</TableCell>
+                            }
+                            if (BOOL_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
+                            }
+                            if (NUMBER_COL_IDS.has(col.id as ColId)) {
+                              return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600 text-right font-mono tabular-nums">{isAmountCol(col.id, col.label) ? fmtAmount(val, GATE_DECIMALS[col.id] ?? 2) : fmtNum(val, GATE_DECIMALS[col.id] ?? 2)}</TableCell>
+                            }
+                            return <TableCell key={col.id} className="whitespace-nowrap px-4 text-xs text-slate-600">{val ?? "—"}</TableCell>
+                          }
+                        }
+                      })}
+                    </TableRow>
+                  )
+                })
+              )}
+            </TableBody>
+          </Table>
+            </div>
 
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="bg-transparent">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={[...PAGE_COLUMNS]} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-        {/* Pending cards for mobile */}
-        <div className="md:hidden space-y-3">
+            <div className="space-y-3 p-3 md:hidden">
           {isPendingLoading && pendingRecords.length === 0 ? (
             [...Array(3)].map((_, i) => (
               <Card key={i} className="border-slate-200 p-4 shadow-sm">
@@ -778,30 +1139,27 @@ export default function GateInPage() {
               No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
             </Card>
           ) : (
-            groupedPendingRecords.map(group => {
+            groupedPendingRecords.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-slate-500">No matching records found</p>
+              <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+            </div>
+          ) : groupedPendingRecords.map(group => {
               const first = group.records[0]
               const draft = first.draft_data || {}
               const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
               const orderKeys = group.records.map((r: any) => r.order_key)
-              const allSelected = orderKeys.every(k => selectedRows.includes(k))
               return (
                 <Card
                   key={orderKeys.join(",")}
-                  className={`gap-0 border-slate-200 p-4 shadow-sm ${allSelected ? "bg-blue-50 border-blue-200" : "bg-white"}`}
+                  className="gap-0 border-slate-200 p-4 shadow-sm bg-white cursor-pointer hover:bg-blue-50/50"
+                  onClick={() => openGateInGroup(group)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">DO Number(s)</div>
                       <div className="mt-1 font-black text-blue-700">{orderKeys.join(", ")}</div>
                     </div>
-                    <Checkbox
-                      checked={allSelected}
-                      onCheckedChange={() => {
-                        if (allSelected) setSelectedRows(prev => prev.filter(k => !orderKeys.includes(k)))
-                        else setSelectedRows(prev => [...new Set([...prev, ...orderKeys])])
-                      }}
-                      className="mt-1"
-                    />
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -831,134 +1189,20 @@ export default function GateInPage() {
             })
           )}
         </div>
-
-        {/* Pending table */}
-        <Card className="hidden md:block border-none shadow-sm overflow-auto max-h-150">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={pendingRecords.length > 0 && selectedRows.length === pendingRecords.length}
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map(col => {
-                    const sf = COL_SORT_FIELD[col.id]
-                    return (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
-                        onClick={sf ? () => handlePendingSort(sf) : undefined}
-                      >
-                        {col.label}{sf && <PendingSortIcon field={sf} />}
-                      </SortableTableHead>
-                    )
-                  })}
-                </ColumnDragProvider>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPendingLoading && pendingRecords.length === 0 ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="opacity-40">
-                    {[...Array(orderedVisibleCols.length + 1)].map((_, j) => (
-                      <TableCell key={j} className="py-4">
-                        <div className="h-4 w-full bg-slate-200 animate-pulse rounded" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : pendingRecords.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-8 text-muted-foreground">
-                    No pending gate-ins. Orders saved as draft in Actual Dispatch will appear here.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                groupedPendingRecords.map(group => {
-                  const first = group.records[0]
-                  const draft = first.draft_data || {}
-                  const totalProducts = first.draft_data?.dialogSelectedProducts?.length || 0
-                  const orderKeys = group.records.map((r: any) => r.order_key)
-                  const allSelected = orderKeys.every(k => selectedRows.includes(k))
-                  return (
-                    <TableRow
-                      key={orderKeys.join(",")}
-                      className={`transition-colors cursor-pointer hover:bg-blue-50/50 ${allSelected ? "bg-blue-50" : ""}`}
-                    >
-                      <TableCell className="text-center">
-                        <Checkbox
-                          checked={allSelected}
-                          onCheckedChange={() => {
-                            if (allSelected) setSelectedRows(prev => prev.filter(k => !orderKeys.includes(k)))
-                            else setSelectedRows(prev => [...new Set([...prev, ...orderKeys])])
-                          }}
-                        />
-                      </TableCell>
-                      {orderedVisibleCols.map(col => {
-                        switch (col.id) {
-                          case "orderNo":
-                            return (
-                              <TableCell key={col.id} className="text-center text-xs text-blue-700 font-bold">
-                                {orderKeys.map(k => <div key={k} className="whitespace-nowrap">{k}</div>)}
-                              </TableCell>
-                            )
-                          case "vehicle_no":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.vehicleNumber || "—"}</TableCell>
-                          case "driver_name":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{draft.driverName || "—"}</TableCell>
-                          case "saved_by":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{first.username}</TableCell>
-                          case "saved_at":
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{group.date}</TableCell>
-                          case "products":
-                            return <TableCell key={col.id} className="text-center"><Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-200 uppercase font-black tracking-tighter">{totalProducts} item(s)</Badge></TableCell>
-                          default: {
-                            const fieldName = COL_FIELD_MAP[col.id as ColId]
-                            if (!fieldName) return null
-                            const val = first[fieldName]
-                            if (DATE_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{formatDate(val)}</TableCell>
-                            }
-                            if (BOOL_COL_IDS.has(col.id as ColId)) {
-                              return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ? "Yes" : "No"}</TableCell>
-                            }
-                            return <TableCell key={col.id} className="whitespace-nowrap text-center text-xs text-slate-600">{val ?? "—"}</TableCell>
-                          }
-                        }
-                      })}
-                    </TableRow>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
+          </CardContent>
         </Card>
 
         {/* Pagination */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span>
-            {pendingResult?.pagination?.totalPages && (
-              <> of <span className="text-blue-600 px-1">{pendingResult.pagination.totalPages}</span></>
-            )}
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingResult?.pagination?.total || 0}</span> items
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30">
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold">
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingResult?.pagination?.totalPages || 1}
+          total={pendingResult?.pagination?.total || 0}
+          noun="Items"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1}
+          nextDisabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
+        />
       </div>
 
       {/* ── Gate-In Dialog ─────────────────────────────────────────────────── */}
@@ -966,13 +1210,25 @@ export default function GateInPage() {
         <DialogContent className="sm:max-w-[90vw] max-w-[95vw]! max-h-[95vh] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] p-0">
           <div className="p-8">
             <DialogHeader className="border-b pb-6 mb-6">
-              <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words flex items-center gap-3">
-                <Truck className="h-6 w-6 text-blue-600 shrink-0" />
-                Gate In — {selectedGroupKeys.join(", ")}
-              </DialogTitle>
-              <DialogDescription className="text-slate-500 mt-1.5">
-                Upload vehicle photos for this order. Saved draft details are shown below.
-              </DialogDescription>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 sm:pr-10">
+                <div className="min-w-0">
+                  <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 leading-tight break-words flex items-center gap-3">
+                    <Truck className="h-6 w-6 text-blue-600 shrink-0" />
+                    Gate In — {selectedGroupKeys.join(", ")}
+                  </DialogTitle>
+                  <DialogDescription className="text-slate-500 mt-1.5">
+                    Upload vehicle photos for this order. Saved draft details are shown below.
+                  </DialogDescription>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button type="button" variant="outline" onClick={handlePrintSlip} className="border-blue-600 text-blue-600 hover:bg-blue-50">
+                    <Printer className="mr-2 h-4 w-4" /> Print Gatepass
+                  </Button>
+                  <Button type="button" onClick={handleDownloadSlip} className="bg-blue-600 hover:bg-blue-700 text-white">
+                    <Download className="mr-2 h-4 w-4" /> Download PDF
+                  </Button>
+                </div>
+              </div>
             </DialogHeader>
 
             {selectedRecord && (
@@ -1001,18 +1257,37 @@ export default function GateInPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                       { label: "DO No.", value: selectedRecord.order_key },
-                      { label: "Vehicle No.", value: getDraftField(selectedRecord, "vehicleNumber") },
-                      { label: "Driver Name", value: getDraftField(selectedRecord, "driverName") },
+                    ].map(f => (
+                      <div key={f.label} className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{f.label}</span>
+                        <span className="text-sm font-bold text-slate-800 mt-0.5">{f.value || "—"}</span>
+                      </div>
+                    ))}
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Vehicle No. <span className="text-red-500">*</span></span>
+                      <Combobox options={vehicleOptions} value={editableVehicle} onValueChange={setEditableVehicle} placeholder="Select Vehicle..." />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Driver Name (Optional)</span>
+                      <Combobox options={driverOptions} value={editableDriver} onValueChange={setEditableDriver} placeholder="Select Driver..." />
+                    </div>
+                    {[
+
                       { label: "Saved By", value: selectedRecord.username },
-                      { label: "Saved At", value: formatDate(selectedRecord.saved_at) },
-                      { label: "Transporter", value: getDraftField(selectedRecord, "loadData.transporterName") },
+                      { label: "Saved At", value: fmtDateTime(selectedRecord.saved_at) },
+                      {
+                        label: "Transporter",
+                        value: getDraftField(selectedRecord, "transporterName") !== "—"
+                          ? getDraftField(selectedRecord, "transporterName")
+                          : getDraftField(selectedRecord, "loadData.transporterName"),
+                      },
                       {
                         label: "Gross Weight",
-                        value: getDraftField(selectedRecord, "totalPackingWeight") !== "—"
+                        value: fmtWeight(getDraftField(selectedRecord, "totalPackingWeight") !== "—"
                           ? getDraftField(selectedRecord, "totalPackingWeight")
-                          : getDraftField(selectedRecord, "loadData.grossWeight")
+                          : getDraftField(selectedRecord, "loadData.grossWeight"), wd)
                       },
-                      { label: "Tare Weight", value: getDraftField(selectedRecord, "loadData.tareWeight") },
+                      { label: "Tare Weight", value: fmtWeight(getDraftField(selectedRecord, "loadData.tareWeight"), wd) },
                       { label: "RST No.", value: getDraftField(selectedRecord, "loadData.rstNo") },
                     ].map(f => (
                       <div key={f.label} className="flex flex-col">
@@ -1035,154 +1310,105 @@ export default function GateInPage() {
                       {/* Desktop table */}
                       <Table className="hidden md:table">
                         <TableHeader className="bg-slate-50">
+                          <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                            <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({selectedGroupRecords.length})</TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => {
+                                    const grossWt = parseFloat(skuGrossWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                    return sum + grossWt * qty
+                                  }, 0), wd)}
+                            </TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => {
+                                    const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
+                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
+                                    return sum + skuWt * qty
+                                  }, 0), wd)}
+                            </TableCell>
+                            <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                              {fmtNum(selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0))}
+                            </TableCell>
+                          </TableRow>
                           <TableRow>
-                            <TableHead className="text-[10px] uppercase font-black h-10 pl-4">PRODUCT NAME</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT (KGS)</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY DISPATCH</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                            <TableHead className="text-[10px] uppercase font-black text-center h-10 pr-4">TAXABLE AMOUNT</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap">Product Name</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[130px]">Gross Weight (KGS)</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[130px]">Weight (KGS)</TableHead>
+                            <TableHead className="px-4 whitespace-nowrap text-right min-w-[150px]">Actual Qty Dispatch</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {selectedGroupRecords.map((record: any, idx: number) => {
-                            const rate = ((parseFloat(record.rate_of_material) || 0) * (parseFloat(record.nos_per_main_uom) || 1)) + (parseFloat(record.freight_rate) || 0)
-                            const rateWoGst = rate ? parseFloat((rate / 1.05).toFixed(2)) : 0
                             const qty = parseFloat(record.qty_to_be_dispatched) || 0
-                            const taxableAmount = rateWoGst * qty
                             const skuWt = parseFloat(skuWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0
                             const totalWt = skuWt * qty
+                            const grossWtRow = (parseFloat(skuGrossWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0) * qty
                             return (
                               <TableRow key={idx} className="h-14">
-                                <TableCell className="p-2 pl-4">
+                                <TableCell className="px-4 py-2">
                                   <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</span>
                                 </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-mono font-bold text-slate-700">
-                                  {totalWt ? totalWt.toFixed(4) : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {grossWtRow ? fmtWeight(grossWtRow, wd) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2">
-                                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                    {qty || "—"}
-                                  </Badge>
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-700">
+                                  {totalWt ? fmtWeight(totalWt, wd) : "—"}
                                 </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                  {rate ? `₹${rate.toFixed(2)}` : "—"}
-                                </TableCell>
-                                <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                  {rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}
-                                </TableCell>
-                                <TableCell className="text-center p-2 pr-4 text-xs font-bold text-slate-700">
-                                  {taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}
+                                <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-slate-900">
+                                  {qty ? fmtNum(qty, 0) : "—"}
                                 </TableCell>
                               </TableRow>
                             )
                           })}
-                          <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                            <TableCell className="text-[10px] uppercase font-black text-slate-900 pl-4">Total</TableCell>
-                            <TableCell className="text-center">
-                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                                {(() => {
-                                  const total = selectedGroupRecords.reduce((sum, r) => {
-                                    const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
-                                    const qty = parseFloat(r.qty_to_be_dispatched) || 0
-                                    return sum + skuWt * qty
-                                  }, 0)
-                                  return total.toFixed(4)
-                                })()}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                                {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell />
-                            <TableCell />
-                            <TableCell className="text-center pr-4 text-xs text-blue-700 font-black">
-                              ₹{selectedGroupRecords.reduce((sum, r) => {
-                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
-                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
-                                return sum + rateWoGst * qty
-                              }, 0).toFixed(2)}
-                            </TableCell>
-                          </TableRow>
                         </TableBody>
                       </Table>
 
                       {/* Mobile cards */}
                       <div className="space-y-3 p-3 md:hidden">
                         {selectedGroupRecords.map((record: any, idx: number) => {
-                          const rate = ((parseFloat(record.rate_of_material) || 0) * (parseFloat(record.nos_per_main_uom) || 1)) + (parseFloat(record.freight_rate) || 0)
-                          const rateWoGst = rate ? parseFloat((rate / 1.05).toFixed(2)) : 0
                           const qty = parseFloat(record.qty_to_be_dispatched) || 0
-                          const taxableAmount = rateWoGst * qty
                           const skuWt = parseFloat(skuWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0
                           const totalWt = skuWt * qty
+                          const grossWtRow = (parseFloat(skuGrossWeightMap.get(record.product_name?.trim().toLowerCase()) || "") || 0) * qty
                           return (
                             <div key={idx} className="rounded-xl border bg-white p-3 space-y-3">
                               <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{record.product_name || "—"}</p>
                               <div className="grid grid-cols-2 gap-3 text-xs">
                                 <div className="rounded-md bg-slate-50 p-2">
+                                  <p className="text-[10px] font-black uppercase text-slate-400">Gross Weight (KGS)</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{grossWtRow ? fmtWeight(grossWtRow, wd) : "—"}</p>
+                                </div>
+                                <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{totalWt ? totalWt.toFixed(4) : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{totalWt ? fmtWeight(totalWt, wd) : "—"}</p>
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-2">
                                   <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                                  <p className="mt-1 font-mono font-bold text-blue-700">{qty || "—"}</p>
-                                </div>
-                                <div className="rounded-md bg-slate-50 p-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{rate ? `₹${rate.toFixed(2)}` : "—"}</p>
-                                </div>
-                                <div className="rounded-md bg-slate-50 p-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{rateWoGst ? `₹${rateWoGst.toFixed(2)}` : "—"}</p>
-                                </div>
-                                <div className="rounded-md bg-slate-50 p-2 col-span-2">
-                                  <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount</p>
-                                  <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
+                                  <p className="mt-1 font-mono tabular-nums font-bold text-slate-900">{qty ? fmtNum(qty, 0) : "—"}</p>
                                 </div>
                               </div>
                             </div>
                           )
                         })}
-                        <div className="grid grid-cols-3 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
+                        <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
                           <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                            <p className="mt-1 font-black text-blue-700">
-                              {selectedGroupRecords.reduce((sum, r) => sum + (parseFloat(r.qty_to_be_dispatched) || 0), 0)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
-                            <p className="mt-1 font-black text-blue-700">
+                            <p className="text-[9px] uppercase font-black text-slate-500">Total Weight (KGS)</p>
+                            <p className="mt-1 font-mono tabular-nums font-black text-blue-700">
                               {(() => {
                                 const total = selectedGroupRecords.reduce((sum, r) => {
                                   const skuWt = parseFloat(skuWeightMap.get(r.product_name?.trim().toLowerCase()) || "") || 0
                                   const qty = parseFloat(r.qty_to_be_dispatched) || 0
                                   return sum + skuWt * qty
                                 }, 0)
-                                return total.toFixed(4)
+                                return fmtWeight(total, wd)
                               })()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase font-black text-slate-500">Taxable Amount</p>
-                            <p className="mt-1 font-black text-blue-700">
-                              ₹{selectedGroupRecords.reduce((sum, r) => {
-                                const rate = ((parseFloat(r.rate_of_material) || 0) * (parseFloat(r.nos_per_main_uom) || 1)) + (parseFloat(r.freight_rate) || 0)
-                                const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-                                const qty = parseFloat(r.qty_to_be_dispatched) || 0
-                                return sum + rateWoGst * qty
-                              }, 0).toFixed(2)}
                             </p>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <GateInGSTSummary records={selectedGroupRecords} />
+                    <OrderChargesPanel orderNos={Array.from(new Set(selectedGroupRecords.map((r: any) => String(r.so_no || "").replace(/(?<=\d)[A-Z].*$/, "")).filter(Boolean))) as string[]} />
                   </div>
                 )}
 
@@ -1206,7 +1432,7 @@ export default function GateInPage() {
                           { label: "Transporter", value: vehicleData.transporter },
                           { label: "GVW", value: vehicleData.gvw },
                           { label: "ULW", value: vehicleData.ulw },
-                          { label: "Passing", value: vehicleData.passing },
+                          { label: "Passing", value: gateInPassing },
                           // { 
                           //   label: "Total Product Gross Weight", 
                           //   value: getDraftField(selectedRecord, "totalPackingWeight") !== "—" 
@@ -1258,49 +1484,66 @@ export default function GateInPage() {
 
                 {/* ── Image Upload ── */}
                 <div>
-                  <h3 className="text-sm font-black uppercase tracking-widest text-slate-500 mb-4">Vehicle & Driver Photos</h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-500">Vehicle & Driver Photos</h3>
+                    {isPhotosMandatory ? (
+                      <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border-amber-300">
+                        Compulsory *
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-50 text-slate-500 border-slate-200">
+                        Optional
+                      </Badge>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <ImageUploadCard
                       label="Front Vehicle Image"
-                      capture="environment"
                       value={frontVehicleImage}
                       fileName={frontVehicleFileName}
                       isUploading={uploadingField === "front"}
+                      required={isPhotosMandatory}
                       onFile={f => selectImage(f, frontVehicleImage, setFrontVehicleImage, setFrontVehicleFileName, setFrontVehicleFile)}
                       onClear={() => clearImage(frontVehicleImage, setFrontVehicleImage, setFrontVehicleFileName, setFrontVehicleFile)}
                     />
                     <ImageUploadCard
                       label="Back Vehicle Image"
-                      capture="environment"
                       value={backVehicleImage}
                       fileName={backVehicleFileName}
                       isUploading={uploadingField === "back"}
+                      required={isPhotosMandatory}
                       onFile={f => selectImage(f, backVehicleImage, setBackVehicleImage, setBackVehicleFileName, setBackVehicleFile)}
                       onClear={() => clearImage(backVehicleImage, setBackVehicleImage, setBackVehicleFileName, setBackVehicleFile)}
                     />
                     <ImageUploadCard
                       label="Driver Photo"
-                      capture="environment"
                       value={driverPhoto}
                       fileName={driverPhotoFileName}
                       isUploading={uploadingField === "driver"}
+                      required={isPhotosMandatory}
                       onFile={f => selectImage(f, driverPhoto, setDriverPhoto, setDriverPhotoFileName, setDriverPhotoFile)}
                       onClear={() => clearImage(driverPhoto, setDriverPhoto, setDriverPhotoFileName, setDriverPhotoFile)}
                     />
                     <ImageUploadCard
                       label="Vehicle Gate Pass"
-                      capture="environment"
                       value={gatepassPhoto}
                       fileName={gatepassPhotoFileName}
                       isUploading={uploadingField === "gatepass"}
+                      required={isPhotosMandatory}
                       onFile={f => selectImage(f, gatepassPhoto, setGatepassPhoto, setGatepassPhotoFileName, setGatepassPhotoFile)}
                       onClear={() => clearImage(gatepassPhoto, setGatepassPhoto, setGatepassPhotoFileName, setGatepassPhotoFile)}
                     />
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-3">
-                    On mobile, tapping a card opens your camera directly. On desktop, it opens the file picker.
-                    All images are optional but recommended for complete gate-in records.
-                    Images are compressed and uploaded only when you confirm gate-in.
+                    On mobile, tapping a card lets you open the camera to take a photo or choose from gallery. On desktop, it opens the file manager.{" "}
+                    {isPhotosMandatory ? (
+                      <span className="font-bold text-amber-700">
+                        All 4 photos are compulsory for your user account and required before confirming Gate In.
+                      </span>
+                    ) : (
+                      <span>All images are optional but recommended for complete gate-in records.</span>
+                    )}{" "}
+                    Allowed file types: JPG, PNG, WEBP, HEIC (iPhone). Max file size: 15 MB per photo. Images are compressed and uploaded only when you confirm gate-in.
                   </p>
                 </div>
 
@@ -1308,19 +1551,28 @@ export default function GateInPage() {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-8 pb-8 flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isProcessing || isReadOnly}
-              className="bg-emerald-600 hover:bg-emerald-700 font-bold"
-            >
-              {isProcessing ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...</>
-              ) : (
-                <><CheckCircle2 className="h-4 w-4 mr-2" /> Confirm Gate In</>
-              )}
-            </Button>
+          <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              remarksPlaceholder="Enter reason for reverting to Plan Vehicle..."
+              disabled={isReadOnly}
+              revertActions={[{
+                label: isProcessing ? "Wait..." : "Revert to Plan Vehicle",
+                onClick: handleRevert,
+                disabled: isProcessing || isReadOnly || !revertRemarks.trim(),
+              }]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...</>
+                ) : (
+                  <><CheckCircle2 className="h-4 w-4 mr-2" /> Confirm Gate In</>
+                ),
+                onClick: handleSubmit,
+                disabled: isProcessing || isReadOnly,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

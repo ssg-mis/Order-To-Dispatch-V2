@@ -1,27 +1,10 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import type React from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { FileUploadField } from "@/components/file-upload-field"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Save, FileUp, Plus, Trash2, CalendarIcon } from "lucide-react"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { useToast } from "@/hooks/use-toast"
-import { useAuth } from "@/hooks/use-auth"
-import { orderApi, customerApi, depotApi, skuApi, brokerApi, salespersonApi, conversionFormulaApi } from "@/lib/api-service"
-import { AsyncCombobox } from "@/components/ui/async-combobox"
-import { format } from "date-fns"
-import { cn, fuzzyMatch } from "@/lib/utils"
 import {
   Table,
   TableBody,
@@ -30,1997 +13,435 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { OrderPunchForm } from "@/components/order-punch/order-punch-form"
+import { OrderPunchDetailModal } from "@/components/order-punch/order-punch-detail-modal"
+import { ModifyOrderDialog } from "@/components/order-punch/modify-order-dialog"
+import { Plus, RefreshCw, Pencil, CheckCircle2, Calendar as CalendarIconLucide } from "lucide-react"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/hooks/use-auth"
+import { orderApi } from "@/lib/api-service"
+import { usePersistedColumns } from "@/hooks/use-persisted-columns"
+import { useColumnOrder } from "@/hooks/use-column-order"
+import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { cn } from "@/lib/utils"
+import { fmtNum, fmtDate, fmtDateTime, fmtAmount } from "@/lib/table-format"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StageTableHeaderRows } from "@/components/stage-table-header-rows"
+import { SortableTableHead } from "@/components/ui/sortable-table-head"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import {
+  StageListHeader,
+  StageToolbar,
+  StageFilterSelect,
+  StageColumnsMenu,
+  StageDivider,
+  StageActiveChips,
+  StageSortIcon,
+  StagePagination,
+} from "@/components/stage-list"
 
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
+const STAGE_KEY = "order-punch"
+
+type ColType = "text" | "number" | "date" | "datetime"
+
+const PAGE_COLUMNS: { id: string; label: string; type: ColType; width: string }[] = [
+  { id: "do_date", label: "DO Date", type: "date", width: "w-[120px]" },
+  { id: "order_no", label: "DO No.", type: "text", width: "w-[140px]" },
+  { id: "manual_sauda_no", label: "Manual Sauda No.", type: "text", width: "w-[150px]" },
+  { id: "customer_name", label: "Customer Name", type: "text", width: "w-[220px]" },
+  { id: "total_qty_box", label: "Total Qty (Box)", type: "number", width: "w-[130px]" },
+  { id: "total_qty_kgs", label: "Total Qty (KGS)", type: "number", width: "w-[130px]" },
+  { id: "total_order_amount", label: "Total Order Amount (₹)", type: "number", width: "w-[160px]" },
+  { id: "depot_name", label: "Dispatch From (Depot)", type: "text", width: "w-[170px]" },
+  { id: "remarks", label: "Remarks", type: "text", width: "w-[200px]" },
+  { id: "broker_name", label: "Broker", type: "text", width: "w-[130px]" },
+  { id: "order_punch_by", label: "Order Punch By (User)", type: "text", width: "w-[190px]" },
+  { id: "actual_datetime", label: "Actual Datetime", type: "datetime", width: "w-[170px]" },
 ]
+const DEFAULT_COLUMN_IDS = PAGE_COLUMNS.map((c) => c.id)
+const NUMBER_COLS = new Set(["total_qty_box", "total_qty_kgs", "total_order_amount"])
+const PAGE_COL_WIDTH: Record<string, string> = Object.fromEntries(PAGE_COLUMNS.map((c) => [c.id, c.width]))
 
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
+const STAGE_COLS: StageColDef<any>[] = PAGE_COLUMNS.map((c) => ({
+  id: c.id,
+  label: c.label,
+  type: c.type === "number" ? "number" : c.type === "text" ? "text" : "date",
+  accessor: (r: any) => r[c.id],
+  total: NUMBER_COLS.has(c.id),
+}))
+const TOTAL_TONES: Record<string, string> = { total_qty_box: "emerald", total_qty_kgs: "blue", total_order_amount: "purple" }
+const MODIFY_COL: StageColDef<any> = { id: "__modify", label: "Modify", type: "text", noFilter: true, noSort: true }
+const COL_CLASS: Record<string, string> = { ...PAGE_COL_WIDTH, __modify: "w-16" }
+const TOTAL_DECIMALS: Record<string, number> = { total_qty_box: 0, total_qty_kgs: 3, total_order_amount: 2 }
+// Numeric and date columns are right aligned; everything else left.
+const RIGHT_ALIGN_COLS = new Set(["total_qty_box", "total_qty_kgs", "total_order_amount", "do_date", "actual_datetime"])
 
-type ProductItem = {
-  id: string
-  skuId?: number
-  productName: string
-  uom: string
-  orderQty: string
-  altUom: string
-  altQty: string
-  rate: string
-  ratePer15Kg: string
-  ratePerLtr: string
-  oilType: string
-  skuWeight: string
-  nosPerMainUom: string
-}
-
-type PreApprovalProduct = {
-  id: string
-  oilType: string
-  ratePer15Kg: string
-  ratePerLtr: string
-}
-
-const forwardEvaluateSteps = (baseRate: number, steps: any[]): number => {
-  let result = baseRate;
-  if (!steps || steps.length === 0) return result;
-  
-  for (const step of steps) {
-    const operand = parseFloat(step.operand_value) || 0;
-    switch (step.operation) {
-      case 'add': result += operand; break;
-      case 'subtract': result -= operand; break;
-      case 'multiply': result *= operand; break;
-      case 'divide': if (operand !== 0) result /= operand; break;
-    }
-  }
-  return result;
-};
-
-export default function OrderPunchPage() {
+export default function OrderPunchListPage() {
   const { toast } = useToast()
-  const { isReadOnly, user, isAdmin, isLoading: isAuthLoading } = useAuth()
+  const { isReadOnly, isAdmin, isFeatureEnabled } = useAuth()
   const router = useRouter()
 
-  // New state for customers
-  const [customers, setCustomers] = useState<any[]>([])
-  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false)
+  const [rows, setRows] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  // Session-scoped (survive refresh, cleared on a new session): search, DO date, customer and
+  // depot narrow data, so none are permanent (no layout keys here).
+  const [listView, patchListView] = usePersistedFilters(STAGE_KEY, {
+    searchQuery: "",
+    doDateFilter: "",
+    depotFilter: "ALL",
+    customerFilter: "ALL",
+  }, { permanentKeys: [] })
+  const { searchQuery, doDateFilter, depotFilter, customerFilter } = listView
+  const setSearchQuery = (v: string) => patchListView({ searchQuery: v })
+  const setDoDateFilter = (v: string) => patchListView({ doDateFilter: v })
+  const setDepotFilter = (v: string) => patchListView({ depotFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [modifyOrder, setModifyOrder] = useState<any>(null)
+  const [loadingModifyId, setLoadingModifyId] = useState<number | null>(null)
+  const [viewOrderId, setViewOrderId] = useState<number | null>(null)
 
-  // New state for depots
-  const [depots, setDepots] = useState<any[]>([])
-  const [isLoadingDepots, setIsLoadingDepots] = useState(false)
-
-  // New state for SKUs
-  const [skus, setSkus] = useState<any[]>([])
-  const skuRegistryRef = useRef<Record<string, any>>({})
-  const [isLoadingSkus, setIsLoadingSkus] = useState(false)
-
-  // New state for Brokers
-  const [brokers, setBrokers] = useState<any[]>([])
-  const [isLoadingBrokers, setIsLoadingBrokers] = useState(false)
-
-  // New state for Salespersons
-  const [salespersons, setSalespersons] = useState<any[]>([])
-  const [isLoadingSalespersons, setIsLoadingSalespersons] = useState(false)
-
-  // New state for Conversion Formulas
-  const [conversionFormulas, setConversionFormulas] = useState<any[]>([])
-  const [isLoadingFormulas, setIsLoadingFormulas] = useState(false)
-
-  const fetchFormulas = async () => {
+  const loadList = useCallback(async () => {
+    setIsLoading(true)
     try {
-      setIsLoadingFormulas(true)
-      const response = await conversionFormulaApi.getAll({ all: "true" })
-      if (response.success) {
-        setConversionFormulas(response.data.conversion_formulas || response.data || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch formulas:", error)
-    } finally {
-      setIsLoadingFormulas(false)
-    }
-  }
-
-  // Function to fetch customers - declared before useEffect
-  const fetchCustomers = async () => {
-    try {
-      setIsLoadingCustomers(true)
-      const response = await customerApi.getAll({ all: "true" })
-      if (response.success) {
-        // Correctly extract customers array from paginated response
-        const customerData = response.data.customers || (Array.isArray(response.data) ? response.data : [])
-        setCustomers(customerData)
-      }
-    } catch (error) {
-      console.error("Failed to fetch customers:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load customer list",
-        variant: "destructive",
+      const res = await orderApi.getPunchList({
+        search: searchQuery || undefined,
+        do_date: doDateFilter || undefined,
+        page,
+        limit: 50,
       })
-    } finally {
-      setIsLoadingCustomers(false)
-    }
-  }
-
-  // Function to fetch depots
-  const fetchDepots = async () => {
-    try {
-      setIsLoadingDepots(true)
-      const response = await depotApi.getAll({ all: "true" })
-      if (response.success) {
-        // Correctly extract depots array from paginated response
-        const depotData = response.data.depots || (Array.isArray(response.data) ? response.data : [])
-        setDepots(depotData)
-      }
-    } catch (error) {
-      console.error("Failed to fetch depots:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load depot list",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingDepots(false)
-    }
-  }
-
-  // Godown gates the Customer picker: changing it clears any already-selected
-  // customer that isn't tagged to the newly-selected Godown (re-checked via a
-  // real backend query, not just cleared unconditionally).
-  const handleDepoChange = async (val: string) => {
-    setDepoName(val)
-    if (!customerName) return
-    const selectedDepot = depots.find(d => d.depot_name === val)
-    if (!selectedDepot) { setCustomerName(""); return }
-    const [name, gstin] = customerName.split('|')
-    try {
-      const res = await customerApi.getAll({ search: name, depot_id: selectedDepot.id, limit: 10 })
-      const list = res.success ? (res.data.customers || []) : []
-      const stillValid = list.some((c: any) => c.customer_name === name && (c.gstin || '') === gstin)
-      if (!stillValid) {
-        setCustomerName("")
-        toast({ title: "Customer cleared", description: "The previously selected customer isn't tagged to this Godown.", variant: "destructive" })
+      if (res.success) {
+        setRows(res.data?.orders || [])
+        setTotalPages(res.data?.pagination?.totalPages || 1)
+        setTotal(res.data?.pagination?.total ?? (res.data?.orders || []).length)
       }
     } catch {
-      setCustomerName("")
-    }
-  }
-
-  // Function to fetch SKUs
-  const fetchSkus = async () => {
-    try {
-      setIsLoadingSkus(true)
-      const response = await skuApi.getAll({ all: "true" })
-      if (response.success) {
-        const skuData = response.data.skuDetails || (Array.isArray(response.data) ? response.data : [])
-        skuData.forEach((s: any) => { if (s.sku_name) skuRegistryRef.current[s.sku_name] = s })
-        setSkus(skuData)
-      }
-    } catch (error) {
-      console.error("Failed to fetch SKUs:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load product list",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to load the Order Punch list.", variant: "destructive" })
     } finally {
-      setIsLoadingSkus(false)
+      setIsLoading(false)
+    }
+  }, [searchQuery, doDateFilter, page, toast])
+
+  // A new search/date narrows the result set, so go back to page 1.
+  useEffect(() => { setPage(1) }, [searchQuery, doDateFilter])
+
+  useEffect(() => { loadList() }, [loadList])
+
+  const uniqueDepots = useMemo(() => {
+    const set = new Set<string>()
+    rows.forEach((r) => { if (r.depot_name) set.add(r.depot_name) })
+    return Array.from(set).sort()
+  }, [rows])
+
+  const uniqueCustomers = useMemo(() => {
+    const set = new Set<string>()
+    rows.forEach((r) => { if (r.customer_name) set.add(r.customer_name) })
+    return Array.from(set).sort()
+  }, [rows])
+
+  const baseFilter = useCallback(
+    (r: any) => {
+      if (depotFilter !== "ALL" && r.depot_name !== depotFilter) return false
+      if (customerFilter !== "ALL" && r.customer_name !== customerFilter) return false
+      if (searchQuery) {
+        const sq = searchQuery.toLowerCase()
+        const matches = (r.order_no && String(r.order_no).toLowerCase().includes(sq)) ||
+                        (r.manual_sauda_no && String(r.manual_sauda_no).toLowerCase().includes(sq)) ||
+                        (r.customer_name && String(r.customer_name).toLowerCase().includes(sq))
+        if (!matches) return false
+      }
+      return true
+    },
+    [depotFilter, customerFilter, searchQuery]
+  )
+
+  const table = useStageTable<any>({ rows, columns: STAGE_COLS, baseFilter, defaultSort: { field: "do_date", dir: "desc" }, persistKey: STAGE_KEY })
+  const sortedRows = table.rows
+
+  const [visibleColumns, setVisibleColumns] = usePersistedColumns(STAGE_KEY, DEFAULT_COLUMN_IDS)
+  const [columnOrder, setColumnOrder] = useColumnOrder(STAGE_KEY, DEFAULT_COLUMN_IDS)
+  const orderedVisibleCols = useMemo(
+    () =>
+      columnOrder
+        .map((id) => PAGE_COLUMNS.find((c) => c.id === id))
+        .filter((c): c is typeof PAGE_COLUMNS[number] => !!c && visibleColumns.includes(c.id)),
+    [columnOrder, visibleColumns]
+  )
+  const handleColumnReorder = useCallback(
+    (newVisibleOrder: string[]) => {
+      const hiddenCols = columnOrder.filter((id) => !visibleColumns.includes(id))
+      setColumnOrder([...newVisibleOrder, ...hiddenCols])
+    },
+    [columnOrder, visibleColumns, setColumnOrder]
+  )
+
+  const renderCell = (row: any, colId: string) => {
+    const widthClass = PAGE_COL_WIDTH[colId] || ""
+    const alignClass = cn("px-4", widthClass, RIGHT_ALIGN_COLS.has(colId) && "text-right whitespace-nowrap", NUMBER_COLS.has(colId) && "font-mono tabular-nums")
+    switch (colId) {
+      case "do_date":
+        return <TableCell key={colId} className={alignClass}>{fmtDate(row.do_date)}</TableCell>
+      case "order_no":
+        return <TableCell key={colId} className={cn("font-mono font-semibold text-blue-700 whitespace-nowrap", alignClass)}>{row.order_no}</TableCell>
+      case "manual_sauda_no":
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.manual_sauda_no || "—"}</TableCell>
+      case "customer_name":
+        return <TableCell key={colId} className={cn("font-medium truncate", alignClass)} title={row.customer_name || ""}>{row.customer_name || "—"}</TableCell>
+      case "total_qty_box":
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_qty_box, 0)}</TableCell>
+      case "total_qty_kgs":
+        return <TableCell key={colId} className={alignClass}>{fmtNum(row.total_qty_kgs, 3)}</TableCell>
+      case "total_order_amount":
+        return <TableCell key={colId} className={alignClass}>{fmtAmount(row.total_order_amount, 2)}</TableCell>
+      case "depot_name":
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.depot_name || "—"}</TableCell>
+      case "remarks":
+        return <TableCell key={colId} className={cn("truncate", alignClass)} title={row.remarks || ""}>{row.remarks || "—"}</TableCell>
+      case "broker_name":
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.broker_name || "—"}</TableCell>
+      case "order_punch_by":
+        return <TableCell key={colId} className={cn("truncate", alignClass)}>{row.order_punch_by || "—"}</TableCell>
+      case "actual_datetime":
+        return <TableCell key={colId} className={cn("whitespace-nowrap", alignClass)}>{fmtDateTime(row.actual_datetime)}</TableCell>
+      default:
+        return null
     }
   }
 
-  // Function to fetch Brokers
-  const fetchBrokers = async () => {
-    try {
-      setIsLoadingBrokers(true)
-      const response = await brokerApi.getAll({ all: "true" })
-      if (response.success) {
-        // Correctly extract brokers array from paginated response
-        const brokerData = response.data.brokers || (Array.isArray(response.data) ? response.data : [])
-        setBrokers(brokerData)
-      }
-    } catch (error) {
-      console.error("Failed to fetch brokers:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load broker list",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingBrokers(false)
-    }
+  const activeFiltersCount = (searchQuery ? 1 : 0) + (doDateFilter ? 1 : 0) + (depotFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllFilters = () => {
+    patchListView({ searchQuery: "", doDateFilter: "", depotFilter: "ALL", customerFilter: "ALL" })
+    table.clearColumnFilters()
   }
-
-  // Function to fetch Salespersons
-  const fetchSalespersons = async () => {
-    try {
-      setIsLoadingSalespersons(true)
-      const response = await salespersonApi.getAll({ all: "true" })
-      if (response.success) {
-        // Correctly extract salespersons array from paginated response
-        const salespersonData = response.data.salespersons || (Array.isArray(response.data) ? response.data : [])
-        setSalespersons(salespersonData)
-      }
-    } catch (error) {
-      console.error("Failed to fetch salespersons:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load salesperson list",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingSalespersons(false)
-    }
-  }
-
-type OrderThroughType =  "Broker" | "Direct" | "Salesperson"
-
-
-  const [products, setProducts] = useState<ProductItem[]>([
-    { id: "1", productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" },
-  ])
-  const [customerType, setCustomerType] = useState<string>("existing")
-  const [depoName, setDepoName] = useState<string>("")
-  const [isBrokerOrder, setIsBrokerOrder] = useState<OrderThroughType>("Direct")
-  const orderThrough = isBrokerOrder
-  const setOrderThrough = setIsBrokerOrder
-  const [orderPurpose, setOrderPurpose] = useState<string>("week-on-week")
-  const [orderType, setOrderType] = useState<string>("regular")
-  const [advancePaymentTaken, setAdvancePaymentTaken] = useState<string>("NO")
-  // Set DO Date to today's date by default
-  const [soDate, setSoDate] = useState<string>(new Date().toISOString().split("T")[0])
-  const [customerName, setCustomerName] = useState<string>("")
-  const [gst, setGst] = useState<string>("") // New state for GST
-  const [contactPerson, setContactPerson] = useState<string>("")
-  const [whatsappNo, setWhatsappNo] = useState<string>("")
-  const [whatsappNoError, setWhatsappNoError] = useState<string>("")
-  const [customerAddress, setCustomerAddress] = useState<string>("")
-  const [deliveryAddress, setDeliveryAddress] = useState<string>("")
-  const [sameAsCustomerAddress, setSameAsCustomerAddress] = useState<boolean>(true)
-  const [orderCategory, setOrderCategory] = useState<string>("Sales")
-
-  // Pre-Approval Products State
-  const [preApprovalProducts, setPreApprovalProducts] = useState<PreApprovalProduct[]>([])
-
-  // Current Pre-Approval Input State
-  const [currentPreApproval, setCurrentPreApproval] = useState({
-    oilType: "Palm Oil",
-    ratePer15Kg: "",
-    ratePerLtr: ""
-  })
-
-  const [brokerName, setBrokerName] = useState<string>("Ashish Motwani")
-  const [deliveryDate, setDeliveryDate] = useState<string>("")
-  const [deliveryDateError, setDeliveryDateError] = useState<string>("")
-  const [startDate, setStartDate] = useState<string>("")
-  const [endDate, setEndDate] = useState<string>("")
-  const [paymentTerms, setPaymentTerms] = useState<string>("7days")
-  const [transportType, setTransportType] = useState<string>("self")
-  const [advanceAmount, setAdvanceAmount] = useState<string>("")
-  const [futurePeriodDate, setFuturePeriodDate] = useState<string>("") // New state for future period date
-  const [orderPunchRemarks, setOrderPunchRemarks] = useState<string>("")
-  const [soFile, setSoFile] = useState<File | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isDeliveryDatePickerOpen, setIsDeliveryDatePickerOpen] = useState(false)
-  const [isFuturePeriodDatePickerOpen, setIsFuturePeriodDatePickerOpen] = useState(false)
-  const [salespersonName, setSalespersonName] = useState<string>("")
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSoFile(e.target.files[0])
-    }
-  }
-
-  // Fetch customers, depots, SKUs, and brokers on mount
-  useEffect(() => {
-    fetchCustomers()
-    fetchDepots()
-    fetchSkus()
-    fetchBrokers()
-    fetchSalespersons()
-    fetchFormulas()
-  }, [])
-
-  useEffect(() => {
-    const allowedDepos = user?.depo_access?.['Order Punch'] || []
-    const banari = allowedDepos.find((d: string) => d.toLowerCase() === "banari")
-    setDepoName(banari || (allowedDepos.length > 0 ? allowedDepos[0] : "Banari"))
-  }, [user])
-
-  // Admins/Super Admins always see every option; other users only see the values
-  // granted to them under Settings > Order Punch Field Access. Default is no access.
-  const allowedOrderThroughTypes: string[] = isAdmin
-    ? ["Direct", "Broker", "Salesperson"]
-    : (user?.features?.order_punch_access?.is_order_through || [])
-  const allowedBrokerNames: string[] | null = isAdmin
-    ? null
-    : (user?.features?.order_punch_access?.broker_name || [])
-  const allowedSalespersonNames: string[] | null = isAdmin
-    ? null
-    : (user?.features?.order_punch_access?.salesperson_name || [])
-  const allowedOrderTypes: string[] = isAdmin
-    ? ["regular", "pre-approval"]
-    : (user?.features?.order_punch_access?.order_type || [])
-  const allowedOrderCategories: string[] = isAdmin
-    ? ["Sales", "Stock Transfer"]
-    : (user?.features?.order_punch_access?.order_category || [])
-
-  useEffect(() => {
-    if (isAdmin || !user) return
-    if (allowedOrderThroughTypes.length === 0) {
-      setOrderThrough("Direct")
-    } else if (!allowedOrderThroughTypes.includes(orderThrough)) {
-      setOrderThrough(allowedOrderThroughTypes[0] as OrderThroughType)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin])
-
-  useEffect(() => {
-    if (isAdmin || !user || orderThrough !== "Broker" || !allowedBrokerNames) return
-    const activeBrokerSet = new Set(
-      brokers.filter(b => (b.status || "").toLowerCase() === "active").map(b => (b.salesman_name || "").toLowerCase())
-    )
-    const activeAllowedBrokerNames = allowedBrokerNames.filter(b => activeBrokerSet.has(b.toLowerCase()))
-    if (activeAllowedBrokerNames.length === 0) {
-      setBrokerName("")
-    } else if (!activeAllowedBrokerNames.some((b: string) => b.toLowerCase() === brokerName.toLowerCase())) {
-      setBrokerName(activeAllowedBrokerNames[0])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, orderThrough, brokers])
-
-  useEffect(() => {
-    if (isAdmin || !user || isBrokerOrder !== "Salesperson" || !allowedSalespersonNames) return
-    const activeSalespersonSet = new Set(
-      salespersons.filter(s => (s.status || "").toLowerCase() === "active").map(s => (s.salesman_name || "").toLowerCase())
-    )
-    const activeAllowedSalespersonNames = allowedSalespersonNames.filter(s => activeSalespersonSet.has(s.toLowerCase()))
-    if (activeAllowedSalespersonNames.length === 0) {
-      setSalespersonName("")
-    } else if (!activeAllowedSalespersonNames.some((s: string) => s.toLowerCase() === salespersonName.toLowerCase())) {
-      setSalespersonName(activeAllowedSalespersonNames[0])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, isBrokerOrder, salespersons])
-
-  useEffect(() => {
-    if (isAdmin || !user) return
-    if (allowedOrderTypes.length === 0) {
-      setOrderType("")
-    } else if (!allowedOrderTypes.includes(orderType)) {
-      setOrderType(allowedOrderTypes[0])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin])
-
-  useEffect(() => {
-    if (isAdmin || !user) return
-    if (allowedOrderCategories.length === 0) {
-      setOrderCategory("")
-    } else if (!allowedOrderCategories.includes(orderCategory)) {
-      setOrderCategory(allowedOrderCategories[0])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin])
-
-  // Customer Auto-fill Effect
-  useEffect(() => {
-    if (customerType === "existing" && customerName) {
-      // Find customer in the fetched list using unique combination
-      const [name, gstin] = customerName.split('|')
-      const selectedCustomer = customers.find(c => c.customer_name === name && (c.gstin || '') === gstin)
-
-      if (selectedCustomer) {
-        setGst(selectedCustomer.gstin || "")
-        setContactPerson(selectedCustomer.contact_person || "")
-        setWhatsappNo(selectedCustomer.contact || "") // Using 'contact' field for WhatsApp
-
-        // Construct full address
-        const parts = [
-          selectedCustomer.address_line_1,
-          selectedCustomer.address_line_2,
-          selectedCustomer.state,
-          selectedCustomer.pincode
-        ].filter(Boolean)
-
-        setCustomerAddress(parts.join(", "))
-      }
-    } else if (customerType === "new") {
-        setGst("")
-    }
-  }, [customerName, customerType, customers])
-
-  // Pre-Approval Rate Auto-fill Effect
-  useEffect(() => {
-    if (orderType !== "pre-approval" || conversionFormulas.length === 0) return;
-
-    let changed = false;
-    const newProducts = products.map(p => {
-      if (!p.productName) return p;
-
-      const productNameLower = p.productName.toLowerCase();
-      let oilTypeVal = "";
-      if (productNameLower.includes("palm") || productNameLower.includes("p.o.") || productNameLower.includes(" po ")) oilTypeVal = "Palm Oil";
-      else if (productNameLower.includes("rice") || productNameLower.includes("r.o.") || productNameLower.includes(" ro ") || productNameLower.includes("rbo")) oilTypeVal = "Rice Oil";
-      else if (productNameLower.includes("soya") || productNameLower.includes("s.o.") || productNameLower.includes(" so ") || productNameLower.includes("sbo")) oilTypeVal = "Soya Oil";
-
-      if (!oilTypeVal) return p;
-
-      const matchedRate = preApprovalProducts.find(pap => pap.oilType.toLowerCase() === oilTypeVal.toLowerCase());
-      if (!matchedRate) return p;
-
-      const baseRate15kg = parseFloat(matchedRate.ratePer15Kg) || 0;
-      const baseRateLtr = parseFloat(matchedRate.ratePerLtr) || 0;
-
-      const formula = conversionFormulas.find(f => f.child_item_id === p.skuId || f.child_sku_name === p.productName);
-      let newRate = p.rate;
-
-      if (formula) {
-        const baseName = (formula.base_sku_name || '').toUpperCase();
-        const isLtrBase = baseName.includes('1 LTR') || baseName.includes('1LTR');
-        const baseRate = isLtrBase ? baseRateLtr : baseRate15kg;
-
-        newRate = baseRate.toString();
-        if (formula.steps && formula.steps.length > 0) {
-           newRate = forwardEvaluateSteps(baseRate, formula.steps).toString();
-        }
-      } else {
-        // Fallback for base items that don't have a conversion formula
-        const nameUpper = p.productName.toUpperCase();
-        if (nameUpper.includes("15 KG") || nameUpper.includes("15KG")) {
-           newRate = baseRate15kg.toString();
-        } else if (nameUpper.includes("1 LTR") || nameUpper.includes("1LTR") || nameUpper.includes("1 LITER")) {
-           newRate = baseRateLtr.toString();
-        } else {
-           return p;
-        }
-      }
-
-      if (p.rate !== newRate) {
-        changed = true;
-        return { ...p, rate: newRate };
-      }
-      return p;
-    });
-
-    if (changed) {
-      setProducts(newProducts);
-    }
-  }, [products, preApprovalProducts, orderType, conversionFormulas]);
-
-  // Track which fields are auto-filled from the database
-  const selectedCustomerRecord = customerType === "existing" && customerName 
-    ? (() => {
-        const [name, gstin] = customerName.split('|')
-        return customers.find(c => c.customer_name === name && (c.gstin || '') === gstin)
-      })()
-    : null;
-
-  const isContactPersonAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact_person);
-  const isWhatsappNoAutoFilled = !!(selectedCustomerRecord && selectedCustomerRecord.contact && /^\d{10}$/.test(selectedCustomerRecord.contact));
-  const isAddressAutoFilled = !!(selectedCustomerRecord && (
-    selectedCustomerRecord.address_line_1 || 
-    selectedCustomerRecord.address_line_2 || 
-    selectedCustomerRecord.state || 
-    selectedCustomerRecord.pincode
-  ));
-
-  // Week on Week / Future Period Date Logic - Initialize Start Date from DO Date
-  useEffect(() => {
-    if (orderPurpose === "week-on-week" || orderPurpose === "future-period") {
-      // If DO Date (soDate) is set, use it as Start Date; otherwise use today
-      if (soDate) {
-        setStartDate(soDate)
-      } else if (!startDate) {
-        setStartDate(new Date().toISOString().split("T")[0])
-      }
-    }
-  }, [orderPurpose, soDate])
-
-  useEffect(() => {
-    if (startDate) {
-      const start = new Date(startDate)
-      const end = new Date(start)
-      end.setDate(start.getDate() + 7)
-      setEndDate(end.toISOString().split("T")[0])
-    }
-  }, [startDate])
-
-  // Validate Actual Delivery Date is within Start Date to End Date range
-  useEffect(() => {
-    if (deliveryDate && startDate && endDate && orderPurpose === "week-on-week") {
-      const delivery = new Date(deliveryDate)
-      const start = new Date(startDate)
-      const end = new Date(endDate)
-
-      if (delivery < start || delivery > end) {
-        setDeliveryDateError(`You selected a date not between the start and end date (${startDate} to ${endDate})`)
-      } else {
-        setDeliveryDateError("")
-      }
-    } else {
-      setDeliveryDateError("")
-    }
-  }, [deliveryDate, startDate, endDate, orderPurpose])
-
-  // Same as Customer Address Logic
-  useEffect(() => {
-    if (sameAsCustomerAddress) {
-      setDeliveryAddress(customerAddress)
-    }
-  }, [sameAsCustomerAddress, customerAddress])
-
-  // Handle Order Category Change Logic
-  useEffect(() => {
-    if (orderCategory === "Stock Transfer") {
-      setIsBrokerOrder("Direct")
-    }
-  }, [orderCategory])
-
-  // Dynamic validation for WhatsApp number
-  useEffect(() => {
-    if (!whatsappNo) {
-      setWhatsappNoError("")
-      return
-    }
-    const digits = whatsappNo.replace(/\D/g, "")
-    if (digits.length !== 10) {
-      setWhatsappNoError("WhatsApp number must be exactly 10 digits")
-    } else {
-      setWhatsappNoError("")
-    }
-  }, [whatsappNo])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    // Customer must be selected/entered before anything else
-    const enteredCustomerName = customerType === "existing"
-      ? (customerName.split('|')[0] || "").trim()
-      : customerName.trim()
-    if (!enteredCustomerName) {
-      toast({
-        title: "Customer Required",
-        description: "Please select a customer before submitting the order.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Validate WhatsApp number: min and max 10 digits
-    const cleanedWhatsapp = whatsappNo.replace(/\D/g, "")
-    if (cleanedWhatsapp.length !== 10) {
-      toast({
-        title: "Validation Error",
-        description: "Customer contact person WhatsApp number must be exactly 10 digits.",
-        variant: "destructive",
-      })
-      setWhatsappNoError("WhatsApp number must be exactly 10 digits")
-      return
-    }
-
-    // Validate based on Order Type
-    if (orderType === "regular" || orderType === "pre-approval") {
-      // For regular and pre-approval, validate products
-      const invalidProduct = products.find((p) =>
-        !p.productName ||
-        !p.orderQty || parseFloat(p.orderQty) <= 0 ||
-        (orderCategory !== "Stock Transfer" && (!p.rate || parseFloat(p.rate) <= 0))
-      )
-
-      if (depoName && invalidProduct) {
-        let errorDesc = "Please fill in product details for all rows."
-        if (!invalidProduct.productName) {
-          errorDesc = "Please select a product for all rows."
-        } else if (!invalidProduct.orderQty || parseFloat(invalidProduct.orderQty) <= 0) {
-          errorDesc = `Order Quantity is mandatory and must be greater than 0 for ${invalidProduct.productName || 'the selected product'}.`
-        } else if (!invalidProduct.rate || parseFloat(invalidProduct.rate) <= 0) {
-          errorDesc = `Rate is mandatory and must be greater than 0 for ${invalidProduct.productName || 'the selected product'}.`
-        }
-
-        toast({
-          title: "Validation Error",
-          description: errorDesc,
-          variant: "destructive",
-        })
-        return
-      }
-    }
-
-    // Validate dates based on orderPurpose
-    if (orderPurpose === "future-period" || orderPurpose === "week-on-week") {
-      if (!startDate) {
-        toast({
-          title: "Validation Error",
-          description: "Please select a start date.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (orderPurpose === "week-on-week" && !deliveryDate) {
-        toast({
-          title: "Validation Error",
-          description: "Please select an actual delivery date.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (orderPurpose === "future-period" && !futurePeriodDate) {
-        toast({
-          title: "Validation Error",
-          description: "Please select a future period date.",
-          variant: "destructive",
-        })
-        return
-      }
-    }
-
-    if (!orderType) {
-      toast({
-        title: "Validation Error",
-        description: "Please select an order type.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmitting(true)
-
-    try {
-      let uploadedSoUrl = null
-
-      // Upload SO Copy if selected
-      if (soFile) {
-        try {
-          const uploadResponse = await orderApi.uploadFile(soFile)
-          if (uploadResponse.success) {
-            uploadedSoUrl = uploadResponse.data.url
-          }
-        } catch (uploadError) {
-          console.error('Error uploading SO copy:', uploadError)
-          toast({
-            title: "Upload Error",
-            description: "Failed to upload SO copy. Order will be submitted without it.",
-            variant: "destructive",
-          })
-        }
-      }
-
-      // Prepare data for backend API
-      const customerNameValue = customerType === "existing" ? customerName.split('|')[0] : customerName
-
-      // v2 requires a real customer FK - a "new" (not-yet-in-master) customer
-      // has no id to send. Master-data self-serve creation isn't migrated yet,
-      // so block here rather than silently submitting an unresolvable order.
-      if (!selectedCustomerRecord) {
-        setIsSubmitting(false)
-        toast({
-          title: "Customer Not Found In Master Data",
-          description: customerType === "new"
-            ? "This v2 build requires selecting an existing customer from master data - on-the-fly new-customer creation isn't migrated yet."
-            : "Could not resolve the selected customer to a master record. Please re-select it from the list.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const selectedBrokerRecord = isBrokerOrder === "Broker"
-        ? brokers.find((b: any) => (b.salesman_name || "").toLowerCase() === (brokerName || "").toLowerCase())
-        : null
-      const selectedSalespersonRecord = isBrokerOrder === "Salesperson"
-        ? salespersons.find((s: any) => (s.salesman_name || "").toLowerCase() === (salespersonName || "").toLowerCase())
-        : null
-
-      // Prepare common order data (v2 schema: real FK ids, not name strings)
-      const orderData: any = {
-        customerId: selectedCustomerRecord.id,
-        depotId: billingDepot?.id ?? null,
-        brokerId: selectedBrokerRecord?.id ?? null,
-        salespersonId: selectedSalespersonRecord?.id ?? null,
-        orderType: orderType,
-        customerType: customerType,
-        deliveryPurpose: orderPurpose,
-        startDate: startDate || null,
-        endDate: endDate || null,
-        deliveryDate: deliveryDate || null,
-        partySoDate: soDate || null,
-        customerContactPersonName: contactPerson || null,
-        customerContactPersonWhatsappNo: whatsappNo || null,
-        customerAddress: customerAddress || null,
-        customerDeliveryAddress: (sameAsCustomerAddress ? customerAddress : deliveryAddress) || null,
-        paymentTerms: paymentTerms || null,
-        advancePaymentToBeTaken: advancePaymentTaken === "YES",
-        advanceAmount: advanceAmount ? parseFloat(advanceAmount) : null,
-        orderThrough: isBrokerOrder,
-        typeOfTransporting: transportType || null,
-        orderPunchRemarks: orderPunchRemarks || null,
-        futurePeriodDate: futurePeriodDate || null,
-        uploadSo: uploadedSoUrl,
-        userId: user?.id || null,
-        orderCategory: orderCategory,
-        gst: gst || null,
-      }
-
-      // Add items array for backend (for regular and pre-approval order types)
-      if ((orderType === "regular" || orderType === "pre-approval") && products.length > 0) {
-        const missingRateProducts: string[] = []
-        const missingSkuProducts: string[] = []
-        orderData.items = products.map(p => {
-          let rate15kg = p.ratePer15Kg ? parseFloat(p.ratePer15Kg) : null
-          let rateLtr = p.ratePerLtr ? parseFloat(p.ratePerLtr) : null
-          let oilTypeVal = ""
-
-          if (!p.skuId) {
-            missingSkuProducts.push(p.productName || "Unnamed product")
-          }
-
-          // For pre-approval, pick from the preApprovalProducts list based on detected oil type
-          if (orderType === "pre-approval") {
-            const productNameLower = (p.productName || "").toLowerCase()
-            let matchedRate = null
-
-            // Robust auto-detection of oil type from product name
-            if (productNameLower.includes("palm") || productNameLower.includes("p.o.") || productNameLower.includes(" po ")) {
-              oilTypeVal = "Palm Oil"
-            } else if (productNameLower.includes("rice") || productNameLower.includes("r.o.") || productNameLower.includes(" ro ") || productNameLower.includes("rbo")) {
-              oilTypeVal = "Rice Oil"
-            } else if (productNameLower.includes("soya") || productNameLower.includes("s.o.") || productNameLower.includes(" so ") || productNameLower.includes("sbo")) {
-              oilTypeVal = "Soya Oil"
-            }
-
-            if (oilTypeVal) {
-              matchedRate = preApprovalProducts.find(pap => pap.oilType.toLowerCase() === oilTypeVal.toLowerCase())
-            }
-
-            if (matchedRate) {
-              rate15kg = matchedRate.ratePer15Kg ? parseFloat(matchedRate.ratePer15Kg) : rate15kg
-              rateLtr = matchedRate.ratePerLtr ? parseFloat(matchedRate.ratePerLtr) : rateLtr
-            }
-          }
-
-          // Pre-approval: flag products whose detected oil type has no matching rate
-          if (orderType === "pre-approval" && (rate15kg == null || rateLtr == null)) {
-            missingRateProducts.push(oilTypeVal || p.productName || "Unnamed product")
-          }
-
-          return {
-            skuId: p.skuId ?? null,
-            uom: p.uom || "Ltr",
-            orderQuantity: p.orderQty ? parseFloat(p.orderQty) : null,
-            rateOfMaterial: p.rate ? parseFloat(p.rate) : null,
-            ratePer15kg: rate15kg,
-            ratePerLtr: rateLtr,
-            oilType: oilTypeVal,
-            alternateUom: p.altUom || "Kg",
-            alternateQtyKg: p.altQty ? parseFloat(p.altQty) : null,
-          }
-        })
-
-        // v2 requires a real SKU FK - a free-typed product name that was never
-        // selected from the dropdown has no id to send.
-        if (missingSkuProducts.length > 0) {
-          setIsSubmitting(false)
-          toast({
-            title: "Product Not Selected From List",
-            description: `Select these products from the dropdown (not typed manually) so they resolve to a master SKU: ${[...new Set(missingSkuProducts)].join(", ")}.`,
-            variant: "destructive",
-          })
-          return
-        }
-
-        // Block submission if any pre-approval product is missing its rate,
-        // otherwise it would save null and show blank in the WhatsApp message
-        if (missingRateProducts.length > 0) {
-          setIsSubmitting(false)
-          toast({
-            title: "Missing Pre-Approval Rate",
-            description: `No Pre-Approval rate found for: ${[...new Set(missingRateProducts)].join(", ")}. Add the matching oil-type rate in the Pre-Approval section before submitting.`,
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
-      // Call backend API (v2 schema)
-      const response = await orderApi.create(orderData)
-
-      if (response.success) {
-        const backendOrderNo = response.data.order.orderNo
-
-        // Prepare order entry for localStorage (for compatibility in existing workflow)
-        const orderEntry = {
-          doNumber: backendOrderNo, // Use backend-generated order number
-          customerType,
-          depoName,
-          isBrokerOrder,
-          orderPurpose,
-          orderType: orderType as "regular" | "pre-approval",
-          advancePaymentTaken,
-          soNumber: backendOrderNo, // Use generated order number
-          soDate,
-          customerName: customerNameValue,
-          contactPerson,
-          whatsappNo,
-          customerAddress,
-          deliveryAddress,
-          brokerName,
-          salespersonName,
-          deliveryDate,
-          startDate,
-          endDate,
-          paymentTerms,
-          transportType,
-          orderPunchRemarks,
-          advanceAmount,
-          products: products.map(p => ({
-            ...p,
-            uom: p.uom || "Ltr",
-            altUom: p.altUom || "Kg"
-          })),
-          preApprovalProducts,
-          orderCategory,
-          stage: orderType === "regular" ? "Approval Of Order" : "Pre-Approval",
-          status: "Pending" as const,
-          timestamp: new Date().toISOString()
-        }
-
-        // saveWorkflowHistory(orderEntry) - Removed as per user request to disable localStorage history
-
-        // Keep legacy keys for compatibility with current workflow stages
-        localStorage.setItem("orderData", JSON.stringify(orderEntry))
-        if (orderType === "regular") {
-          localStorage.setItem("commitmentReviewData", JSON.stringify({ orderData: orderEntry }))
-        }
-
-        // Show success message with prominently displayed order number
-        toast({
-          title: "✅ Order Created Successfully!",
-          description: `Order Number: ${backendOrderNo.replace(/[A-Z]$/i, '')} — this order has been saved to the database.`,
-        })
-
-        resetForm()
-
-        // setTimeout(() => {
-        //   router.push(orderType === "regular" ? "/approval-of-order" : "/pre-approval")
-        // }, 1500)
-      }
-
-    } catch (error: any) {
-      let errorMessage = error.message || "Failed to save order to database. Please try again."
-
-      // Surface a specific field-level message if the backend returned one
-      if (Array.isArray(error?.errors) && error.errors.length > 0 && error.errors[0]?.message) {
-        errorMessage = error.errors[0].message
-      }
-
-      if (errorMessage.includes("too long for type character varying")) {
-        errorMessage = "One or more fields exceed maximum length. Check: WhatsApp number (max 20 chars), Payment Terms, Transport Type."
-      }
-
-      toast({
-        title: "Error Saving Order",
-        description: errorMessage,
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const addProduct = () => {
-    setProducts([
-      ...products,
-      { id: Math.random().toString(36).substr(2, 9), productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" },
-    ])
-  }
-
-  const removeProduct = (id: string) => {
-    if (products.length > 1) {
-      setProducts(products.filter((p) => p.id !== id))
-    }
-  }
-
-  const updateProduct = (id: string, field: keyof ProductItem, value: string) => {
-    setProducts((prevProducts) =>
-      prevProducts.map((p) => {
-        if (p.id !== id) return p;
-        return { ...p, [field]: value };
-      })
-    );
-  }
-
-  // Handle product selection and auto-fill UOM fields
-  const handleProductSelect = (productId: string, skuName: string, skuData?: any) => {
-    const selectedSku = skuData || skuRegistryRef.current[skuName] || skus.find((sku) => sku.sku_name === skuName)
-
-    if (selectedSku) {
-      setProducts((prevProducts) =>
-        prevProducts.map((p) => {
-          if (p.id !== productId) return p;
-          return {
-            ...p,
-            skuId: selectedSku.id,
-            productName: selectedSku.sku_name,
-            uom: selectedSku.main_uom || "",
-            altUom: selectedSku.alternate_uom || "",
-            skuWeight: selectedSku.sku_weight != null ? String(selectedSku.sku_weight) : "",
-            nosPerMainUom: selectedSku.nos_per_main_uom != null ? String(selectedSku.nos_per_main_uom) : "",
-          };
-        })
-      );
-    } else {
-      updateProduct(productId, "productName", skuName)
-    }
-  }
-
-  // Pre-Approval Product Helpers
-  const addPreApprovalProduct = () => {
-    if (!currentPreApproval.ratePer15Kg || !currentPreApproval.ratePerLtr) {
-      toast({
-        title: "Validation Error",
-        description: "Both 15 KG and 1 LTR rates are mandatory for Pre-Approval orders.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Row Limit: maximum 3 items
-    if (preApprovalProducts.length >= 3) {
-      toast({
-        title: "Limit Reached",
-        description: "You can add a maximum of 3 oil types (Palm, Rice, and Soya Oil).",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Duplicate Check: ensure same oil type isn't added twice
-    if (preApprovalProducts.some(p => p.oilType === currentPreApproval.oilType)) {
-      toast({
-        title: "Duplicate Entry",
-        description: "Rates for this oil type have already been added. Select a different oil type or edit the existing row.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setPreApprovalProducts([
-      ...preApprovalProducts,
-      {
-        id: Math.random().toString(36).substr(2, 9),
-        oilType: currentPreApproval.oilType,
-        ratePer15Kg: currentPreApproval.ratePer15Kg,
-        ratePerLtr: currentPreApproval.ratePerLtr,
-      },
-    ])
-
-    // Reset current input
-    setCurrentPreApproval({
-      ...currentPreApproval,
-      ratePer15Kg: "",
-      ratePerLtr: ""
-    })
-  }
-
-  const removePreApprovalProduct = (id: string) => {
-    setPreApprovalProducts(preApprovalProducts.filter((p) => p.id !== id))
-  }
-
-  const updatePreApprovalProduct = (id: string, field: keyof PreApprovalProduct, value: string) => {
-    setPreApprovalProducts((prevProducts) =>
-      prevProducts.map((p) => {
-        if (p.id !== id) return p;
-        return { ...p, [field]: value };
-      })
-    );
-  }
-
-  const resetForm = () => {
-    setCustomerType("existing")
-    setOrderCategory("Sales")
-    const allowedDepos = user?.depo_access?.['Order Punch'] || []
-    const banari = allowedDepos.find((d: string) => d.toLowerCase() === "banari")
-    setDepoName(banari || (allowedDepos.length > 0 ? allowedDepos[0] : "Banari"))
-    setIsBrokerOrder("Direct")
-    setOrderPurpose("week-on-week")
-    setOrderType("regular")
-    setAdvancePaymentTaken("NO")
-    setSoDate(new Date().toISOString().split("T")[0])
-    setCustomerName("")
-    setGst("")
-    setContactPerson("")
-    setWhatsappNo("")
-    setWhatsappNoError("")
-    setCustomerAddress("")
-    setDeliveryAddress("")
-    setSameAsCustomerAddress(true)
-    setPreApprovalProducts([])
-    setCurrentPreApproval({
-      oilType: "Palm Oil",
-      ratePer15Kg: "",
-      ratePerLtr: ""
-    })
-    setBrokerName("Ashish Motwani")
-    setDeliveryDate("")
-    setStartDate("")
-    setEndDate("")
-    setPaymentTerms("7days")
-    setTransportType("self")
-    setAdvanceAmount("")
-    setFuturePeriodDate("")
-    setOrderPunchRemarks("")
-    setSoFile(null)
-    const fileInput = document.getElementById("soFile") as HTMLInputElement
-    if (fileInput) fileInput.value = ""
-    setProducts([{ id: Math.random().toString(36).substr(2, 9), productName: "", uom: "", orderQty: "", altUom: "", altQty: "", rate: "", ratePer15Kg: "", ratePerLtr: "", oilType: "", skuWeight: "", nosPerMainUom: "" }])
-  }
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  // Customer/shipping state comes from the customer's billing address (customerAddress)
-  const shippingState = extractState(customerAddress || "") || ""
-
-  console.log("[GST DEBUG] depoName:", depoName, "| billingDepot:", billingDepot?.depot_name, "| billingState:", billingState, "| shippingState:", shippingState)
-
-  const totalTaxable = products.reduce((sum, p) => {
-    const rate = parseFloat(p.rate) || 0
-    const nos = parseFloat(p.nosPerMainUom) || 0
-    const qty = parseFloat(p.orderQty) || 0
-    const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2))
-    return sum + (rateWoGst * qty)
-  }, 0)
-  let gstType = "same"
-  let orderCgst = 0, orderSgst = 0, orderIgst = 0
-  if (!billingState || !shippingState) {
-    gstType = "no_address"
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-    orderCgst = Math.round(totalTaxable * 0.025 * 100) / 100
-    orderSgst = orderCgst
-  } else {
-    gstType = "different"
-    orderIgst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-  // Round Off = difference between the grand total rounded to the nearest rupee and the exact total
-  const orderRawTotal = totalTaxable + orderCgst + orderSgst + orderIgst
-  const orderRoundedTotal = Math.round(orderRawTotal)
-  const orderRoundOff = orderRoundedTotal - orderRawTotal
-  console.log("[GST DEBUG] gstType:", gstType, "| CGST:", orderCgst, "| SGST:", orderSgst, "| IGST:", orderIgst, "| RoundOff:", orderRoundOff)
 
   return (
-    <div className="p-6 max-w-full space-y-6" suppressHydrationWarning>
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-3">
+    <div className="p-3 sm:px-6 sm:py-3 max-w-full space-y-2 sm:space-y-3" suppressHydrationWarning>
+      {/* ── Page Header ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
+        <div className="flex items-start gap-3 min-w-0">
           <SidebarTrigger className="-ml-1" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Stage 1: Order Punch</h1>
-            <p className="text-muted-foreground">Create a new order with customer and product details.</p>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Stage 1: Order Punch</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">Delivery Order (DO) details punched into the system.</p>
           </div>
         </div>
-        {/* <Button variant="outline" className="gap-2 bg-transparent">
-          <FileUp className="h-4 w-4" /> Import
-        </Button> */}
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+          <Button variant="outline" size="sm" onClick={loadList} disabled={isLoading} title="Refresh" aria-label="Refresh" className="w-full sm:w-9 sm:px-0">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            <span className="sm:hidden ml-1">Refresh</span>
+          </Button>
+          {!isReadOnly && (
+            <Button
+              className="w-full gap-2 bg-blue-600 hover:bg-blue-700 sm:w-auto"
+              onClick={() => setIsAddOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              <span className="truncate">Add Order</span>
+            </Button>
+          )}
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6" suppressHydrationWarning>
-        <Card>
-          <CardHeader>
-            <CardTitle>Order Information</CardTitle>
-            <CardDescription>Enter all order and customer details below.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="soDate">DO Date</Label>
-                <Input id="soDate" type="date" value={soDate} onChange={(e) => setSoDate(e.target.value)} />
-              </div>
+      {/* ── DO List Table ── */}
+      <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+        <StageListHeader
+          title="Order Punch List"
+          shown={sortedRows.length}
+          total={rows.length}
+          description="Orders disappear 48 hours after their Stage 3 Approval/Rejection decision."
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search DO No., Customer, Manual Sauda No..."
+        >
+          <StageToolbar
+            shown={sortedRows.length}
+            total={rows.length}
+            activeCount={activeFiltersCount}
+            onReset={clearAllFilters}
+            filters={
+              <>
+                <Input
+                  type="date"
+                  value={doDateFilter}
+                  onChange={(e) => setDoDateFilter(e.target.value)}
+                  className="!h-8 py-0 px-2.5 text-xs md:text-xs w-[150px] bg-white border-slate-200 shadow-2xs"
+                />
+                <StageDivider />
+                <StageFilterSelect value={depotFilter} onChange={setDepotFilter} allLabel="All Depots" options={uniqueDepots} />
+                <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomers} />
+                <StageColumnsMenu
+                  columns={PAGE_COLUMNS}
+                  visibleColumns={visibleColumns}
+                  setVisibleColumns={setVisibleColumns}
+                  show={isAdmin || isFeatureEnabled("can_toggle_columns")}
+                />
+              </>
+            }
+          />
+          <StageActiveChips
+            chips={[
+              ...(doDateFilter ? [{ label: `DO Date: ${doDateFilter}`, onClear: () => setDoDateFilter("") }] : []),
+              ...(depotFilter !== "ALL" ? [{ label: `Depot: ${depotFilter}`, onClear: () => setDepotFilter("ALL") }] : []),
+              ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+              ...(searchQuery ? [{ label: `Search: ${searchQuery}`, onClear: () => setSearchQuery("") }] : []),
+            ]}
+          />
+        </StageListHeader>
 
-              <div className="space-y-2">
-                <Label htmlFor="orderCategory">ORDER CATEGORY</Label>
-                <Select value={orderCategory} onValueChange={setOrderCategory}>
-                  <SelectTrigger id="orderCategory">
-                    <SelectValue placeholder="Select Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allowedOrderCategories.includes("Sales") && (
-                      <SelectItem value="Sales">Sales</SelectItem>
-                    )}
-                    {allowedOrderCategories.includes("Stock Transfer") && (
-                      <SelectItem value="Stock Transfer">Stock Transfer</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="orderPurpose">ORDER TYPE (DELIVERY PURPOSE)</Label>
-                <Select value={orderPurpose} onValueChange={setOrderPurpose}>
-                  <SelectTrigger id="orderPurpose">
-                    <SelectValue placeholder="Select purpose" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="week-on-week">Week On Week</SelectItem>
-                    <SelectItem value="future-period">Future Period</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-
-              <div className="space-y-2">
-                <Label htmlFor="orderType">ORDER TYPE</Label>
-                <Select value={orderType} onValueChange={setOrderType}>
-                  <SelectTrigger id="orderType">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allowedOrderTypes.includes("regular") && (
-                      <SelectItem value="regular">Regular</SelectItem>
-                    )}
-                    {allowedOrderTypes.includes("pre-approval") && (
-                      <SelectItem value="pre-approval">Pre-Approval</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-                {orderType === "regular" && (
-                  <p className="text-xs text-blue-600 mt-1">
-                    ℹ️ Regular orders will skip Pre-Approval and go directly to Approval Of Order
-                  </p>
-                )}
-              </div>
-
-              {(orderPurpose === "week-on-week" || orderPurpose === "future-period") && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="startDate">Start Date</Label>
-                    <Input
-                      id="startDate"
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="endDate">End Date</Label>
-                    <Input
-                      id="endDate"
-                      type="date"
-                      value={endDate}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  </div>
-                  {(orderPurpose === "week-on-week" || orderPurpose === "future-period") && (
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryDate">Actual Delivery Date</Label>
-                      <Popover open={isDeliveryDatePickerOpen} onOpenChange={setIsDeliveryDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !deliveryDate && "text-muted-foreground",
-                              deliveryDateError && "border-red-500"
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {deliveryDate ? format(new Date(deliveryDate), "PPP") : <span>Pick a date</span>}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={deliveryDate ? new Date(deliveryDate) : undefined}
-                            onSelect={(date) => {
-                              if (date) {
-                                setDeliveryDate(format(date, "yyyy-MM-dd"))
-                                setIsDeliveryDatePickerOpen(false)
-                              }
-                            }}
-                            initialFocus
-                            modifiers={{
-                              inRange: (date) => {
-                                if (!startDate || !endDate) return false
-                                const start = new Date(startDate)
-                                const end = new Date(endDate)
-                                return date >= start && date <= end
-                              }
-                            }}
-                            modifiersClassNames={{
-                              inRange: "bg-blue-100 text-blue-900 hover:bg-blue-200"
-                            }}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                      {deliveryDateError && (
-                        <p className="text-xs text-red-600 font-medium">{deliveryDateError}</p>
-                      )}
-                    </div>
-                  )}
-
-                  {orderPurpose === "future-period" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="futurePeriodDate">Future Period Date</Label>
-                      <Popover open={isFuturePeriodDatePickerOpen} onOpenChange={setIsFuturePeriodDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !futurePeriodDate && "text-muted-foreground"
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {futurePeriodDate ? format(new Date(futurePeriodDate), "PPP") : <span>Pick a date</span>}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={futurePeriodDate ? new Date(futurePeriodDate) : undefined}
-                            onSelect={(date) => {
-                              if (date) {
-                                setFuturePeriodDate(format(date, "yyyy-MM-dd"))
-                                setIsFuturePeriodDatePickerOpen(false)
-                              }
-                            }}
-                            initialFocus
-                            modifiers={{
-                              inRange: (date) => {
-                                if (!startDate || !endDate) return false
-                                const start = new Date(startDate)
-                                const end = new Date(endDate)
-                                return date >= start && date <= end
-                              }
-                            }}
-                            modifiersClassNames={{
-                              inRange: "bg-blue-100 text-blue-900 hover:bg-blue-200"
-                            }}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                      <p className="text-xs text-blue-600 mt-1">
-                        ℹ️ This date will be saved for future period delivery
-                      </p>
-                    </div>
-                  )}
-                  <div className="hidden md:block"></div>
-                </>
-              )}
-
-              {/* Note for Pre-Approval Orders */}
-              {orderType === "pre-approval" && (orderPurpose === "week-on-week" || orderPurpose === "future-period") && (
-                <div className="md:col-span-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
-                    <span className="text-lg">⚠️</span>
-                    15 KG and 1 Ltr rate is compulsory for Pre-Approval orders
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2 hidden">
-                <Label htmlFor="customerType">Customer Type</Label>
-                <Select value={customerType} onValueChange={setCustomerType}>
-                  <SelectTrigger id="customerType">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="existing">Existing Customer</SelectItem>
-                    <SelectItem value="new">New Customer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="customerName">Customer Name</Label>
-                {customerType === "existing" ? (
-                  <AsyncCombobox
-                    placeholder={!depoName ? "Select a Godown first" : (isLoadingCustomers ? "Loading..." : "Select existing customer")}
-                    disabled={!depoName}
-                    searchPlaceholder="Search customers..."
-                    value={customerName}
-                    onValueChange={setCustomerName}
-                    onSelectOption={(opt: any) => {
-                      if (opt.original) {
-                        setCustomers(prev => {
-                          const exists = prev.find(c => c.id === opt.original.id);
-                          return exists ? prev : [...prev, opt.original];
-                        });
-                      }
-                    }}
-                    fetchOptions={async (search: string, page: number) => {
-                      const selectedDepot = depots.find(d => d.depot_name === depoName);
-                      // Godown-gated: only customers tagged to the selected Godown, filtered
-                      // server-side (not by loading every customer and filtering in the browser).
-                      const res = await customerApi.getAll({ search, page, limit: 20, depot_id: selectedDepot?.id });
-                      const list = res.data.customers || [];
-                      return {
-                        options: list.map((c: any) => ({ 
-                          value: `${c.customer_name}|${c.gstin || ''}`, // Unique value
-                          label: c.customer_name, 
-                          dropdownLabel: `${c.customer_name}${c.gstin ? ' - ' + c.gstin : ''}`,
-                          original: c 
-                        })),
-                        hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
-                    }}
-                  />
+        <CardContent className="p-0">
+          <div className="overflow-x-auto rounded-b-xl">
+            <Table className="table-auto">
+              <StageTableHeaderRows
+                columns={orderedVisibleCols.map((c) => STAGE_COLS.find((s) => s.id === c.id)!)}
+                trailingColumns={[MODIFY_COL]}
+                table={table}
+                decimals={TOTAL_DECIMALS}
+                tones={TOTAL_TONES}
+                colClassName={COL_CLASS}
+                onReorder={handleColumnReorder}
+                dragDisabled={!isAdmin && !isFeatureEnabled("can_reorder_columns")}
+              />
+              <TableBody>
+                {isLoading ? (
+                  [...Array(4)].map((_, i) => (
+                    <TableRow key={i} className="opacity-40">
+                      {[...Array(orderedVisibleCols.length + 1)].map((__, j) => (
+                        <TableCell key={j} className="px-4"><div className="h-4 w-full bg-slate-200 animate-pulse rounded" /></TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-16 text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="h-10 w-10 text-slate-300" />
+                        <p className="font-medium">No orders to show</p>
+                        <p className="text-sm text-slate-400">Click "Add Order" to punch a new one.</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : sortedRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={orderedVisibleCols.length + 1} className="text-center py-12 text-muted-foreground">
+                      <p className="font-medium text-slate-500">No matching records found for the current filters</p>
+                      <button onClick={clearAllFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold">
+                        Clear Filters
+                      </button>
+                    </TableCell>
+                  </TableRow>
                 ) : (
-                  <Input
-                    id="customerName"
-                    placeholder="Enter customer name"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                  />
-                )}
-              </div>
-
-              {gst && (
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="gst">GST Number</Label>
-                  <Input
-                    id="gst"
-                    value={gst}
-                    readOnly
-                    className="bg-muted font-mono"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="contactPerson">Customer Contact Person Name <span className="text-red-500">*</span></Label>
-                <Input
-                  id="contactPerson"
-                  placeholder="Enter name"
-                  value={contactPerson}
-                  onChange={(e) => setContactPerson(e.target.value)}
-                  required
-                  disabled={isContactPersonAutoFilled}
-                  className={isContactPersonAutoFilled ? "bg-muted" : ""}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="whatsappNo">Customer Contact Person WhatsApp No.<span className="text-red-500">*</span></Label>
-                <Input
-                  id="whatsappNo"
-                  placeholder="Enter WhatsApp number"
-                  value={whatsappNo}
-                  onChange={(e) => {
-                    const cleaned = e.target.value.replace(/\D/g, "");
-                    setWhatsappNo(cleaned);
-                  }}
-                  required
-                  disabled={isWhatsappNoAutoFilled}
-                  className={cn(
-                    isWhatsappNoAutoFilled ? "bg-muted" : "",
-                    whatsappNoError && "border-red-500 focus-visible:ring-red-500"
-                  )}
-                />
-                {whatsappNoError && (
-                  <p className="text-xs text-red-600 font-medium">{whatsappNoError}</p>
-                )}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="customerAddress">Customer Address<span className="text-red-500">*</span></Label>
-                <Input
-                  id="customerAddress"
-                  placeholder="Enter full address"
-                  value={customerAddress}
-                  onChange={(e) => setCustomerAddress(e.target.value)}
-                  required
-                  disabled={isAddressAutoFilled}
-                  className={isAddressAutoFilled ? "bg-muted" : ""}
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <Checkbox
-                    id="sameAsCustomer"
-                    checked={sameAsCustomerAddress}
-                    onCheckedChange={(checked) => setSameAsCustomerAddress(checked as boolean)}
-                  />
-                  <Label htmlFor="sameAsCustomer" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Same as Customer Address
-                  </Label>
-                </div>
-                <Label htmlFor="deliveryAddress">Delivery Address</Label>
-                <Input
-                  id="deliveryAddress"
-                  placeholder="Enter delivery address"
-                  value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  readOnly={sameAsCustomerAddress}
-                  className={sameAsCustomerAddress ? "bg-muted" : ""}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="depoName">Depo Name</Label>
-                {isAuthLoading ? (
-                  <div className="h-9 w-full rounded-md border border-input bg-muted animate-pulse" />
-                ) : (
-                  <AsyncCombobox
-                    placeholder="Select Depo"
-                    searchPlaceholder="Search depots..."
-                    value={depoName}
-                    onValueChange={handleDepoChange}
-                    onSelectOption={(opt: any) => {
-                      if (opt.original) {
-                        setDepots(prev => {
-                          const exists = prev.find(d => d.depot_id === opt.original.depot_id);
-                          return exists ? prev : [...prev, opt.original];
-                        });
-                      }
-                    }}
-                    fetchOptions={async (search: string, page: number) => {
-                      const res = await depotApi.getAll({ search, page, limit: 20 });
-                      let list = res.data.depots || [];
-                      const fetchedCount = list.length;
-                      const allowedDepos = user?.depo_access?.['Order Punch'] || [];
-                      if (allowedDepos.length > 0) {
-                        list = list.filter((d: any) =>
-                          allowedDepos.some((ad: string) => ad.toLowerCase() === d.depot_name.toLowerCase())
-                        );
-                      }
-                      return {
-                        options: list.map((d: any) => ({ value: d.depot_name, label: d.depot_name, original: d })),
-                        hasMore: (fetchedCount + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
-                    }}
-                    className="w-full"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="advancePayment">Advance Payment to Be Taken</Label>
-                <Select value={advancePaymentTaken} onValueChange={setAdvancePaymentTaken}>
-                  <SelectTrigger id="advancePayment">
-                    <SelectValue placeholder="Select YES/NO" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NO">NO</SelectItem>
-                    <SelectItem value="YES">YES</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {advancePaymentTaken === "YES" && (
-                <div className="space-y-2">
-                  <Label htmlFor="advanceAmount">Advance Amount</Label>
-                  <Input
-                    id="advanceAmount"
-                    type="number"
-                    placeholder="0.00"
-                    value={advanceAmount}
-                    onChange={(e) => setAdvanceAmount(e.target.value)}
-                  />
-                </div>
-              )}
-
-
-
-              {/* Pre-Approval Rates Section */}
-              {orderType === "pre-approval" && (
-                <div className="md:col-span-2 space-y-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100">
-                  <div className="flex flex-col space-y-1">
-                    <Label className="text-lg font-semibold text-blue-900">Pre-Approval Rates</Label>
-                    <p className="text-sm text-blue-600">Add 15 KG and 1 LTR rates for different oil types.</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end bg-white p-4 rounded-md shadow-sm border border-blue-100">
-                    <div className="space-y-2">
-                      <Label htmlFor="currentOilType">Oil Type</Label>
-                      <Select
-                        value={currentPreApproval.oilType}
-                        onValueChange={(val) => setCurrentPreApproval(prev => ({ ...prev, oilType: val }))}
-                      >
-                        <SelectTrigger id="currentOilType">
-                          <SelectValue placeholder="Select Oil" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Palm Oil">Palm Oil</SelectItem>
-                          <SelectItem value="Rice Oil">Rice Oil</SelectItem>
-                          <SelectItem value="Soya Oil">Soya Oil</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="currentRate15Kg">15 KG Rate</Label>
-                      <Input
-                        id="currentRate15Kg"
-                        type="number"
-                        value={currentPreApproval.ratePer15Kg}
-                        onChange={(e) => setCurrentPreApproval(prev => ({ ...prev, ratePer15Kg: e.target.value }))}
-                        placeholder="0.00"
-                        className="font-semibold text-green-600"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="currentRateLtr">1 LTR Rate</Label>
-                      <Input
-                        id="currentRateLtr"
-                        type="number"
-                        value={currentPreApproval.ratePerLtr}
-                        onChange={(e) => setCurrentPreApproval(prev => ({ ...prev, ratePerLtr: e.target.value }))}
-                        placeholder="0.00"
-                        className="font-semibold text-blue-600"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      onClick={addPreApprovalProduct}
-                      disabled={isReadOnly}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
-                      title={isReadOnly ? "View Only Access" : "Add to List"}
+                  sortedRows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      className="hover:bg-slate-50 cursor-pointer transition-colors"
+                      onClick={() => setViewOrderId(row.id)}
                     >
-                      <Plus className="h-4 w-4 mr-2" /> Add to List
-                    </Button>
-                  </div>
-
-                  {preApprovalProducts.length > 0 && (
-                    <div className="overflow-hidden rounded-md border border-blue-100 bg-white">
-                      <Table>
-                        <TableHeader className="bg-blue-50/50">
-                          <TableRow>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">Oil Type</TableHead>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">15 KG Rate</TableHead>
-                            <TableHead className="font-bold text-blue-900 text-xs uppercase tracking-wider">1 LTR Rate</TableHead>
-                            <TableHead className="w-[50px]"></TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {preApprovalProducts.map((p) => (
-                            <TableRow key={p.id} className="hover:bg-blue-50/30">
-                              <TableCell className="font-medium py-2">{p.oilType}</TableCell>
-                              <TableCell className="font-semibold text-green-600 py-2">₹{p.ratePer15Kg || "—"}</TableCell>
-                              <TableCell className="font-semibold text-blue-600 py-2">₹{p.ratePerLtr || "—"}</TableCell>
-                              <TableCell className="py-2 text-right">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => removePreApprovalProduct(p.id)}
-                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Show Product List for both regular and pre-approval */}
-              {(orderType === "regular" || orderType === "pre-approval") && (
-                <div className="md:col-span-2 space-y-4 p-4 bg-muted/50 rounded-lg border">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-lg font-semibold">Product List</Label>
-                  </div>
-                  <div className="space-y-4">
-                    {products.map((product, idx) => (
-                      <div key={product.id} className="flex gap-4 items-end p-4 border rounded-lg bg-card shadow-sm relative pt-8">
-                        <div className="absolute top-2 left-4 text-[10px] font-bold text-blue-500/80 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-widest">
-                          Product {idx + 1}
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 flex-1 md:grid-cols-13">
-                          <div className={`space-y-1.5 col-span-2 md:col-span-5`}>
-                            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Product Name</Label>
-                            <AsyncCombobox
-                              placeholder={isLoadingSkus ? "Loading..." : "Select product"}
-                              searchPlaceholder="Search products..."
-                              value={product.productName}
-                              onValueChange={(val) => handleProductSelect(product.id, val)}
-                              onSelectOption={(opt: any) => {
-                                if (opt.original) {
-                                  if (opt.original.sku_name) skuRegistryRef.current[opt.original.sku_name] = opt.original
-                                  setSkus(prev => {
-                                    const exists = prev.find(s => s.sku_id === opt.original.sku_id);
-                                    return exists ? prev : [...prev, opt.original];
-                                  });
-                                  handleProductSelect(product.id, opt.original.sku_name, opt.original)
-                                }
-                              }}
-                              fetchOptions={async (search: string, page: number) => {
-                                // Fuzzy search needs the whole list, so filter the SKUs we already
-                                // hold locally and page through them; fall back to the server only
-                                // if that list hasn't loaded.
-                                let list: any[] = skus.length > 0
-                                  ? skus.filter((s: any) => fuzzyMatch(search, s.sku_name || ""))
-                                  : ((await skuApi.getAll({ all: "true" })).data.skuDetails || [])
-                                      .filter((s: any) => fuzzyMatch(search, s.sku_name || ""));
-
-                                // Local filter for pre-approval types if needed
-                                if (orderType === "pre-approval" && preApprovalProducts.length > 0) {
-                                  list = list.filter((s: any) => {
-                                    const skuNameLower = s.sku_name.toLowerCase();
-                                    return (Array.isArray(preApprovalProducts) ? preApprovalProducts : []).some(pap => {
-                                      const oilType = pap.oilType.toLowerCase();
-                                      if (oilType.includes("palm")) return skuNameLower.includes("palm") || skuNameLower.includes("p.o.");
-                                      if (oilType.includes("rice")) return skuNameLower.includes("rice") || skuNameLower.includes("r.o.") || skuNameLower.includes("rbo");
-                                      if (oilType.includes("soya")) return skuNameLower.includes("soya") || skuNameLower.includes("s.o.") || skuNameLower.includes("sbo");
-                                      return false;
-                                    });
-                                  });
-                                }
-
-                                const pageSize = 20;
-                                const slice = list.slice((page - 1) * pageSize, page * pageSize);
-
-                                return {
-                                  options: slice.map((sku: any) => ({
-                                    value: sku.sku_name,
-                                    label: sku.sku_name,
-                                    original: sku
-                                  })),
-                                  hasMore: page * pageSize < list.length
-                                };
-                              }}
-                              className="h-10"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5 col-span-1 md:col-span-2">
-                            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">UOM</Label>
-                            <Input
-                              value={product.uom}
-                              onChange={(e) => updateProduct(product.id, "uom", e.target.value)}
-                              placeholder="UOM"
-                              className="h-10 border-slate-200 focus:border-blue-400 focus:ring-blue-400 bg-muted"
-                              readOnly
-                            />
-                          </div>
-
-                          <div className="space-y-1.5 col-span-1 md:col-span-2">
-                            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Order Qty <span className="text-red-500">*</span></Label>
-                            <Input
-                              type="number"
-                              name={`qty-${Math.random().toString(36).substring(7)}`}
-                              value={product.orderQty}
-                              onChange={(e) => updateProduct(product.id, "orderQty", e.target.value)}
-                              placeholder="0"
-                              autoComplete="new-password"
-                              className="bg-background h-10 border-slate-200 focus:border-blue-400 focus:ring-blue-400"
-                            />
-                          </div>
-
-                          {/* Rate field for both types, but auto-filled for Pre-Approval */}
-                          <div className="space-y-1.5 col-span-2 md:col-span-2">
-                            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider truncate">Rate {orderCategory !== "Stock Transfer" && <span className="text-red-500">*</span>} {orderCategory === "Stock Transfer" && <span className="text-[10px] lowercase">(Optional)</span>}</Label>
-                            <Input
-                              type="number"
-                              name={`rate-${Math.random().toString(36).substring(7)}`}
-                              value={product.rate}
-                              onChange={(e) => updateProduct(product.id, "rate", e.target.value)}
-                              placeholder="0.00"
-                              autoComplete="new-password"
-                              className="bg-background h-11 min-w-[120px] border-slate-200 focus:border-blue-400 focus:ring-blue-400 font-semibold text-blue-600 text-base px-3"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5 col-span-2 md:col-span-2">
-                            <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider truncate">Taxable Amount</Label>
-                            <Input
-                              readOnly
-                              value={(() => {
-                                const rate = parseFloat(product.rate) || 0;
-                                const nos = parseFloat(product.nosPerMainUom) || 0;
-                                const qty = parseFloat(product.orderQty) || 0;
-                                const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2));
-                                return `₹${(rateWoGst * qty).toFixed(2)}`;
-                              })()}
-                              className="bg-background h-11 min-w-[120px] border-slate-200 font-semibold text-blue-600 text-base px-3"
-                            />
-                          </div>
-
-
-                        </div>
-
-                        <div className="flex-none mb-1 pt-6">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeProduct(product.id)}
-                            disabled={products.length === 1}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={addProduct}
-                        disabled={isReadOnly}
-                        className="gap-2 bg-white hover:bg-blue-50 text-blue-600 border-blue-200 shadow-sm"
-                        title={isReadOnly ? "View Only Access" : "Add Product"}
-                      >
-                        <Plus className="h-4 w-4" /> Add Product
-                      </Button>
-                    </div>
-                    {products.length > 0 && (
-                      <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg">
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Weight</p>
-                          <p className="text-sm font-bold text-blue-700">
-                            {products.reduce((sum, p) => sum + (parseFloat(p.skuWeight) || 0) * (parseFloat(p.orderQty) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Order Qty</p>
-                          <p className="text-sm font-bold text-blue-700">
-                            {products.reduce((sum, p) => sum + (parseFloat(p.orderQty) || 0), 0).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Taxable Amount</p>
-                          <p className="text-sm font-bold text-blue-700">
-                            ₹{products.reduce((sum, p) => {
-                              const rate = parseFloat(p.rate) || 0;
-                              const nos = parseFloat(p.nosPerMainUom) || 0;
-                              const qty = parseFloat(p.orderQty) || 0;
-                              const rateWoGst = parseFloat(((rate * nos) / 1.05).toFixed(2));
-                              return sum + (rateWoGst * qty);
-                            }, 0).toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {products.length > 0 && (
-                      <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
-                        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown (Indicative)</p>
-                        </div>
-                        <div className="p-4 max-w-sm ml-auto space-y-2">
-                          {gstType === "no_address" && (
-                            <p className="text-[10px] text-amber-600 font-semibold">Add billing &amp; delivery address to calculate GST</p>
+                      {orderedVisibleCols.map((col) => renderCell(row, col.id))}
+                      <TableCell className="px-4 text-left" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "h-7 w-7 transition-colors",
+                            row.stage3_status !== "Required Modification"
+                              ? "text-slate-300 hover:bg-transparent cursor-not-allowed"
+                              : "text-amber-500 hover:text-amber-700 hover:bg-amber-50 cursor-pointer"
                           )}
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${orderCgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${orderSgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-                            <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${orderIgst.toFixed(2)}` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
-                            <span className="font-mono font-bold text-slate-500">
-                              {`${orderRoundOff >= 0 ? "+" : "-"}₹${Math.abs(orderRoundOff).toFixed(2)}`}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center border-t border-slate-200 pt-2">
-                            <span className="font-black uppercase text-slate-800 text-[11px]">Total Order Value</span>
-                            <span className="font-mono font-black text-blue-700 text-sm">
-                              ₹{orderRoundedTotal.toFixed(2)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                          disabled={row.stage3_status !== "Required Modification" || isReadOnly || loadingModifyId === row.id}
+                          title={
+                            isReadOnly
+                              ? "View Only Access"
+                              : row.stage3_status !== "Required Modification"
+                              ? "Order must be marked 'Required Modification' at Stage 3 to edit"
+                              : "Modify order"
+                          }
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              setLoadingModifyId(row.id)
+                              const res = await orderApi.getById(row.id)
+                              if (res.success && res.data) {
+                                setModifyOrder(res.data)
+                              } else {
+                                toast({
+                                  title: "Error",
+                                  description: res.message || "Failed to load order details for modification.",
+                                  variant: "destructive",
+                                })
+                              }
+                            } catch (err: any) {
+                              toast({
+                                title: "Error",
+                                description: err?.message || "Failed to load order details.",
+                                variant: "destructive",
+                              })
+                            } finally {
+                              setLoadingModifyId(null)
+                            }
+                          }}
+                        >
+                          {loadingModifyId === row.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                          ) : (
+                            <Pencil className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <StagePagination
+            sticky
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            noun="Orders"
+            onPrev={() => setPage(p => Math.max(1, p - 1))}
+            onNext={() => setPage(p => p + 1)}
+            prevDisabled={page === 1 || rows.length === 0}
+            nextDisabled={rows.length === 0 || page >= totalPages}
+          />
+        </CardContent>
+      </Card>
 
-              {allowedOrderThroughTypes.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="isBroker"> Is This Order Through</Label>
-                  <Select value={orderThrough} onValueChange={(value: OrderThroughType) => setOrderThrough(value)}>
-                    <SelectTrigger id="isBroker">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allowedOrderThroughTypes.includes("Direct") && <SelectItem value="Direct">Direct</SelectItem>}
-                      {allowedOrderThroughTypes.includes("Broker") && <SelectItem value="Broker">Broker</SelectItem>}
-                      {allowedOrderThroughTypes.includes("Salesperson") && <SelectItem value="Salesperson">Salesperson</SelectItem>}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+      {/* Add Order - same dialog footprint as the Plan Vehicle dialog */}
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:w-[95vw] sm:!max-w-[95vw] max-h-[95dvh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Add Order</DialogTitle>
+            <DialogDescription>Create a new order with customer and product details.</DialogDescription>
+          </DialogHeader>
+          <OrderPunchForm
+            onCancel={() => setIsAddOpen(false)}
+            onSuccess={() => { setIsAddOpen(false); loadList() }}
+          />
+        </DialogContent>
+      </Dialog>
 
-              {isBrokerOrder === "Broker" && allowedOrderThroughTypes.includes("Broker") && (
-                <div className="space-y-2">
-                  <Label htmlFor="brokerName">Broker Name (IF ORDER THROUGH BROKER)</Label>
-                  <AsyncCombobox
-                    placeholder={isLoadingBrokers ? "Loading..." : "Select broker"}
-                    searchPlaceholder="Search brokers..."
-                    value={brokerName}
-                    onValueChange={setBrokerName}
-                    onSelectOption={(opt: any) => {
-                      if (opt.original) {
-                        setBrokers(prev => {
-                          const exists = prev.find(b => b.id === opt.original.id);
-                          return exists ? prev : [...prev, opt.original];
-                        });
-                      }
-                    }}
-                    fetchOptions={async (search: string, page: number) => {
-                      if (allowedBrokerNames) {
-                        const allowedSet = new Set(allowedBrokerNames.map(b => b.toLowerCase()))
-                        const filtered = brokers.filter(b =>
-                          allowedSet.has((b.salesman_name || "").toLowerCase()) &&
-                          (b.status || "").toLowerCase() === "active" &&
-                          (!search || (b.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
-                        )
-                        const start = (page - 1) * 20
-                        const pageItems = filtered.slice(start, start + 20)
-                        return {
-                          options: pageItems.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
-                          hasMore: start + 20 < filtered.length
-                        };
-                      }
-                      const res = await brokerApi.getAll({ search, page, limit: 20 });
-                      const list = res.data.brokers || [];
-                      return {
-                        options: list.map((b: any) => ({ value: b.salesman_name, label: b.salesman_name, original: b })),
-                        hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
-                    }}
-                    disabled={isLoadingBrokers}
-                  />
-                </div>
-              )}
+      {/* Modify Order - directly opens dialog on list page */}
+      <ModifyOrderDialog
+        order={modifyOrder}
+        open={!!modifyOrder}
+        onOpenChange={(open) => {
+          if (!open) setModifyOrder(null)
+        }}
+        onSaved={() => {
+          setModifyOrder(null)
+          loadList()
+        }}
+      />
 
-              {isBrokerOrder === "Salesperson" && (
-                <div className="space-y-2">
-                  <Label htmlFor="salespersonName">Salesperson Name</Label>
-                  <AsyncCombobox
-                    placeholder={isLoadingSalespersons ? "Loading..." : "Select salesperson"}
-                    searchPlaceholder="Search salespersons..."
-                    value={salespersonName}
-                    onValueChange={setSalespersonName}
-                    onSelectOption={(opt: any) => {
-                      if (opt.original) {
-                        setSalespersons(prev => {
-                          const exists = prev.find(s => s.id === opt.original.id);
-                          return exists ? prev : [...prev, opt.original];
-                        });
-                      }
-                    }}
-                    fetchOptions={async (search: string, page: number) => {
-                      if (allowedSalespersonNames) {
-                        const allowedSet = new Set(allowedSalespersonNames.map(s => s.toLowerCase()))
-                        const filtered = salespersons.filter(s =>
-                          allowedSet.has((s.salesman_name || "").toLowerCase()) &&
-                          (s.status || "").toLowerCase() === "active" &&
-                          (!search || (s.salesman_name || "").toLowerCase().includes(search.toLowerCase()))
-                        )
-                        const start = (page - 1) * 20
-                        const pageItems = filtered.slice(start, start + 20)
-                        return {
-                          options: pageItems.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
-                          hasMore: start + 20 < filtered.length
-                        };
-                      }
-                      const res = await salespersonApi.getAll({ search, page, limit: 20 });
-                      const list = res.data.salespersons || [];
-                      return {
-                        options: list.map((s: any) => ({ value: s.salesman_name, label: s.salesman_name, original: s })),
-                        hasMore: (list.length + (page - 1) * 20) < (res.data.pagination?.total || 0)
-                      };
-                    }}
-                    disabled={isLoadingSalespersons}
-                  />
-                </div>
-              )}
-
-              {orderPurpose !== "week-on-week" && (
-                <div className="space-y-2">
-                  <Label htmlFor="deliveryDate">Expected Delivery Date</Label>
-                  <Input
-                    id="deliveryDate"
-                    type="date"
-                    value={deliveryDate}
-                    onChange={(e) => setDeliveryDate(e.target.value)}
-                  />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="paymentTerms">Payment Terms</Label>
-                <Select value={paymentTerms} onValueChange={setPaymentTerms}>
-                  <SelectTrigger id="paymentTerms">
-                    <SelectValue placeholder="Select terms" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="advance">Advance</SelectItem>
-                    <SelectItem value="7days">7 Days After Delivery</SelectItem>
-                    <SelectItem value="delivery">On Delivery</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="transportType">Transport Type</Label>
-                <Select value={transportType} onValueChange={setTransportType}>
-                  <SelectTrigger id="transportType">
-                    <SelectValue placeholder="Select transport" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="self">FOR</SelectItem>
-                    <SelectItem value="others">EX-Depot</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <FileUploadField
-                  label="Upload SO Copy"
-                  accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                  fileName={soFile?.name || ""}
-                  helperText="Max file size: 20 MB"
-                  buttonText="Select SO Copy"
-                  onFilesSelected={(files) => {
-                    if (files[0]) {
-                      setSoFile(files[0])
-                    }
-                  }}
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="orderPunchRemarks">Remarks</Label>
-                <Textarea
-                  id="orderPunchRemarks"
-                  placeholder="Enter any additional remarks here..."
-                  value={orderPunchRemarks}
-                  onChange={(e) => setOrderPunchRemarks(e.target.value)}
-                  className="min-h-25"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-end gap-4">
-          <Button variant="ghost" type="button" disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button type="submit" className="gap-2 px-8" disabled={isSubmitting || isReadOnly} title={isReadOnly ? "View Only Access" : "Save Order"}>
-            <Save className="h-4 w-4" /> {isSubmitting ? "Saving..." : "Save Order"}
-          </Button>
-        </div>
-      </form>
+      <OrderPunchDetailModal orderId={viewOrderId} onClose={() => setViewOrderId(null)} />
     </div>
   )
 }

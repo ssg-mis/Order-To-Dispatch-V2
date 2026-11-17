@@ -26,7 +26,7 @@ export default function ProductionPage() {
     const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().split('T')[0]
   })
   const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0])
-  const [rangeData, setRangeData] = useState<{ sku_name: string; date: string; qty: number }[]>([])
+  const [rangeData, setRangeData] = useState<{ sku_id?: number; sku_name: string; date: string; qty: number }[]>([])
   const [isLoadingView, setIsLoadingView] = useState(false)
 
   const { data: skuListRaw } = useQuery({
@@ -40,7 +40,7 @@ export default function ProductionPage() {
 
   const banariSkus = useMemo(() => {
     return (skuListRaw || [])
-      .map((r: any) => ({ name: r.sku_name as string, sku_id: r.sku_code as string, status: r.status as string }))
+      .map((r: any) => ({ id: r.id as number, name: r.sku_name as string, sku_id: r.sku_code as string, status: r.status as string }))
       .sort((a: any, b: any) => a.name.localeCompare(b.name))
   }, [skuListRaw])
 
@@ -51,7 +51,7 @@ export default function ProductionPage() {
       .then(res => {
         if (res.success) {
           const map: Record<string, string> = {}
-          res.data.forEach((row: any) => { if (row.qty > 0) map[row.sku_name] = String(row.qty) })
+          res.data.forEach((row: any) => { if (row.qty > 0) map[String(row.sku_id)] = String(row.qty) })
           setProductionQtyMap(map)
         }
       })
@@ -74,7 +74,7 @@ export default function ProductionPage() {
     try {
       const items = Object.entries(productionQtyMap)
         .filter(([_, qty]) => qty !== '')
-        .map(([sku_name, qty]) => ({ sku_name, qty: parseInt(qty) || 0 }))
+        .map(([skuId, qty]) => ({ sku_id: Number(skuId), sku_name: banariSkus.find((s: any) => String(s.id) === skuId)?.name ?? '', qty: parseInt(qty) || 0 }))
       const res = await productionApi.bulkUpsert({ date: productionDate, items })
       if (res.success) {
         toast({ title: "Saved", description: "Production data saved successfully" })
@@ -153,8 +153,8 @@ export default function ProductionPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {banariSkus.map((sku: { name: string; sku_id: string; status: string }) => (
-                      <TableRow key={sku.name} className="hover:bg-slate-50/60">
+                    {banariSkus.map((sku: { id: number; name: string; sku_id: string; status: string }) => (
+                      <TableRow key={sku.id} className="hover:bg-slate-50/60">
                         <TableCell className="text-xs text-slate-500 font-mono">{sku.sku_id || "—"}</TableCell>
                         <TableCell className="font-medium text-slate-800">{sku.name}</TableCell>
                         <TableCell>
@@ -168,8 +168,8 @@ export default function ProductionPage() {
                             className="w-36 text-right ml-auto"
                             placeholder="0"
                             min="0"
-                            value={productionQtyMap[sku.name] ?? ''}
-                            onChange={e => setProductionQtyMap(prev => ({ ...prev, [sku.name]: e.target.value }))}
+                            value={productionQtyMap[String(sku.id)] ?? ''}
+                            onChange={e => setProductionQtyMap(prev => ({ ...prev, [String(sku.id)]: e.target.value }))}
                           />
                         </TableCell>
                       </TableRow>
@@ -215,11 +215,16 @@ export default function ProductionPage() {
               ) : (() => {
                 const dates = Array.from(new Set(rangeData.map(r => r.date))).sort()
                 const bySkuMap: Record<string, Record<string, number>> = {}
+                const skuNameById: Record<string, string> = {}
                 rangeData.forEach(r => {
-                  if (!bySkuMap[r.sku_name]) bySkuMap[r.sku_name] = {}
-                  bySkuMap[r.sku_name][r.date] = r.qty
+                  const k = String(r.sku_id ?? r.sku_name)
+                  skuNameById[k] = r.sku_name
+                  if (!bySkuMap[k]) bySkuMap[k] = {}
+                  bySkuMap[k][r.date] = r.qty
                 })
-                const pivotRows = Object.entries(bySkuMap).sort(([a], [b]) => a.localeCompare(b))
+                const pivotRows: [string, Record<string, number>][] = Object.entries(bySkuMap)
+                  .sort(([a], [b]) => skuNameById[a].localeCompare(skuNameById[b]))
+                  .map(([k, dateMap]) => [skuNameById[k], dateMap])
                 if (pivotRows.length === 0) return (
                   <div className="flex flex-col items-center justify-center py-16 gap-2">
                     <CalendarSearch className="h-8 w-8 text-slate-300" />

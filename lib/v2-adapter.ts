@@ -74,6 +74,7 @@ function base(row: any): Record<string, any> {
   // Order header
   r.order_no = o.orderNo ?? r.order_no ?? null;
   r.so_no = o.orderNo ?? null; // legacy lift_receiving_confirmation name
+  r.line_code = row.lineCode ?? null; // readable order-line ID: <order_no>/<sku_code>[-n]
   r.order_type = o.orderType ?? null;
   r.order_category = o.orderCategory ?? null;
   r.customer_type = o.customerType ?? null;
@@ -111,7 +112,8 @@ function base(row: any): Record<string, any> {
   r.upload_copy = o.uploadCopy ?? null;
   r.gst = o.gst ?? null;
 
-  // Customer / depot / broker / salesperson
+  r.cd_amount = dsp.cdAmount != null ? Number(dsp.cdAmount) : (row.cdAmount != null ? Number(row.cdAmount) : null);
+  r.cdAmount = r.cd_amount;
   r.customer_name = c.customerName ?? null;
   r.party_name = c.customerName ?? null; // legacy name
   r.depo_name = d.depotName ?? null;
@@ -128,6 +130,8 @@ function base(row: any): Record<string, any> {
   r.nos_per_main_uom = s.nosPerMainUom ?? null;
   r.oil_type = oi.oilType ?? null;
   r.uom = oi.uom ?? s.mainUom ?? null;
+  r.sku_gross_weight = s.grossWeight ?? null; // per-unit packed weight of the SKU
+  r.sku_unit_weight = s.skuWeight ?? null; // per-unit net weight of the SKU
   r.alternate_uom = oi.alternateUom ?? s.alternateUom ?? null;
   r.order_quantity = oi.orderQuantity ?? null;
   r.approval_qty = oi.approvedQty ?? null;
@@ -195,6 +199,10 @@ export function flattenOrderItemStage(row: any): Record<string, any> {
   if (row.orderConfirmationWithCustomer !== undefined) r.order_confirmation_with_customer = row.orderConfirmationWithCustomer;
   if (row.revertRemarks !== undefined) r.revert_planning_remarks = row.revertRemarks;
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Master-driven GST (Dispatch Planning): the SKU's GST % and the depot/customer GST state codes.
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
   if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
   if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
   if (row.dispatchPlanningUser !== undefined) r.dispatch_planning_user = row.dispatchPlanningUser;
@@ -203,6 +211,41 @@ export function flattenOrderItemStage(row: any): Record<string, any> {
   // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
   if (row.approvalInherited !== undefined) r.approval_inherited = row.approvalInherited;
   return r;
+}
+
+// Order Approval's PENDING list only (client request, Stage 3 overhaul): one
+// row per ORDER (not per order_item), with nested `items` and server-computed
+// totals - a different shape from flattenOrderItemStage's flat per-item rows,
+// so it gets its own flattener rather than overloading that one (which is
+// still used, unchanged, by History and by Pre-Approval/Dispatch-Planning).
+export function flattenGroupedOrderApproval(row: any): Record<string, any> {
+  const o = row.order || {};
+  const c = row.customer || {};
+  const d = row.depot || {};
+  const b = row.broker || {};
+  return {
+    id: o.id ?? null, // order id - the row/detail key for this new shape
+    order_id: o.id ?? null,
+    order_no: o.orderNo ?? null,
+    party_so_date: o.partySoDate ?? null,
+    manual_sauda_no: o.manualSaudaNo ?? null,
+    customer_name: c.customerName ?? null,
+    depo_name: d.depotName ?? null,
+    broker_name: b.brokerName ?? null,
+    order_punch_user: row.orderPunchUser ?? null,
+    total_qty_box: row.totalQtyBox ?? 0,
+    total_qty_kg: row.totalQtyKg ?? 0,
+    total_order_amount: row.totalOrderAmount ?? 0,
+    // Client spec: "Dispatch from" is the depot. The order_approvals.dispatchFrom
+    // flag ('in-stock'/'production') is only a fallback when no depot is set.
+    dispatch_from: d.depotName ?? row.dispatchFrom ?? null,
+    remarks: row.remarks ?? null,
+    actual_datetime: row.actualAt ?? null,
+    order_datetime: o.createdAt ?? null,
+    status: row.status ?? null,
+    item_count: row.itemCount ?? 0,
+    items: row.items ?? [],
+  };
 }
 
 // Actual Dispatch is per SHIPMENT: submit key = dispatch id.
@@ -219,6 +262,14 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   r.actual_1 = dsp.actualAt ?? null;
   r.reason_of_difference_in_weight_if_any_speacefic = dsp.reasonOfWeightDifference ?? null; // legacy name
   if (row.hasPriorDispatch !== undefined) r.has_prior_dispatch = row.hasPriorDispatch;
+  // Status column on the Actual Dispatch list: gate-in done / draft saved for this DO.
+  if (row.actualCompletionSeconds !== undefined) r.actual_completion_seconds = row.actualCompletionSeconds != null ? Number(row.actualCompletionSeconds) : null;
+  if (row.hasGateIn !== undefined) r.has_gate_in = !!row.hasGateIn;
+  if (row.hasDraft !== undefined) r.has_draft = !!row.hasDraft;
+  // Master-driven GST for Dispatch Planning: the SKU's GST % and the depot/customer GST state codes.
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
   // Earlier-gate audit trail — the dispatch slip/voucher printout's
   // Pre-Approve / Approve By block reads these (order_punch_at/_user come
   // through base() already).
@@ -231,6 +282,22 @@ export function flattenDispatchStage(row: any): Record<string, any> {
   // and has no approval row of its own — the names above were resolved from
   // the nearest ancestor it split from (see stageUtils.resolveInheritedApproval).
   if (row.approvalInherited !== undefined) r.approval_inherited = row.approvalInherited;
+  // Read-only reference from Stage 5 (Plan Vehicle) — vehicle/transporter are
+  // decided there, not re-entered at Actual Dispatch; plan_vehicle_confirmed
+  // distinguishes an actually-confirmed plan from a reverted/attempted one.
+  const vp = row.vehiclePlanning || null;
+  r.plan_vehicle_confirmed = !!vp?.actualAt;
+  r.plan_vehicle_registration_no = row.planVehicleRegNo ?? null;
+  r.plan_vehicle_transporter_name = row.planVehicleTransporterName ?? null;
+  r.plan_vehicle_driver_name = row.planVehicleDriverName ?? null;
+  // Advance amounts stay editable at Actual Dispatch per spec ("allow the user
+  // to modify it here as well") — these are just the Plan Vehicle-confirmed
+  // starting values to pre-fill that editable field with.
+  r.plan_vehicle_freight_rate_type = vp?.freightRateType ?? null;
+  r.plan_vehicle_freight_amount = vp?.freightAmount ?? null;
+  r.plan_vehicle_advance_bank = vp?.advanceBhadaBank ?? null;
+  r.plan_vehicle_advance_diesel = vp?.advanceBhadaDieselAdvance ?? null;
+  r.plan_vehicle_advance_cash = vp?.advanceBhadaCash ?? null;
   return r;
 }
 
@@ -256,11 +323,22 @@ export function flattenSecurityStage(row: any): Record<string, any> {
   return r;
 }
 
+// Master-driven GST carried from Dispatch Planning onwards: the SKU's GST % (frozen on the order line) and
+// the depot / customer GST state codes, which decide CGST + SGST (same state) vs IGST (other state).
+function applyMasterGst(r: Record<string, any>, row: any) {
+  if (row.gstRatePercent !== undefined) r.gst_rate_percent = row.gstRatePercent;
+  if (row.depotGstStateCode !== undefined) r.depot_gst_state_code = row.depotGstStateCode;
+  if (row.customerGstStateCode !== undefined) r.customer_gst_state_code = row.customerGstStateCode;
+  if (row.hsnCode !== undefined) r.hsn_code = row.hsnCode;
+}
+
 // Make/Check Invoice: submit key = invoices id.
 export function flattenInvoiceStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
   const inv = row.invoice || {};
+  const vp = row.vehiclePlanning || {};
   r.id = inv.id ?? null;
   r.invoice_id = inv.id ?? null;
   r.dispatch_id = dsp.id ?? null;
@@ -282,12 +360,26 @@ export function flattenInvoiceStage(row: any): Record<string, any> {
   r.actual_5 = inv.madeAt ?? null;
   r.planned_6 = inv.plannedCheckedAt ?? null;
   r.actual_6 = inv.checkedAt ?? null;
+
+  // Advance bhada & diesel prefill: from Invoice (if already made) or fallback to Actual Dispatch / Plan Vehicle
+  r.driver_advance_cash = inv.driverAdvanceCash ?? dsp.advanceBhadaCash ?? vp.advanceBhadaCash ?? null;
+  r.driver_advance_bank = inv.driverAdvanceBank ?? dsp.advanceBhadaBank ?? vp.advanceBhadaBank ?? null;
+  r.diesel_amount = inv.dieselAmount ?? dsp.advanceBhadaDieselAdvance ?? vp.advanceBhadaDieselAdvance ?? null;
+  r.petrol_pump_name = inv.petrolPumpName ?? null;
+  r.diesel_parchi_file = inv.dieselParchiFile ?? null;
+  r.insurance_details = inv.insuranceDetails ?? null;
+
+  r.advance_bhada_cash = dsp.advanceBhadaCash ?? vp.advanceBhadaCash ?? null;
+  r.advance_bhada_bank = dsp.advanceBhadaBank ?? vp.advanceBhadaBank ?? null;
+  r.advance_bhada_diesel_advance = dsp.advanceBhadaDieselAdvance ?? vp.advanceBhadaDieselAdvance ?? null;
+
   return r;
 }
 
 // Gate Out: submit key = gate_outs id.
 export function flattenGateOutStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
   const g = row.gateOut || {};
   const inv = row.invoice || {};
@@ -306,30 +398,46 @@ export function flattenGateOutStage(row: any): Record<string, any> {
   r.invoice_date = inv.invoiceDate ?? null;
   r.invoice_copy = inv.invoiceCopy ?? null;
   r.bill_amount = inv.billAmount ?? null;
+  if (row.preApprovalUser !== undefined) r.pre_approval_user = row.preApprovalUser;
+  if (row.preApprovalActualAt !== undefined) r.pre_approval_at = row.preApprovalActualAt;
+  if (row.orderApprovalUser !== undefined) r.order_approval_user = row.orderApprovalUser;
+  if (row.orderApprovalActualAt !== undefined) r.order_approval_at = row.orderApprovalActualAt;
   return r;
 }
 
-// Confirm Material Receipt: submit key = material_receipts id.
-export function flattenMaterialReceiptStage(row: any): Record<string, any> {
+// Unloading: submit key = unloadings id.
+export function flattenUnloadingStage(row: any): Record<string, any> {
   const r = base(row);
+  applyMasterGst(r, row);
   const dsp = row.dispatch || {};
-  const mr = row.materialReceipt || {};
+  const ul = row.unloading || {};
   const inv = row.invoice || {};
-  r.id = mr.id ?? null;
-  r.material_receipt_id = mr.id ?? null;
+  r.id = ul.id ?? null;
+  r.unloading_id = ul.id ?? null;
   r.dispatch_id = dsp.id ?? null;
   r.d_sr_number = dsp.dsrNumber ?? null;
   r.invoice_no = inv.invoiceNo ?? null;
+  r.invoice_copy = inv.invoiceCopy ?? null;
+  r.truck_no = row.vehicle?.registrationNo ?? r.truck_no ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
-  r.material_received_date = mr.materialReceivedDate ?? null;
-  r.received_image_proof = mr.receivedImageProof ?? null;
-  r.damage_status = mr.damageStatus ?? null;
-  r.damage_qty = mr.damageQty ?? null;
-  r.damage_image = mr.damageImage ?? null;
-  r.remarks_3 = mr.remarks ?? null;
-  r.planned_8 = mr.plannedAt ?? null;
-  r.actual_8 = mr.actualAt ?? null;
+  r.actual_qty_dispatch = dsp.actualQtyDispatch ?? r.actual_qty_dispatch ?? null;
+  r.shortage_qty = ul.shortageQty ?? null;
+  r.received_date = ul.receivedDate ?? null;
+  r.received_time = ul.receivedTime ?? null;
+  r.received_proof = ul.receivedProof ?? null;
+  r.damage_photos = ul.damagePhotos ?? null;
+  r.sfg_oil_kg = row.sfgOilKg ?? null;
+  r.damaged_containers = row.damagedContainers ?? [];
+  r.shortage_cause = ul.shortageCause ?? null;
+  r.shortage_borne_by = ul.shortageBorneBy ?? null;
+  r.total_loss_value = ul.totalLossValue ?? null;
+  r.total_loss_qty = ul.totalLossQty ?? null;
+  r.approval_status = ul.approvalStatus ?? null;
+  r.approval_remarks = ul.approvalRemarks ?? null;
+  r.remarks_3 = ul.remarks ?? null;
+  r.planned_8 = ul.plannedAt ?? null;
+  r.actual_8 = ul.actualAt ?? null;
   return r;
 }
 
@@ -344,6 +452,15 @@ export function flattenDamageStage(row: any): Record<string, any> {
   r.d_sr_number = dsp.dsrNumber ?? null;
   r.planned_1 = dsp.plannedAt ?? null;
   r.actual_1 = dsp.actualAt ?? null;
+  const ul = row.unloading || {};
+  r.shortage_qty = ul.shortageQty ?? null;
+  r.damage_qty = ul.shortageQty ?? null;
+  r.damaged_container_count = row.damagedContainerCount ?? 0;
+  r.loss_company = Number(row.lossCompany) || 0;
+  r.loss_transporter = Number(row.lossTransporter) || 0;
+  r.loss_customer = Number(row.lossCustomer) || 0;
+  r.credit_qty = Number(row.creditQty) || 0;
+  r.damage_status = (Number(ul.shortageQty) > 0 || Number(row.damagedContainerCount) > 0) ? 'Damaged' : 'Delivered';
   r.status_2 = da.status ?? null;
   r.credit_note_date = da.creditNoteDate ?? null;
   r.credit_note_no = da.creditNoteNo ?? null;
@@ -352,6 +469,22 @@ export function flattenDamageStage(row: any): Record<string, any> {
   r.credit_note_amount = da.creditNoteAmount ?? null;
   r.net_banalce = da.netBalance ?? null; // legacy misspelling kept for the page
   r.net_balance = da.netBalance ?? null;
+  // Stage 15 settlement documents
+  r.total_loss_qty = ul.totalLossQty ?? null;
+  r.gst_rate = row.gstRate ?? null; // GST % from the SKU master
+  r.credit_note_taxable = da.creditNoteTaxable ?? null;
+  r.credit_note_gst_percent = da.creditNoteGstPercent ?? null;
+  r.debit_note_no = da.debitNoteNo ?? null;
+  r.debit_note_date = da.debitNoteDate ?? null;
+  r.debit_note_copy = da.debitNoteCopy ?? null;
+  r.debit_note_amount = da.debitNoteAmount ?? null;
+  r.reverse_transfer_no = da.reverseTransferNo ?? null;
+  r.reverse_transfer_date = da.reverseTransferDate ?? null;
+  r.reverse_transfer_copy = da.reverseTransferCopy ?? null;
+  r.reverse_transfer_qty = da.reverseTransferQty ?? null;
+  r.company_loss_amount = da.companyLossAmount ?? null;
+  r.company_loss_head = da.companyLossHead ?? null;
+  r.settlement_remarks = da.settlementRemarks ?? null;
   r.planned_9 = da.plannedAt ?? null;
   r.actual_9 = da.actualAt ?? null;
   return r;

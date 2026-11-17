@@ -12,10 +12,12 @@ interface SortableTableHeadProps {
   id: string
   className?: string
   onClick?: () => void
+  /** Make the inner wrapper span the full cell width (used by StageHeadCell so the totals band can fill the cell). */
+  fill?: boolean
   children: React.ReactNode
 }
 
-export function SortableTableHead({ id, className, onClick, children }: SortableTableHeadProps) {
+export function SortableTableHead({ id, className, onClick, fill, children }: SortableTableHeadProps) {
   const disabled = React.useContext(ColumnDragDisabledContext)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
 
@@ -38,12 +40,12 @@ export function SortableTableHead({ id, className, onClick, children }: Sortable
       onClick={onClick}
     >
       <div className={cn("flex items-center w-full", isRight ? "justify-end" : isCenter ? "justify-center" : "justify-start")}>
-        <div className="relative pl-3.5 inline-flex items-center">
+        <div className={cn("relative items-center", fill ? "flex w-full" : "inline-flex")}>
           {!disabled && (
             <span
               {...attributes}
               {...listeners}
-              className="absolute left-0 top-1/2 -translate-y-1/2 cursor-grab opacity-0 group-hover:opacity-40 hover:!opacity-70 active:cursor-grabbing flex-shrink-0 touch-none z-10 text-slate-400"
+              className="absolute -left-3.5 top-1/2 -translate-y-1/2 cursor-grab opacity-0 group-hover:opacity-40 hover:!opacity-70 active:cursor-grabbing flex-shrink-0 touch-none z-10 text-slate-400"
               onClick={(e) => e.stopPropagation()}
             >
               <GripVertical size={11} />

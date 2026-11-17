@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -31,6 +32,8 @@ export function ConversionFormulaForm({
   handleConversionFormulaFieldChangeAttempt,
   setConversionFormulaEffectiveDatesOpen,
 }: ConversionFormulaFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const { toast } = useToast()
 
   const attemptChange = (fieldName: string, applyChange: () => void) => {
@@ -51,7 +54,7 @@ export function ConversionFormulaForm({
         {editingItem?.id && (
           <ConversionFormulaSectionalHistoryTable
             conversionFormulaId={editingItem.id}
-            onOpenView={() => setConversionFormulaEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setConversionFormulaEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

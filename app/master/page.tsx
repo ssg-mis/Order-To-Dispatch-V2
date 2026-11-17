@@ -18,10 +18,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Combobox } from "@/components/ui/combobox"
+import { MasterTabPicker } from "@/components/master-tab-picker"
+import { HistoryApprovalsDialog } from "@/components/history-approvals-dialog"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
-import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, oilTagApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, lookupApi, masterHistoryApi } from "@/lib/api-service"
+import { customerApi, depotApi, brokerApi, skuDetailsApi, commonApi, skuSellingPriceApi, varCalcApi, salespersonApi, ledgerGroupApi, stockGroupApi, unitApi, ledgerApi, rawMaterialApi, semiFinishedGoodApi, insuranceDetailApi, conversionFormulaApi, priceLevelApi, petrolPumpApi, cdRuleApi, tdsRuleApi, oilTagApi, bhadaRateApi, vehicleMasterApi, driverMasterApi, transportMasterApi, orderApi, inventoryApi, setMasterTabContext, stateApi, districtApi, subDistrictApi, lookupApi, masterHistoryApi } from "@/lib/api-service"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useInView } from "react-intersection-observer"
 
@@ -91,6 +93,7 @@ import { FinishedGoodsForm } from "@/components/masters/forms/FinishedGoodsForm"
 import { MasterFieldChangeConfirmModal, SkuFieldChangeConfirmModal } from "@/components/masters/modals/MasterFieldChangeConfirmModal"
 import { VehicleForm } from "@/components/masters/forms/VehicleForm"
 import { DriverForm } from "@/components/masters/forms/DriverForm"
+import { getVehicleDocFileErrors } from "@/lib/vehicle-doc-validation"
 import { TransportForm } from "@/components/masters/forms/TransportForm"
 import { RawMaterialForm } from "@/components/masters/forms/RawMaterialForm"
 import { SemiFinishedGoodForm } from "@/components/masters/forms/SemiFinishedGoodForm"
@@ -109,6 +112,7 @@ import {
   UnitForm,
 } from "@/components/masters/forms/SimpleMastersForms"
 import { CustomerBulkImportModal } from "@/components/masters/modals/customer-bulk-import-modal"
+import { CustomerGodownTagModal } from "@/components/masters/modals/customer-godown-tag-modal"
 import { DepotBulkImportModal } from "@/components/masters/modals/depot-bulk-import-modal"
 import { BrokerBulkImportModal } from "@/components/masters/modals/broker-bulk-import-modal"
 import { SalespersonBulkImportModal } from "@/components/masters/modals/salesperson-bulk-import-modal"
@@ -118,6 +122,7 @@ import { VehicleBulkImportModal } from "@/components/masters/modals/vehicle-bulk
 import { DriverBulkImportModal } from "@/components/masters/modals/driver-bulk-import-modal"
 import { TransporterBulkImportModal } from "@/components/masters/modals/transporter-bulk-import-modal"
 import { LedgerGroupBulkImportModal } from "@/components/masters/modals/ledger-group-bulk-import-modal"
+import { LedgerMasterTab } from "@/components/masters/LedgerMasterTab"
 import { StockGroupBulkImportModal } from "@/components/masters/modals/stock-group-bulk-import-modal"
 import { UnitBulkImportModal } from "@/components/masters/modals/unit-bulk-import-modal"
 import { RawMaterialBulkImportModal } from "@/components/masters/modals/raw-material-bulk-import-modal"
@@ -155,6 +160,21 @@ import {
 } from "@/lib/masterTabConfig"
 
 export default function MasterPage() {
+
+  // Global scroll restoration for all master forms
+  useEffect(() => {
+    const savedScroll = sessionStorage.getItem('masterFormScrollTop');
+    if (savedScroll) {
+      setTimeout(() => {
+        const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+        if (container) {
+          container.scrollTop = parseInt(savedScroll, 10);
+        }
+      }, 50);
+      sessionStorage.removeItem('masterFormScrollTop');
+    }
+  }); // Runs on every render, but only does something if savedScroll exists
+
   const { toast } = useToast()
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -210,6 +230,7 @@ export default function MasterPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [customerBulkImportOpen, setCustomerBulkImportOpen] = useState(false)
+  const [customerGodownTagOpen, setCustomerGodownTagOpen] = useState(false)
   const [isExportingCustomers, setIsExportingCustomers] = useState(false)
   const [depotBulkImportOpen, setDepotBulkImportOpen] = useState(false)
   const [isExportingDepots, setIsExportingDepots] = useState(false)
@@ -1032,6 +1053,9 @@ export default function MasterPage() {
       const headers = [
         "Unit ID / Code",
         "Unit Name",
+        "Short Name",
+        "Decimal Places",
+        "UQC",
         "Status",
       ]
 
@@ -1041,6 +1065,9 @@ export default function MasterPage() {
         const row = [
           `"${item.unit_code || item.unitCode || item.id || ''}"`,
           `"${(item.unit_name || item.unitName || '').replace(/"/g, '""')}"`,
+          `"${(item.short_name || '').replace(/"/g, '""')}"`,
+          `"${item.decimal_places ?? ''}"`,
+          `"${item.uqc_code || ''}"`,
           `"${item.status || 'Active'}"`,
         ]
         csvRows.push(row.join(","))
@@ -1890,6 +1917,7 @@ export default function MasterPage() {
         "MSME W.E.F. Date",
         "FSSAI No",
         "FSSAI Licence Type",
+        "FSSAI W.E.F. Date",
         "FSSAI Valid Upto",
         "Ledger Group ID",
         "Is Required for Commitment",
@@ -1919,6 +1947,7 @@ export default function MasterPage() {
           `"${item.msme_registration_wef ? String(item.msme_registration_wef).split('T')[0] : ''}"`,
           `"${item.fssai_no || ''}"`,
           `"${item.fssai_licence_type || ''}"`,
+          `"${item.fssai_registration_wef ? String(item.fssai_registration_wef).split('T')[0] : ''}"`,
           `"${item.fssai_valid_upto ? String(item.fssai_valid_upto).split('T')[0] : ''}"`,
           `"${item.ledger_group_id || ''}"`,
           `"${item.is_required_for_commitment || 'No'}"`,
@@ -2269,10 +2298,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     () => (allActiveDepotsData || []).filter((d: Depot) => d.status === 'Active'),
     [allActiveDepotsData]
   )
-  // "Belongs to Which Godown" options - exactly these 5, sourced from the real
-  // Depot records (never a hardcoded id list, in case they get re-seeded).
+  // "Belongs to Which Godown" options - sourced from all active Depot records
   const godownDepots = useMemo(
-    () => activeDepots.filter((d: any) => GODOWN_NAMES.includes(d.depot_name)),
+    () => activeDepots,
     [activeDepots]
   )
 
@@ -2290,6 +2318,26 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   })
   const states = useMemo(() => statesData || [], [statesData])
   const activeStates = useMemo(() => states.filter((s: any) => s.status === 'Active'), [states])
+
+  const { data: districtsData } = useQuery({
+    queryKey: ["master-districts"],
+    queryFn: async () => {
+      const res = await districtApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.districts || []) : []
+    }
+  })
+  const activeDistricts = useMemo(() => (districtsData || []).filter((d: any) => d.status === 'Active'), [districtsData])
+
+  const { data: subDistrictsData } = useQuery({
+    queryKey: ["master-sub_districts"],
+    queryFn: async () => {
+      const res = await subDistrictApi.getAll({ page: 1, limit: 1000, all: "true" })
+      return res.success ? (res.data.sub_districts || res.data.subDistricts || []) : []
+    }
+  })
+  const activeSubDistricts = useMemo(() => (subDistrictsData || []).filter((sd: any) => sd.status === 'Active'), [subDistrictsData])
+
+
 
   // GST Registration Status/Type dropdown options - sourced from Reference Data
   // (simple_lookups), never hardcoded, same pattern as activeStates above.
@@ -2328,10 +2376,11 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     },
     staleTime: 5 * 60 * 1000,
   })
-  const activeMsmeRegTypes = useMemo(
-    () => (msmeRegTypeData || []).filter((r: any) => r.status === 'Active'),
-    [msmeRegTypeData]
-  )
+  const activeMsmeRegTypes = useMemo(() => {
+    const filtered = (msmeRegTypeData || []).filter((r: any) => r.status === 'Active')
+    const orderMap: Record<string, number> = { "Not Applicable": 0, "Micro": 1, "Small": 2, "Medium": 3 }
+    return filtered.sort((a: any, b: any) => (orderMap[a.name] ?? 99) - (orderMap[b.name] ?? 99))
+  }, [msmeRegTypeData])
   const { data: fssaiLicenceTypeData } = useQuery({
     queryKey: ["lookup-fssai_licence_type"],
     queryFn: async () => {
@@ -2340,10 +2389,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     },
     staleTime: 5 * 60 * 1000,
   })
-  const activeFssaiLicenceTypes = useMemo(
-    () => (fssaiLicenceTypeData || []).filter((r: any) => r.status === 'Active'),
-    [fssaiLicenceTypeData]
-  )
+  const activeFssaiLicenceTypes = useMemo(() => {
+    const orderMap: Record<string, number> = { "registration": 0, "state licence": 1, "national licence": 2 }
+    return (fssaiLicenceTypeData || [])
+      .filter((r: any) => r.status === 'Active')
+      .sort(
+        (a: any, b: any) =>
+          (orderMap[String(a.name || '').trim().toLowerCase()] ?? 99) -
+          (orderMap[String(b.name || '').trim().toLowerCase()] ?? 99)
+      )
+  }, [fssaiLicenceTypeData])
 
   // Bank Name dropdown options - Reference Data only, free text is deliberately
   // not allowed (same pattern as every other Reference-Data-sourced dropdown).
@@ -3378,7 +3433,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       const nextId = await fetchNextId(type)
       setQuickAddForm(
         type === 'unit'
-          ? { unit_code: nextId, unit_name: '', status: 'Active' }
+          ? { unit_code: nextId, unit_name: '', short_name: '', decimal_places: 2, uqc_id: '', status: 'Active' }
           : { ledger_code: nextId, ledger_name: '', ledger_group_id: '', status: 'Active' }
       )
     }
@@ -3389,6 +3444,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     if (!quickAddDialog) return
     if (quickAddDialog.type === 'unit' && !quickAddForm.unit_name?.trim()) {
       toast({ title: "Error", description: "Unit Name is required", variant: "destructive" })
+      return
+    }
+    if (quickAddDialog.type === 'unit' && !quickAddForm.short_name?.trim()) {
+      toast({ title: "Error", description: "Short name (symbol) is required", variant: "destructive" })
       return
     }
     if (quickAddDialog.type === 'ledger' && !quickAddForm.ledger_name?.trim()) {
@@ -3424,7 +3483,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         : await lookupApi.create(quickAddDialog.type, quickAddForm)
       if (res?.success) {
         const created = res.data
-        const label = quickAddDialog.type === 'unit' ? created.unit_name : quickAddDialog.type === 'ledger' ? created.ledger_name : created.name
+        const label = quickAddDialog.type === 'unit' ? (created.short_name || created.unit_name) : quickAddDialog.type === 'ledger' ? created.ledger_name : created.name
         const queryKey = quickAddDialog.type === 'unit' ? ['unit-options'] : quickAddDialog.type === 'ledger' ? ['ledger-options'] : [`lookup-${quickAddDialog.type}`]
         // Patch the cache directly (rather than just invalidating) so the new
         // row's label renders immediately even if it's pending approval and
@@ -3475,8 +3534,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     msme_registration_type: "",
     msme_registration_wef: "",
     fssai_no: "",
+    fssai_registration_wef: "",
     fssai_valid_upto: "",
     fssai_licence_type: "",
+    aadhaar_number: "",
     aadhaar_upload: "",
     pan_upload: "",
     gst_certificate_upload: "",
@@ -3541,6 +3602,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   const [unitForm, setUnitForm] = useState<any>({
     unit_code: '',
     unit_name: '',
+    short_name: '',
+    decimal_places: 2,
+    uqc_id: '',
     status: 'Active',
   })
 
@@ -3886,8 +3950,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       msme_registration_type: "",
       msme_registration_wef: "",
       fssai_no: "",
+      fssai_registration_wef: "",
       fssai_valid_upto: "",
       fssai_licence_type: "",
+      aadhaar_number: "",
       aadhaar_upload: "",
       pan_upload: "",
       gst_certificate_upload: "",
@@ -3938,7 +4004,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     })
     setLedgerGroupForm({ group_code: "", group_name: "", status: "Active" })
     setStockGroupForm({ group_code: "", group_name: "", status: "Active" })
-    setUnitForm({ unit_code: "", unit_name: "", status: "Active" })
+    setUnitForm({ unit_code: "", unit_name: "", short_name: "", decimal_places: 2, uqc_id: "", status: "Active" })
     setRawMaterialForm({ raw_material_code: "", name: "", main_uom_id: "", stock_group_id: "", additional_uoms: [], type_of_supply: "", gst_rate_id: "", hsn_code_id: "", sac_code_id: "", default_accounting_ledger_id: "", batch_tracking_enabled: false, status: "Active" })
     setNewAdditionalUom({ uom_id: '', conversion_ratio: '' })
     setShowAdditionalUomSection(false)
@@ -4181,6 +4247,19 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           res = await stockGroupApi.create(stockGroupForm)
         }
       } else if (activeTab === "units") {
+        const unitDecimals = Number(unitForm.decimal_places ?? 2)
+        if (!String(unitForm.unit_name || "").trim()) {
+          toast({ title: "Error", description: "Name of unit is required", variant: "destructive" })
+          return
+        }
+        if (!String(unitForm.short_name || "").trim()) {
+          toast({ title: "Error", description: "Short name (symbol) is required", variant: "destructive" })
+          return
+        }
+        if (!Number.isInteger(unitDecimals) || unitDecimals < 0 || unitDecimals > 6) {
+          toast({ title: "Error", description: "Number of decimal places must be a whole number from 0 to 6", variant: "destructive" })
+          return
+        }
         if (editingItem) {
           res = await unitApi.update(editingItem.id, unitForm)
         } else {
@@ -4258,6 +4337,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
         if (res?.success && skuDetailsForm.sku_name) {
           const isStaged = !isAdminOrSuper || res?.data?.staged === true;
+          // Opening qty is keyed by the SKU's id, so a staged rename can't orphan it.
+          const savedSkuId = editingItem?.id ?? res?.data?.id;
           await Promise.allSettled(
             Object.entries(openingStockByDepot)
               .filter(([_, qty]) => qty !== '')
@@ -4265,6 +4346,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 inventoryApi.upsertOpeningQty({
                   depo_name: depotName,
                   product_name: skuDetailsForm.sku_name as string,
+                  sku_id: savedSkuId,
                   opening_qty: parseInt(qty) || 0,
                   is_staged: isStaged,
                 })
@@ -4279,13 +4361,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
       } else if (activeTab === "vehicle_master") {
         // --- Mandatory field validation ---
-        const vErrors: { registration_no?: string; vehicle_type?: string; transporter?: string; state_permit_image?: string } = {}
+        const vErrors: Record<string, string> = {}
         if (!vehicleForm.registration_no?.trim()) vErrors.registration_no = 'Registration Number is required'
         if (!vehicleForm.vehicle_type?.trim()) vErrors.vehicle_type = 'Vehicle Type is required'
         if (!vehicleForm.transporter?.trim()) vErrors.transporter = 'Transporter is required'
         // State permit document is compulsory when the permit section applies (GVW > 3000)
         const permitApplies = vehicleForm.gvw !== '' && Number(vehicleForm.gvw) > 3000
         if (permitApplies && !vehicleForm.state_permit_image) vErrors.state_permit_image = 'State Permit document is required'
+        Object.assign(vErrors, { ...getVehicleDocFileErrors(vehicleForm, roadTaxType), ...vErrors })
         // --- Duplicate registration number check (against already-loaded list) ---
         const regNo = vehicleForm.registration_no?.trim().toUpperCase()
         const duplicate = vehicles.find((v: any) =>
@@ -4884,6 +4967,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           handleCustomerFieldChangeAttempt={handleCustomerFieldChangeAttempt}
           setCustomerEffectiveDatesSection={setCustomerEffectiveDatesSection}
           activeStates={activeStates}
+          activeDistricts={activeDistricts}
+          activeSubDistricts={activeSubDistricts}
           activeGstRegStatuses={activeGstRegStatuses}
           activeGstRegTypes={activeGstRegTypes}
           activeMsmeRegTypes={activeMsmeRegTypes}
@@ -4980,7 +5065,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       )
       case 'ledger_groups': return <LedgerGroupForm ledgerGroupForm={ledgerGroupForm} setLedgerGroupForm={setLedgerGroupForm} ledgerGroupOptionsData={ledgerGroupOptionsData} editingItem={editingItem} handleLedgerGroupFieldChangeAttempt={handleLedgerGroupFieldChangeAttempt} setLedgerGroupEffectiveDatesOpen={setLedgerGroupEffectiveDatesOpen} />
       case 'stock_groups': return <StockGroupForm stockGroupForm={stockGroupForm} setStockGroupForm={setStockGroupForm} stockGroupOptionsData={stockGroupOptionsData} editingItem={editingItem} handleStockGroupFieldChangeAttempt={handleStockGroupFieldChangeAttempt} setStockGroupEffectiveDatesOpen={setStockGroupEffectiveDatesOpen} />
-      case 'units': return <UnitForm unitForm={unitForm} setUnitForm={setUnitForm} editingItem={editingItem} handleUnitFieldChangeAttempt={handleUnitFieldChangeAttempt} setUnitEffectiveDatesOpen={setUnitEffectiveDatesOpen} />
+      case 'units': return <UnitForm unitForm={unitForm} setUnitForm={setUnitForm} uqcOptions={activeUqcCodes} editingItem={editingItem} handleUnitFieldChangeAttempt={handleUnitFieldChangeAttempt} setUnitEffectiveDatesOpen={setUnitEffectiveDatesOpen} />
       case 'raw_materials': return (
         <RawMaterialForm
           rawMaterialForm={rawMaterialForm}
@@ -5157,6 +5242,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
 
   const filteredUnits = unitsList.filter((u: any) =>
     matchesSearch(u?.unit_name, searchTerm) ||
+    matchesSearch(u?.short_name, searchTerm) ||
+    matchesSearch(u?.uqc_code, searchTerm) ||
     matchesSearch(u?.unit_code, searchTerm)
   )
 
@@ -5554,7 +5641,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
             if (!open) resetForms()
           }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all" disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.replace('_', ' ')}`}>
+              <Button size="sm" className={`h-9 md:h-10 bg-primary hover:bg-primary/90 shadow-lg px-3 md:px-4 rounded-xl transition-all ${activeTab === 'ledgers' ? 'hidden' : ''}`} disabled={isMasterTabReadOnly} onClick={handleOpenAddDialog} title={isMasterTabReadOnly ? "View Only Access" : `Add New ${activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.replace('_', ' ')}`}>
                 <Plus className="h-4 w-4 md:mr-2" />
                 <span className="hidden md:inline">Add {activeTab === 'customers' ? 'Customer' : activeTab === 'depots' ? 'Depot' : activeTab === 'brokers' ? 'Broker' : activeTab === 'salespersons' ? 'Salesperson' : activeTab === 'sku_details' ? 'Finished Good' : activeTab === 'sku_selling_price' ? 'SKU Pricing' : activeTab === 'transport_master' ? 'Transporter' : activeTab === 'ledger_groups' ? 'Ledger Group' : activeTab === 'stock_groups' ? 'Stock Group' : activeTab === 'units' ? 'Unit' : activeTab === 'raw_materials' ? 'Raw Material' : activeTab === 'semi_finished_goods' ? 'Semi Finished Good' : activeTab === 'conversion_formulas' ? 'Conversion Formula' : activeTab === 'price_levels' ? 'Price Level' : activeTab === 'petrol_pumps' ? 'Petrol Pump' : activeTab === 'cd_rules' ? 'Cash Discount Rule' : activeTab === 'tds_rules' ? 'TDS Rule' : activeTab === 'oil_tags' ? 'Oil Tag' : activeTab === 'bhada_rates' ? 'Bhada Rate' : activeTab.split('_')[0].charAt(0).toUpperCase() + activeTab.split('_')[0].slice(1)}</span>
               </Button>
@@ -6670,7 +6757,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <div className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
                   <div className="space-y-3">
                     {/* Standalone Top Back Button */}
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="sticky -top-6 z-50 -mt-8 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
                       <Button
                         type="button"
                         variant="outline"
@@ -6734,7 +6821,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
               ) : activeTab === 'sku_details' && skuHistoryModalOpen && editingItem?.id ? (
                 <div className="space-y-4 py-2 min-h-[480px] flex flex-col justify-between">
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="sticky -top-6 z-50 -mt-8 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
                       <Button
                         type="button"
                         variant="outline"
@@ -6806,7 +6893,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                         variant="outline"
                         size="sm"
                         className="h-7 px-2.5 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center gap-1.5 shadow-2xs mr-6"
-                        onClick={() => setShowAuditTrailView(true)}
+                        onClick={() => {
+                          const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+                          if (container) {
+                            sessionStorage.setItem('masterFormScrollTop', container.scrollTop.toString());
+                          }
+                          setShowAuditTrailView(true);
+                        }}
                       >
                         <Clock className="h-3.5 w-3.5 text-blue-600" />
                         <span>Audit Trail Log</span>
@@ -6829,27 +6922,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </PageHeader>
 
       <Tabs value={activeTab} className="w-full space-y-6" onValueChange={setActiveTab}>
-        <div className="flex items-center">
-          <Select value={activeTab} onValueChange={setActiveTab}>
-            <SelectTrigger className="w-full sm:w-72 h-12 rounded-xl bg-white shadow-sm border-slate-200 px-4 font-medium data-[state=open]:ring-2 data-[state=open]:ring-primary/20">
-              <SelectValue placeholder="Select master" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl max-h-[300px]">
-              {visibleTabs.map((tab) => {
-                const meta = TAB_META[tab]
-                if (!meta) return null
-                const Icon = meta.icon
-                return (
-                  <SelectItem key={tab} value={tab} className="rounded-lg cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Icon className="h-3.5 w-3.5 text-slate-500" />
-                      {meta.label}
-                    </span>
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-3">
+          <MasterTabPicker tabs={visibleTabs} meta={TAB_META} value={activeTab} onChange={setActiveTab} />
+          {isAdminOrSuper && <HistoryApprovalsDialog masterLabels={TAB_META} />}
         </div>
 
 
@@ -6877,6 +6952,20 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                     <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
                     <span>Import CSV</span>
                   </Button>
+
+                  {isAdminOrSuper && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 md:h-9 border-violet-200 bg-violet-50/60 hover:bg-violet-100/80 text-violet-800 shadow-2xs px-3 rounded-xl font-bold flex items-center gap-1.5"
+                      disabled={isMasterTabReadOnly}
+                      onClick={() => setCustomerGodownTagOpen(true)}
+                      title="Tag many existing customers to a godown (depot) at once"
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5 text-violet-600" />
+                      <span>Tag Godown</span>
+                    </Button>
+                  )}
 
                   <Button
                     variant="outline"
@@ -7185,6 +7274,12 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </TabsContent>
         )}
 
+        {visibleTabs.includes("ledgers") && (
+          <TabsContent value="ledgers">
+            <LedgerMasterTab isAdminOrSuper={isAdminOrSuper} isReadOnly={isMasterTabReadOnly} canEditExisting={canEditExisting} />
+          </TabsContent>
+        )}
+
         {visibleTabs.includes("stock_groups") && (
           <TabsContent value="stock_groups">
             <MasterCardWrapper
@@ -7316,6 +7411,24 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 tabName="units"
                 codeKey="unit_code"
                 nameKey="unit_name"
+                nameLabel="Name of unit"
+                renderCustomHeaders={() => (
+                  <>
+                    <TableHead>Short name</TableHead>
+                    <TableHead>Decimals</TableHead>
+                    <TableHead>UQC</TableHead>
+                  </>
+                )}
+                renderCustomCells={(item: any) => (
+                  <>
+                    <TableCell className="font-mono font-semibold text-slate-800">{item.short_name || "—"}</TableCell>
+                    <TableCell className="font-mono text-slate-700">{item.decimal_places ?? "—"}</TableCell>
+                    <TableCell className="text-slate-700">{item.uqc_code || "—"}</TableCell>
+                  </>
+                )}
+                renderMobileCustomFields={(item: any) => (
+                  <p className="text-xs text-slate-500">Short name: {item.short_name || "—"} · Decimals: {item.decimal_places ?? "—"} · UQC: {item.uqc_code || "—"}</p>
+                )}
               />
             </MasterCardWrapper>
           </TabsContent>
@@ -7788,8 +7901,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           <TabsContent value="insurance_details">
             <MasterCardWrapper
               icon={Shield}
-              title="Vehicle Insurance"
-              description="Manage vehicle policy details"
+              title="Insurance Details"
+              description="Marine Cargo Insurance | Open Policy"
               isAdminOrSuper={isAdminOrSuper}
               subTab={insuranceDetailSubTab}
               setSubTab={setInsuranceDetailSubTab}
@@ -8659,6 +8772,25 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 <Label htmlFor="qa_unit_name">UOM *</Label>
                 <Input id="qa_unit_name" value={quickAddForm.unit_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, unit_name: e.target.value })} placeholder="e.g. Kilograms" />
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="qa_unit_short_name">Short name (symbol) *</Label>
+                  <Input id="qa_unit_short_name" maxLength={20} value={quickAddForm.short_name || ''} onChange={e => setQuickAddForm({ ...quickAddForm, short_name: e.target.value })} placeholder="e.g. KG" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qa_unit_decimals">Number of decimal places</Label>
+                  <Input id="qa_unit_decimals" type="number" min={0} max={6} step={1} value={quickAddForm.decimal_places ?? 2} onChange={e => setQuickAddForm({ ...quickAddForm, decimal_places: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>UQC – Unit Quantity Code</Label>
+                <Select value={quickAddForm.uqc_id ? String(quickAddForm.uqc_id) : ''} onValueChange={val => setQuickAddForm({ ...quickAddForm, uqc_id: val })}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select UQC" /></SelectTrigger>
+                  <SelectContent>
+                    {activeUqcCodes.map((r: any) => <SelectItem key={r.id} value={String(r.id)}>{r.code} – {r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="qa_unit_is_active" checked={quickAddForm.status === 'Active'} onCheckedChange={checked => setQuickAddForm({ ...quickAddForm, status: checked === true ? 'Active' : 'Inactive' })} />
                 <Label htmlFor="qa_unit_is_active" className="cursor-pointer">Is Active?</Label>
@@ -8726,6 +8858,14 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CustomerGodownTagModal
+        open={customerGodownTagOpen}
+        onOpenChange={setCustomerGodownTagOpen}
+        onSuccess={() => {
+          refetchCustomer()
+        }}
+      />
 
       <CustomerBulkImportModal
         open={customerBulkImportOpen}

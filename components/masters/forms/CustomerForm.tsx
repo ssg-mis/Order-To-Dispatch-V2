@@ -1,14 +1,19 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
+import { MultiCombobox } from "@/components/ui/multi-combobox"
+import { sortDepotsBanariFirst } from "@/lib/depot-sort"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, Users, MapPin, Receipt, Building2, ShieldCheck, FileText, Warehouse, Landmark, BookOpen } from "lucide-react"
 import { FileUploadField } from "@/components/file-upload-field"
+import { formatBankLabel, bankSearchKeywords } from "@/lib/dropdown-masters"
 import { CustomerSectionalHistoryTable } from "@/components/customer-sectional-history-table"
+import { AddressLocationFields } from "@/components/masters/forms/AddressLocationFields"
 import { Customer, CustomerAddress, STATUS_OPTIONS, formatDocDate } from "@/components/masters/types"
 
 export interface CustomerFormProps {
@@ -25,6 +30,8 @@ export interface CustomerFormProps {
   ) => void
   setCustomerEffectiveDatesSection: (sec: any) => void
   activeStates: any[]
+  activeDistricts?: any[]
+  activeSubDistricts?: any[]
   activeGstRegStatuses?: any[]
   activeGstRegTypes?: any[]
   activeMsmeRegTypes?: any[]
@@ -89,6 +96,7 @@ export function CustomerForm({
   handleFileUpload,
   handleFileRemove,
 }: CustomerFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
   return (
     <div className="space-y-5 py-2">
       {/* Customer Basic Details */}
@@ -104,7 +112,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Customer History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -194,71 +202,77 @@ export function CustomerForm({
         </div>
       </div>
 
-      {/* Mailing Details */}
+      {/* Primary Address */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
           <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
             <MapPin className="h-4.5 w-4.5 text-blue-600" />
-            <span>Mailing Details</span>
+            <span>Primary Address</span>
           </Label>
           {editingItem?.id && (
             <CustomerSectionalHistoryTable
               section="mailing"
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
-              title="Mailing Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              title="Primary Address History"
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="address_line_1" className="text-xs font-semibold text-slate-800">Address Line 1</Label>
-          <Input
-            id="address_line_1"
-            value={customerForm.address_line_1 || ""}
-            onChange={e => {
-              const val = e.target.value
-              handleCustomerFieldChangeAttempt("Address Line 1", "mailing", () => {
-                setCustomerForm(prev => ({ ...prev, address_line_1: val }))
-              })
-            }}
-            placeholder="Street address"
-          />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div className="space-y-1.5">
-            <Label htmlFor="state" className="text-xs font-semibold text-slate-800">State</Label>
-            <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
-              value={customerForm.state_id ? String(customerForm.state_id) : ""}
-              onValueChange={val => {
-                const selected = activeStates.find((s: any) => String(s.id) === val)
-                handleCustomerFieldChangeAttempt("State", "mailing", () => {
-                  setCustomerForm(prev => ({ ...prev, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || prev.state }))
-                })
-              }}
-              placeholder="Select state"
-              searchPlaceholder="Search state..."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pincode" className="text-xs font-semibold text-slate-800">Pincode</Label>
-            <Input
-              id="pincode"
-              className={`font-mono ${customerFormErrors.pincode ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
-              value={customerForm.pincode || ""}
-              onChange={e => {
-                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6)
-                handleCustomerFieldChangeAttempt("Pincode", "mailing", () => {
-                  setCustomerForm(prev => ({ ...prev, pincode: val }))
-                })
-              }}
-              onBlur={handlePincodeBlur}
-              placeholder="6-digit PIN code"
-            />
-            {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
-          </div>
-        </div>
+        {/* Primary Address (stored on the customer record itself: address line, city, post, thana, state, district, sub-district, pincode) */}
+        {(() => {
+          const primaryState = activeStates.find((s: any) => String(s.id) === String(customerForm.state_id))
+          const setMailing = (label: string, patch: Record<string, any>) =>
+            handleCustomerFieldChangeAttempt(label, "mailing", () => {
+              setCustomerForm(prev => ({ ...prev, ...patch }))
+            })
+          return (
+            <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                <span className="text-xs font-bold text-slate-900">Primary Address</span>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="address_line_1" className="text-xs font-medium text-slate-800">Address Line</Label>
+                <Input
+                  id="address_line_1"
+                  className="text-xs"
+                  value={customerForm.address_line_1 || ""}
+                  onChange={e => setMailing("Address Line 1", { address_line_1: e.target.value })}
+                  placeholder="Address"
+                />
+              </div>
+              <AddressLocationFields
+                value={customerForm as any}
+                activeStates={activeStates}
+                onChange={(patch, label) => setMailing(label, patch)}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pincode" className="text-xs font-medium text-slate-800">Pincode</Label>
+                  <Input
+                    id="pincode"
+                    className={`font-mono text-xs ${customerFormErrors.pincode ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
+                    value={customerForm.pincode || ""}
+                    onChange={e => setMailing("Pincode", { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
+                    onBlur={handlePincodeBlur}
+                    placeholder="PIN Code (6 digits)"
+                  />
+                  {customerFormErrors.pincode && <p className="text-xs text-red-500 mt-1">{customerFormErrors.pincode}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-800">Status</Label>
+                  <Combobox
+                    options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                    value={customerForm.primary_address_status || "Active"}
+                    onValueChange={val => val && setMailing("Primary Address Status", { primary_address_status: val })}
+                    placeholder="Select status"
+                    searchPlaceholder="Search..."
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         <div className="flex justify-end pt-1">
           <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 flex items-center gap-1 shadow-2xs" onClick={addAddressRow}>
@@ -271,52 +285,25 @@ export function CustomerForm({
           return (
             <div key={index} className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
               <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                <span className="text-xs font-bold text-slate-900">Address {index + 1}</span>
-                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => removeAddressRow(index)}>Remove</Button>
+                <span className="text-xs font-bold text-slate-900">
+                  {`Additional Address ${index + 1}`}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => removeAddressRow(index)}>Remove</Button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-slate-800">Address Line</Label>
-                <Input className="bg-white text-xs" value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
+                <Input className="text-xs" value={addr.address_line_1 || ''} onChange={e => updateAddressRow(index, { address_line_1: e.target.value })} placeholder="Address" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">City</Label>
-                  <Input className="bg-white text-xs" value={addr.city || ''} onChange={e => updateAddressRow(index, { city: e.target.value })} placeholder="City" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Post</Label>
-                  <Input className="bg-white text-xs" value={addr.post || ''} onChange={e => updateAddressRow(index, { post: e.target.value })} placeholder="Post" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Thana</Label>
-                  <Input className="bg-white text-xs" value={addr.thana || ''} onChange={e => updateAddressRow(index, { thana: e.target.value })} placeholder="Thana" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">State</Label>
-                  <Combobox
-                    options={activeStates.map((s: any) => ({ value: String(s.id), label: `${s.state_name} (${s.gst_state_code} / ${s.short_name || '—'})` }))}
-                    value={addr.state_id ? String(addr.state_id) : ""}
-                    onValueChange={val => handleAddressStateChange(index, val)}
-                    placeholder="Select State" searchPlaceholder="Search state..."
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">District</Label>
-                  <Input className="bg-white text-xs" value={addr.district || ''} onChange={e => updateAddressRow(index, { district: e.target.value })} placeholder="District" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-800">Sub-District</Label>
-                  <Input className="bg-white text-xs" value={addr.sub_district || ''} onChange={e => updateAddressRow(index, { sub_district: e.target.value })} placeholder="Sub-District" />
-                </div>
-              </div>
-              {rowState && (
-                <p className="text-[11px] text-slate-500">
-                  State Code: <span className="font-semibold text-slate-700">{rowState.gst_state_code}</span>
-                  {" · "}Short Name: <span className="font-semibold text-slate-700">{rowState.short_name || '—'}</span>
-                </p>
-              )}
+              <AddressLocationFields
+                value={addr as any}
+                activeStates={activeStates}
+                onChange={(patch) => {
+                  const { state: _stateName, ...rest } = patch
+                  updateAddressRow(index, rest)
+                }}
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-slate-800">Pincode</Label>
@@ -325,9 +312,19 @@ export function CustomerForm({
                     onChange={e => updateAddressRow(index, { pincode: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
                     onBlur={e => handleAddressPincodeBlur(index, e.target.value)}
                     placeholder="PIN Code (6 digits)"
-                    className={`bg-white font-mono text-xs ${addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
+                    className={`font-mono text-xs ${addressErrors[index] ? 'border-red-500 focus-visible:ring-red-400' : ''}`}
                   />
                   {addressErrors[index] && <p className="text-xs text-red-500 mt-1">{addressErrors[index]}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-800">Status</Label>
+                  <Combobox
+                    options={[{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }]}
+                    value={addr.status || "Active"}
+                    onValueChange={val => val && updateAddressRow(index, { status: val })}
+                    placeholder="Select status"
+                    searchPlaceholder="Search..."
+                  />
                 </div>
               </div>
             </div>
@@ -348,7 +345,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="GST Registration History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -427,7 +424,7 @@ export function CustomerForm({
               <Input
                 id="gst_registration_wef"
                 type="date"
-                className="font-medium"
+                className={`font-medium ${!customerForm.gst_registration_wef ? 'text-slate-500' : ''}`}
                 value={customerForm.gst_registration_wef?.split('T')[0] || ''}
                 onChange={e => setCustomerForm({...customerForm, gst_registration_wef: e.target.value})}
               />
@@ -436,160 +433,47 @@ export function CustomerForm({
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* MSME Details */}
-      <div className="border-t border-slate-200 pt-4 space-y-3">
-        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
-            <Building2 className="h-4.5 w-4.5 text-blue-600" />
-            <span>MSME Details</span>
-          </Label>
-          {editingItem?.id && (
-            <CustomerSectionalHistoryTable
-              section="msme"
-              customerId={editingItem.id}
-              customerName={customerForm.customer_name}
-              title="MSME Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
-            />
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          
           <div className="space-y-1.5">
-            <Label htmlFor="msme_registration_no" className="text-xs font-semibold text-slate-800">MSME Registration No</Label>
-            <Input
-              id="msme_registration_no"
-              className="font-mono uppercase"
-              value={customerForm.msme_registration_no || ''}
-              onChange={e => {
-                const val = e.target.value
-                handleCustomerFieldChangeAttempt("MSME Registration No", "msme", () => {
-                  setCustomerForm(prev => ({ ...prev, msme_registration_no: val }))
-                })
-              }}
-              placeholder="Enter MSME registration no"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="msme_registration_type" className="text-xs font-semibold text-slate-800">MSME Registration Type</Label>
-            <Combobox
-              options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-              value={customerForm.msme_registration_type || ""}
+            <Label htmlFor="gst_status" className="text-xs font-semibold text-slate-800">Status</Label>
+            <Select
+              value={customerForm.gst_status || "Active"}
               onValueChange={val => {
-                handleCustomerFieldChangeAttempt("MSME Registration Type", "msme", () => {
-                  setCustomerForm(prev => ({ ...prev, msme_registration_type: val }))
+                handleCustomerFieldChangeAttempt("Status", "gst", () => {
+                  setCustomerForm(prev => ({ ...prev, gst_status: val }))
                 })
               }}
-              placeholder="Select type"
-              searchPlaceholder="Search..."
-            />
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
+        
           <div className="space-y-1.5">
-            <Label htmlFor="msme_registration_wef" className="text-xs font-semibold text-slate-800">MSME W.E.F. Date (Applicable From)</Label>
+            <Label htmlFor="aadhaar_number" className="text-xs font-semibold text-slate-800">Aadhaar Card Number</Label>
             <Input
-              id="msme_registration_wef"
-              type="date"
-              className="font-medium"
-              value={customerForm.msme_registration_wef?.split('T')[0] || ''}
-              onChange={e => setCustomerForm({...customerForm, msme_registration_wef: e.target.value})}
-            />
-            {customerForm.msme_registration_wef && (
-              <p className="text-xs text-slate-500">{formatDocDate(customerForm.msme_registration_wef)}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* FSSAI Details */}
-      <div className="border-t border-slate-200 pt-4 space-y-3">
-        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
-            <ShieldCheck className="h-4.5 w-4.5 text-blue-600" />
-            <span>FSSAI Details</span>
-          </Label>
-          {editingItem?.id && (
-            <CustomerSectionalHistoryTable
-              section="fssai"
-              customerId={editingItem.id}
-              customerName={customerForm.customer_name}
-              title="FSSAI Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
-            />
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div className="space-y-1.5">
-            <Label htmlFor="fssai_no" className="text-xs font-semibold text-slate-800">FSSAI No</Label>
-            <Input
-              id="fssai_no"
+              id="aadhaar_number"
               className="font-mono"
-              value={customerForm.fssai_no || ''}
+              placeholder="12-digit Aadhaar"
+              inputMode="numeric"
+              maxLength={12}
+              value={customerForm.aadhaar_number || ""}
               onChange={e => {
-                const val = e.target.value
-                handleCustomerFieldChangeAttempt("FSSAI No", "fssai", () => {
-                  setCustomerForm(prev => ({ ...prev, fssai_no: val }))
-                })
-              }}
-              placeholder="Enter FSSAI no"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fssai_licence_type" className="text-xs font-semibold text-slate-800">FSSAI Licence Type</Label>
-            <Combobox
-              options={activeFssaiLicenceTypes.map((r: any) => ({ value: r.name, label: r.name }))}
-              value={customerForm.fssai_licence_type || ""}
-              onValueChange={val => {
-                handleCustomerFieldChangeAttempt("FSSAI Licence Type", "fssai", () => {
-                  setCustomerForm(prev => ({ ...prev, fssai_licence_type: val }))
-                })
-              }}
-              placeholder="Select licence type"
-              searchPlaceholder="Search..."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fssai_valid_upto" className="text-xs font-semibold text-slate-800">FSSAI Valid Upto Date</Label>
-            <Input
-              id="fssai_valid_upto"
-              type="date"
-              className="font-medium"
-              value={customerForm.fssai_valid_upto?.split('T')[0] || ''}
-              onChange={e => {
-                const val = e.target.value
-                handleCustomerFieldChangeAttempt("FSSAI Valid Upto", "fssai", () => {
-                  setCustomerForm(prev => ({ ...prev, fssai_valid_upto: val }))
+                const val = e.target.value.replace(/\D/g, "").slice(0, 12)
+                handleCustomerFieldChangeAttempt("Aadhaar Card Number", "gst", () => {
+                  setCustomerForm(prev => ({ ...prev, aadhaar_number: val }))
                 })
               }}
             />
-            {customerForm.fssai_valid_upto && (
-              <p className="text-xs text-slate-500">{formatDocDate(customerForm.fssai_valid_upto)}</p>
-            )}
           </div>
-        </div>
-      </div>
 
-      {/* Document Uploads */}
-      <div className="border-t border-slate-200 pt-4 space-y-3">
-        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
-            <FileText className="h-4.5 w-4.5 text-blue-600" />
-            <span>Document Uploads</span>
-          </Label>
-          {editingItem?.id && (
-            <CustomerSectionalHistoryTable
-              section="documents"
-              customerId={editingItem.id}
-              customerName={customerForm.customer_name}
-              title="Document Uploads History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
-            />
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <FileUploadField
-            label="Aadhaar Card"
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">Aadhaar Card</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.aadhaar_upload || ""}
             helperText="Max file size: 20 MB"
@@ -607,8 +491,10 @@ export function CustomerForm({
               })
             }}
           />
-          <FileUploadField
-            label="PAN Card"
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">PAN Card</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.pan_upload || ""}
             helperText="Max file size: 20 MB"
@@ -626,8 +512,10 @@ export function CustomerForm({
               })
             }}
           />
-          <FileUploadField
-            label="GST Certificate"
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">GST Certificate</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.gst_certificate_upload || ""}
             helperText="Max file size: 20 MB"
@@ -645,8 +533,115 @@ export function CustomerForm({
               })
             }}
           />
-          <FileUploadField
-            label="MSME Certificate"
+          </div>
+        </div>
+      </div>
+
+      {/* MSME Details */}
+      <div className="border-t border-slate-200 pt-4 space-y-3">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
+            <Building2 className="h-4.5 w-4.5 text-blue-600" />
+            <span>MSME Details</span>
+          </Label>
+          {editingItem?.id && (
+            <CustomerSectionalHistoryTable
+              section="msme"
+              customerId={editingItem.id}
+              customerName={customerForm.customer_name}
+              title="MSME Details History"
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_registration_no" className="text-xs font-semibold text-slate-800">MSME Registration No</Label>
+            <Input
+              id="msme_registration_no"
+              className="font-mono uppercase"
+              value={customerForm.msme_registration_no || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("MSME Registration No", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_registration_no: val }))
+                })
+              }}
+              placeholder="UDYAM-XX-00-0000000"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_registration_type" className="text-xs font-semibold text-slate-800">MSME Registration Type</Label>
+            <Combobox
+              options={activeMsmeRegTypes.map((r: any) => ({ value: r.name, label: r.name }))}
+              value={customerForm.msme_registration_type || ""}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("MSME Registration Type", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_registration_type: val }))
+                })
+              }}
+              placeholder="Select type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_activity_type" className="text-xs font-semibold text-slate-800">Activity Type</Label>
+            <Select
+              value={customerForm.msme_activity_type || ""}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("Activity Type", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_activity_type: val }))
+                })
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select activity type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Unknown">Unknown</SelectItem>
+                <SelectItem value="Manufacturing">Manufacturing</SelectItem>
+                <SelectItem value="Services">Services</SelectItem>
+                <SelectItem value="Trades">Trades</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_registration_wef" className="text-xs font-semibold text-slate-800">MSME W.E.F. Date (Applicable From)</Label>
+            <Input
+              id="msme_registration_wef"
+              type="date"
+              className={`font-medium ${!customerForm.msme_registration_wef ? 'text-slate-500' : ''}`}
+              value={customerForm.msme_registration_wef?.split('T')[0] || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("MSME W.E.F. Date", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_registration_wef: val }))
+                })
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="msme_status" className="text-xs font-semibold text-slate-800">MSME Status</Label>
+            <Select
+              value={customerForm.msme_status || "Active"}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("MSME Status", "msme", () => {
+                  setCustomerForm(prev => ({ ...prev, msme_status: val }))
+                })
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">MSME Certificate</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.msme_certificate_upload || ""}
             helperText="Max file size: 20 MB"
@@ -664,8 +659,101 @@ export function CustomerForm({
               })
             }}
           />
-          <FileUploadField
-            label="FSSAI Certificate"
+          </div>
+        </div>
+      </div>
+
+      {/* FSSAI Details */}
+      <div className="border-t border-slate-200 pt-4 space-y-3">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
+            <ShieldCheck className="h-4.5 w-4.5 text-blue-600" />
+            <span>FSSAI Details</span>
+          </Label>
+          {editingItem?.id && (
+            <CustomerSectionalHistoryTable
+              section="fssai"
+              customerId={editingItem.id}
+              customerName={customerForm.customer_name}
+              title="FSSAI Details History"
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="space-y-1.5">
+            <Label htmlFor="fssai_no" className="text-xs font-semibold text-slate-800">FSSAI Licence No</Label>
+            <Input
+              id="fssai_no"
+              className="font-mono"
+              value={customerForm.fssai_no || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("FSSAI Licence No", "fssai", () => {
+                  setCustomerForm(prev => ({ ...prev, fssai_no: val }))
+                })
+              }}
+              placeholder="14-digit FSSAI No"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fssai_licence_type" className="text-xs font-semibold text-slate-800">FSSAI Licence Type</Label>
+            <Combobox
+              options={[...activeFssaiLicenceTypes]
+                .sort((a: any, b: any) => {
+                  const order = ["Registration", "State Licence", "National Licence"]
+                  const aIdx = order.indexOf(a.name)
+                  const bIdx = order.indexOf(b.name)
+                  return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+                })
+                .map((r: any) => ({ value: r.name, label: r.name }))}
+              value={customerForm.fssai_licence_type || ""}
+              onValueChange={val => {
+                handleCustomerFieldChangeAttempt("FSSAI Licence Type", "fssai", () => {
+                  setCustomerForm(prev => ({ ...prev, fssai_licence_type: val }))
+                })
+              }}
+              placeholder="Select licence type"
+              searchPlaceholder="Search..."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fssai_registration_wef" className="text-xs font-semibold text-slate-800">FSSAI W.E.F. Date (Applicable From)</Label>
+            <Input
+              id="fssai_registration_wef"
+              type="date"
+              className={`font-medium ${!customerForm.fssai_registration_wef ? 'text-slate-500' : ''}`}
+              value={customerForm.fssai_registration_wef?.split('T')[0] || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("FSSAI W.E.F. Date", "fssai", () => {
+                  setCustomerForm(prev => ({ ...prev, fssai_registration_wef: val }))
+                })
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fssai_valid_upto" className="text-xs font-semibold text-slate-800">FSSAI Valid Upto Date</Label>
+            <Input
+              id="fssai_valid_upto"
+              type="date"
+              className={`font-medium ${!customerForm.fssai_valid_upto ? 'text-slate-500' : ''}`}
+              value={customerForm.fssai_valid_upto?.split('T')[0] || ''}
+              onChange={e => {
+                const val = e.target.value
+                handleCustomerFieldChangeAttempt("FSSAI Valid Upto", "fssai", () => {
+                  setCustomerForm(prev => ({ ...prev, fssai_valid_upto: val }))
+                })
+              }}
+            />
+            {customerForm.fssai_valid_upto && (
+              <p className="text-xs text-slate-500">{formatDocDate(customerForm.fssai_valid_upto)}</p>
+            )}
+          </div>
+        
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-800">FSSAI Certificate</Label>
+            <FileUploadField
             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
             value={customerForm.fssai_certificate_upload || ""}
             helperText="Max file size: 20 MB"
@@ -683,9 +771,9 @@ export function CustomerForm({
               })
             }}
           />
+          </div>
         </div>
       </div>
-
       {/* Godown Tagging Details */}
       <div className="border-t border-slate-200 pt-4 space-y-3">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
@@ -699,46 +787,29 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Godown History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-slate-800">Select Godowns</Label>
-            <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 p-2.5 bg-slate-50/40">
-              {(godownDepots || []).map((d: any) => {
-                const checked = (customerForm.godown_ids || []).includes(d.id)
-                return (
-                  <label key={d.id} className="flex items-center gap-2 text-xs font-medium text-slate-800 cursor-pointer hover:text-slate-900">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(val) => {
-                        handleCustomerFieldChangeAttempt("Tagged Godowns", "godown", () => {
-                          const current = customerForm.godown_ids || []
-                          setCustomerForm(prev => ({
-                            ...prev,
-                            godown_ids: val ? [...current, d.id] : current.filter((id: number) => id !== d.id),
-                          }))
-                        })
-                      }}
-                    />
-                    {d.depot_name}
-                  </label>
-                )
-              })}
-            </div>
+            <Label className="text-xs font-semibold text-slate-800">Select Godown(s)</Label>
+            <MultiCombobox
+              options={sortDepotsBanariFirst(godownDepots).map((d: any) => ({ value: d.id.toString(), label: d.depot_name }))}
+              values={(customerForm.godown_ids?.length ? customerForm.godown_ids : [godownDepots?.find(d => d.depot_name?.toLowerCase() === 'banari')?.id].filter(Boolean) as number[]).map(id => String(id))}
+              onValuesChange={vals => {
+                handleCustomerFieldChangeAttempt("Godown", "godown", () => {
+                  setCustomerForm(prev => ({
+                    ...prev,
+                    godown_ids: vals.map(v => parseInt(v, 10)),
+                  }))
+                })
+              }}
+              placeholder="Select godown(s)"
+              searchPlaceholder="Search godown..."
+            />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="is_required_for_commitment" className="text-xs font-semibold text-slate-800">Is Required for Commitment</Label>
-            <Select value={customerForm.is_required_for_commitment || "No"} onValueChange={val => setCustomerForm({...customerForm, is_required_for_commitment: val})}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Yes">Yes</SelectItem>
-                <SelectItem value="No">No</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+
         </div>
       </div>
 
@@ -755,7 +826,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Bank Details History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -763,21 +834,19 @@ export function CustomerForm({
           <div className="flex flex-col items-end space-y-2">
             <p className="text-xs text-slate-400 w-full">No bank details added.</p>
             <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 shadow-2xs" onClick={() => {
-              handleCustomerFieldChangeAttempt("Add Bank Account", "bank", () => {
-                addBankAccountRow()
-              })
+              addBankAccountRow()
             }}>+ Add Bank Account</Button>
           </div>
         )}
         {(customerForm.bank_accounts || []).map((bank, index) => (
           <div key={index} className="space-y-3 pt-1">
             <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-              <span className="text-xs font-bold text-slate-900">Bank Account {index + 1}</span>
-              {(customerForm.bank_accounts || []).length > 1 && (
+              <span className="text-xs font-bold text-slate-900">
+                {index === 0 ? "Primary Bank Account" : `Additional Bank Account ${index}`}
+              </span>
+              {index > 0 && (
                 <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold" onClick={() => {
-                  handleCustomerFieldChangeAttempt(`Remove Bank Account ${index + 1}`, "bank", () => {
-                    removeBankAccountRow(index)
-                  })
+                  removeBankAccountRow(index)
                 }}>
                   Remove Account
                 </Button>
@@ -787,7 +856,7 @@ export function CustomerForm({
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-800">Bank Name</Label>
                 <Combobox
-                  options={activeBankNames.map((b: any) => ({ value: String(b.id), label: b.name }))}
+                  options={activeBankNames.map((b: any) => ({ value: String(b.id), label: formatBankLabel(b), keywords: bankSearchKeywords(b) }))}
                   value={bank.bank_name_id ? String(bank.bank_name_id) : ""}
                   onValueChange={val => {
                     handleCustomerFieldChangeAttempt(`Bank Name (Account ${index + 1})`, "bank", () => {
@@ -841,13 +910,30 @@ export function CustomerForm({
                 />
                 {bankAccountErrors[index] && <p className="text-xs text-red-500 mt-1">{bankAccountErrors[index]}</p>}
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-800">Status</Label>
+                <Select
+                  value={bank.status || "Active"}
+                  onValueChange={(val: "Active" | "Inactive") => {
+                    handleCustomerFieldChangeAttempt("Status", "bank", () => {
+                      updateBankAccountRow(index, { status: val })
+                    })
+                  }}
+                >
+                  <SelectTrigger className="w-full h-9 border-slate-200">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {index === (customerForm.bank_accounts || []).length - 1 && (
               <div className="flex justify-end pt-1">
                 <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-800 shadow-2xs" onClick={() => {
-                  handleCustomerFieldChangeAttempt("Add Bank Account", "bank", () => {
-                    addBankAccountRow()
-                  })
+                  addBankAccountRow()
                 }}>+ Add Bank Account</Button>
               </div>
             )}
@@ -868,7 +954,7 @@ export function CustomerForm({
               customerId={editingItem.id}
               customerName={customerForm.customer_name}
               title="Ledger Group History"
-              onOpenView={(sec) => setCustomerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setCustomerEffectiveDatesSection(sec))}
             />
           )}
         </div>

@@ -81,13 +81,19 @@ export function CustomerSectionalHistoryTable({ section, customerId, title, onOp
       variant="outline"
       size="sm"
       className="h-7 px-2.5 text-xs font-semibold border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center gap-1.5 shadow-2xs transition-colors"
-      onClick={() => onOpenView && onOpenView(section)}
+      onClick={() => {
+        const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+        if (container) {
+          sessionStorage.setItem('masterFormScrollTop', container.scrollTop.toString());
+        }
+        if (onOpenView) onOpenView(section);
+      }}
     >
       <History className="h-3.5 w-3.5 text-blue-600" />
       <span>
         {title ||
           (section === "mailing"
-            ? "Mailing History"
+            ? "Primary Address History"
             : section === "gst"
             ? "GST History"
             : section === "msme"

@@ -32,3 +32,4 @@ Thumbs.db
 
 # Local-only dev scratch / one-off scripts — not for deployment
 /scratch
+*.py

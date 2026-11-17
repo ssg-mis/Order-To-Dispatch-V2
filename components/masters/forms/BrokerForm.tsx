@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -47,6 +48,8 @@ export function BrokerForm({
   handleFileUpload,
   handleFileRemove,
 }: BrokerFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="space-y-5 py-2">
       {/* Broker Basic Details */}
@@ -62,7 +65,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="Broker History"
-              onOpenView={(sec) => setBrokerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -159,7 +162,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="GST & Tax History"
-              onOpenView={(sec) => setBrokerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -167,7 +170,7 @@ export function BrokerForm({
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-800">State</Label>
             <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
               value={brokerForm.state_id ? String(brokerForm.state_id) : ""}
               onValueChange={val => {
                 const selected = activeStates.find((s: any) => String(s.id) === val)
@@ -247,7 +250,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="MSME History"
-              onOpenView={(sec) => setBrokerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -286,7 +289,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="FSSAI History"
-              onOpenView={(sec) => setBrokerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -325,7 +328,7 @@ export function BrokerForm({
               brokerId={editingItem.id}
               brokerName={brokerForm.salesman_name}
               title="Document Uploads History"
-              onOpenView={(sec) => setBrokerEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setBrokerEffectiveDatesSection(sec))}
             />
           )}
         </div>

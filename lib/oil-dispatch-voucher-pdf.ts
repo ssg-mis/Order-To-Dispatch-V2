@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 interface VoucherProduct {
   product_name: string
@@ -57,7 +58,7 @@ const fmtDateTime = (s: string | null) => {
   h = h % 12 || 12
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(2)} ${pad(h)}:${pad(d.getMinutes())} ${ampm}`
 }
-const wt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+const wt = (n: number) => { const d = getWeightDecimals(); return Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) }
 
 export function generateOilDispatchVoucherPdf(vouchers: OilDispatchVoucher[], filename?: string) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })

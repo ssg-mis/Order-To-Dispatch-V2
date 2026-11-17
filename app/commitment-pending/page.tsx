@@ -100,7 +100,7 @@ export default function CommitmentPendingPage() {
 
   return (
     <WorkflowStageShell
-      title="Stage 4: Commitment Pending"
+      title="Commitment Pending"
       description="Order is pending for final commitment entry completion."
       pendingCount={showOrder && pendingOrder ? 1 : 0}
       historyData={[]}

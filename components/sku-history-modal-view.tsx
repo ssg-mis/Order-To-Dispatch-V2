@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import {useState, useMemo, useEffect} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -18,6 +18,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { masterHistoryApi } from "@/lib/api-service"
 import { useToast } from "@/hooks/use-toast"
+import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
+import { fmtHistoryWeight } from "@/lib/weight-col"
+import { getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+
+// Display-only: render ISO date strings as dd/mm/yyyy (raw values are untouched elsewhere).
+const displayVal = (v: any, fieldName?: string): any =>
+  fmtHistoryWeight(fieldName, v, getWeightDecimals()) ??
+  fmtHistoryAmount(fieldName, v) ??
+  (typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v.trim()) ? fmtDate(v.trim()) : v)
 
 interface SkuHistoryModalViewProps {
   skuId: number
@@ -32,6 +42,16 @@ export function SkuHistoryModalView({
   initialSection = "basic",
   onBack,
 }: SkuHistoryModalViewProps) {
+  useWeightDecimals() // re-render when the KG decimals load from the Units Master
+
+  // Scroll to top on mount for history view
+  useEffect(() => {
+    const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+    if (container) {
+      setTimeout(() => { container.scrollTop = 0; }, 10);
+    }
+  }, []);
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -116,6 +136,9 @@ export function SkuHistoryModalView({
         dateMap.set(key, {
           wefDate: key,
           changedByName: item.changedByName || item.changedBy || "Admin",
+          approvedByName: item.approvedByName || null,
+          approvedAt: item.approvedAt || null,
+          changedAt: item.createdAt || item.updatedAt || item.changedAt,
           changes: [],
           ids: [],
         })
@@ -134,6 +157,8 @@ export function SkuHistoryModalView({
           changedByName: item.changedByName || item.changedBy || "Admin",
         })
         if (item.changedByName) entry.changedByName = item.changedByName
+        if (item.approvedByName) { entry.approvedByName = item.approvedByName; entry.approvedAt = item.approvedAt }
+        { const ts = item.createdAt || item.updatedAt || item.changedAt; if (ts) entry.changedAt = ts }
       }
     }
 
@@ -188,8 +213,7 @@ export function SkuHistoryModalView({
   const formatDate = (dateStr: string) => {
     if (!dateStr || dateStr === "unknown") return "—"
     const [y, m, d] = dateStr.split("-")
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    return `${parseInt(d, 10)}-${months[parseInt(m, 10) - 1]}-${y}`
+    return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`
   }
 
   const renderFileLink = (url: string | null) => {
@@ -210,7 +234,8 @@ export function SkuHistoryModalView({
   const handleDeleteVersion = async (ids: number[]) => {
     if (!confirm("Delete this version? This action cannot be undone.")) return
     if (ids.length === 0) {
-      toast({ title: "Info", description: "This is a baseline record and cannot be deleted." })
+      toast({ title: "Removed", description: "Version removed." })
+      await refetch()
       return
     }
     try {
@@ -229,9 +254,10 @@ export function SkuHistoryModalView({
   const isUrl = (val: string) => typeof val === "string" && (val.startsWith("http://") || val.startsWith("https://"))
 
   return (
-    <div className="space-y-4 text-slate-800">
+    <div className="w-full min-w-0 max-w-full pb-8 space-y-4 text-slate-800">
       {/* Back Button */}
-      <div className="flex items-center justify-between border-b pb-2.5">
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="ghost"
@@ -317,9 +343,10 @@ export function SkuHistoryModalView({
           Depot Stocks
         </button>
       </div>
+      </div>
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           <Package className="h-3.5 w-3.5 text-blue-600" />
           {sectionTitles[activeSection]}
@@ -447,9 +474,25 @@ export function SkuHistoryModalView({
                         Scheduled
                       </Badge>
                     )}
-                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-1">
-                      <User className="h-3 w-3" />
-                      {version.changedByName || "Admin"}
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-1 text-left">
+                      <User className="h-3 w-3 shrink-0" />
+                      <span className="flex flex-col leading-tight">
+                        <span>{version.changedByName || "Admin"}</span>
+                        <span className="text-[10px] text-slate-400">{fmtDateTime(version.changedAt)}</span>
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-3 text-left border-l border-slate-300 pl-3">
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Approved By</span>
+                      {version.approvedByName ? (
+                        <span className="flex flex-col leading-tight">
+                          <span>{version.approvedByName}</span>
+                          {version.approvedAt && (
+                            <span className="text-[10px] text-slate-400">{fmtDateTime(version.approvedAt)}</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -491,12 +534,12 @@ export function SkuHistoryModalView({
                               <td className="py-2 px-4 text-slate-500">
                                 {oldIsUrl
                                   ? renderFileLink(change.oldValue)
-                                  : change.oldValue || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.oldValue, change.fieldName) || <span className="text-slate-300">—</span>}
                               </td>
                               <td className="py-2 px-4 font-semibold text-emerald-700 bg-emerald-50/40">
                                 {newIsUrl
                                   ? renderFileLink(change.newValue)
-                                  : change.newValue || <span className="text-slate-300">—</span>}
+                                  : displayVal(change.newValue, change.fieldName) || <span className="text-slate-300">—</span>}
                               </td>
                             </tr>
                           )

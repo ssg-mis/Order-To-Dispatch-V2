@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -23,6 +24,8 @@ export function OilTagForm({
   handleOilTagFieldChangeAttempt,
   setOilTagEffectiveDatesOpen,
 }: OilTagFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   const attemptChange = (fieldName: string, applyChange: () => void) => {
     if (handleOilTagFieldChangeAttempt) {
       handleOilTagFieldChangeAttempt(fieldName, applyChange)
@@ -41,7 +44,7 @@ export function OilTagForm({
         {editingItem?.id && (
           <OilTagSectionalHistoryTable
             oilTagId={editingItem.id}
-            onOpenView={() => setOilTagEffectiveDatesOpen?.(true)}
+            onOpenView={handleOpenEffectiveDatesView(() => setOilTagEffectiveDatesOpen?.(true))}
           />
         )}
       </div>

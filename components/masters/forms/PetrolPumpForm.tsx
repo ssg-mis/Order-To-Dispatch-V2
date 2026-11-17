@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -47,6 +48,8 @@ export function PetrolPumpForm({
   handleFileUpload,
   handleFileRemove,
 }: PetrolPumpFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="space-y-5 py-2">
       {/* Petrol Pump Basic Details */}
@@ -62,7 +65,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="Petrol Pump History"
-              onOpenView={(sec) => setPetrolPumpEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -163,7 +166,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="GST & Tax History"
-              onOpenView={(sec) => setPetrolPumpEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -171,7 +174,7 @@ export function PetrolPumpForm({
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-800">State</Label>
             <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
               value={petrolPumpForm.state_id ? String(petrolPumpForm.state_id) : ""}
               onValueChange={val => {
                 const selected = activeStates.find((s: any) => String(s.id) === val)
@@ -255,7 +258,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="MSME History"
-              onOpenView={(sec) => setPetrolPumpEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -301,7 +304,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="FSSAI History"
-              onOpenView={(sec) => setPetrolPumpEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>
@@ -347,7 +350,7 @@ export function PetrolPumpForm({
               petrolPumpId={editingItem.id}
               petrolPumpName={petrolPumpForm.petrol_pump_name}
               title="Document Uploads History"
-              onOpenView={(sec) => setPetrolPumpEffectiveDatesSection(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setPetrolPumpEffectiveDatesSection(sec))}
             />
           )}
         </div>

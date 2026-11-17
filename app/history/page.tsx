@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect } from "react"
 import { matchesSearch } from "@/lib/search-utils"
 import { formatToIST } from "@/lib/date-utils"
+import { fmtDateTime } from "@/lib/table-format"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -39,8 +40,8 @@ function HistoryContent() {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Global Audit History</h1>
-          <p className="text-muted-foreground">Track every action across all workflow stages.</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Global Audit History</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Track every action across all workflow stages.</p>
         </div>
         <Button className="gap-2">
           <Download className="h-4 w-4" /> Export logs
@@ -74,7 +75,7 @@ function HistoryContent() {
                 <TableHead>Stage Completed</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Processed By</TableHead>
-                <TableHead>Date & Time</TableHead>
+                <TableHead className="text-right">Date & Time</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -101,7 +102,7 @@ function HistoryContent() {
                         {log.processedBy}
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{formatDate(log.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm text-right tabular-nums">{fmtDateTime(log.timestamp)}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" className="gap-2" onClick={() => handleViewDetails(i)}>
                         <Eye className="h-4 w-4" /> Details

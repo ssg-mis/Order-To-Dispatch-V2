@@ -68,7 +68,13 @@ const stages = [
     icon: FileCheck, color: "#059669", bg: "#ecfdf5", border: "#a7f3d0",
   },
   {
-    no: "09", title: "Gate Out", actor: "Security Gate",
+    no: "12", title: "Gate Out", actor: "Security Gate",
+    action: "Verifies documents, takes photo, marks gate out.",
+    isAutomated: false,
+  },
+  {
+    no: "13", title: "Reach Vehicle", actor: "Company/Customer",
+    action: "Marks arrival, records accidents, or handles vehicle change.",
     action: "Capture vehicle exit time and final seal confirmation.",
     icon: Gauge, color: "#d97706", bg: "#fffbeb", border: "#fde68a",
   },
@@ -207,9 +213,9 @@ export default function SystemFlowPage() {
         <div className="mb-7">
           <div className="flex items-center gap-3 mb-1">
             <div className="h-7 w-1 rounded-full bg-indigo-500" />
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">System Flow</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">System Flow</h1>
           </div>
-          <p className="ml-4 pl-3 text-sm text-slate-500">
+          <p className="ml-4 pl-3 text-xs sm:text-sm text-muted-foreground">
             End-to-end order lifecycle — from punch to delivery
           </p>
         </div>

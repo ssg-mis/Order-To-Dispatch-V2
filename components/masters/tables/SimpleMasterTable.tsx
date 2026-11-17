@@ -234,6 +234,7 @@ export const SimpleMasterTable: React.FC<SimpleMasterTableProps> = ({
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-800 truncate">{item[nameKey]}</p>
                     {item[codeKey] && <p className="text-xs text-slate-500">{item[codeKey]}</p>}
+                    {renderMobileCustomFields && renderMobileCustomFields(item)}
                   </div>
                   <div className="flex gap-1 shrink-0">
                     {item.is_system ? (

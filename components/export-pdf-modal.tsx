@@ -9,6 +9,9 @@ import { Input } from "@/components/ui/input"
 import { FileDown, Download, Loader2, ChevronDown, ChevronRight, Trash2, Eye } from "lucide-react"
 import { reportsApi, userApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
+import { fmtAmount, isAmountCol } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtWeight, getWeightDecimals } from "@/lib/weight-format"
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -212,6 +215,10 @@ function fmtVal(val: any, key: string, available: boolean): string {
 
   if (key === "gst_rate") return `${(parseFloat(val) * 100).toFixed(0)}%`
 
+  if (isAmountCol(key, COL_MAP.get(key)?.label)) return fmtAmount(val, 2)
+
+  if ((/_wt$/.test(key) || key === "wt_diff") && Number.isFinite(Number(String(val).replace(/,/g, "")))) return fmtWeight(val, getWeightDecimals())
+
   if (typeof val === "number") return val % 1 !== 0 ? val.toFixed(2) : String(val)
 
   if (typeof val === "string") {
@@ -257,6 +264,7 @@ function generateCsv(rows: any[], selectedKeys: string[]): void {
 
 export function ExportPdfModal({ triggerClassName, open: openProp, onOpenChange, hideTrigger }: { triggerClassName?: string; open?: boolean; onOpenChange?: (o: boolean) => void; hideTrigger?: boolean } = {}) {
   const { user } = useAuth()
+  useWeightDecimals() // keeps the weight decimals current + re-renders the preview when the units master loads
   const [internalOpen, setInternalOpen] = useState(false)
   const open = openProp !== undefined ? openProp : internalOpen
   const setOpen = onOpenChange || setInternalOpen

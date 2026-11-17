@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -46,6 +47,8 @@ export function SalespersonForm({
   handleFileUpload,
   handleFileRemove,
 }: SalespersonFormProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
   return (
     <div className="space-y-5 py-2">
       <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
@@ -59,7 +62,7 @@ export function SalespersonForm({
             salespersonId={editingItem.id}
             salespersonName={salespersonForm.salesman_name}
             title="Salesperson History"
-            onOpenView={(sec) => setSalespersonEffectiveDatesSection(sec)}
+            onOpenView={handleOpenEffectiveDatesView((sec: any) => setSalespersonEffectiveDatesSection(sec))}
           />
         )}
       </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -20,13 +20,15 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Upload, CheckCircle, Settings2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, CheckSquare, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Printer, Download } from "lucide-react"
+import { generateGatePassPdf } from "@/lib/gate-pass-pdf-lazy"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { gateOutApi, orderApi, depotApi, skuApi } from "@/lib/api-service"
+import { gateOutApi, orderApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -34,6 +36,17 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageFilterSelect, StageColumnsMenu, StageActiveChips, StagePagination, StageActionFooter } from "@/components/stage-list"
+import { StageTableHeaderRows, bodyCellClass } from "@/components/stage-table-header-rows"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
@@ -86,128 +99,190 @@ async function compressImageForUpload(file: File): Promise<File> {
   return new File([blob], `${cleanName}.jpg`, { type: "image/jpeg", lastModified: Date.now() })
 }
 
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
+// GST + invoice total of a set of products (one party / invoice). GST % per product and the same-state /
+// other-state split come from the masters, carried from Dispatch Planning.
+function computeInvoice(selProds: any[]) {
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf(Number(p.rate) || 0, parseFloat(p.actualQty) || 0, p),
+    product: p,
+  }))
+  const firstProd = selProds[0]
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
+  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  return { gst, totalTaxable, invoiceTotal, roundOff }
 }
 
-function InvoiceSummary({ selectedGroups, selectedProducts }: {
+function InvoiceSummary({ selectedGroups, selectedProducts, title = "Invoice Summary" }: {
   selectedGroups: any[]
   selectedProducts: string[]
+  title?: string
 }) {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
-
-  const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
-
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  const { gst, totalTaxable, invoiceTotal, roundOff } = computeInvoice(selProds)
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Invoice Summary</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{title}</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Total Taxable Amount</span>
-          <span className="font-mono font-bold text-slate-700">₹{totalTaxable.toFixed(2)}</span>
+          <span className="font-mono font-bold text-slate-700">{totalTaxable === null ? "—" : `₹${fmtAmount(totalTaxable)}`}</span>
         </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${fmtAmount(roundOff)}` : roundOff < 0 ? `-₹${fmtAmount(Math.abs(roundOff))}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${fmtAmount(invoiceTotal)}`}</span>
         </div>
       </div>
     </div>
   )
 }
 
+// Grand totals of everything being gated out: weight (KGS), invoice amount and quantity across every party,
+// with a party-wise breakdown above the totals when the load carries more than one party / invoice.
+function GrandTotals({ sections, selectedProducts, skuWeightMap, wd }: {
+  sections: any[]
+  selectedProducts: string[]
+  skuWeightMap: Map<string, string>
+  wd: number
+}) {
+  const weightOf = (prods: any[]) =>
+    prods.reduce(
+      (sum: number, p: any) => sum + (parseFloat(skuWeightMap.get(p.productName?.trim().toLowerCase()) || "") || 0) * (parseFloat(p.actualQty) || 0),
+      0
+    )
+  const qtyOf = (prods: any[]) => prods.reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)
+
+  // Each party / invoice has its own GST split, so the grand invoice amount is the sum of the per-party totals.
+  const rows = sections
+    .map((g) => {
+      const prods = g._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey))
+      return {
+        key: g._rowKey as string,
+        party: g.customerName as string,
+        invoice: g.invoiceNo as string,
+        items: prods.length,
+        qty: qtyOf(prods),
+        weight: weightOf(prods),
+        amount: prods.length > 0 ? computeInvoice(prods).invoiceTotal : null,
+      }
+    })
+    .filter((r) => r.items > 0)
+
+  const totalQty = rows.reduce((a, r) => a + r.qty, 0)
+  const totalWeight = rows.reduce((a, r) => a + r.weight, 0)
+  const grandInvoice = rows.length > 0 && rows.every((r) => r.amount !== null) ? rows.reduce((a, r) => a + (r.amount as number), 0) : null
+
+  return (
+    <div className="border-2 border-blue-200 rounded-2xl sm:rounded-3xl bg-white shadow-md overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 bg-gradient-to-r from-blue-700 to-blue-600">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-white">Grand Total</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-blue-100">
+          {rows.length} {rows.length === 1 ? "party" : "parties"} · {rows.reduce((a, r) => a + r.items, 0)} items
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-500">
+              <th className="px-4 sm:px-6 py-2 text-left">Party</th>
+              <th className="px-4 py-2 text-left">Invoice</th>
+              <th className="px-4 py-2 text-right">Quantity</th>
+              <th className="px-4 py-2 text-right">Weight (KGS)</th>
+              <th className="px-4 sm:px-6 py-2 text-right">Invoice Amount (₹)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.key} className="hover:bg-slate-50/60">
+                <td className="px-4 sm:px-6 py-2 font-bold text-slate-800 uppercase">{r.party}</td>
+                <td className="px-4 py-2 font-mono font-semibold text-green-700">{r.invoice}</td>
+                <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-700">{fmtNum(r.qty, 0)}</td>
+                <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-700">{fmtWeight(r.weight, wd)}</td>
+                <td className="px-4 sm:px-6 py-2 text-right font-mono tabular-nums font-bold text-slate-900">{r.amount === null ? "—" : fmtAmount(r.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {/* Grand totals sit in the same columns they add up */}
+          <tfoot>
+            <tr className="bg-blue-50 border-t-2 border-blue-200">
+              <td className="px-4 sm:px-6 py-4 text-xs font-black uppercase tracking-wider text-blue-800" colSpan={2}>Grand Total</td>
+              <td className="px-4 py-4 text-right font-mono tabular-nums text-base font-black text-slate-900">{fmtNum(totalQty, 0)}</td>
+              <td className="px-4 py-4 text-right font-mono tabular-nums text-base font-black text-slate-900">{fmtWeight(totalWeight, wd)}</td>
+              <td className="px-4 sm:px-6 py-4 text-right font-mono tabular-nums text-lg font-black text-blue-700">{grandInvoice === null ? "—" : fmtAmount(grandInvoice)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+const NUMERIC_DYN_COLS = new Set(["actual_qty_dispatch", "orderQty", "qtyToDispatch", "altQty", "rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "bill_amount", "actual_qty", "actual_approval_qty", "gross_weight", "tare_weight", "net_weight", "extra_weight", "damage_qty"])
+const DATE_DYN_COLS = new Set(["deliveryDate", "dispatch_date_confirmed", "fitness_end_date", "insurance_end_date", "tax_end_date", "pollution_end_date", "permit1_end_date", "permit2_end_date", "invoice_date"])
+// Money / rate columns carry the unit in the heading (no ₹ inside cells).
+const DYN_LABEL_OVERRIDES: Record<string, string> = {
+  rate: "Rate (₹)",
+  ratePerLtr: "Rate Per Ltr (₹)",
+  ratePer15Kg: "Rate Per 15 kg (₹)",
+  rateOfMaterial: "Rate Of Material (₹)",
+  totalWithGst: "Total Amount With Gst (₹)",
+  advanceAmount: "Advance Amount (₹)",
+  bill_amount: "Bill Amount (₹)",
+}
+// Decimals per numeric column: whole counts = 0, quantities = 4, money = 2.
+const NUM_DECIMALS: Record<string, number> = { products: 0, actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, altQty: 4, rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2, actual_qty: 4, actual_approval_qty: 4, damage_qty: 4 }
+
+function getDynamicColumnValue(group: any, colId: string) {
+  const directValue = group?.[colId]
+  if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
+
+  const firstProduct = group?._allProducts?.[0] || {}
+  const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
+
+  const orderValue = (firstOrder as any)?.[colId]
+  if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
+
+  const productValue = (firstProduct as any)?.[colId]
+  if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
+
+  return "—"
+}
+
 export default function GateOutPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
+  const numDecimals = useMemo<Record<string, number>>(() => ({ ...NUM_DECIMALS, gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd }), [wd])
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
+  // Tab is remembered permanently by the shell (persistKey); filters / quick search are session-scoped.
+  // Refresh/reload only reloads data - never clears it. Reset (resetAllFilters) is the only way to clear.
+  const [listView, patchListView] = usePersistedFilters("gate-out", {
+    quickSearch: "",
+    customerFilter: "ALL",
+    vehicleFilter: "ALL",
+  })
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
+  const { quickSearch, customerFilter, vehicleFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setVehicleFilter = (v: string) => patchListView({ vehicleFilter: v })
 
   const [filterValues, setFilterValues] = useState({
     status: "",
@@ -234,6 +309,18 @@ export default function GateOutPage() {
       for (const sku of skuDetailsData) {
         if (sku.sku_name) {
           const weight = sku.sku_weight ?? ""
+          map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
+        }
+      }
+    }
+    return map
+  }, [skuDetailsData])
+  const skuGrossWeightMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (Array.isArray(skuDetailsData)) {
+      for (const sku of skuDetailsData) {
+        if (sku.sku_name) {
+          const weight = sku.gross_weight ?? ""
           map.set(sku.sku_name.trim().toLowerCase(), weight ? String(weight) : "—")
         }
       }
@@ -272,11 +359,11 @@ export default function GateOutPage() {
   }, [columnOrder, setColumnOrder])
 
   // Selection & Dialog State
-  const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([]) // Changed to array for multi-group support
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]) // State to manage expanded sections
+  const [commonOpen, setCommonOpen] = useState(true) // Common Details card (vehicle / driver / load) - open by default
 
   // Gate Out Form State
   const [isUploading, setIsUploading] = useState<string | null>(null)
@@ -286,6 +373,20 @@ export default function GateOutPage() {
     vehicleLoadedImage: null as File | null,
     vehicleLoadedImageName: "",
   })
+
+  // The two evidence files are only uploaded on submit, so preview images come from local blob URLs.
+  const useLocalPreview = (file: File | null) => {
+    const [url, setUrl] = useState<string | undefined>(undefined)
+    useEffect(() => {
+      if (!file || !file.type.startsWith("image/") || /hei[cf]/i.test(file.type)) { setUrl(undefined); return }
+      const u = URL.createObjectURL(file)
+      setUrl(u)
+      return () => URL.revokeObjectURL(u)
+    }, [file])
+    return url
+  }
+  const gatePassPreview = useLocalPreview(gateOutData.gatePassFile)
+  const vehicleImagePreview = useLocalPreview(gateOutData.vehicleLoadedImage)
 
   // Pending query with numeric pagination
   const [pendingPage, setPendingPage] = useState(1)
@@ -431,8 +532,8 @@ export default function GateOutPage() {
         id: order.id,
         specificOrderNo: doNumber,
         productName: order.product_name,
-        rate: (parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1),
-        amount: ((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) * (parseFloat(order.actual_qty_dispatch) || 0),
+        rate: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0),
+        amount: ((((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0)) * (parseFloat(order.actual_qty_dispatch) || 0),
         invoiceNo: order.invoice_no,
         invoiceDate: order.invoice_date,
         billAmount: order.bill_amount,
@@ -485,7 +586,19 @@ export default function GateOutPage() {
         processid: g._allProducts[0]?.processid || "—",
         vehicleNo: (g._allProducts[0]?.truckNo || "—").toUpperCase(),
         actual1Date: formatDate(g._allProducts[0]?.lrc_actual_1 || g._allProducts[0]?.actual_1),
-        invoiceNo: g._allProducts[0]?.invoice_no || "—",
+        // A vehicle can carry several invoices / companies, so list every distinct invoice (each with its own copy link).
+        invoiceList: (() => {
+          const seen = new Map<string, string | null>()
+          g._allProducts.forEach((p: any) => {
+            const no = p.invoice_no
+            if (no && (!seen.has(no) || !seen.get(no))) seen.set(no, p.invoice_copy || null)
+          })
+          return Array.from(seen, ([no, copy]) => ({ no, copy }))
+        })(),
+        invoiceNo: (() => {
+          const nos = Array.from(new Set(g._allProducts.map((p: any) => p.invoice_no).filter(Boolean)))
+          return nos.length ? nos.join(", ") : "—"
+        })(),
         orderPunchRemarks: g._allProducts[0]?.order_punch_remarks || "—",
         uploadSo: g._allProducts[0]?.upload_so || g._allProducts[0]?.uploadSo || null,
         // actual_qty_dispatch is a PER-PRODUCT line quantity, so the group total must
@@ -498,114 +611,204 @@ export default function GateOutPage() {
     return result
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Stage list table state (column search / date range / sort / totals) ──
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    if (colId === "orderNo") return group.orderNo || ""
-    if (colId === "processid") return group.processid || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "actual1Date") return group.actual1Date || ""
-    if (colId === "invoiceNo") return group.invoiceNo || ""
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group.isReverted 
-        ? "Issue Reported" 
-        : group._allProducts?.some((p: any) => p.status_1 === "Issue") 
-          ? "Issue Reported" 
-          : "Pending Review"
-    }
-    if (colId === "products") return String(group._productCount || 0)
-    return String(getDynamicColumnValue(group, colId))
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
-
-
-  const getDynamicColumnValue = (group: any, colId: string) => {
-    const directValue = group?.[colId]
-    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
-
-    const firstProduct = group?._allProducts?.[0] || {}
-    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
-
-    const orderValue = (firstOrder as any)?.[colId]
-    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
-
-    const productValue = (firstProduct as any)?.[colId]
-    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
-
-    return "—"
-  }
-
-  const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
+  const stageCols = useMemo<StageColDef<any>[]>(() => {
+    const std: StageColDef<any>[] = [
+      { id: "partySoDate", label: "DO Date", type: "date", accessor: (g) => g._allProducts?.[0]?.party_so_date },
+      { id: "customerName", label: "Customer Name", accessor: (g) => (g.customerNames && g.customerNames.length > 0 ? g.customerNames.join(", ") : g.customerName) },
+      { id: "orderNo", label: "DO Number", accessor: (g) => g.orderNo },
+      { id: "actual1Date", label: "Dispatched Date", type: "date", accessor: (g) => g._allProducts?.[0]?.lrc_actual_1 || g._allProducts?.[0]?.actual_1 },
+      { id: "processid", label: "Manual Sauda No.", accessor: (g) => g.processId },
+      { id: "invoiceNo", label: "Invoice No.", accessor: (g) => g.invoiceNo },
+      { id: "vehicleNo", label: "Vehicle No.", accessor: (g) => g.vehicleNo },
+      { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: (g) => g.orderPunchRemarks },
+      { id: "status", label: "Status", accessor: () => "Ready" },
+      { id: "products", label: "Items", type: "number", accessor: (g) => g._productCount || 0, total: true },
+    ]
+    const stdIds = new Set(std.map((c) => c.id))
+    const dyn: StageColDef<any>[] = ALL_COLUMNS.filter((c) => !stdIds.has(c.id)).map((c) =>
+      NUMERIC_DYN_COLS.has(c.id)
+        ? { id: c.id, label: DYN_LABEL_OVERRIDES[c.id] || c.label, type: "number" as const, accessor: (g: any) => Number(getDynamicColumnValue(g, c.id)) || 0, total: ["bill_amount", "gross_weight", "tare_weight", "net_weight", "extra_weight"].includes(c.id) }
+        : DATE_DYN_COLS.has(c.id)
+          ? { id: c.id, label: c.label, type: "date" as const, accessor: (g: any) => { const v = getDynamicColumnValue(g, c.id); return v === "—" ? null : v } }
+          : { id: c.id, label: c.label, accessor: (g: any) => String(getDynamicColumnValue(g, c.id)) }
     )
+    return [...std, ...dyn]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const baseFilter = useCallback(
+    (g: any) => {
+      if (customerFilter !== "ALL") {
+        const names: string[] = g.customerNames && g.customerNames.length > 0 ? g.customerNames : [g.customerName]
+        if (!names.includes(customerFilter)) return false
+      }
+      if (vehicleFilter !== "ALL" && g.vehicleNo !== vehicleFilter) return false
+      const q = quickSearch.trim().toLowerCase()
+      if (q) {
+        const hay = [g.orderNo, g.customerName, g.invoiceNo, g.vehicleNo, g.processId, g.orderPunchRemarks].join(" ").toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customerFilter, vehicleFilter, quickSearch]
+  )
+
+  const table = useStageTable<any>({ rows: displayRows, columns: stageCols, baseFilter, persistKey: "gate-out" })
+  const orderedCols = useMemo(
+    () => orderedVisible.map((id) => stageCols.find((c) => c.id === id)).filter(Boolean) as StageColDef<any>[],
+    [orderedVisible.join("|"), stageCols] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const colOf = (id: string) => stageCols.find((c) => c.id === id)
+  const customerOptions = useMemo(
+    () => Array.from(new Set(displayRows.flatMap((g: any) => (g.customerNames && g.customerNames.length > 0 ? g.customerNames : [g.customerName])).filter(Boolean))).sort() as string[],
+    [displayRows]
+  )
+  const vehicleOptions = useMemo(
+    () => Array.from(new Set(displayRows.map((g: any) => g.vehicleNo).filter((v: string) => v && v !== "—"))).sort() as string[],
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (customerFilter !== "ALL" ? 1 : 0) + (vehicleFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const resetAllFilters = () => {
+    patchListView({ customerFilter: "ALL", vehicleFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
   }
 
-  const toggleSelectAll = () => {
-    if (selectedItems.length === displayRows.length) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems(displayRows.map(r => r._rowKey))
-    }
-  }
 
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    // Get all selected groups
-    const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
-    if (targets.length > 0) {
-      setSelectedGroups(targets)
-      // Select all products by default from all selected groups
-      const allProdKeys = targets.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
-      setSelectedProducts(allProdKeys)
-
-      // Reset form
-      setGateOutData({
-        gatePassFile: null,
-        gatePassFileName: "",
-        vehicleLoadedImage: null,
-        vehicleLoadedImageName: ""
+  // A vehicle can carry several parties / invoices. The dialog shows each party (and invoice) as its own block,
+  // with its own products, GST and amount - so split the vehicle group into one section per party + invoice.
+  const splitGroupByParty = (group: any): any[] => {
+    const buckets = new Map<string, any[]>()
+    group._allProducts.forEach((p: any) => {
+      const party = String(p.party_name || p.partyName || "Unknown Customer").trim()
+      const key = `${p.customer_id ?? party.toUpperCase()}|${p.invoiceNo || p.invoice_no || ""}`
+      if (!buckets.has(key)) buckets.set(key, [])
+      buckets.get(key)!.push(p)
+    })
+    if (buckets.size <= 1) return [group]
+    return Array.from(buckets.values()).map((prods, i) => {
+      const party = String(prods[0].party_name || prods[0].partyName || "Unknown Customer").trim()
+      const doNos = Array.from(new Set(prods.map((p: any) => p.specificOrderNo)))
+      const ordersMap: Record<string, any> = {}
+      doNos.forEach((d: any) => {
+        const orig = group._ordersMap[d]
+        if (orig) ordersMap[d] = { ...orig, _products: prods.filter((p: any) => p.specificOrderNo === d) }
       })
-      setExpandedOrders([]) // Reset expanded state
-
-      setIsDialogOpen(true)
-    }
+      const invNos = Array.from(new Set(prods.map((p: any) => p.invoice_no).filter(Boolean)))
+      return {
+        ...group,
+        _rowKey: `${group._rowKey}#${i}`,
+        customerName: party,
+        customerNames: [party],
+        _allProducts: prods,
+        _ordersMap: ordersMap,
+        _productCount: prods.length,
+        doNumber: doNos.join(", "),
+        orderNo: doNos.join(", "),
+        invoiceNo: invNos.length ? invNos.join(", ") : "—",
+        invoiceList: (group.invoiceList || []).filter((inv: any) => invNos.includes(inv.no)),
+        actual_qty_dispatch: prods.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch) || 0), 0),
+      }
+    })
   }
+
+  const handleRowClick = (group: any) => {
+    const sections = splitGroupByParty(group)
+    setSelectedGroups(sections)
+    // Select all products by default from the clicked group
+    const allProdKeys = group._allProducts.map((p: any) => p._rowKey)
+    setSelectedProducts(allProdKeys)
+
+    // Reset form
+    setGateOutData({
+      gatePassFile: null,
+      gatePassFileName: "",
+      vehicleLoadedImage: null,
+      vehicleLoadedImageName: ""
+    })
+    setExpandedOrders(sections.map((sec: any) => sec._rowKey)) // every party block starts expanded
+    setCommonOpen(true) // common details start expanded
+
+    setIsDialogOpen(true)
+  }
+
+  const buildSlipParties = () => {
+    const productsForSlip = selectedGroups.flatMap((group: any) =>
+      group._allProducts.filter((p: any) => selectedProducts.includes(p._rowKey))
+    );
+    const partyGroups: Record<string, any[]> = {};
+    productsForSlip.forEach((p: any) => {
+      const pName = p.party_name || p.partyName || "Unknown Party";
+      if (!partyGroups[pName]) partyGroups[pName] = [];
+      partyGroups[pName].push(p);
+    });
+    return Object.entries(partyGroups).map(([party, partyProducts]) => {
+      const firstProd = partyProducts[0];
+      const orderThrough = firstProd.is_order_through || firstProd.isOrderThrough || "Direct";
+      const referenceLabel = orderThrough === "Broker" ? "Broker" : orderThrough === "Salesperson" ? "Salesperson" : "";
+      const referenceValue = orderThrough === "Broker"
+        ? (firstProd.broker_name || firstProd.brokerName || "—")
+        : orderThrough === "Salesperson"
+          ? (firstProd.salesperson_name || "—")
+          : "Direct";
+      return {
+        party,
+        commitmentNo: firstProd.so_no || firstProd.soNo || firstProd.specificOrderNo || "—",
+        date: new Date().toLocaleDateString('en-GB'),
+        referenceLabel,
+        referenceValue,
+        place: firstProd.customer_address || firstProd.customerAddress || "—",
+        partyMo: firstProd.customer_contact_person_whatsapp_no || firstProd.whatsapp || "—",
+        status: "Original",
+        processId: firstProd.processid || "—",
+        punchBy: firstProd.order_punch_user || "—",
+        punchAt: firstProd.order_punch_at || null,
+        preApproveBy: firstProd.pre_approval_user || "—",
+        preApproveAt: firstProd.pre_approval_at || null,
+        approveBy: firstProd.order_approval_user || "—",
+        approveAt: firstProd.order_approval_at || null,
+        vehicleNo: firstProd.vehicle_no || firstProd.truck_no || firstProd.truckNo || firstProd.registration_no || "",
+        driverName: firstProd.driver_name || firstProd.driverName || "",
+        tareWt: firstProd.tareWeight || firstProd.tare_weight || "",
+        grossWt: firstProd.grossWeight || firstProd.gross_weight || "",
+        driverMobile: firstProd.driver_mobile_no || firstProd.driverMobile || "",
+        rstNo: firstProd.rst_no || firstProd.rstNo || "",
+        saudaNo: firstProd.manual_sauda_no || firstProd.sauda_no || "",
+        billNo: firstProd.invoice_no || firstProd.invoiceNo || "",
+        products: partyProducts.map((prod: any) => {
+          const qty = parseFloat(prod.actual_qty_dispatch || prod.qty_to_be_dispatched || "0");
+          const skuWt = parseFloat(skuWeightMap.get(prod.productName?.trim().toLowerCase()) || "") || 0;
+          const skuGrossWt = parseFloat(skuGrossWeightMap.get(prod.productName?.trim().toLowerCase()) || "") || 0;
+          return {
+            productName: prod.productName || "—",
+            uom: prod.uom || "PCS",
+            qty,
+            weight: skuWt * qty,
+            grossWeight: (skuGrossWt > 0 ? skuGrossWt : skuWt) * qty,
+          };
+        }),
+      };
+    });
+  };
+
+  const handleDownloadSlip = () => {
+    if (selectedGroups.length === 0 || selectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to download the gate pass", variant: "destructive" });
+      return;
+    }
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf");
+  };
+
+  const handlePrintSlip = () => {
+    if (selectedGroups.length === 0 || selectedProducts.length === 0) {
+      toast({ title: "Error", description: "Please select products to print the gate pass", variant: "destructive" });
+      return;
+    }
+    generateGatePassPdf(buildSlipParties(), "gate-pass.pdf", { print: true });
+  };
 
   const handleSubmit = async () => {
     if (selectedGroups.length === 0) return
@@ -676,7 +879,6 @@ export default function GateOutPage() {
         queryClient.invalidateQueries({ queryKey: ["gate-out-history"] });
 
         setIsDialogOpen(false)
-        setSelectedItems([])
       }
 
       // Stale-write conflicts: the row was already processed/moved by another user.
@@ -720,8 +922,9 @@ export default function GateOutPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="gate-out"
       partyNames={customerNames}
-      title="Stage 11: Gate Out"
+      title="Stage 12: Gate Out"
       description="Record gate out details and upload gate pass grouped by Customer."
       pendingCount={displayRows.length}
       historyData={[]}
@@ -759,91 +962,77 @@ export default function GateOutPage() {
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <div className="flex justify-end gap-2">
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Complete Gate Out ({selectedItems.length})
-          </Button>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-
         {/* Main Card View (Grouped) */}
-        <Card className="border-none shadow-sm overflow-hidden">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Gate Out List"
+            shown={table.rows.length}
+            total={displayRows.length}
+            description="Dispatches ready for gate out, grouped by dispatch date and vehicle"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Invoice, Vehicle..."
+          >
+            <StageToolbar
+              shown={table.rows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={resetAllFilters}
+              filters={
+                <>
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerOptions} />
+                  <StageFilterSelect value={vehicleFilter} onChange={setVehicleFilter} allLabel="All Vehicles" options={vehicleOptions} />
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(vehicleFilter !== "ALL" ? [{ label: `Vehicle: ${vehicleFilter}`, onClear: () => setVehicleFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
           {/* Desktop Table View */}
-          <div className="hidden md:block max-h-[600px] overflow-auto">
+          <div className="hidden overflow-x-auto md:block">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-                <TableRow className="bg-slate-50">
-                  <TableHead className="w-10 text-center">
-                    <Checkbox checked={displayRows.length > 0 && selectedItems.length === displayRows.length} onCheckedChange={toggleSelectAll} />
-                  </TableHead>
-                  <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                    {orderedVisible.map(id => {
-                      const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                      if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                      if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
-                      if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number<PendingSortIcon field="orderNo" /></SortableTableHead>
-                      if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
-                      if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
-                      if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No.<PendingSortIcon field="invoiceNo" /></SortableTableHead>
-                      if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
-                      if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                      if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                      if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
-                      const dynCol = ALL_COLUMNS.find(c => c.id === id)
-                      if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
-                      return null
-                    })}
-                  </ColumnDragProvider>
-                </TableRow>
-              </TableHeader>
+              <StageTableHeaderRows
+                columns={orderedCols}
+                table={table}
+                decimals={numDecimals}
+                onReorder={handleColumnReorder}
+                dragDisabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}
+              />
               <TableBody>
                 {isPendingLoading && pendingOrders.length === 0 ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                      <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                       {orderedVisible.map(id => (
-                        <TableCell key={id} className="text-center py-4">
-                          <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-16" : id === "products" ? "w-12" : id === "customerName" ? "w-32" : id === "orderNo" || id === "invoiceNo" || id === "vehicleNo" ? "w-24" : "w-20")} />
+                        <TableCell key={id} className={cn("px-4 py-4", colOf(id)?.type === "number" || colOf(id)?.type === "date" ? "text-right" : "text-left")}>
+                          <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", (colOf(id)?.type === "number" || colOf(id)?.type === "date") && "ml-auto",id === "status" ? "h-5 w-16" : id === "products" ? "w-12" : id === "customerName" ? "w-32" : id === "orderNo" || id === "invoiceNo" || id === "vehicleNo" ? "w-24" : "w-20")} />
                         </TableCell>
                       ))}
                     </TableRow>
                   ))
-                ) : sortedDisplayRows.length > 0 ? (
-                  sortedDisplayRows.map((group) => (
+                ) : table.rows.length > 0 ? (
+                  table.rows.map((group) => (
                     <TableRow
                       key={group._rowKey}
-                      className={cn(
-                        "cursor-pointer transition-colors",
-                        selectedItems.includes(group._rowKey) ? "bg-blue-50/40" : "hover:bg-slate-50/60"
-                      )}
-                      onClick={() => toggleSelectItem(group._rowKey)}
+                      className="cursor-pointer transition-colors hover:bg-slate-50/60"
+                      onClick={() => handleRowClick(group)}
+                      title="Click to complete gate out"
                     >
-                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                      </TableCell>
                       {orderedVisible.map(id => {
-                        if (id === "partySoDate") return <TableCell key={id} className="text-xs text-slate-600 whitespace-nowrap">{group.partySoDate}</TableCell>
+                        if (id === "partySoDate") return <TableCell key={id} className={bodyCellClass(colOf(id), "text-slate-600 whitespace-nowrap")}>{group.partySoDate}</TableCell>
                         if (id === "customerName") return (
-                          <TableCell key={id} className="text-xs text-slate-600">
+                          <TableCell key={id} className="px-4 text-left text-xs text-slate-600">
                             <div className="flex flex-col gap-1">
                               {(group.customerNames && group.customerNames.length > 0 ? group.customerNames : [group.customerName]).map((name: string, idx: number) => (
                                 <span key={`${name}-${idx}`} className="font-medium text-slate-700">{name}</span>
@@ -852,7 +1041,7 @@ export default function GateOutPage() {
                           </TableCell>
                         )
                         if (id === "orderNo") return (
-                          <TableCell key={id} className="text-xs">
+                          <TableCell key={id} className="px-4 text-left text-xs">
                             <div className="flex flex-col gap-1.5">
                               {String(group.doNumber || "—").split(", ").map((doNo: string) => (
                                 <span key={doNo} className="text-blue-700 font-bold whitespace-nowrap">{doNo}</span>
@@ -860,40 +1049,50 @@ export default function GateOutPage() {
                             </div>
                           </TableCell>
                         )
-                        if (id === "actual1Date") return <TableCell key={id} className="text-center text-xs text-slate-600 whitespace-nowrap">{group.actual1Date}</TableCell>
-                        if (id === "processid") return <TableCell key={id} className="text-xs text-slate-600">{group.processId}</TableCell>
+                        if (id === "actual1Date") return <TableCell key={id} className={bodyCellClass(colOf(id), "text-slate-600 whitespace-nowrap")}>{group.actual1Date}</TableCell>
+                        if (id === "processid") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.processId}</TableCell>
                         if (id === "invoiceNo") return (
-                          <TableCell key={id} className="text-xs text-slate-600">
-                            {group._allProducts?.[0]?.invoice_copy ? (
-                              <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
-                            ) : group.invoiceNo}
+                          <TableCell key={id} className="px-4 text-left text-xs text-slate-600">
+                            {group.invoiceList?.length ? group.invoiceList.map((inv: any, i: number) => (
+                              <span key={inv.no}>
+                                {i > 0 && ", "}
+                                {inv.copy ? (
+                                  <a href={inv.copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">{inv.no}</a>
+                                ) : inv.no}
+                              </span>
+                            )) : group.invoiceNo}
                           </TableCell>
                         )
-                        if (id === "vehicleNo") return <TableCell key={id} className="text-xs text-slate-600 whitespace-nowrap">{group.vehicleNo}</TableCell>
-                        if (id === "orderPunchRemarks") return <TableCell key={id} className="text-xs text-slate-600">{group.orderPunchRemarks}</TableCell>
+                        if (id === "vehicleNo") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600 whitespace-nowrap">{group.vehicleNo}</TableCell>
+                        if (id === "orderPunchRemarks") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.orderPunchRemarks}</TableCell>
                         if (id === "status") return (
-                          <TableCell key={id} className="text-center">
+                          <TableCell key={id} className="px-4 text-left">
                             <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap">Ready</Badge>
                           </TableCell>
                         )
                         if (id === "products") return (
-                          <TableCell key={id} className="text-center">
-                            <Badge variant="secondary" className="font-black text-[10px]">{group._productCount}</Badge>
-                          </TableCell>
+                          <TableCell key={id} className={bodyCellClass(colOf(id))}>{fmtNum(group._productCount, 0)}</TableCell>
                         )
-                        return null
+                        if (NUMERIC_DYN_COLS.has(id)) {
+                          const val = getDynamicColumnValue(group, id)
+                          const d = numDecimals[id] ?? 4
+                          const formatted = isAmountCol(id, colOf(id)?.label) ? fmtAmount(val, d) : fmtNum(val, d)
+                          return <TableCell key={id} className={bodyCellClass(colOf(id), "text-slate-600")}>{formatted}</TableCell>
+                        }
+                        if (DATE_DYN_COLS.has(id)) return <TableCell key={id} className={bodyCellClass(colOf(id), "text-slate-600 whitespace-nowrap")}>{fmtDate(getDynamicColumnValue(group, id) === "—" ? null : getDynamicColumnValue(group, id))}</TableCell>
+                        return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                       })}
-                      {dynamicColumns.map((colId) => (
-                        <TableCell key={colId} className="text-xs text-slate-600">
-                          {String(getDynamicColumnValue(group, colId))}
-                        </TableCell>
-                      ))}
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={1 + orderedVisible.length + dynamicColumns.length} className="text-center py-12 text-muted-foreground">
-                      No orders pending for gate out
+                    <TableCell colSpan={orderedVisible.length} className="text-center py-12 text-muted-foreground">
+                      {displayRows.length > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                          <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                        </div>
+                      ) : "No orders pending for gate out"}
                     </TableCell>
                   </TableRow>
                 )}
@@ -919,15 +1118,13 @@ export default function GateOutPage() {
                   </Card>
                 ))}
               </div>
-            ) : displayRows.length > 0 ? (
+            ) : table.rows.length > 0 ? (
               <div className="grid grid-cols-1 gap-4">
-                {displayRows.map((group) => (
+                {table.rows.map((group) => (
                   <Card
                     key={group._rowKey}
-                    className={cn(
-                      "p-4 border-2 transition-all shadow-sm bg-white",
-                      selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-md" : "border-slate-100 hover:border-blue-200"
-                    )}
+                    onClick={() => handleRowClick(group)}
+                    className="p-4 border transition-all shadow-sm bg-white cursor-pointer border-slate-200 hover:border-blue-400 hover:shadow-md active:bg-slate-50"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-1">
@@ -940,7 +1137,7 @@ export default function GateOutPage() {
                           </div>
                         )}
                       </div>
-                      <Checkbox checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} className="mt-1 h-5 w-5" />
+                      <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 text-[10px] font-black whitespace-nowrap shrink-0">Ready</Badge>
                     </div>
 
                     {visibleColumns.includes("orderNo") && (
@@ -968,7 +1165,7 @@ export default function GateOutPage() {
                         <div>
                           <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Invoice No.</p>
                           {group._allProducts?.[0]?.invoice_copy ? (
-                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-xs font-black text-blue-600 hover:underline break-words">
+                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs font-black text-blue-600 hover:underline break-words">
                               {group.invoiceNo}
                             </a>
                           ) : (
@@ -986,7 +1183,7 @@ export default function GateOutPage() {
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                       <Badge variant="secondary" className="font-black">{group._productCount} items</Badge>
-                      {visibleColumns.includes("status") && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Ready for Gate Out</Badge>}
+                      <span className="text-xs font-semibold text-blue-600">Click to complete gate out →</span>
                     </div>
 
                     {visibleColumns.includes("orderPunchRemarks") && group.orderPunchRemarks && group.orderPunchRemarks !== "—" && (
@@ -1014,39 +1211,28 @@ export default function GateOutPage() {
               </div>
             ) : (
               <div className="text-center py-12 text-muted-foreground">
-                No orders pending for gate out
+                {displayRows.length > 0 ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                    <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                  </div>
+                ) : "No orders pending for gate out"}
               </div>
             )}
           </div>
+          </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingData?.pagination?.totalPages || 1}</span>
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Loads
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-              disabled={pendingPage === 1}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => p + 1)}
-              disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingData?.pagination?.totalPages || 1}
+          total={pendingData?.pagination?.total || 0}
+          noun="Loads"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1}
+          nextDisabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+        />
       </div>
 
       {/* Split-View Dialog */}
@@ -1055,126 +1241,40 @@ export default function GateOutPage() {
           <div className="p-4 sm:p-6">
             <DialogHeader className="pr-8">
               <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 border-b pb-4 mb-4 leading-tight">
-                Complete Gate Out - {selectedGroups.length > 1 ? `${selectedGroups.length} Invoices Selected` : selectedGroups[0]?.invoiceNo}
+                Complete Gate Out - {(() => {
+                  const invs = Array.from(new Set(selectedGroups.flatMap((g: any) => (g.invoiceList || []).map((i: any) => i.no))))
+                  if (selectedGroups.length > 1 && selectedGroups[0]?.vehicleNo && selectedGroups[0]?.vehicleNo !== "—") return `Vehicle ${selectedGroups[0].vehicleNo} (${selectedGroups.length} parties)`
+                  if (invs.length === 1) return `Invoice ${invs[0]}`
+                  return selectedGroups[0]?.vehicleNo ? `Vehicle ${selectedGroups[0]?.vehicleNo}` : "Selected Load"
+                })()}
               </DialogTitle>
             </DialogHeader>
 
             {selectedGroups.length > 0 && (
               <div className="space-y-4 mt-6 min-w-0">
-                {selectedGroups.map((group, groupIdx) => {
-                  const allProducts = group._allProducts;
-                  const allSelected = allProducts.every((p: any) => selectedProducts.includes(p._rowKey));
-                  const isExpanded = expandedOrders.includes(group._rowKey);
-                  const toggleExpand = () => {
-                    setExpandedOrders(prev => isExpanded ? prev.filter(id => id !== group._rowKey) : [...prev, group._rowKey]);
-                  };
-
-                  const uniqueOrderDetails = Object.values(group._ordersMap);
-
+                {/* Common details of the load (vehicle, driver, documents, weights) - shown once for all parties */}
+                {(() => {
+                  const firstProd = selectedGroups[0]?._allProducts?.[0] || {}
                   return (
-                    <div key={group._rowKey} className="border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm min-w-0">
-                        <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
-                          <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                            <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
-                              DETAILS FOR {group.invoiceNo && group.invoiceNo !== "—" ? `INVOICE ${group.invoiceNo} — ` : ""}{group.customerName}
-                            </Badge>
-                            <div className="flex flex-col">
-                              <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">GROUP {groupIdx + 1} | {group.doNumber}</span>
-                              <span className="text-xs text-blue-100 font-bold leading-none">
-                                {allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).length} Items Checked
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
-                            <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2 leading-none cursor-pointer">
-                              {isExpanded ? 'HIDE DETAILS ▲' : 'CLICK TO SHOW DETAILS ▼'}
-                            </div>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/20 rounded-full">
-                              {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                            </Button>
-                          </div>
+                    <div className="border-2 border-slate-200 rounded-xl sm:rounded-3xl bg-white shadow-sm p-4 sm:p-6 min-w-0">
+                      <div
+                        className={cn("flex items-center justify-between gap-2 cursor-pointer select-none", commonOpen && "mb-4")}
+                        onClick={() => setCommonOpen((o) => !o)}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="h-3 w-1 bg-slate-700 rounded-full" />
+                          <p className="text-xs font-black uppercase tracking-[0.15em] text-slate-700">Common Details - Vehicle, Driver &amp; Load (all parties)</p>
+                          {!commonOpen && firstProd.truckNo ? (
+                            <span className="text-xs font-black text-blue-800 whitespace-nowrap">{String(firstProd.truckNo).toUpperCase()}</span>
+                          ) : null}
                         </div>
-
-                          {/* Consolidated Collapsible Details Bar */}
-                          {isExpanded && (
-                            <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
-                              {uniqueOrderDetails.map((orderDetails: any, idx) => {
-                                const firstProd = orderDetails._products[0] || {};
-                                return (
-                                  <div key={idx} className="bg-white border border-slate-100 rounded-2xl p-4 sm:p-6 relative shadow-sm">
-                                    <div className="absolute -top-3 left-6">
-                                      <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200 text-[10px] font-black uppercase px-3 py-1">
-                                        ORDER: {firstProd.specificOrderNo}
-                                      </Badge>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-                                      {/* Order Info */}
-                                      {/* Order Info */}
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Delivery Purpose</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.deliveryPurpose}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Start Date / End Date</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">
-                                          {orderDetails.startDate ? new Date(orderDetails.startDate).toLocaleDateString("en-GB") : "—"} / {orderDetails.endDate ? new Date(orderDetails.endDate).toLocaleDateString("en-GB") : "—"}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">DO Date</p>
-                                        <p className="text-xs font-bold text-slate-700">
-                                          {orderDetails.partySoDate || "—"}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transport Type</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.transportType}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Credit Status</p>
-                                        <Badge className={cn("text-[10px] font-black px-2 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-                                          {orderDetails.partyCredit}
-                                        </Badge>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Customer Address</p>
-                                        <p className="text-[10px] font-medium text-slate-600 leading-tight break-words" title={orderDetails.customerAddress}>{orderDetails.customerAddress}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact Person</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.contactPerson} ({orderDetails.whatsapp})</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">
-                                          {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{orderDetails.advanceAmount}
-                                        </p>
-                                      </div>
-                                      <div className="sm:col-span-2">
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Order Punch Remarks</p>
-                                        <p className="text-[10px] font-medium text-slate-600 leading-tight italic">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
-                                      </div>
-                                      <div className="sm:col-span-2">
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">PO Copy (SO Upload)</p>
-                                        {group.uploadSo ? (
-                                          <a 
-                                            href={group.uploadSo} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
-                                          >
-                                            <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
-                                            <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
-                                            <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                          </a>
-                                        ) : (
-                                          <p className="text-[10px] font-black text-slate-400 leading-none">NOT UPLOADED</p>
-                                        )}
-                                      </div>
-
-                                      <div className="sm:col-span-2 md:col-span-4 h-px bg-slate-200 my-1" />
-
-                                      {/* Dispatch Info */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{commonOpen ? "HIDE DETAILS ▲" : "CLICK TO SHOW DETAILS ▼"}</span>
+                          {commonOpen ? <ChevronUp className="h-5 w-5 text-slate-500" /> : <ChevronDown className="h-5 w-5 text-slate-500" />}
+                        </div>
+                      </div>
+                      {commonOpen && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Truck No</p>
                                         <p className="text-sm font-black text-blue-800">{firstProd.truckNo || "—"}</p>
@@ -1183,17 +1283,6 @@ export default function GateOutPage() {
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Bilty No</p>
                                         <p className="text-xs font-black text-blue-600">{firstProd.biltyNo || firstProd.bilty_no || "—"}</p>
                                       </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Invoice No</p>
-                                        <p className="text-xs font-black text-green-600">{firstProd.invoiceNo || "—"}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Invoice Date</p>
-                                        <p className="text-xs font-bold text-slate-700">
-                                          {firstProd.invoiceDate ? new Date(firstProd.invoiceDate).toLocaleDateString("en-GB") : "—"}
-                                        </p>
-                                      </div>
-
                                       <div className="sm:col-span-2 md:col-span-4 h-px bg-slate-200 my-1" />
 
                                       {/* Vehicle Info */}
@@ -1212,7 +1301,7 @@ export default function GateOutPage() {
                                       </div>
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                        <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight ? fmtWeight(firstProd.passing_weight, wd) : "—"}</p>
                                       </div>
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
@@ -1327,16 +1416,16 @@ export default function GateOutPage() {
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
                                         <p className="text-xs font-black text-slate-900 leading-tight">
-                                          {firstProd.grossWeight || "0"} / {firstProd.tareWeight || "0"} / <span className="text-blue-600 font-black">{((Number(firstProd.grossWeight || 0) - Number(firstProd.tareWeight || 0)) || "0").toString()}</span>
+                                          {fmtWeight(firstProd.grossWeight || 0, wd)} / {fmtWeight(firstProd.tareWeight || 0, wd)} / <span className="text-blue-600 font-black">{fmtWeight(Number(firstProd.grossWeight || 0) - Number(firstProd.tareWeight || 0), wd)}</span>
                                         </p>
                                       </div>
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff</p>
-                                        <p className="text-xs font-black text-amber-600">{firstProd.weightDiff || "0"}</p>
+                                        <p className="text-xs font-black text-amber-600">{fmtWeight(firstProd.weightDiff || 0, wd)}</p>
                                       </div>
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Extra Weight</p>
-                                        <p className="text-xs font-black text-purple-600">{firstProd.extraWeight || "0"}</p>
+                                        <p className="text-xs font-black text-purple-600">{fmtWeight(firstProd.extraWeight || 0, wd)}</p>
                                       </div>
                                       <div>
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff Reason</p>
@@ -1346,6 +1435,136 @@ export default function GateOutPage() {
                                         <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transporter Name</p>
                                         <p className="text-xs font-bold text-slate-700 break-words" title={firstProd.transporterName}>{firstProd.transporterName || "—"}</p>
                                       </div>
+                      </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {selectedGroups.map((group, groupIdx) => {
+                  const allProducts = group._allProducts;
+                  const allSelected = allProducts.every((p: any) => selectedProducts.includes(p._rowKey));
+                  const isExpanded = expandedOrders.includes(group._rowKey);
+                  const toggleExpand = () => {
+                    setExpandedOrders(prev => isExpanded ? prev.filter(id => id !== group._rowKey) : [...prev, group._rowKey]);
+                  };
+
+                  const uniqueOrderDetails = Object.values(group._ordersMap);
+
+                  return (
+                    <div key={group._rowKey} className="border-2 border-slate-100 rounded-xl sm:rounded-3xl overflow-hidden bg-white shadow-sm min-w-0">
+                        <div className="bg-blue-600 px-3 sm:px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer" onClick={toggleExpand}>
+                          <div className="min-w-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                            <Badge className="max-w-full bg-white text-blue-800 hover:bg-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-black tracking-tight rounded-full shadow-sm uppercase whitespace-normal break-words">
+                              DETAILS FOR {group.invoiceNo && group.invoiceNo !== "—" ? `INVOICE ${group.invoiceNo} — ` : ""}{group.customerName}
+                            </Badge>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] text-blue-100 font-black uppercase tracking-widest leading-none mb-1">GROUP {groupIdx + 1} | {group.doNumber}</span>
+                              <span className="text-xs text-blue-100 font-bold leading-none">
+                                {allProducts.filter((p: any) => selectedProducts.includes(p._rowKey)).length} Items Checked
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
+                            <div className="text-[10px] sm:text-[11px] text-blue-50 font-bold uppercase tracking-widest sm:mr-2 leading-none cursor-pointer">
+                              {isExpanded ? 'HIDE DETAILS ▲' : 'CLICK TO SHOW DETAILS ▼'}
+                            </div>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/20 rounded-full">
+                              {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                            </Button>
+                          </div>
+                        </div>
+
+                          {/* Consolidated Collapsible Details Bar */}
+                          {isExpanded && (
+                            <div className="px-3 sm:px-5 pb-5 pt-4 space-y-6 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                              {uniqueOrderDetails.map((orderDetails: any, idx) => {
+                                const firstProd = orderDetails._products[0] || {};
+                                return (
+                                  <div key={idx} className="bg-white border border-slate-100 rounded-2xl p-4 sm:p-6 relative shadow-sm">
+                                    <div className="absolute -top-3 left-6">
+                                      <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200 text-[10px] font-black uppercase px-3 py-1">
+                                        ORDER: {firstProd.specificOrderNo}
+                                      </Badge>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+                                      {/* Order Info */}
+                                      {/* Order Info */}
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Delivery Purpose</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.deliveryPurpose}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Start Date / End Date</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">
+                                          {orderDetails.startDate ? new Date(orderDetails.startDate).toLocaleDateString("en-GB") : "—"} / {orderDetails.endDate ? new Date(orderDetails.endDate).toLocaleDateString("en-GB") : "—"}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">DO Date</p>
+                                        <p className="text-xs font-bold text-slate-700">
+                                          {orderDetails.partySoDate || "—"}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Transport Type</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.transportType}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Credit Status</p>
+                                        <Badge className={cn("text-[10px] font-black px-2 py-0.5", orderDetails.partyCredit === 'Good' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+                                          {orderDetails.partyCredit}
+                                        </Badge>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Customer Address</p>
+                                        <p className="text-[10px] font-medium text-slate-600 leading-tight break-words" title={orderDetails.customerAddress}>{orderDetails.customerAddress}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Contact Person</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.contactPerson} ({orderDetails.whatsapp})</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
+                                        <p className="text-xs font-bold text-slate-900 leading-none">
+                                          {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{fmtAmount(orderDetails.advanceAmount)}
+                                        </p>
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Order Punch Remarks</p>
+                                        <p className="text-[10px] font-medium text-slate-600 leading-tight italic">"{orderDetails.orderPunchRemarks || "No special instructions provided."}"</p>
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">PO Copy (SO Upload)</p>
+                                        {group.uploadSo ? (
+                                          <a 
+                                            href={group.uploadSo} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200 w-fit group shadow-sm mt-0.5"
+                                          >
+                                            <FileText className="h-3 w-3 group-hover:scale-110 transition-transform" />
+                                            <span className="text-[10px] font-black uppercase tracking-tight">VIEW PO COPY</span>
+                                            <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                          </a>
+                                        ) : (
+                                          <p className="text-[10px] font-black text-slate-400 leading-none">NOT UPLOADED</p>
+                                        )}
+                                      </div>
+
+                                      <div className="sm:col-span-2 md:col-span-4 h-px bg-slate-200 my-1" />
+
+                                      {/* Dispatch Info */}
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Invoice No</p>
+                                        <p className="text-xs font-black text-green-600">{firstProd.invoiceNo || "—"}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Invoice Date</p>
+                                        <p className="text-xs font-bold text-slate-700">
+                                          {firstProd.invoiceDate ? new Date(firstProd.invoiceDate).toLocaleDateString("en-GB") : "—"}
+                                        </p>
+                                      </div>
                                     </div>
                                   </div>
                                 );
@@ -1353,14 +1572,30 @@ export default function GateOutPage() {
                             </div>
                           )}
 
-                          {/* Product List (Responsive) */}
+                          {/* Product List (Responsive) + this party's invoice summary - collapsible with the header */}
+                          {isExpanded && (
+                          <>
                           <div className="px-3 sm:px-5 pb-5 pt-4 border-t border-slate-100">
                           <div className="border border-slate-200 rounded-xl sm:rounded-2xl overflow-x-auto shadow-sm bg-white">
                             <div className="hidden md:block overflow-x-auto">
                             <Table>
                               <TableHeader className="bg-slate-50">
+                                {/* Totals row (above the headings) */}
+                                <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                                  <TableCell className="px-2" />
+                                  <TableCell className="px-4 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({allProducts.length})</TableCell>
+                                  <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">
+                                    {fmtNum(allProducts.reduce((sum: number, p: any) => sum + (parseFloat(skuWeightMap.get(p.productName?.trim().toLowerCase()) || "") || 0) * (parseFloat(p.actualQty) || 0), 0), wd)}
+                                  </TableCell>
+                                  <TableCell />
+                                  <TableCell />
+                                  <TableCell />
+                                  <TableCell className="px-4 text-right font-mono tabular-nums font-black text-slate-900">
+                                    {(() => { const total = sumTaxable(allProducts.map((p: any) => ({ rate: p.rate || 0, qty: parseFloat(p.actualQty) || 0, product: p }))); return total === null ? "—" : fmtAmount(total, 2); })()}
+                                  </TableCell>
+                                </TableRow>
                                 <TableRow>
-                                  <TableHead className="w-12 text-center h-10">
+                                  <TableHead className="w-12 text-center align-top py-2.5 px-2">
                                     <Checkbox
                                       checked={allSelected}
                                       onCheckedChange={(checked) => {
@@ -1372,22 +1607,18 @@ export default function GateOutPage() {
                                       }}
                                     />
                                   </TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT(KGS)</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY DISPATCH</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">TAXABLE AMOUNT</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">AMOUNT</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE NO</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE DATE</TableHead>
-                                  <TableHead className="text-[10px] uppercase font-black text-center h-10">TRUCK NO</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-left">Product Info</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Weight (KGS)</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Actual Qty Dispatch</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Rate Inc. Taxes (₹)</TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]"><RateWithoutGstHeading /></TableHead>
+                                  <TableHead className="whitespace-nowrap align-top py-2.5 px-4 text-right min-w-[110px]">Taxable Amount (₹)</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
                                 {allProducts.map((product: any) => (
                                   <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                                    <TableCell className="text-center p-2">
+                                    <TableCell className="text-center px-2 py-2">
                                       <Checkbox
                                         checked={selectedProducts.includes(product._rowKey)}
                                         onCheckedChange={() => {
@@ -1399,92 +1630,42 @@ export default function GateOutPage() {
                                         }}
                                       />
                                     </TableCell>
-                                    <TableCell className="p-2">
+                                    <TableCell className="px-4 py-2 text-left">
                                       <div className="flex flex-col">
                                         <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{product.specificOrderNo}</span>
                                         <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                                       </div>
                                     </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                                    <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
                                       {(() => {
                                         const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                                         const skuWt = parseFloat(skuWtStr || "") || 0;
                                         const qty = parseFloat(product.actualQty) || 0;
                                         const totalWt = skuWt * qty;
                                         if (!totalWt) return "—";
-                                        return totalWt.toFixed(4);
+                                        return fmtWeight(totalWt, wd);
                                       })()}
                                     </TableCell>
-                                    <TableCell className="text-center p-2">
-                                      <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                        {product.actualQty || "0"}
-                                      </Badge>
+                                    <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums font-bold text-blue-700 min-w-[110px] whitespace-nowrap">
+                                      {fmtNum(parseFloat(product.actualQty) || 0, 0)}
                                     </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                            {product.rate ? `₹${product.rate.toFixed(2)}` : "—"}
-                                          </span>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                          <div className="space-y-1.5">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                            <p className="text-sm font-black text-blue-700 leading-none">
-                                              {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                            </p>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
+                                    <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
+                                      <RateInclusiveTaxPopover
+                                        product={product}
+                                        cdAmount={product.cd_amount || product.cdAmount}
+                                        displayRate={product.rate}
+                                        align="end"
+                                      />
                                     </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {product.rate ? `₹${(product.rate / 1.05).toFixed(2)}` : "—"}
+                                    <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
+                                      {rateWithoutGstText(product.rate || 0, product, (n) => fmtAmount(n, 2))}
                                     </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {(() => { const t = parseFloat(((product.rate || 0) / 1.05).toFixed(2)) * (parseFloat(product.actualQty) || 0); return t ? `₹${t.toFixed(2)}` : "—"; })()}
-                                    </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {product.amount ? `₹${product.amount.toFixed(2)}` : "—"}
-                                    </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-green-700">
-                                      {product.invoice_copy ? (
-                                        <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline">
-                                          {product.invoiceNo || "View Invoice"}
-                                        </a>
-                                      ) : (
-                                        <span>{product.invoiceNo || "—"}</span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-black">
-                                      {product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}
-                                    </TableCell>
-                                    <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                                      {(product.truckNo || "—").toUpperCase()}
+                                    <TableCell className="px-4 py-2 text-right text-xs font-mono tabular-nums text-slate-700 min-w-[110px] whitespace-nowrap">
+                                      {(() => { const t = taxableOf(product.rate || 0, parseFloat(product.actualQty) || 0, product); return t ? fmtAmount(t) : "—"; })()}
                                     </TableCell>
                                   </TableRow>
                                 ))}
-
-                                {/* Summary Footer Row */}
-                                <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                                  <TableCell />
-                                  <TableCell className="text-[10px] uppercase font-black text-slate-900">Total</TableCell>
-                                  <TableCell />
-                                  <TableCell className="text-center">
-                                    <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                                      {allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell />
-                                  <TableCell />
-                                  <TableCell className="text-center text-xs text-blue-700 font-black">
-                                    ₹{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(((p.rate || 0) / 1.05).toFixed(2)) * (parseFloat(p.actualQty) || 0)), 0).toFixed(2)}
-                                  </TableCell>
-                                  <TableCell className="text-center text-xs text-blue-700 font-black">
-                                    ₹{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2)}
-                                  </TableCell>
-                                  <TableCell colSpan={4} />
-                                </TableRow>
                               </TableBody>
                             </Table>
                             </div>
@@ -1535,101 +1716,74 @@ export default function GateOutPage() {
                                         const qty = parseFloat(product.actualQty) || 0;
                                         const totalWt = skuWt * qty;
                                         if (!totalWt) return "—";
-                                        return totalWt.toFixed(4);
+                                        return fmtWeight(totalWt, wd);
                                       })()}</p>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
                                       <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                                      <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                                      <p className="mt-1 font-mono font-bold text-blue-700">{fmtNum(parseFloat(product.actualQty) || 0, 0)}</p>
                                     </div>
                                     <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">{product.rate ? `₹${product.rate.toFixed(2)}` : "—"}</p>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                          <div className="space-y-1.5">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                            <p className="text-sm font-black text-blue-700 leading-none">
-                                              {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                            </p>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
-                                    </div>
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.rate ? `₹${(product.rate / 1.05).toFixed(2)}` : "—"}</p>
-                                    </div>
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{(() => { const t = parseFloat(((product.rate || 0) / 1.05).toFixed(2)) * (parseFloat(product.actualQty) || 0); return t ? `₹${t.toFixed(2)}` : "—"; })()}</p>
-                                    </div>
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Amount</p>
-                                      <p className="mt-1 font-mono font-black text-blue-700">{product.amount ? `₹${product.amount.toFixed(2)}` : "—"}</p>
-                                    </div>
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Truck No</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{(product.truckNo || "—").toUpperCase()}</p>
-                                    </div>
-                                    <div className="rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Invoice Date</p>
-                                      <p className="mt-1 font-mono font-bold text-slate-700">{product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}</p>
-                                    </div>
-                                    <div className="col-span-2 rounded-md bg-slate-50 p-2">
-                                      <p className="text-[10px] font-black uppercase text-slate-400">Invoice</p>
-                                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                                        {product.invoice_copy ? (
-                                          <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-green-700 underline">
-                                            {product.invoiceNo || "View Invoice"}
-                                          </a>
-                                        ) : (
-                                          <span className="text-xs font-bold text-green-700">{product.invoiceNo || "—"}</span>
-                                        )}
+                                      <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes) (₹)</p>
+                                      <div className="mt-1">
+                                        <RateInclusiveTaxPopover
+                                          product={product}
+                                          cdAmount={product.cd_amount || product.cdAmount}
+                                          displayRate={product.rate}
+                                          align="center"
+                                        />
                                       </div>
+                                    </div>
+                                    <div className="rounded-md bg-slate-50 p-2">
+                                      <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{rateWithoutGstText(product.rate || 0, product, (n) => fmtAmount(n, 2))}</p>
+                                    </div>
+                                    <div className="rounded-md bg-slate-50 p-2">
+                                      <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount (₹)</p>
+                                      <p className="mt-1 font-mono font-bold text-slate-700">{(() => { const t = taxableOf(product.rate || 0, parseFloat(product.actualQty) || 0, product); return t ? fmtAmount(t) : "—"; })()}</p>
                                     </div>
                                   </div>
                                 </div>
                               ))}
-                              <div className="bg-slate-50 p-4">
-                                <div className="grid grid-cols-2 gap-3 text-xs">
-                                  <div>
-                                    <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                                    <Badge className="mt-1 bg-blue-600 text-white font-black text-xs px-3">
-                                      {allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                                    </Badge>
-                                  </div>
-                                  <div>
-                                    <p className="text-[9px] uppercase font-black text-slate-500">Total Amount</p>
-                                    <p className="mt-1 font-black text-blue-700">
-                                      ₹{allProducts.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2)}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
                             </div>
                           </div>
                           </div>
+                          <div className="p-3 sm:p-5 pt-0">
+                            <InvoiceSummary
+                              selectedGroups={[group]}
+                              selectedProducts={selectedProducts}
+                              title={`Invoice Summary — ${group.customerName}${group.invoiceNo && group.invoiceNo !== "—" ? ` (Invoice ${group.invoiceNo})` : ""}`}
+                            />
+                          </div>
+                          </>
+                          )}
                     </div>
                   );
                 })}
 
-                {/* GST & Invoice Summary */}
-                <InvoiceSummary
-                  selectedGroups={selectedGroups}
-                  selectedProducts={selectedProducts}
-                />
+                {/* Grand totals across every party in this gate out */}
+                <GrandTotals sections={selectedGroups} selectedProducts={selectedProducts} skuWeightMap={skuWeightMap} wd={wd} />
+
+                <OrderChargesPanel orderNos={Array.from(new Set(selectedGroups.flatMap((g: any) => g._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey)).map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, "")).filter(Boolean))) as string[]} />
               </div>
             )}
 
             {/* Gate Out Form (Bottom) */}
             <div className="mt-8 space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                <CheckCircle className="h-4 w-4 text-blue-600" />
-                Gate Pass & Evidence
-              </h3>
+              <div className="flex items-center justify-between border-b pb-2 flex-wrap gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-blue-600" />
+                  Gate Pass & Evidence
+                </h3>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={handlePrintSlip} className="gap-1.5 h-8">
+                    <Printer className="h-3.5 w-3.5" /> Print Gate Pass
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={handleDownloadSlip} className="gap-1.5 h-8">
+                    <Download className="h-3.5 w-3.5" /> Download Gate Pass
+                  </Button>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
                 <div className="space-y-2">
@@ -1637,6 +1791,7 @@ export default function GateOutPage() {
                     label={<>Upload Gate Pass <span className="text-red-500">*</span></>}
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     fileName={gateOutData.gatePassFileName}
+                    value={gatePassPreview}
                     variant="dropzone"
                     helperText="Max file size: 20 MB"
                     uploading={isUploading === 'gatePass'}
@@ -1650,6 +1805,7 @@ export default function GateOutPage() {
                     label={<>Upload Vehicle Loaded Image <span className="text-red-500">*</span></>}
                     accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
                     fileName={gateOutData.vehicleLoadedImageName}
+                    value={vehicleImagePreview}
                     variant="dropzone"
                     helperText="Max file size: 20 MB"
                     uploading={isUploading === 'vehicleImage'}
@@ -1660,17 +1816,18 @@ export default function GateOutPage() {
               </div>
             </div>
 
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-3">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="h-11 sm:h-10">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing || isReadOnly}
-                className="bg-blue-600 hover:bg-blue-700 min-w-37.5 h-11 sm:h-10"
-              >
-                {isProcessing ? "Processing..." : "Complete Gate Out"}
-              </Button>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              <StageActionFooter
+                onCancel={() => setIsDialogOpen(false)}
+                cancelDisabled={isProcessing}
+                actions={[
+                  {
+                    label: isProcessing ? "Processing..." : "Complete Gate Out",
+                    onClick: handleSubmit,
+                    disabled: isProcessing || isReadOnly || !gateOutData.gatePassFile || !gateOutData.vehicleLoadedImage || selectedProducts.length === 0,
+                  },
+                ]}
+              />
             </DialogFooter>
           </div>
         </DialogContent>

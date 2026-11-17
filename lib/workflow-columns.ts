@@ -127,7 +127,7 @@ export const WORKFLOW_STAGE_ORDER = [
   "make-invoice",
   "check-invoice",
   "gate-out",
-  "material-receipt",
+  "unloading",
   "damage-adjustment",
 ] as const
 

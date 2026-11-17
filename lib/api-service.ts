@@ -3,7 +3,9 @@
  * Centralized API calls for the application
  */
 
+import { sortDepotsBanariFirst } from "./depot-sort"
 import { API_CONFIG, API_ENDPOINTS } from './api-config';
+import { toast as showToast } from '@/hooks/use-toast';
 import {
   adaptList,
   flattenOrderItemStage,
@@ -11,8 +13,9 @@ import {
   flattenSecurityStage,
   flattenInvoiceStage,
   flattenGateOutStage,
-  flattenMaterialReceiptStage,
+  flattenUnloadingStage,
   flattenDamageStage,
+  flattenGroupedOrderApproval,
 } from './v2-adapter';
 
 // Types
@@ -66,12 +69,14 @@ export interface OrderItem {
 }
 
 export interface CreateOrderRequest {
+  /** Extra taxable ledger lines (e.g. Transporting Expenses): [{ ledgerId, amount }] */
+  charges?: { ledgerId: number; amount: number }[];
   customerId: number;
   orderType: 'regular' | 'pre-approval';
   depotId?: number;
   brokerId?: number;
   salespersonId?: number;
-  orderCategory?: 'Sales' | 'Stock Transfer';
+  orderCategory?: 'Sales' | 'Stock Transfer' | 'Sales Return';
   deliveryPurpose?: 'week-on-week' | 'future-period';
   orderThrough?: 'Direct' | 'Broker' | 'Salesperson';
   items: OrderItem[];
@@ -154,6 +159,12 @@ async function request<T = any>(
       throw data;
     }
 
+    // A non-admin's history add / edit / delete is queued for admin approval instead of being applied -
+    // tell the user once, here, for every screen that triggers one.
+    if (data && data.pending === true && typeof window !== 'undefined') {
+      showToast({ title: 'Submitted for approval', description: data.message || 'An admin must approve this change before it is applied.' });
+    }
+
     return data;
   } catch (error: any) {
     // Expected, already-formatted API errors (validation failures, business rules)
@@ -178,9 +189,12 @@ export const orderApi = {
     });
   },
 
-  uploadFile: async (file: File): Promise<ApiResponse<{ url: string }>> => {
+  // `original` (optional): untouched file when `file` was already compressed client-side;
+  // the backend keeps it in S3 (under originals/) so it can be retrieved later.
+  uploadFile: async (file: File, original?: File): Promise<ApiResponse<{ url: string; original_url?: string }>> => {
     const formData = new FormData();
     formData.append('file', file);
+    if (original && original !== file) formData.append('original', original);
 
     return request(API_ENDPOINTS.orders.upload, {
       method: 'POST',
@@ -206,10 +220,50 @@ export const orderApi = {
     return request(API_ENDPOINTS.orders.getByOrderNumber(orderNo));
   },
 
+  /** Order Punch screen's DO list - computed totals + Stage 3 rollup + 48h visibility rule, all server-side. */
+  getPunchList: async (params?: {
+    search?: string;
+    do_date?: string;
+    start_date?: string;
+    end_date?: string;
+    depot_id?: number;
+    customer_id?: number;
+    page?: number;
+    limit?: number;
+  }): Promise<ApiResponse> => {
+    return request(`/orders/punch-list${buildQuery(params)}`);
+  },
+
+  /** One order's full header + line items, by orders.id (numeric PK) - for the detail/Modify view. */
+  getById: async (id: number): Promise<ApiResponse> => {
+    return request(`/orders/${id}`);
+  },
+
   update: async (id: number, updateData: Partial<CreateOrderRequest>): Promise<ApiResponse> => {
     return request(API_ENDPOINTS.orders.update(id), {
       method: 'PUT',
       body: JSON.stringify(updateData),
+    });
+  },
+
+  /** Ledger charges of an order (single source) + whether it was already invoiced, looked up by DO number. */
+  getChargesByNo: async (orderNo: string): Promise<ApiResponse> => {
+    return request(`/orders/charges-by-no?order_no=${encodeURIComponent(orderNo)}`);
+  },
+
+  /** Set the ledger charges of an order that has none yet (refused if it already has charges or is invoiced). */
+  initCharges: async (id: number, charges: { ledgerId: number; amount: number }[]): Promise<ApiResponse> => {
+    return request(`/orders/${id}/charges`, {
+      method: 'POST',
+      body: JSON.stringify({ charges }),
+    });
+  },
+
+  /** Order Punch Modify: replace the order's line items. items: [{ id?, sku_id, order_quantity, rate_of_material }] */
+  updateItems: async (id: number, items?: any[], charges?: any[]): Promise<ApiResponse> => {
+    return request(`/orders/${id}/items`, {
+      method: 'PUT',
+      body: JSON.stringify({ items, charges }),
     });
   },
 
@@ -311,7 +365,9 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenOrderItemStage);
+    // Pending is grouped one row per DO (order), not per order_item - see
+    // orderApprovalService._groupRowsByOrder on the backend.
+    return adaptList(await request(`/approval/pending${queryString}`), 'orders', flattenGroupedOrderApproval);
   },
 
   getHistory: async (params?: {
@@ -327,7 +383,7 @@ export const approvalApi = {
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
 
-    return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenOrderItemStage);
+    return adaptList(await request(`/approval/history${queryString}`), 'orders', flattenGroupedOrderApproval);
   },
 
   getFilters: async (): Promise<ApiResponse> => {
@@ -336,6 +392,21 @@ export const approvalApi = {
 
   getById: async (id: number): Promise<ApiResponse> => {
     return request(`/approval/${id}`);
+  },
+
+  // One full order (all items + invoice-style tax breakdown) for the
+  // single-DO Approval detail form.
+  getByOrderId: async (orderId: number): Promise<ApiResponse> => {
+    return request(`/approval/order/${orderId}`);
+  },
+
+  // Replace an order's extra taxable-amount charge lines (e.g. Transporting
+  // Expenses). Call once per order submit, not once per item.
+  setOrderCharges: async (orderId: number, charges: Array<{ ledgerId: number; amount: number }>, userId?: number | null): Promise<ApiResponse> => {
+    return request(`/approval/order/${orderId}/charges`, {
+      method: 'PUT',
+      body: JSON.stringify({ charges, userId }),
+    });
   },
 
   submit: async (id: number, data?: any): Promise<ApiResponse> => {
@@ -423,6 +494,10 @@ export const actualDispatchApi = {
     return adaptList(await request(`/actual-dispatch/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
   },
 
+  getVehicleTareStats: async (vehicleId: number | string): Promise<ApiResponse> => {
+    return request(`/actual-dispatch/vehicle-tare/${vehicleId}`);
+  },
+
   getHistory: async (params?: {
     page?: number;
     limit?: number;
@@ -469,6 +544,105 @@ export const actualDispatchApi = {
   },
 };
 
+export const reachVehicleApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/pending${buildQuery(params)}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/history${buildQuery(params)}`);
+  },
+
+  submit: async (id: number, data: any): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/submit/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/reach-vehicle/revert/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+};
+
+// Stage 5 (carved out of Actual Dispatch): consolidate DOs, assign a vehicle/
+// transporter, generate the gate pass. Same row shape as actual-dispatch's
+// pending/history rows (dispatches.id space) — reuses flattenDispatchStage as-is.
+export const planVehicleApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return adaptList(await request(`/plan-vehicle/pending${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    party_name?: string;
+    depo_names?: string[];
+    manual_sauda_no?: string;
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return adaptList(await request(`/plan-vehicle/history${buildQuery(params)}`), 'dispatches', flattenDispatchStage);
+  },
+
+  submit: async (id: number, data?: any): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/submit/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  },
+
+  // One stage back: the shipment returns to Dispatch Planning.
+  revertToDispatchPlanning: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/revert-to-planning/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+
+  revert: async (id: number, userId: number | null, remarks?: string): Promise<ApiResponse> => {
+    return request(`/plan-vehicle/revert/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, remarks }),
+    });
+  },
+};
+
 export const gateInApi = {
   getPending: (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
     return request(`/gate-in/pending${buildQuery(params)}`);
@@ -486,11 +660,22 @@ export const gateInApi = {
     backVehicleImage?: string;
     driverPhoto?: string;
     gatepassPhoto?: string;
+    vehicleNumber?: string;
+    driverName?: string;
   }): Promise<ApiResponse> =>
     request('/gate-in/submit', { method: 'POST', body: JSON.stringify(data) }),
 
+  revertToPlanVehicle: (orderKey: string, remarks: string): Promise<ApiResponse> =>
+    request('/gate-in/revert', { method: 'POST', body: JSON.stringify({ orderKey, remarks }) }),
+
   check: (orderKey: string): Promise<ApiResponse> =>
     request(`/gate-in/check?order_key=${encodeURIComponent(orderKey)}`),
+
+  getSettings: (): Promise<ApiResponse> =>
+    request('/gate-in/settings'),
+
+  updateSettings: (data: { photos_mandatory: boolean }): Promise<ApiResponse> =>
+    request('/gate-in/settings', { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 export const draftApi = {
@@ -662,6 +847,91 @@ export const checkInvoiceApi = {
   },
 };
 
+export const collectionApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    invoice_no?: string;
+    customer_name?: string;
+    view?: "receivable" | "disputed" | "all";
+    do_date_from?: string;
+    do_date_to?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/collections/pending${buildQuery(params)}`);
+  },
+
+  getSuggestion: async (params: {
+    invoiceId: number;
+    receiptDate?: string;
+    tdsRuleId?: number;
+    gstPercent?: number;
+  }): Promise<ApiResponse> => {
+    return request(`/collections/suggestion${buildQuery(params)}`);
+  },
+
+  getInvoiceReceipts: async (invoiceId: number): Promise<ApiResponse> => {
+    return request(`/collections/receipts/${invoiceId}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    customer_name?: string;
+    from?: string;
+    to?: string;
+    entry?: "receipts" | "disputes" | "cleared";
+  }): Promise<ApiResponse> => {
+    return request(`/collections/history${buildQuery(params)}`);
+  },
+
+  setDispute: async (data: { invoiceId: number; disputed: boolean; remarks: string }): Promise<ApiResponse> => {
+    return request(`/collections/dispute`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  addReceipt: async (data: any): Promise<ApiResponse> => {
+    return request(`/collections/add-receipt`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+export const finalInvoiceApi = {
+  getPending: async (params?: {
+    page?: number;
+    limit?: number;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/final-invoice/pending${buildQuery(params)}`);
+  },
+
+  getHistory: async (params?: {
+    page?: number;
+    limit?: number;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<ApiResponse> => {
+    return request(`/final-invoice/history${buildQuery(params)}`);
+  },
+
+  submit: async (id: number | string, data: any): Promise<ApiResponse> => {
+    return request(`/final-invoice/submit/${id}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
 export const gateOutApi = {
   getPending: async (params?: {
     page?: number;
@@ -699,7 +969,7 @@ export const gateOutApi = {
   },
 };
 
-export const confirmMaterialReceiptApi = {
+export const unloadingApi = {
   getPending: async (params?: {
     page?: number;
     limit?: number;
@@ -708,11 +978,15 @@ export const confirmMaterialReceiptApi = {
     party_name?: string;
     depo_names?: string[];
     search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
     manual_sauda_no?: string;
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return adaptList(await request(`/confirm-receipt/pending${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
+    return adaptList(await request(`/unloading/pending${buildQuery(params)}`), 'orders', flattenUnloadingStage);
   },
 
   getHistory: async (params?: {
@@ -723,19 +997,114 @@ export const confirmMaterialReceiptApi = {
     party_name?: string;
     depo_names?: string[];
     search?: string;
+    order_no?: string;
+    customer_name?: string;
+    start_date?: string;
+    end_date?: string;
     manual_sauda_no?: string;
     do_date_from?: string;
     do_date_to?: string;
   }): Promise<ApiResponse> => {
-    return adaptList(await request(`/confirm-receipt/history${buildQuery(params)}`), 'orders', flattenMaterialReceiptStage);
+    return adaptList(await request(`/unloading/history${buildQuery(params)}`), 'orders', flattenUnloadingStage);
   },
 
   submit: async (id: number | string, data: any): Promise<ApiResponse> => {
-    return request(`/confirm-receipt/submit/${id}`, {
+    return request(`/unloading/submit/${id}`, {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
+
+  // Losses reported at Unloading that wait for Company Admin approval.
+  getApprovals: async (params?: { page?: number; limit?: number }): Promise<ApiResponse> => {
+    return adaptList(await request(`/unloading/approvals${buildQuery(params)}`), 'orders', flattenUnloadingStage);
+  },
+
+  // Company Admin only. decision: 'approve' | 'reject' (reject needs remarks).
+  review: async (id: number | string, data: {
+    decision: 'approve' | 'reject';
+    remarks?: string;
+    shortageBorneBy?: string;
+    containerBorneBy?: Record<number, string>;
+  }): Promise<ApiResponse> => {
+    return request(`/unloading/review/${id}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+export const returnApi = {
+  getOptions: async (): Promise<ApiResponse> => request(`/returns/options`),
+
+  // Order Punch (category = Sales Return)
+  getReturnableInvoices: async (customerId: number | string): Promise<ApiResponse> =>
+    request(`/returns/invoices${buildQuery({ customer_id: customerId })}`),
+
+  getInvoiceLines: async (customerId: number | string, invoiceNo: string): Promise<ApiResponse> =>
+    request(`/returns/invoices/${encodeURIComponent(invoiceNo)}/lines${buildQuery({ customer_id: customerId })}`),
+
+  // Stock Return (Cases I / II): transfers whose stock reached a depot and can still be returned
+  getReturnableTransfers: async (depotId: number | string): Promise<ApiResponse> =>
+    request(`/returns/stock/transfers${buildQuery({ depot_id: depotId })}`),
+  getStockReturns: async (): Promise<ApiResponse> => request(`/returns/stock/list`),
+  getSalesReturns: async (): Promise<ApiResponse> => request(`/returns/sales/list`),
+
+  // Main Gate "Stock Return" gate pass
+  createGatePass: async (data: any): Promise<ApiResponse> =>
+    request(`/returns/gate-pass`, { method: "POST", body: JSON.stringify(data) }),
+  getGatePasses: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/gate-pass${buildQuery(params)}`),
+
+  // Stage 17 - Credit Note
+  getPendingCreditNotes: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/pending${buildQuery(params)}`),
+  getCreditNoteHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/history${buildQuery(params)}`),
+  getCreditNoteInvoiceOptions: async (id: number | string): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/${id}/invoice-options`),
+  submitCreditNote: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/returns/credit-notes/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
+
+  // Stage 18 - Unload Returned Stock
+  getPendingUnloadings: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/unloading/pending${buildQuery(params)}`),
+  getUnloadingHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/returns/unloading/history${buildQuery(params)}`),
+  submitUnloading: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/returns/unloading/submit/${id}`, { method: "POST", body: JSON.stringify(data) }),
+};
+
+// Stage 20 - Transport Bills
+export const transportBillApi = {
+  getPending: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/transport-bills/pending${buildQuery(params)}`),
+  getHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/transport-bills/history${buildQuery(params)}`),
+  getAccess: async (): Promise<ApiResponse> => request(`/transport-bills/access`),
+  getDetail: async (id: number | string): Promise<ApiResponse> => request(`/transport-bills/${id}`),
+  saveActuals: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/actuals`, { method: "POST", body: JSON.stringify(data) }),
+  approve: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/approve`, { method: "POST", body: JSON.stringify(data) }),
+  recordVoucher: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/transport-bills/${id}/voucher`, { method: "POST", body: JSON.stringify(data) }),
+};
+
+// Stage 21 - Diesel Bills
+export const dieselBillApi = {
+  getPending: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/diesel-bills/pending${buildQuery(params)}`),
+  getHistory: async (params?: Record<string, any>): Promise<ApiResponse> =>
+    request(`/diesel-bills/history${buildQuery(params)}`),
+  getAccess: async (): Promise<ApiResponse> => request(`/diesel-bills/access`),
+  getDetail: async (id: number | string): Promise<ApiResponse> => request(`/diesel-bills/${id}`),
+  save: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/${id}/save`, { method: "POST", body: JSON.stringify(data) }),
+  approve: async (id: number | string, data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/${id}/approve`, { method: "POST", body: JSON.stringify(data) }),
+  createLedger: async (data: any): Promise<ApiResponse> =>
+    request(`/diesel-bills/ledger`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const damageAdjustmentApi = {
@@ -852,7 +1221,7 @@ export const userApi = {
   saveColumnPrefs: async (
     id: number,
     stageKey: string,
-    partial: { visible?: string[]; order?: string[] },
+    partial: { visible?: string[]; order?: string[]; sort?: { field: string; dir: 'asc' | 'desc' } | null; filters?: Record<string, any> | null },
     opts?: { keepalive?: boolean }
   ): Promise<ApiResponse> => {
     return request(`/users/${id}/column-prefs`, {
@@ -915,6 +1284,19 @@ export const customerApi = {
       method: 'POST',
       body: JSON.stringify({ rows }),
     });
+  },
+
+  /** Tag EXISTING customers to godown(s). rows: [{ customer_code?, gstin?, customer_name?, godown }]; mode 'add' | 'replace'. */
+  bulkTagGodowns: async (rows: any[], mode: 'add' | 'replace' = 'add', dryRun = false): Promise<ApiResponse> => {
+    return request('/customers/bulk-godown', {
+      method: 'POST',
+      body: JSON.stringify({ rows, mode, dry_run: dryRun }),
+    });
+  },
+
+  /** Every customer with its current godown(s) - feeds the Tag Godown sheet. */
+  getGodownTagSheet: async (): Promise<ApiResponse> => {
+    return request('/customers/godown-tags');
   },
 
   getGstHistory: async (id: number): Promise<ApiResponse> => {
@@ -982,7 +1364,12 @@ export const depotApi = {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
-    return request(`/depots${queryString}`);
+    const res: any = await request(`/depots${queryString}`);
+    // Every depot / godown list in the app: Banari first, rest A-Z.
+    if (res?.success && Array.isArray(res.data?.depots)) {
+      res.data.depots = sortDepotsBanariFirst(res.data.depots);
+    }
+    return res;
   },
 
   getById: async (id: string): Promise<ApiResponse> => {
@@ -1500,6 +1887,9 @@ export const ledgerApi = {
   update: async (id: string | number, data: any): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: async (id: string | number): Promise<ApiResponse> => request(`/ledgers/${id}`, { method: 'DELETE' }),
   getPending: async (): Promise<ApiResponse> => request('/ledgers/pending'),
+  /** Where a ledger is used (blocks deletion): [{ label, n }] */
+  getUsage: async (id: string | number): Promise<ApiResponse> => request(`/ledgers/${id}/usage`),
+  bulkImport: async (rows: any[]): Promise<ApiResponse> => request('/ledgers/bulk-import', { method: 'POST', body: JSON.stringify({ rows }) }),
   review: async (id: string | number, data: { action: string; reason?: string; [key: string]: any }): Promise<ApiResponse> => request(`/ledgers/${id}/approval`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
@@ -1749,6 +2139,12 @@ export const reportsApi = {
       : '';
     return request(`${API_ENDPOINTS.reports.dailyDispatch}${queryString}`);
   },
+  getTransitLoss: async (params?: any): Promise<ApiResponse> => {
+    const queryString = params && Object.keys(params).length
+      ? '?' + new URLSearchParams(params as any).toString()
+      : '';
+    return request(`${API_ENDPOINTS.reports.transitLoss}${queryString}`);
+  },
 };
 
 export const commitmentPunchApi = {
@@ -1758,19 +2154,23 @@ export const commitmentPunchApi = {
       body: JSON.stringify(data),
     }),
 
-  getAll: async (params?: { page?: number; limit?: number; party_name?: string; search?: string }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/commitment-punch${queryString}`);
-  },
+  // Uses buildQuery so undefined values are never serialised to the string "undefined"
+  getAll: async (params?: { page?: number; limit?: number; party_name?: string; search?: string }): Promise<ApiResponse> =>
+    request(`/commitment-punch${buildQuery(params)}`),
 
-  getPending: async (params?: { page?: number; limit?: number; search?: string }): Promise<ApiResponse> => {
-    const queryString = params
-      ? '?' + new URLSearchParams(params as any).toString()
-      : '';
-    return request(`/commitment-punch/pending${queryString}`);
-  },
+  getPending: async (params?: { page?: number; limit?: number; search?: string; commitment_date?: string; po_date?: string; do_date?: string }): Promise<ApiResponse> =>
+    request(`/commitment-punch/pending${buildQuery(params)}`),
+
+  /** Fetch a single commitment with joined names — used as pre-fill source for the Process dialog. */
+  getById: async (id: number): Promise<ApiResponse> =>
+    request(`/commitment-punch/${id}`),
+
+  /** Update planned values on a commitment (Payment Terms, Transport, Depot, etc.). */
+  updateCommitment: async (id: number, data: any): Promise<ApiResponse> =>
+    request(`/commitment-punch/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 
   processCommitment: async (id: number, data: any): Promise<ApiResponse> =>
     request(`/commitment-punch/${id}/process`, {
@@ -1787,15 +2187,16 @@ export const inventoryApi = {
     return request('/inventory/data');
   },
 
-  upsertOpeningQty: async (data: { depo_name: string; product_name: string; opening_qty: number; is_staged?: boolean }): Promise<ApiResponse> => {
+  upsertOpeningQty: async (data: { depo_name: string; product_name: string; sku_id?: number | string; opening_qty: number; is_staged?: boolean }): Promise<ApiResponse> => {
     return request('/inventory/opening-qty', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
-  getDetail: async (depot_name: string, product_name: string, type: string): Promise<ApiResponse> => {
+  getDetail: async (depot_name: string, product_name: string, type: string, sku_id?: number | string | null): Promise<ApiResponse> => {
     const params = new URLSearchParams({ depot_name, product_name, type });
+    if (sku_id !== undefined && sku_id !== null && sku_id !== '') params.set('sku_id', String(sku_id));
     return request(`/inventory/detail?${params}`);
   },
 };
@@ -1807,7 +2208,7 @@ export const productionApi = {
   getByRange: async (from: string, to: string): Promise<ApiResponse> => {
     return request(`/production?from=${from}&to=${to}`);
   },
-  bulkUpsert: async (data: { date: string; items: { sku_name: string; qty: number }[] }): Promise<ApiResponse> => {
+  bulkUpsert: async (data: { date: string; items: { sku_id?: number | string; sku_name: string; qty: number }[] }): Promise<ApiResponse> => {
     return request('/production/bulk', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1828,6 +2229,10 @@ export const masterHistoryApi = {
   deleteHistory: async (id: number | string): Promise<ApiResponse> => {
     return request(`/master-history/${id}`, { method: 'DELETE' });
   },
+  // Admin only: history changes waiting for approval, and approve / reject one group of them
+  getPendingRequests: async (): Promise<ApiResponse> => request('/master-history/requests/pending'),
+  reviewRequest: async (groupKey: string, action: 'approve' | 'reject', reason?: string): Promise<ApiResponse> =>
+    request('/master-history/requests/review', { method: 'PATCH', body: JSON.stringify({ groupKey, action, reason }) }),
   deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
     return request(`/master-history/section/${section}/${id}`, { method: 'DELETE' });
   },
@@ -1841,11 +2246,16 @@ export default {
   approval: approvalApi,
   dispatchPlanning: dispatchPlanningApi,
   actualDispatch: actualDispatchApi,
+  planVehicle: planVehicleApi,
   securityGuardApproval: securityGuardApprovalApi,
   makeInvoice: makeInvoiceApi,
   checkInvoice: checkInvoiceApi,
+  finalInvoice: finalInvoiceApi,
   gateOut: gateOutApi,
-  confirmMaterialReceipt: confirmMaterialReceiptApi,
+  unloading: unloadingApi,
+  returns: returnApi,
+  transportBills: transportBillApi,
+  dieselBills: dieselBillApi,
   skuDetails: skuDetailsApi,
   skuSellingPrice: skuSellingPriceApi,
   common: commonApi,

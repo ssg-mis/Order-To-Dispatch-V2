@@ -22,6 +22,10 @@ import {
 export interface ComboboxOption {
   value: string
   label: string
+  /** Optional muted second line shown under the label in the list (also searchable). */
+  subLabel?: string
+  /** Extra text that is matched by the search box but not displayed (e.g. a bank's short name). */
+  keywords?: string
 }
 
 interface ComboboxProps {
@@ -33,6 +37,8 @@ interface ComboboxProps {
   emptyText?: string
   disabled?: boolean
   className?: string
+  /** Extra classes for the dropdown list (e.g. a min-width wider than the trigger). */
+  popoverClassName?: string
 }
 
 export function Combobox({
@@ -44,6 +50,7 @@ export function Combobox({
   emptyText = "No option found.",
   disabled = false,
   className,
+  popoverClassName,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
 
@@ -70,7 +77,8 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-full p-0"
+        className={cn("w-[var(--radix-popover-trigger-width)] p-0", popoverClassName)}
+        style={{ width: 'var(--radix-popover-trigger-width)' }}
         align="start"
         onWheel={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
@@ -83,7 +91,7 @@ export function Combobox({
               {options.map((option, index) => (
                 <CommandItem
                   key={`${option.value}-${index}`}
-                  value={option.label ? `${option.label} ${option.value}` : option.value}
+                  value={option.label ? `${option.label} ${option.subLabel || ""} ${option.keywords || ""} ${option.value}` : option.value}
                   onSelect={() => {
                     onValueChange?.(option.value === value ? "" : option.value)
                     setOpen(false)
@@ -95,7 +103,14 @@ export function Combobox({
                       value === option.value ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  {option.label}
+                  {option.subLabel ? (
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{option.label}</span>
+                      <span className="truncate text-xs text-muted-foreground">{option.subLabel}</span>
+                    </div>
+                  ) : (
+                    option.label
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

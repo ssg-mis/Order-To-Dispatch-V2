@@ -2,6 +2,7 @@
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { getWeightDecimals } from "@/lib/weight-format"
 
 // ── Types (mirror the /reports/pending-sauda response) ──────────────────────
 interface OilBucket { qty: number; kg: number; rate: number }
@@ -75,6 +76,7 @@ const fmtDate = (s: string | null): string => {
 }
 const inNum = (n: number) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })
 const qtyOrDash = (n: number) => (n && n > 0 ? inNum(n) : "-")
+const wtOrDash = (n: number) => { const d = getWeightDecimals(); return n && n > 0 ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d }) : "-" }
 const rateOrDash = (n: number) =>
   n && n > 0 ? Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"
 const dispatchedStr = (arr: number[]) =>
@@ -128,8 +130,8 @@ export function generatePendingSaudaPdf(report: PendingSaudaReport) {
   const pushSubtotalKg = (s: MonthSubtotal) => {
     body.push([
       "", "", "", "", "",
-      qtyOrDash(s.riceKg), "KGS", qtyOrDash(s.soyaKg), "KGS", qtyOrDash(s.palmKg), "KGS",
-      qtyOrDash(s.totalKg), "KGS", "", "", "", "",
+      wtOrDash(s.riceKg), "KGS", wtOrDash(s.soyaKg), "KGS", wtOrDash(s.palmKg), "KGS",
+      wtOrDash(s.totalKg), "KGS", "", "", "", "",
     ])
     rowTypes.push("special")
   }
@@ -151,8 +153,8 @@ export function generatePendingSaudaPdf(report: PendingSaudaReport) {
   rowTypes.push("special")
   body.push([
     { content: "Weight", colSpan: 5, styles: { halign: "right" } },
-    qtyOrDash(g.riceKg), "KGS", qtyOrDash(g.soyaKg), "KGS", qtyOrDash(g.palmKg), "KGS",
-    qtyOrDash(g.totalKg), "KGS", "", "", "", "",
+    wtOrDash(g.riceKg), "KGS", wtOrDash(g.soyaKg), "KGS", wtOrDash(g.palmKg), "KGS",
+    wtOrDash(g.totalKg), "KGS", "", "", "", "",
   ])
   rowTypes.push("special")
 

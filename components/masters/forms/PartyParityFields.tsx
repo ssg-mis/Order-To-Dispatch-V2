@@ -1,4 +1,5 @@
 "use client"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration";
 
 import React from "react"
 import { Label } from "@/components/ui/label"
@@ -54,6 +55,8 @@ export function PartyParityFields({
   transportName,
   onOpenTransportHistory,
 }: PartyParityFieldsProps) {
+  const handleOpenEffectiveDatesView = useScrollRestoration();
+
 
   const updateField = (fieldName: string, section: 'gst' | 'msme' | 'fssai' | 'documents', applyChange: () => void) => {
     if (onFieldChangeAttempt) {
@@ -78,7 +81,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="GST & Tax History"
-              onOpenView={(sec) => onOpenSalespersonHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -86,7 +89,7 @@ export function PartyParityFields({
               section="gst"
               transportId={editingItem.id}
               title="GST & Tax History"
-              onOpenView={(sec) => onOpenTransportHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -94,7 +97,7 @@ export function PartyParityFields({
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-slate-800">State</Label>
             <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
               value={form.state_id ? String(form.state_id) : ""}
               onValueChange={val => {
                 const selected = activeStates.find((s: any) => String(s.id) === val)
@@ -186,7 +189,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="MSME History"
-              onOpenView={(sec) => onOpenSalespersonHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -194,7 +197,7 @@ export function PartyParityFields({
               section="msme"
               transportId={editingItem.id}
               title="MSME History"
-              onOpenView={(sec) => onOpenTransportHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -239,7 +242,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="FSSAI History"
-              onOpenView={(sec) => onOpenSalespersonHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -247,7 +250,7 @@ export function PartyParityFields({
               section="fssai"
               transportId={editingItem.id}
               title="FSSAI History"
-              onOpenView={(sec) => onOpenTransportHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>
@@ -292,7 +295,7 @@ export function PartyParityFields({
               salespersonId={editingItem.id}
               salespersonName={salespersonName || ""}
               title="Document Uploads History"
-              onOpenView={(sec) => onOpenSalespersonHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenSalespersonHistory?.(sec))}
             />
           )}
           {editingItem?.id && isTransport && (
@@ -300,7 +303,7 @@ export function PartyParityFields({
               section="documents"
               transportId={editingItem.id}
               title="Document Uploads History"
-              onOpenView={(sec) => onOpenTransportHistory?.(sec)}
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => onOpenTransportHistory?.(sec))}
             />
           )}
         </div>

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { userApi, depotApi, brokerApi, salespersonApi } from "@/lib/api-service"
 import { useAuth } from "@/hooks/use-auth"
@@ -56,6 +57,7 @@ const PAGE_ACCESS_OPTIONS = [
   "Pre Approval",
   "Approval of Order",
   "Dispatch Planning",
+  "Plan Vehicle",
   "Actual Dispatch",
   "Vehicle Details",
   "Material Load",
@@ -63,8 +65,15 @@ const PAGE_ACCESS_OPTIONS = [
   "Make Invoice",
   "Check Invoice",
   "Gate Out",
-  "Confirm Material Receipt",
+  "Reach Vehicle",
+  "Unloading",
   "Damage Adjustment",
+  "Collection",
+  "Return",
+  "Unload Returned Stock",
+  "Issue Documents Against Returned Stock",
+  "Transport Bills",
+  "Diesel Bills",
   "Gate In",
   "Variable Parameters",
   "Settings",
@@ -76,7 +85,7 @@ const PAGE_ACCESS_OPTIONS = [
 ]
 
 // Pages that support per-page accessible depot/location selection
-const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Actual Dispatch", "Inventory"]
+const DEPOT_SCOPED_PAGES = ["Order Punch", "Dispatch Planning", "Plan Vehicle", "Actual Dispatch", "Inventory"]
 
 // Values selectable in Order Punch's "Is This Order Through" field
 const ORDER_THROUGH_OPTIONS = ["Direct", "Broker", "Salesperson"]
@@ -91,6 +100,7 @@ const ORDER_TYPE_OPTIONS = [
 const ORDER_CATEGORY_OPTIONS = [
   { value: "Sales", label: "Sales" },
   { value: "Stock Transfer", label: "Stock Transfer" },
+  { value: "Sales Return", label: "Sales Return" },
 ]
 
 const MASTER_TABS = [
@@ -103,6 +113,7 @@ const MASTER_TABS = [
   { key: "vehicle_master", label: "Vehicles" },
   { key: "driver_master", label: "Drivers" },
   { key: "transport_master", label: "Transporters" },
+  { key: "ledgers", label: "Ledgers" },
 ]
 
 const STATUSES = ["active", "inactive"]
@@ -155,6 +166,7 @@ export default function SettingsPage() {
   const [isBrokersLoading, setIsBrokersLoading] = useState(false)
   const [salespersons, setSalespersons] = useState<any[]>([])
   const [isSalespersonsLoading, setIsSalespersonsLoading] = useState(false)
+
 
   // Fetch depots for access control
   useEffect(() => {
@@ -676,12 +688,19 @@ export default function SettingsPage() {
               <Settings className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-primary">Settings</h1>
-              <p className="text-muted-foreground text-sm">Manage system configuration and user access</p>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Settings</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground">Manage system configuration and user access</p>
             </div>
           </div>
           <SidebarTrigger />
         </div>
+      </div>
+
+
+      {/* User Access Management Header */}
+      <div className="pt-2">
+        <h2 className="text-base font-bold text-slate-900">User Access Management</h2>
+        <p className="text-xs text-slate-500">Configure user credentials, roles, and granular page permissions</p>
       </div>
 
       {/* Toolbar: search + actions */}
@@ -1209,6 +1228,30 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox
+                    id="feature-can_approve_transport_bills"
+                    checked={!!formData.features.can_approve_transport_bills}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_approve_transport_bills: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_approve_transport_bills" className="text-sm cursor-pointer font-normal">
+                    Can approve Transport Bills
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-can_approve_diesel_bills"
+                    checked={!!formData.features.can_approve_diesel_bills}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_approve_diesel_bills: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_approve_diesel_bills" className="text-sm cursor-pointer font-normal">
+                    Can approve Diesel Bills
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
                     id="feature-can_toggle_columns"
                     checked={!!formData.features.can_toggle_columns}
                     onCheckedChange={(checked) =>
@@ -1217,6 +1260,30 @@ export default function SettingsPage() {
                   />
                   <Label htmlFor="feature-can_toggle_columns" className="text-sm cursor-pointer font-normal">
                     Can toggle columns
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-can_sort_columns"
+                    checked={!!formData.features.can_sort_columns}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, can_sort_columns: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-can_sort_columns" className="text-sm cursor-pointer font-normal">
+                    Can sort columns (ascending / descending)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="feature-gate_in_photos_mandatory"
+                    checked={!!formData.features.gate_in_photos_mandatory}
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => ({ ...prev, features: { ...prev.features, gate_in_photos_mandatory: !!checked } }))
+                    }
+                  />
+                  <Label htmlFor="feature-gate_in_photos_mandatory" className="text-sm cursor-pointer font-normal">
+                    Vehicle & Driver Photos Compulsory at Gate-In
                   </Label>
                 </div>
               </div>

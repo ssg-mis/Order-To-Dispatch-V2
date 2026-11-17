@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -26,14 +27,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { CheckCircle, Settings2, Eye, FileText, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Printer } from "lucide-react"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { WORKFLOW_STAGE_COLUMNS as ALL_COLUMNS } from "@/lib/workflow-columns"
 import { ColumnToggleContent } from "@/components/ui/column-toggle-content"
-import { checkInvoiceApi, skuApi, depotApi } from "@/lib/api-service"
+import { checkInvoiceApi, skuApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { OrderChargesPanel } from "@/components/order-punch/order-charges-panel"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { fmtWeight, getWeightDecimals } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 import { useAuth } from "@/hooks/use-auth"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { StageHistoryTab } from "@/components/workflow/stage-history-tab"
@@ -41,25 +46,13 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
-
-const INDIAN_STATES = [
-  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-  "Delhi", "Jammu and Kashmir", "Ladakh", "Chandigarh", "Puducherry",
-  "Andaman and Nicobar Islands", "Dadra and Nagar Haveli", "Daman and Diu", "Lakshadweep",
-]
-
-function extractState(addr: string): string | null {
-  if (!addr) return null
-  const lower = addr.toLowerCase()
-  for (const s of INDIAN_STATES) {
-    if (lower.includes(s.toLowerCase())) return s
-  }
-  return null
-}
+import { RateInclusiveTaxPopover } from "@/components/workflow/rate-inclusive-tax-popover"
+import { RateWithoutGstHeading } from "@/components/workflow/rate-without-gst-heading"
+import { GstTaxRows } from "@/components/workflow/gst-tax-rows"
+import { rateWithoutGst, rateWithoutGstText, summarizeGst, sumTaxable, taxableOf } from "@/lib/gst"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StagePagination, StageActionFooter, StageDecisionFooter } from "@/components/stage-list"
 
 function InvoiceSummary({ selectedGroups, selectedProducts }: {
   selectedGroups: any[]
@@ -68,96 +61,85 @@ function InvoiceSummary({ selectedGroups, selectedProducts }: {
   const selProds = selectedGroups.flatMap((g) => g._allProducts)
     .filter((p) => selectedProducts.includes(p._rowKey))
 
+  const lines = selProds.map((p) => ({
+    taxable: taxableOf(Number(p.rate) || 0, parseFloat(p.actualQty) || 0, p),
+    product: p,
+  }))
+  // GST % per product and the same-state / other-state split come from the masters, carried from Dispatch Planning.
   const firstProd = selProds[0]
-  const firstGroup = selectedGroups[0]
-  const firstOrderDetails: any = Object.values(firstGroup?._ordersMap || {})[0] || {}
-  const depoName = (firstOrderDetails?.depoName && firstOrderDetails.depoName !== "—")
-    ? firstOrderDetails.depoName
-    : (firstProd?.depo_name || "")
-  const shippingAddr = firstProd?.customer_address || ""
+  const gst = summarizeGst(lines, firstProd?.depot_gst_state_code, firstProd?.customer_gst_state_code)
+  const totalTaxable = gst.totalTaxable
 
-  const shippingState = extractState(shippingAddr) || ""
-
-  // Company/billing state comes from the DEPOT master record's own address (state field)
-  const { data: billingRes } = useQuery({
-    queryKey: ['billing-depot-state', depoName],
-    queryFn: () => depotApi.getAll({ search: depoName, all: "true" }),
-    enabled: !!depoName,
-    staleTime: 10 * 60 * 1000,
-  })
-  const billingDepots: any[] = billingRes?.data?.depots || []
-  const billingDepot = billingDepots.find((d: any) =>
-    d.depot_name?.toLowerCase() === depoName.toLowerCase()
-  ) || billingDepots[0]
-  const billingState = billingDepot?.state || ""
-
-  const totalTaxable = selProds.reduce((sum, p) => {
-    const rate = Number(p.rate) || 0
-    const rateWoGst = parseFloat((rate / 1.05).toFixed(2))
-    return sum + (rateWoGst * (parseFloat(p.actualQty) || 0))
-  }, 0)
-
-  const missingBilling = !billingState
-  const missingShipping = !shippingState
-  let gstType = "same"
-  let cgst = Math.round(totalTaxable * 0.025 * 100) / 100
-  let sgst = cgst
-  let igst = 0
-
-  if (missingBilling || missingShipping) {
-    gstType = "no_address"
-    cgst = 0
-    sgst = 0
-  } else if (billingState.trim().toLowerCase() === shippingState.trim().toLowerCase()) {
-    gstType = "same"
-  } else {
-    gstType = "different"
-    cgst = 0
-    sgst = 0
-    igst = Math.round(totalTaxable * 0.05 * 100) / 100
-  }
-
-  const rawTotal = totalTaxable + cgst + sgst + igst
-  const invoiceTotal = Math.round(rawTotal)
-  const roundOff = parseFloat((invoiceTotal - rawTotal).toFixed(2))
+  // Without every GST rate and the state split there is no honest total: show "—" rather than guess.
+  const rawTotal = gst.complete && totalTaxable !== null ? totalTaxable + gst.cgst + gst.sgst + gst.igst : null
+  const invoiceTotal = rawTotal === null ? null : Math.round(rawTotal)
+  const roundOff = rawTotal === null || invoiceTotal === null ? null : parseFloat((invoiceTotal - rawTotal).toFixed(2))
 
   return (
     <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GST Breakdown</p>
       </div>
-      <div className="p-4 max-w-sm ml-auto space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">CGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${cgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">SGST (2.5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "same" ? `₹${sgst.toFixed(2)}` : "—"}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-black uppercase text-slate-500 text-[10px]">IGST (5%)</span>
-          <span className="font-mono font-bold text-slate-700">{gstType === "different" ? `₹${igst.toFixed(2)}` : "—"}</span>
-        </div>
+      {/* pr-6 matches the Taxable Amount column's right padding so both right edges line up. */}
+      <div className="py-4 pl-4 pr-6 max-w-sm ml-auto space-y-2">
+        <GstTaxRows summary={gst} />
         <div className="flex justify-between items-center text-xs">
           <span className="font-black uppercase text-slate-500 text-[10px]">Round Off</span>
           <span className="font-mono font-bold text-slate-500">
-            {roundOff > 0 ? `+₹${roundOff.toFixed(2)}` : roundOff < 0 ? `-₹${Math.abs(roundOff).toFixed(2)}` : `₹0.00`}
+            {roundOff === null ? "—" : roundOff > 0 ? `+₹${fmtAmount(roundOff)}` : roundOff < 0 ? `-₹${fmtAmount(Math.abs(roundOff))}` : `₹0.00`}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-200 pt-2">
           <span className="font-black uppercase text-slate-800 text-[11px]">Total Invoice Amount</span>
-          <span className="font-mono font-black text-blue-700 text-sm">₹{invoiceTotal.toFixed(2)}</span>
+          <span className="font-mono font-black text-blue-700 text-sm">{invoiceTotal === null ? "—" : `₹${fmtAmount(invoiceTotal)}`}</span>
         </div>
       </div>
     </div>
   )
 }
 
+// Table standard: numeric + date columns right aligned, units in headings, plain fixed decimals.
+const NUM_DECIMALS: Record<string, number> = {
+  products: 0,
+  actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+  gross_weight: 3, tare_weight: 3, net_weight: 3, extra_weight: 3, // weight decimals come from the Units Master (WEIGHT_COL_IDS) - values here only mark the column as numeric
+  rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
+}
+const DATE_COL_IDS = new Set(["partySoDate", "actual1Date", "deliveryDate", "invoice_date", "dispatch_date_confirmed", "fitness_end_date", "insurance_end_date", "tax_end_date", "pollution_end_date", "permit1_end_date", "permit2_end_date"])
+const MONEY_HEAD_IDS = new Set(["rate", "ratePerLtr", "ratePer15Kg", "rateOfMaterial", "totalWithGst", "advanceAmount", "bill_amount"])
+const WEIGHT_COL_IDS = new Set(["gross_weight", "tare_weight", "net_weight", "extra_weight"])
+const numDec = (id: string) => (WEIGHT_COL_IDS.has(id) ? getWeightDecimals() : NUM_DECIMALS[id])
+const isRightCol = (id: string) => id in NUM_DECIMALS || DATE_COL_IDS.has(id)
+const fmtCell = (id: string, v: any) => {
+  if (v === "—" || v === null || v === undefined || v === "") return "—"
+  if (isAmountCol(id)) return fmtAmount(v, NUM_DECIMALS[id] ?? 2)
+  if (id in NUM_DECIMALS) return fmtNum(v, numDec(id))
+  if (DATE_COL_IDS.has(id)) return fmtDate(v)
+  return String(v)
+}
+const colLabel = (id: string, label: string) => (MONEY_HEAD_IDS.has(id) ? `${label} (₹)` : label)
+
+function getDynamicColumnValue(group: any, colId: string) {
+  const directValue = group?.[colId]
+  if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
+
+  const firstProduct = group?._allProducts?.[0] || {}
+  const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
+
+  const orderValue = (firstOrder as any)?.[colId]
+  if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
+
+  const productValue = (firstProduct as any)?.[colId]
+  if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
+
+  return "—"
+}
+
 export default function CheckInvoicePage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
 
@@ -267,13 +249,14 @@ export default function CheckInvoicePage() {
   }, [skuDetailsData])
 
   // Selection & Dialog State
-  const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([]) // Changed to array for multi-group support
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   // View-only mode: opened for issued/reverted records that are awaiting re-issue
   // from Make Invoice. Details are visible but verification cannot be completed.
   const [viewOnly, setViewOnly] = useState(false)
+  // "Are you sure?" step before a Verified verdict is submitted.
+  const [confirmVerifyOpen, setConfirmVerifyOpen] = useState(false)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]) // State to manage expanded sections
 
   const [checkData, setCheckData] = useState({
@@ -324,13 +307,15 @@ export default function CheckInvoicePage() {
 
     filteredPendingOrders.forEach((order: any) => {
       const invoiceNo = order.invoice_no || "No Invoice"
+      // Same key the backend paginates on: invoices without a number must not merge into one group.
+      const groupKey = order.invoice_no || `No Invoice #${order.invoice_id ?? order.id}`
       const partyName = (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : (order.party_name || order.partyName || "Unknown Customer")
       const rawDoNumber = order.so_no || order.soNo || "—"
       const doNumber = rawDoNumber.replace(/(?<=\d)[A-Z].*$/, "")
 
-      if (!grouped[invoiceNo]) {
-        grouped[invoiceNo] = {
-          _rowKey: invoiceNo,
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = {
+          _rowKey: groupKey,
           customerName: partyName,
           invoiceNo: invoiceNo,
           doNumberList: new Set<string>(),
@@ -340,7 +325,7 @@ export default function CheckInvoicePage() {
         }
       }
 
-      const group = grouped[invoiceNo]
+      const group = grouped[groupKey]
       group.doNumberList.add(doNumber)
 
       const orderKey = doNumber;
@@ -388,8 +373,9 @@ export default function CheckInvoicePage() {
         id: order.id,
         specificOrderNo: doNumber,
         productName: order.product_name,
-        rate: ((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0),
-        amount: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) * (parseFloat(order.actual_qty_dispatch || order.actual_qty || order.qty) || 0),
+        // (punch rate × nos per main UOM) + freight − CD, all per main UOM and tax inclusive.
+        rate: (((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0),
+        amount: ((((parseFloat(order.rate_of_material) || 0) * (parseFloat(order.nos_per_main_uom) || 1)) + (parseFloat(order.freight_rate) || 0)) - (parseFloat(order.cd_amount || order.cdAmount) || 0)) * (parseFloat(order.actual_qty_dispatch || order.actual_qty || order.qty) || 0),
         invoiceNo: order.invoice_no,
         invoiceDate: order.invoice_date,
         billAmount: order.bill_amount,
@@ -464,96 +450,93 @@ export default function CheckInvoicePage() {
     })
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
+  // ── Stage list table state (column search / date range / sort / totals) ──
+  // Status buttons are remembered permanently; quick search / customer filter only for the session.
+  // Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("check-invoice", {
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "PENDING" | "ISSUE",
+    customerFilter: "ALL",
+  }, { permanentKeys: ["statusFilter"] })
+  const { quickSearch, statusFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "PENDING" | "ISSUE") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
+  const groupStatus = (g: any): string =>
+    g.isReverted || g._allProducts?.some((p: any) => p.status_1 === "Issue") ? "Issue Reported" : "Pending Review"
 
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    if (colId === "orderNo") return group.orderNo || ""
-    if (colId === "processid") return group.processid || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "actual1Date") return group.actual1Date || ""
-    if (colId === "invoiceNo") return group.invoiceNo || ""
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group.isReverted 
-        ? "Issue Reported" 
-        : group._allProducts?.some((p: any) => p.status_1 === "Issue") 
-          ? "Issue Reported" 
-          : "Pending Review"
-    }
-    if (colId === "products") return String(group._productCount || 0)
-    return String(getDynamicColumnValue(group, colId))
-  }
-
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
-
-  const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
+  const stageCols = useMemo<StageColDef<any>[]>(() => {
+    const std: StageColDef<any>[] = [
+      { id: "partySoDate", label: "DO Date", type: "date", accessor: (g) => g._allProducts?.[0]?.party_so_date },
+      { id: "orderNo", label: "DO Number", accessor: (g) => g.orderNo },
+      { id: "processid", label: "Manual Sauda No.", accessor: (g) => g.processid },
+      { id: "customerName", label: "Customer Name", accessor: (g) => g.customerName },
+      { id: "actual1Date", label: "Dispatched Date", type: "date", accessor: (g) => g._allProducts?.[0]?.lrc_actual_1 || g._allProducts?.[0]?.actual_1 },
+      { id: "invoiceNo", label: "Invoice No.", accessor: (g) => g.invoiceNo },
+      { id: "vehicleNo", label: "Vehicle No.", accessor: (g) => g.vehicleNo },
+      { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: (g) => g.orderPunchRemarks },
+      { id: "status", label: "Status", accessor: (g) => groupStatus(g) },
+      { id: "products", label: "Items", type: "number", accessor: (g) => g._productCount || 0, total: true },
+    ]
+    const stdIds = new Set(std.map((c) => c.id))
+    const SUMMABLE_DYN = new Set(["bill_amount", "gross_weight", "tare_weight", "net_weight", "extra_weight"])
+    const dyn: StageColDef<any>[] = ALL_COLUMNS.filter((c) => !stdIds.has(c.id)).map((c) =>
+      c.id in NUM_DECIMALS
+        ? { id: c.id, label: colLabel(c.id, c.label), type: "number" as const, accessor: (g: any) => Number(getDynamicColumnValue(g, c.id)) || 0, ...(SUMMABLE_DYN.has(c.id) ? { total: true } : {}) }
+        : { id: c.id, label: colLabel(c.id, c.label), type: DATE_COL_IDS.has(c.id) ? ("date" as const) : undefined, accessor: (g: any) => String(getDynamicColumnValue(g, c.id)) }
     )
+    return [...std, ...dyn]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const baseFilter = useCallback(
+    (g: any) => {
+      if (statusFilter === "PENDING" && groupStatus(g) !== "Pending Review") return false
+      if (statusFilter === "ISSUE" && groupStatus(g) !== "Issue Reported") return false
+      if (customerFilter !== "ALL" && g.customerName !== customerFilter) return false
+      const q = quickSearch.trim().toLowerCase()
+      if (q) {
+        const hay = [g.orderNo, g.customerName, g.invoiceNo, g.vehicleNo, g.processid, g.orderPunchRemarks].join(" ").toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statusFilter, customerFilter, quickSearch]
+  )
+
+  const table = useStageTable<any>({ rows: displayRows, columns: stageCols, baseFilter, persistKey: "check-invoice" })
+  const orderedCols = useMemo(
+    () => orderedVisible.map((id) => stageCols.find((c) => c.id === id)).filter(Boolean) as StageColDef<any>[],
+    [orderedVisible.join("|"), stageCols] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const customerOptions = useMemo(
+    () => Array.from(new Set(displayRows.map((g: any) => g.customerName).filter(Boolean))).sort() as string[],
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const resetAllFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
   }
 
-  // Issued/reverted records are awaiting re-issue from Make Invoice and cannot be
-  // verified, so they are excluded from selection (view-only via the eye action).
-  const selectableRows = useMemo(() => displayRows.filter(r => !r.isReverted), [displayRows])
 
-  const toggleSelectAll = () => {
-    if (selectableRows.length > 0 && selectedItems.length === selectableRows.length) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems(selectableRows.map(r => r._rowKey))
+  // Row click opens the verify dialog for that invoice. Issued/reverted records are
+  // awaiting re-issue from Make Invoice and cannot be verified, so they open view-only.
+  const handleRowClick = (group: any) => {
+    if (group.isReverted) {
+      handleViewGroup(group)
+      return
     }
-  }
-
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    // Get all selected groups
-    const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
-    if (targets.length > 0) {
-      setViewOnly(false)
-      setSelectedGroups(targets)
-      // Select all products by default from all selected groups
-      const allProdKeys = targets.flatMap(g => g._allProducts.map((p: any) => p._rowKey))
-      setSelectedProducts(allProdKeys)
-
-      // Reset form
-      setCheckData({ status: "", remarks: "" })
-      setExpandedOrders([]) // Reset expanded state
-
-      setIsDialogOpen(true)
-    }
+    setViewOnly(false)
+    setSelectedGroups([group])
+    // Select all products by default
+    setSelectedProducts(group._allProducts.map((p: any) => p._rowKey))
+    setCheckData({ status: "", remarks: "" })
+    setExpandedOrders([])
+    setIsDialogOpen(true)
   }
 
   // Open the details dialog in read-only mode for an issued/reverted record.
@@ -568,17 +551,11 @@ export default function CheckInvoicePage() {
     setIsDialogOpen(true)
   }
 
-  const handleSubmit = async () => {
-    if (selectedGroups.length === 0 || !checkData.status) {
-      toast({
-        title: "Validation Error",
-        description: "Please select verification status.",
-        variant: "destructive"
-      })
-      return
-    }
+  // "Verified" moves the invoice forward; "Issue" sends it back to Make Invoice and needs remarks.
+  const handleSubmit = async (verdict: "Verified" | "Issue") => {
+    if (selectedGroups.length === 0) return
 
-    if (checkData.status === "Issue" && !checkData.remarks) {
+    if (verdict === "Issue" && !checkData.remarks.trim()) {
       toast({
         title: "Validation Error",
         description: "Remarks are mandatory when reporting an issue.",
@@ -608,8 +585,8 @@ export default function CheckInvoicePage() {
 
       for (const product of productsToSubmit) {
         const submitData = {
-          status: checkData.status,
-          remarks: checkData.remarks,
+          status: verdict,
+          remarks: checkData.remarks.trim(),
           userId: user?.id || null // Track acting user's login id
         };
 
@@ -630,8 +607,10 @@ export default function CheckInvoicePage() {
 
       if (successfulSubmissions.length > 0) {
         toast({
-          title: "Invoices Verified",
-          description: `Successfully verified ${successfulSubmissions.length} items.`,
+          title: verdict === "Issue" ? "Issue Reported" : "Invoices Verified",
+          description: verdict === "Issue"
+            ? `${successfulSubmissions.length} items sent back to Make Invoice.`
+            : `Successfully verified ${successfulSubmissions.length} items.`,
         })
 
         await refetchPending();
@@ -642,7 +621,6 @@ export default function CheckInvoicePage() {
         queryClient.invalidateQueries({ queryKey: ["make-invoice-pending"] });
 
         setIsDialogOpen(false)
-        setSelectedItems([])
       }
 
       // Stale-write conflicts: the row was already processed/moved by another user.
@@ -706,24 +684,10 @@ export default function CheckInvoicePage() {
   })
 
 
-  const getDynamicColumnValue = (group: any, colId: string) => {
-    const directValue = group?.[colId]
-    if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
-
-    const firstProduct = group?._allProducts?.[0] || {}
-    const firstOrder = Object.values(group?._ordersMap || {})[0] || {}
-
-    const orderValue = (firstOrder as any)?.[colId]
-    if (orderValue !== undefined && orderValue !== null && orderValue !== "") return orderValue
-
-    const productValue = (firstProduct as any)?.[colId]
-    if (productValue !== undefined && productValue !== null && productValue !== "") return productValue
-
-    return "—"
-  }
 
   return (
     <WorkflowStageShell
+      persistKey="check-invoice"
       partyNames={customerNames}
       title="Stage 10: Check Invoice"
       description="Review and verify invoices grouped by Customer."
@@ -757,106 +721,103 @@ export default function CheckInvoicePage() {
           orderListKey="invoices"
           mapOrderNo={(order: any) => order.so_no || "-"}
           mapCustomerName={(order: any) => (order.transfer === 'yes' && order.bill_company_name) ? order.bill_company_name : order.party_name}
-          mapRemarks={(order: any) => `${order.remarks_2 || "-"} ${order.freight_rate ? `| Freight: ₹${order.freight_rate}` : ""}`}
+          mapRemarks={(order: any) => `${order.remarks_2 || "-"} ${order.freight_rate ? `| Freight (₹): ${order.freight_rate}` : ""}`}
           getDate={(order: any) => order.actual_6 || order.timestamp || null}
         />
       }
     >
       <div className="space-y-4">
-        {/* Action Bar */}
-        <div className="flex flex-col justify-end gap-2 sm:flex-row">
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-700 sm:w-auto"
-          >
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Verify Invoice ({selectedItems.length})
-          </Button>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full bg-transparent sm:w-auto">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                <ColumnToggleContent columns={ALL_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-
         {/* Main Table (Grouped) */}
-        <Card className="border-none shadow-sm overflow-hidden md:max-h-[600px] md:overflow-auto">
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Invoices List"
+            shown={table.rows.length}
+            total={displayRows.length}
+            description="Invoices pending verification, grouped by invoice"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Invoice, Vehicle..."
+          >
+            <StageToolbar
+              shown={table.rows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={resetAllFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "PENDING", label: "Pending Review" },
+                      { value: "ISSUE", label: "Issue Reported" },
+                      { value: "ALL", label: "All" },
+                    ]}
+                  />
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={customerOptions} />
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusFilter === "PENDING" ? "Pending Review" : "Issue Reported"}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
               <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox checked={selectableRows.length > 0 && selectedItems.length === selectableRows.length} onCheckedChange={toggleSelectAll} />
-                </TableHead>
                 <ColumnDragProvider columnIds={orderedVisible} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisible.map(id => {
-                    const cls = "whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors"
-                    if (id === "partySoDate") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("partySoDate")}>DO Date<PendingSortIcon field="partySoDate" /></SortableTableHead>
-                    if (id === "orderNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderNo")}>DO Number<PendingSortIcon field="orderNo" /></SortableTableHead>
-                    if (id === "processid") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("processid")}>Manual Sauda No.<PendingSortIcon field="processid" /></SortableTableHead>
-                    if (id === "customerName") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("customerName")}>Customer Name<PendingSortIcon field="customerName" /></SortableTableHead>
-                    if (id === "actual1Date") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("actual1Date")}>Dispatched Date<PendingSortIcon field="actual1Date" /></SortableTableHead>
-                    if (id === "invoiceNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("invoiceNo")}>Invoice No.<PendingSortIcon field="invoiceNo" /></SortableTableHead>
-                    if (id === "vehicleNo") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("vehicleNo")}>Vehicle No.<PendingSortIcon field="vehicleNo" /></SortableTableHead>
-                    if (id === "orderPunchRemarks") return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort("orderPunchRemarks")}>Order Punch Remarks<PendingSortIcon field="orderPunchRemarks" /></SortableTableHead>
-                    if (id === "status") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Status</SortableTableHead>
-                    if (id === "products") return <SortableTableHead key={id} id={id} className="whitespace-nowrap text-center">Items</SortableTableHead>
-                    const dynCol = ALL_COLUMNS.find(c => c.id === id)
-                    if (dynCol) return <SortableTableHead key={id} id={id} className={cls} onClick={() => handlePendingSort(id)}>{dynCol.label}<PendingSortIcon field={id} /></SortableTableHead>
-                    return null
-                  })}
+                  {orderedCols.map(col => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={isRightCol(col.id) ? "right" : "left"} />
+                  ))}
                 </ColumnDragProvider>
               </TableRow>
             </TableHeader>
             <TableBody>
+              <StageTotalsRow
+                columns={orderedCols}
+                totals={table.totals}
+                count={table.rows.length}
+                labelColumnId={orderedCols[0]?.id}
+                unit=""
+                format={(n, id) => isAmountCol(id) ? fmtAmount(n, NUM_DECIMALS[id] ?? 2) : fmtNum(n, numDec(id) ?? 2)}
+                tones={{ products: "blue", actual_qty_dispatch: "purple", bill_amount: "emerald" }}
+                align={Object.fromEntries(orderedCols.map(c => [c.id, isRightCol(c.id) ? "right" : "left"])) as Record<string, "center" | "left" | "right">}
+              />
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
                     {orderedVisible.map(id => (
-                      <TableCell key={id} className="text-center py-4">
-                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full mx-auto", id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-16" : id === "orderNo" || id === "processid" || id === "invoiceNo" || id === "vehicleNo" || id === "actual1Date" ? "w-24" : "w-20")} />
+                      <TableCell key={id} className={cn("px-4 py-4", isRightCol(id) ? "text-right" : "text-left")}>
+                        <div className={cn("h-3 bg-slate-200 animate-pulse rounded-full", isRightCol(id) && "ml-auto",id === "status" ? "h-5 w-24" : id === "products" ? "w-16" : id === "customerName" ? "w-40" : id === "orderPunchRemarks" ? "w-16" : id === "orderNo" || id === "processid" || id === "invoiceNo" || id === "vehicleNo" || id === "actual1Date" ? "w-24" : "w-20")} />
                       </TableCell>
                     ))}
                   </TableRow>
                 ))
-              ) : sortedDisplayRows.length > 0 ? (
-                sortedDisplayRows.map((group) => (
+              ) : table.rows.length > 0 ? (
+                table.rows.map((group) => (
                   <TableRow
                     key={group._rowKey}
-                    className={`${selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : ""} ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
+                    onClick={() => handleRowClick(group)}
+                    title={group.isReverted ? "Awaiting re-issue from Make Invoice — click to view details" : "Click to verify invoice"}
+                    className={`cursor-pointer hover:bg-slate-50 ${group.isReverted ? "opacity-60 bg-amber-50/40" : ""}`}
                   >
-                    <TableCell className="text-center">
-                      {group.isReverted ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-amber-600 hover:bg-amber-100"
-                          onClick={() => handleViewGroup(group)}
-                          title="Awaiting re-issue from Make Invoice — view details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Checkbox
-                          checked={selectedItems.includes(group._rowKey)}
-                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        />
-                      )}
-                    </TableCell>
                     {orderedVisible.map(id => {
-                      if (id === "partySoDate") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
+                      if (id === "partySoDate") return <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{group.partySoDate}</TableCell>
                       if (id === "orderNo") return (
-                        <TableCell key={id} className="text-center text-xs">
+                        <TableCell key={id} className="px-4 text-left text-xs">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.orderNo }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-blue-700 font-bold">{d.doNumber}</span>
@@ -864,10 +825,10 @@ export default function CheckInvoicePage() {
                           </div>
                         </TableCell>
                       )
-                      if (id === "processid") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.processid}</TableCell>
-                      if (id === "customerName") return <TableCell key={id} className="text-center text-xs text-slate-600">{group.customerName}</TableCell>
+                      if (id === "processid") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.processid}</TableCell>
+                      if (id === "customerName") return <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{group.customerName}</TableCell>
                       if (id === "actual1Date") return (
-                        <TableCell key={id} className="text-center text-xs text-slate-600">
+                        <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", dispatchedDate: group.actual1Date }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`}>{d.dispatchedDate}</span>
@@ -876,15 +837,15 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "invoiceNo") return (
-                        <TableCell key={id} className="text-center text-xs font-medium">
+                        <TableCell key={id} className="px-4 text-left text-xs font-medium">
                           {group._allProducts?.[0]?.invoice_copy ? (
-                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
+                            <a href={group._allProducts[0].invoice_copy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline font-bold">{group.invoiceNo}</a>
                           ) : group.invoiceNo}
                         </TableCell>
                       )
-                      if (id === "vehicleNo") return <TableCell key={id} className="text-center"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
+                      if (id === "vehicleNo") return <TableCell key={id} className="px-4 text-left"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
                       if (id === "orderPunchRemarks") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           <div className="flex flex-col gap-1.5">
                             {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
                               <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
@@ -893,7 +854,7 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "status") return (
-                        <TableCell key={id} className="text-center">
+                        <TableCell key={id} className="px-4 text-left">
                           {group.isReverted ? (
                             <Badge className="bg-red-100 text-red-700">Issue Reported</Badge>
                           ) : group._allProducts.some((p: any) => p.status_1 === "Issue") ? (
@@ -904,23 +865,31 @@ export default function CheckInvoicePage() {
                         </TableCell>
                       )
                       if (id === "products") return (
-                        <TableCell key={id} className="text-center">
-                          <Badge variant="secondary">{group._productCount} items</Badge>
+                        <TableCell key={id} className="px-4 text-right text-xs font-mono tabular-nums">
+                          {fmtNum(group._productCount, 0)}
                         </TableCell>
                       )
-                      return <TableCell key={id} className="text-center text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
+                      return isRightCol(id)
+                        ? <TableCell key={id} className="px-4 text-right text-xs text-slate-600 whitespace-nowrap font-mono tabular-nums min-w-[110px]">{fmtCell(id, getDynamicColumnValue(group, id))}</TableCell>
+                        : <TableCell key={id} className="px-4 text-left text-xs text-slate-600">{String(getDynamicColumnValue(group, id))}</TableCell>
                     })}
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={1 + orderedVisible.length} className="text-center py-8 text-muted-foreground">
-                    No invoices pending for review
+                  <TableCell colSpan={orderedVisible.length} className="text-center py-8 text-muted-foreground">
+                    {displayRows.length > 0 ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                        <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                      </div>
+                    ) : "No invoices pending for review"}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </div>
           <div className="space-y-3 p-3 md:hidden">
             {isPendingLoading && pendingOrders.length === 0 ? (
               [...Array(5)].map((_, i) => (
@@ -931,16 +900,15 @@ export default function CheckInvoicePage() {
                   </div>
                 </div>
               ))
-            ) : displayRows.length > 0 ? (
-              displayRows.map((group) => {
+            ) : table.rows.length > 0 ? (
+              table.rows.map((group) => {
                 const display = buildCheckInvoiceDisplay(group)
-                const selected = selectedItems.includes(group._rowKey)
                 return (
                   <div
                     key={group._rowKey}
+                    onClick={() => handleRowClick(group)}
                     className={cn(
-                      "rounded-lg border bg-white p-4 shadow-sm",
-                      selected && "border-blue-200 bg-blue-50",
+                      "cursor-pointer rounded-lg border bg-white p-4 shadow-sm active:bg-slate-50",
                       group.isReverted && "opacity-60 bg-amber-50/40"
                     )}
                   >
@@ -955,22 +923,6 @@ export default function CheckInvoicePage() {
                         )}
                         {visibleColumns.includes("partySoDate") && <p className="mt-1 text-xs font-semibold text-slate-500">{display.partySoDate}</p>}
                       </div>
-                      {group.isReverted ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 text-amber-600 hover:bg-amber-100"
-                          onClick={() => handleViewGroup(group)}
-                          title="Awaiting re-issue from Make Invoice — view details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Checkbox
-                          checked={selected}
-                          onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        />
-                      )}
                     </div>
 
                     {visibleColumns.includes("customerName") && (
@@ -985,7 +937,7 @@ export default function CheckInvoicePage() {
                         <div className="rounded-md bg-slate-50 p-2">
                           <p className="text-[10px] font-black uppercase text-slate-400">Invoice No.</p>
                           {display.invoiceCopy ? (
-                            <a href={display.invoiceCopy} target="_blank" rel="noopener noreferrer" className="mt-1 block font-bold text-blue-600 underline break-words">
+                            <a href={display.invoiceCopy} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-1 block font-bold text-blue-600 underline break-words">
                               {display.invoiceNo}
                             </a>
                           ) : (
@@ -1001,7 +953,7 @@ export default function CheckInvoicePage() {
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
                         <p className="text-[10px] font-black uppercase text-slate-400">Items</p>
-                        <p className="mt-1 font-bold">{display.productCount} items</p>
+                        <p className="mt-1 font-bold font-mono tabular-nums">{fmtNum(display.productCount, 0)}</p>
                       </div>
                       {visibleColumns.includes("vehicleNo") && (
                         <div className="rounded-md bg-slate-50 p-2">
@@ -1020,12 +972,12 @@ export default function CheckInvoicePage() {
                         </div>
                       )}
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Qty</p>
-                        <p className="mt-1 font-mono font-bold">{display.qty}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Qty to Dispatch</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtNum(display.qty, 4)}</p>
                       </div>
                       <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-[10px] font-black uppercase text-slate-400">Amount</p>
-                        <p className="mt-1 font-mono font-bold">₹{Number(display.amount).toFixed(2)}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400">Amount (₹)</p>
+                        <p className="mt-1 font-mono tabular-nums font-bold">{fmtAmount(display.amount, 2)}</p>
                       </div>
                     </div>
                     {dynamicColumns.length > 0 && (
@@ -1035,8 +987,8 @@ export default function CheckInvoicePage() {
                           if (!col) return null
                           return (
                             <div key={colId} className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">{col.label}</p>
-                              <p className="mt-1 font-bold break-words">{String(getDynamicColumnValue(group, colId))}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">{colLabel(colId, col.label)}</p>
+                              <p className="mt-1 font-bold break-words">{fmtCell(colId, getDynamicColumnValue(group, colId))}</p>
                             </div>
                           )
                         })}
@@ -1061,39 +1013,28 @@ export default function CheckInvoicePage() {
               })
             ) : (
               <div className="py-10 text-center text-muted-foreground">
-                No invoices pending for review
+                {displayRows.length > 0 ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="font-medium text-slate-500">No matching records found for the filters</p>
+                    <button onClick={resetAllFilters} className="text-xs text-blue-600 hover:underline font-semibold">Clear Filters</button>
+                  </div>
+                ) : "No invoices pending for review"}
               </div>
             )}
           </div>
+          </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full mt-4 bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-blue-50">
-          <div className="text-xs font-bold text-slate-500 bg-slate-100/50 px-4 py-2 rounded-full border border-slate-200/50">
-            Page <span className="text-blue-600 px-1">{pendingPage}</span> of <span className="text-blue-600 px-1">{pendingData?.pagination?.totalPages || 1}</span>
-            <span className="mx-2 text-slate-300">|</span>
-            Total <span className="text-blue-600 px-1">{pendingData?.pagination?.total || 0}</span> Invoices
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:flex">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-              disabled={pendingPage === 1}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingPage(p => p + 1)}
-              disabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
-              className="h-9 rounded-xl border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95 disabled:opacity-30 text-xs font-bold"
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        </div>
+        <StagePagination
+          page={pendingPage}
+          totalPages={pendingData?.pagination?.totalPages || 1}
+          total={pendingData?.pagination?.total || 0}
+          noun="Invoices"
+          onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+          onNext={() => setPendingPage(p => p + 1)}
+          prevDisabled={pendingPage === 1}
+          nextDisabled={pendingPage >= (pendingData?.pagination?.totalPages || 1)}
+        />
       </div>
 
       {/* Split-View Dialog */}
@@ -1189,7 +1130,7 @@ export default function CheckInvoicePage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
                                       <p className="text-xs font-bold text-slate-900 leading-none">
-                                        {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{orderDetails.advanceAmount}
+                                        {(orderDetails.isOrderThrough === "Direct" || (orderDetails.isOrderThrough === "—" && !orderDetails.isBroker)) ? "No" : orderDetails.brokerName} / ₹{fmtAmount(orderDetails.advanceAmount)}
                                       </p>
                                     </div>
 
@@ -1255,7 +1196,7 @@ export default function CheckInvoicePage() {
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-xs font-bold text-slate-900 leading-none">{firstProd.passing_weight ? fmtWeight(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
@@ -1337,16 +1278,16 @@ export default function CheckInvoicePage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
                                       <p className="text-xs font-black text-slate-900 leading-tight">
-                                        {firstProd.grossWeight || firstProd.gross_weight || "0"} / {firstProd.tareWeight || firstProd.tare_weight || "0"} / <span className="text-blue-600 font-black">{((Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0)) || "0").toString()}</span>
+                                        {fmtWeight(firstProd.grossWeight || firstProd.gross_weight || 0, wd)} / {fmtWeight(firstProd.tareWeight || firstProd.tare_weight || 0, wd)} / <span className="text-blue-600 font-black">{fmtWeight(Number(firstProd.grossWeight || firstProd.gross_weight || 0) - Number(firstProd.tareWeight || firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff</p>
-                                      <p className="text-xs font-black text-amber-600">{firstProd.weightDiff || firstProd.difference || "0"}</p>
+                                      <p className="text-xs font-black text-amber-600">{fmtWeight(firstProd.weightDiff || firstProd.difference || 0, wd)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Extra Weight</p>
-                                      <p className="text-xs font-black text-purple-600">{firstProd.extraWeight || firstProd.extra_weight || "0"}</p>
+                                      <p className="text-xs font-black text-purple-600">{fmtWeight(firstProd.extraWeight || firstProd.extra_weight || 0, wd)}</p>
                                     </div>
                                     <div className="md:col-span-2">
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Weight Diff Reason</p>
@@ -1365,10 +1306,50 @@ export default function CheckInvoicePage() {
 
                 {/* 2. Unified Product Table */}
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white min-w-0">
-                  <Table className="hidden md:table">
+                  <Table className="hidden md:table table-fixed" containerClassName="overflow-x-hidden">
+                    {/* Fixed column widths so Product Info doesn't swallow the row and the numeric columns sit evenly. */}
+                    <colgroup>
+                      <col style={{ width: 48 }} />
+                      <col style={{ width: "22%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col />
+                    </colgroup>
                     <TableHeader className="bg-slate-50">
+                      <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90 shadow-sm">
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4 text-left font-black text-slate-900">Total ({selectedProducts.length})</TableCell>
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4 text-right font-mono tabular-nums">
+                          {(() => {
+                            const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .reduce((sum, p) => {
+                                const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
+                                const skuWt = parseFloat(skuWtStr || "") || 0;
+                                const q = parseFloat(p.actualQty) || 0;
+                                return sum + (skuWt * q);
+                              }, 0);
+                            return fmtWeight(totalSelectedWt, wd);
+                          })()}
+                        </TableCell>
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4" />
+                        <TableCell className="px-4" />
+                        <TableCell className="pl-4 pr-6 text-right font-mono tabular-nums">
+                          {(() => {
+                            const total = sumTaxable(selectedGroups.flatMap(g => g._allProducts)
+                              .filter(p => selectedProducts.includes(p._rowKey))
+                              .map(p => ({ rate: Number(p.rate) || 0, qty: parseFloat(p.actualQty) || 0, product: p })));
+                            return total === null ? "—" : fmtAmount(total, 2);
+                          })()}
+                        </TableCell>
+                      </TableRow>
                       <TableRow>
-                        <TableHead className="w-12 text-center h-10">
+                        <TableHead className="w-12 px-4 text-left h-10">
                           <Checkbox
                             checked={selectedGroups.every(g => g._allProducts.every((p: any) => selectedProducts.includes(p._rowKey)))}
                             onCheckedChange={(checked) => {
@@ -1381,27 +1362,28 @@ export default function CheckInvoicePage() {
                             }}
                           />
                         </TableHead>
-                        <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">WEIGHT(KGS)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">ACTUAL QTY</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE (INC. WITH TAXES)</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">RATE</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">TAXABLE AMOUNT</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE NO</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">INVOICE DATE</TableHead>
-                        <TableHead className="text-[10px] uppercase font-black text-center h-10">TRUCK NO</TableHead>
+                        <TableHead className="px-4 text-left h-10">Product Info</TableHead>
+                        <TableHead className="px-4 text-left h-10 whitespace-normal">HSN Code</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Weight (KGS)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Actual Qty</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal">Rate Inc. Taxes (₹)</TableHead>
+                        <TableHead className="px-4 text-right h-10 whitespace-normal"><RateWithoutGstHeading /></TableHead>
+                        <TableHead className="pl-4 pr-6 text-right h-10 whitespace-normal">Taxable Amount (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {selectedGroups.flatMap(g => g._allProducts).map((product: any) => {
                         const originalRate = Number(product.rate) || 0;
-                        const rateWoGst = parseFloat((originalRate / 1.05).toFixed(2));
+                        const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0);
+                        // product.rate is already net of the Make Invoice CD (see the mapping above).
+                        const netRateIncTaxes = originalRate;
+                        const rateWoGst = rateWithoutGst(netRateIncTaxes, product);
                         const qty = parseFloat(product.actualQty) || 0;
-                        const taxableAmount = rateWoGst * qty;
+                        const taxableAmount = rateWoGst === null ? null : rateWoGst * qty;
 
                         return (
                           <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                            <TableCell className="text-center p-2">
+                            <TableCell className="px-4 py-2 text-left">
                               <Checkbox
                                 checked={selectedProducts.includes(product._rowKey)}
                                 onCheckedChange={() => {
@@ -1413,107 +1395,46 @@ export default function CheckInvoicePage() {
                                 }}
                               />
                             </TableCell>
-                            <TableCell className="p-2">
+                            <TableCell className="px-4 py-2">
                               <div className="flex flex-col">
                                 <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 leading-none">{product.specificOrderNo}</span>
                                 <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest mt-1 leading-none">{product.party_name || product.partyName}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
+                            <TableCell className="px-4 py-2 text-left text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {product.hsn_code || "—"}
+                            </TableCell>
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
                               {(() => {
                                 const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                                 const skuWt = parseFloat(skuWtStr || "") || 0;
                                 const totalWt = skuWt * qty;
                                 if (!totalWt) return "—";
-                                return totalWt.toFixed(4);
+                                return fmtWeight(totalWt, wd);
                               })()}
                             </TableCell>
-                            <TableCell className="text-center p-2">
-                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                {product.actualQty || "0"}
-                              </Badge>
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {fmtNum(product.actualQty || 0, 0)}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <span className="cursor-pointer hover:text-blue-600 hover:underline transition-all">
-                                    {originalRate ? `₹${originalRate.toFixed(2)}` : "—"}
-                                  </span>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl animate-in zoom-in-95 duration-200">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              <RateInclusiveTaxPopover
+                                product={product}
+                                cdAmount={cdAmt}
+                                displayRate={netRateIncTaxes}
+                                align="end"
+                              />
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              {originalRate ? `₹${rateWoGst.toFixed(2)}` : "—"}
+                            <TableCell className="px-4 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {netRateIncTaxes && rateWoGst !== null ? fmtAmount(rateWoGst) : "—"}
                             </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              {taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}
-                            </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-green-700">
-                              {product.invoice_copy ? (
-                                <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="hover:text-green-900 underline">
-                                  {product.invoiceNo || "View Invoice"}
-                                </a>
-                              ) : (
-                                <span>{product.invoiceNo || "—"}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-black">
-                              {product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}
-                            </TableCell>
-                            <TableCell className="text-center p-2 text-xs font-bold text-slate-700">
-                              {(product.truckNo || "—").toUpperCase()}
+                            <TableCell className="pl-4 pr-6 py-2 text-right text-xs font-bold text-slate-700 font-mono tabular-nums whitespace-nowrap">
+                              {taxableAmount ? fmtAmount(taxableAmount) : "—"}
                             </TableCell>
                           </TableRow>
                         );
                       })}
 
-                      {/* Summary Row */}
-                      <TableRow className="bg-slate-50 font-black h-12 border-t-2 border-slate-200">
-                        <TableCell />
-                        <TableCell className="text-[10px] uppercase font-black text-slate-900">Total Selection</TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {(() => {
-                              const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
-                                .filter(p => selectedProducts.includes(p._rowKey))
-                                .reduce((sum, p) => {
-                                  const skuWtStr = skuWeightMap.get(p.productName?.trim().toLowerCase());
-                                  const skuWt = parseFloat(skuWtStr || "") || 0;
-                                  const q = parseFloat(p.actualQty) || 0;
-                                  return sum + (skuWt * q);
-                                }, 0);
-                              return totalSelectedWt.toFixed(4);
-                            })()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-blue-600 text-white font-black text-xs px-3">
-                            {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-center text-xs text-blue-700 font-black">
-                          ₹{selectedGroups.flatMap(g => g._allProducts)
-                            .filter(p => selectedProducts.includes(p._rowKey))
-                            .reduce((sum, p) => {
-                              const r = Number(p.rate) || 0;
-                              const rateWoGst = parseFloat((r / 1.05).toFixed(2));
-                              const q = parseFloat(p.actualQty) || 0;
-                              return sum + (rateWoGst * q);
-                            }, 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell colSpan={3} />
-                      </TableRow>
                     </TableBody>
                   </Table>
 
@@ -1539,9 +1460,11 @@ export default function CheckInvoicePage() {
                     {selectedGroups.flatMap(g => g._allProducts).map((product: any) => {
                       const selected = selectedProducts.includes(product._rowKey)
                       const originalRate = Number(product.rate) || 0
-                      const rateWoGst = parseFloat((originalRate / 1.05).toFixed(2))
+                      const cdAmt = parseFloat(product.cd_amount || product.cdAmount || 0)
+                      const netRateIncTaxes = originalRate // already net of CD, see the mapping above
+                      const rateWoGst = rateWithoutGst(netRateIncTaxes, product)
                       const qty = parseFloat(product.actualQty) || 0
-                      const taxableAmount = rateWoGst * qty
+                      const taxableAmount = rateWoGst === null ? null : rateWoGst * qty
 
                       return (
                         <div key={product._rowKey} className={cn("rounded-xl border bg-white p-3 space-y-3", selected && "border-blue-200 bg-blue-50/40")}>
@@ -1568,66 +1491,45 @@ export default function CheckInvoicePage() {
 
                           <div className="grid grid-cols-2 gap-3 text-xs">
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Weight(KGS)</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">
+                              <p className="text-[10px] font-black uppercase text-slate-400">HSN Code</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{product.hsn_code || "—"}</p>
+                            </div>
+                            <div className="rounded-md bg-slate-50 p-2">
+                              <p className="text-[10px] font-black uppercase text-slate-400">Weight (KGS)</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
                                 {(() => {
                                   const skuWtStr = skuWeightMap.get(product.productName?.trim().toLowerCase());
                                   const skuWt = parseFloat(skuWtStr || "") || 0;
                                   const totalWt = skuWt * qty;
                                   if (!totalWt) return "—";
-                                  return totalWt.toFixed(4);
+                                  return fmtWeight(totalWt, wd);
                                 })()}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
                               <p className="text-[10px] font-black uppercase text-slate-400">Actual Qty</p>
-                              <p className="mt-1 font-mono font-bold text-blue-700">{product.actualQty || "0"}</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-blue-700">{fmtNum(product.actualQty || 0, 0)}</p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate (Inc. with taxes)</p>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <p className="mt-1 cursor-pointer font-mono font-bold text-slate-700">
-                                    {originalRate ? `₹${originalRate.toFixed(2)}` : "—"}
-                                  </p>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-fit p-3 bg-white border-2 border-blue-100 shadow-xl rounded-xl">
-                                  <div className="space-y-1.5">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Freight Rate</p>
-                                    <p className="text-sm font-black text-blue-700 leading-none">
-                                      {product.freight_rate ? `₹${product.freight_rate}` : "No Freight Rate Available"}
-                                    </p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Rate Inc. Taxes (₹)</p>
+                              <div className="mt-1">
+                                <RateInclusiveTaxPopover
+                                  product={product}
+                                  cdAmount={cdAmt}
+                                  displayRate={netRateIncTaxes}
+                                  align="center"
+                                />
+                              </div>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Rate</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">
-                                {originalRate ? `₹${(originalRate / 1.05).toFixed(2)}` : "—"}
+                              <p className="text-[10px] font-black uppercase text-slate-400"><RateWithoutGstHeading /></p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">
+                                {rateWithoutGstText(netRateIncTaxes, product, (n) => fmtAmount(n, 2))}
                               </p>
                             </div>
                             <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Total Taxable Amount</p>
-                              <p className="mt-1 font-mono font-bold text-slate-700">{taxableAmount ? `₹${taxableAmount.toFixed(2)}` : "—"}</p>
-                            </div>
-                            <div className="rounded-md bg-green-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-green-700">Invoice No</p>
-                              {product.invoice_copy ? (
-                                <a href={product.invoice_copy} target="_blank" rel="noopener noreferrer" className="mt-1 block font-bold text-green-700 underline break-words">
-                                  {product.invoiceNo || "View Invoice"}
-                                </a>
-                              ) : (
-                                <p className="mt-1 font-bold text-green-700 break-words">{product.invoiceNo || "—"}</p>
-                              )}
-                            </div>
-                            <div className="rounded-md bg-slate-50 p-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Invoice Date</p>
-                              <p className="mt-1 font-bold">{product.invoiceDate ? new Date(product.invoiceDate).toLocaleDateString("en-GB") : "—"}</p>
-                            </div>
-                            <div className="rounded-md bg-slate-50 p-2 col-span-2">
-                              <p className="text-[10px] font-black uppercase text-slate-400">Truck No</p>
-                              <p className="mt-1 font-bold">{(product.truckNo || "—").toUpperCase()}</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400">Taxable Amount (₹)</p>
+                              <p className="mt-1 font-mono tabular-nums font-bold text-slate-700">{taxableAmount ? fmtAmount(taxableAmount, 2) : "—"}</p>
                             </div>
                           </div>
                         </div>
@@ -1635,14 +1537,8 @@ export default function CheckInvoicePage() {
                     })}
                     <div className="grid grid-cols-2 gap-3 rounded-lg border bg-slate-50 p-3 text-xs">
                       <div>
-                        <p className="text-[9px] uppercase font-black text-slate-500">Total Qty</p>
-                        <p className="mt-1 font-black text-blue-700">
-                          {selectedGroups.flatMap(g => g._allProducts).filter(p => selectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + (parseFloat(p.actualQty) || 0), 0)}
-                        </p>
-                      </div>
-                      <div>
                         <p className="text-[9px] uppercase font-black text-slate-500">Total Weight</p>
-                        <p className="mt-1 font-black text-blue-700">
+                        <p className="mt-1 font-mono tabular-nums font-black text-blue-700">
                           {(() => {
                             const totalSelectedWt = selectedGroups.flatMap(g => g._allProducts)
                               .filter(p => selectedProducts.includes(p._rowKey))
@@ -1652,7 +1548,7 @@ export default function CheckInvoicePage() {
                                 const q = parseFloat(p.actualQty) || 0;
                                 return sum + (skuWt * q);
                               }, 0);
-                            return totalSelectedWt.toFixed(4);
+                            return fmtWeight(totalSelectedWt, wd);
                           })()}
                         </p>
                       </div>
@@ -1665,6 +1561,8 @@ export default function CheckInvoicePage() {
                   selectedGroups={selectedGroups}
                   selectedProducts={selectedProducts}
                 />
+
+                <OrderChargesPanel orderNos={Array.from(new Set(selectedGroups.flatMap((g: any) => g._allProducts || []).filter((p: any) => selectedProducts.includes(p._rowKey)).map((p: any) => String(p.so_no || p.soNo || "").replace(/(?<=\d)[A-Z].*$/, "")).filter(Boolean))) as string[]} />
               </div>
             )}
 
@@ -1686,58 +1584,141 @@ export default function CheckInvoicePage() {
                   </div>
                 )}
               </div>
-            ) : (
-            <div className="mt-8 space-y-6 border rounded-lg p-4 sm:p-6 bg-white shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                <CheckCircle className="h-4 w-4 text-blue-600" />
-                Final Verification Logic
-              </h3>
+            ) : null}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label>Verification Status <span className="text-red-500">*</span></Label>
-                  <Select value={checkData.status} onValueChange={(val) => setCheckData({ ...checkData, status: val })}>
-                    <SelectTrigger className="h-10 border-2 focus:ring-2 focus:ring-blue-500 transition-all font-bold tracking-tight bg-white">
-                      <SelectValue placeholder="Select Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Verified" className="font-bold text-green-600">Verified</SelectItem>
-                      <SelectItem value="Issue" className="font-bold text-red-600">Issue</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 sm:flex-col sm:justify-start">
+              {(() => {
+                const handlePrintData = () => {
+                  const group = selectedGroups[0]
+                  if (!group) return
+                  const allProducts = selectedGroups.flatMap((g: any) => g._allProducts)
+                  const customerName = group.customerName || '—'
+                  const vehicleNo = group.vehicleNo || '—'
+                  const doNumber = group.doNumber || '—'
+                  const invoiceNo = group.invoiceNo || '—'
+                  const invoiceCopy = allProducts[0]?.invoice_copy || null
+                  const productRows = allProducts.map((p: any) => `
+                    <tr>
+                      <td style="border:1px solid #ddd;padding:8px">${p.productName || '—'}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:center">${p.actualQty || p.qtyToDispatch || '—'} ${p.unit || ''}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.rate || p.final_rate || 0), 2)}</td>
+                      <td style="border:1px solid #ddd;padding:8px;text-align:right">₹${fmtAmount(parseFloat(p.actualQty || p.qtyToDispatch || 0) * parseFloat(p.rate || p.final_rate || 0), 2)}</td>
+                    </tr>
+                  `).join('')
+                  const printContent = `
+                    <html><head><title>Invoice Verification - ${invoiceNo}</title>
+                    <style>
+                      body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+                      h1 { font-size: 20px; margin-bottom: 4px; }
+                      .subtitle { color: #555; font-size: 13px; margin-bottom: 20px; }
+                      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+                      .field { background: #f8f8f8; padding: 10px 14px; border-radius: 6px; }
+                      .field label { font-size: 11px; color: #666; text-transform: uppercase; }
+                      .field p { font-size: 14px; font-weight: 600; margin: 2px 0 0; }
+                      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                      th { background: #1e293b; color: white; padding: 10px 8px; font-size: 13px; }
+                      td { font-size: 13px; }
+                      .inv-link { display: block; margin: 16px 0; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; font-size: 14px; }
+                      @media print { button { display: none; } }
+                    </style></head>
+                    <body>
+                      <h1>Shree Shyam Oil Extractions</h1>
+                      <div class="subtitle">Invoice Verification Sheet — Check Invoice Stage</div>
+                      <div class="grid">
+                        <div class="field"><label>Customer Name</label><p>${customerName}</p></div>
+                        <div class="field"><label>DO Number</label><p>${doNumber}</p></div>
+                        <div class="field"><label>Vehicle No.</label><p>${vehicleNo}</p></div>
+                        <div class="field"><label>Invoice No.</label><p>${invoiceNo}</p></div>
+                        <div class="field"><label>Invoice Date</label><p>${allProducts[0]?.invoice_date || '—'}</p></div>
+                        <div class="field"><label>Bill Amount</label><p>₹${fmtAmount(allProducts[0]?.bill_amount || 0, 2)}</p></div>
+                        <div class="field"><label>Insurance</label><p>${allProducts[0]?.insurance_details || '—'}</p></div>
+                        <div class="field"><label>Driver Advance (Cash)</label><p>₹${fmtAmount(allProducts[0]?.driver_advance_cash || 0, 2)}</p></div>
+                        <div class="field"><label>Driver Advance (Bank)</label><p>₹${fmtAmount(allProducts[0]?.driver_advance_bank || 0, 2)}</p></div>
+                        <div class="field"><label>Diesel Amount</label><p>₹${fmtAmount(allProducts[0]?.diesel_amount || 0, 2)}</p></div>
+                      </div>
+                      ${invoiceCopy ? `<div class="inv-link">📎 Invoice Copy attached: <a href="${invoiceCopy}" target="_blank">${invoiceCopy.split('/').pop()}</a></div>` : '<div class="inv-link" style="color:#c00">⚠️ No Invoice Copy attached</div>'}
+                      <table>
+                        <thead><tr><th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+                        <tbody>${productRows}</tbody>
+                      </table>
+                    </body></html>
+                  `
+                  const win = window.open('', '_blank')
+                  if (win) { win.document.write(printContent); win.document.close(); win.focus(); win.print() }
+                }
 
-                <div className="space-y-2">
-                  <Label>Remarks {checkData.status === "Issue" && <span className="text-red-500">*</span>}</Label>
-                  <Textarea
-                    value={checkData.remarks}
-                    onChange={(e) => setCheckData({ ...checkData, remarks: e.target.value })}
-                    placeholder="Enter verification remarks..."
-                    className="h-[38px] min-h-[38px]"
+                const printAction = {
+                  label: <><Printer className="h-4 w-4" />Print Data</>,
+                  title: "Print Verification Sheet",
+                  onClick: handlePrintData,
+                }
+
+                // Issued/reverted records are view-only: just Print + Close.
+                if (viewOnly) {
+                  return (
+                    <StageActionFooter
+                      onCancel={() => setIsDialogOpen(false)}
+                      cancelLabel="Close"
+                      actions={[{ ...printAction, variant: "outline" as const }]}
+                    />
+                  )
+                }
+
+                // Same footer as the other stages that can send work back: remarks on the left,
+                // Issue (back to Make Invoice, remarks mandatory) and Verified (moves forward) on the right.
+                return (
+                  <StageDecisionFooter
+                    remarks={checkData.remarks}
+                    onRemarksChange={(v) => setCheckData({ ...checkData, remarks: v })}
+                    remarksLabel="Remarks"
+                    remarksRequired={false}
+                    remarksPlaceholder="Enter remarks..."
+                    disabled={isProcessing || isReadOnly}
+                    revertActions={[{
+                      label: "Issue",
+                      onClick: () => handleSubmit("Issue"),
+                      disabled: isProcessing || isReadOnly || !checkData.remarks.trim(),
+                      title: isReadOnly ? "View Only Access" : !checkData.remarks.trim() ? "Remarks are required to report an issue" : "Report issue — sends back to Make Invoice",
+                    }]}
+                    extraActions={[printAction]}
+                    onCancel={() => setIsDialogOpen(false)}
+                    cancelDisabled={isProcessing}
+                    approve={{
+                      label: isProcessing ? "Processing..." : "Verified",
+                      onClick: () => setConfirmVerifyOpen(true),
+                      disabled: isProcessing || isReadOnly,
+                      title: isReadOnly ? "View Only Access" : "Mark as verified and move forward",
+                    }}
                   />
-                </div>
-              </div>
-            </div>
-            )}
-
-            <DialogFooter className="mt-8 border-t pt-4 bg-gray-50 -mx-3 sm:-mx-6 -mb-3 sm:-mb-6 px-3 sm:px-6 py-4 gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing} className="w-full sm:w-auto">
-                {viewOnly ? "Close" : "Cancel"}
-              </Button>
-              {!viewOnly && (
-                <Button
-                  onClick={handleSubmit}
-                  disabled={isProcessing || !checkData.status || isReadOnly}
-                  className="w-full bg-blue-600 hover:bg-blue-700 min-w-[150px] sm:w-auto"
-                  title={isReadOnly ? "View Only Access" : "Complete Verification"}
-                >
-                  {isProcessing ? "Processing..." : "Complete Verification"}
-                </Button>
-              )}
+                )
+              })()}
             </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={confirmVerifyOpen} onOpenChange={setConfirmVerifyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Invoice Verification</AlertDialogTitle>
+            <AlertDialogDescription>
+              Invoice <span className="font-bold text-slate-800">{selectedGroups[0]?.invoiceNo}</span> ({selectedProducts.length} item{selectedProducts.length === 1 ? "" : "s"}) will be marked as verified and moved to the next stage. Please make sure all details are correct, as this cannot be undone from here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Review Again</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() => {
+                setConfirmVerifyOpen(false)
+                handleSubmit("Verified")
+              }}
+            >
+              Confirm & Verify
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </WorkflowStageShell>
   )
 }

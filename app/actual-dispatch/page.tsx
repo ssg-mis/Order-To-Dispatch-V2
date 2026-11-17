@@ -4,8 +4,12 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
+import { CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageActionBar, StagePagination, StageDecisionFooter, StageActionFooter } from "@/components/stage-list"
 import { cn } from "@/lib/utils"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -18,11 +22,11 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { FileUploadField } from "@/components/file-upload-field"
 import { Separator } from "@/components/ui/separator"
-import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { Settings2, ChevronDown, ChevronUp, Truck, Weight, CheckCircle2, XCircle, FileText, ExternalLink, Printer, Download, ArrowUpDown, ArrowUp, ArrowDown, Info, Eye, Image as ImageIcon } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { actualDispatchApi, skuApi, orderApi, depotApi, vehicleMasterApi, transportMasterApi, driverMasterApi, draftApi, gateInApi } from "@/lib/api-service"
 import { isStaleWriteError } from "@/lib/stale-write"
-import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf"
+import { generateDispatchSlipPdf } from "@/lib/dispatch-slip-pdf-lazy"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useAuth } from "@/hooks/use-auth"
@@ -33,6 +37,9 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { fmtNum, fmtAmount, isAmountCol } from "@/lib/table-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { getOriginalImageUrl } from "@/lib/original-image-url"
 
 function formatDate(dateStr: string) {
   if (!dateStr) return "—";
@@ -124,7 +131,18 @@ function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
         extraWeight: internalOrder.extra_weight || "—",
         weightmentSlip: internalOrder.weightment_slip_copy || null,
         rstNo: internalOrder.rst_no || "—",
-        weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—"
+        weightDiffReason: internalOrder.reason_of_difference_in_weight_if_any_speacefic || "—",
+        // Read-only reference from Plan Vehicle (Stage 5) — vehicle/transporter/
+        // driver/freight are decided there, not re-entered/re-validated here.
+        plan_vehicle_confirmed: order.plan_vehicle_confirmed ?? internalOrder.plan_vehicle_confirmed ?? false,
+        plan_vehicle_registration_no: order.plan_vehicle_registration_no ?? internalOrder.plan_vehicle_registration_no ?? null,
+        plan_vehicle_transporter_name: order.plan_vehicle_transporter_name ?? internalOrder.plan_vehicle_transporter_name ?? null,
+        plan_vehicle_driver_name: order.plan_vehicle_driver_name ?? internalOrder.plan_vehicle_driver_name ?? null,
+        plan_vehicle_freight_rate_type: order.plan_vehicle_freight_rate_type ?? internalOrder.plan_vehicle_freight_rate_type ?? null,
+        plan_vehicle_freight_amount: order.plan_vehicle_freight_amount ?? internalOrder.plan_vehicle_freight_amount ?? null,
+        plan_vehicle_advance_bank: order.plan_vehicle_advance_bank ?? internalOrder.plan_vehicle_advance_bank ?? null,
+        plan_vehicle_advance_diesel: order.plan_vehicle_advance_diesel ?? internalOrder.plan_vehicle_advance_diesel ?? null,
+        plan_vehicle_advance_cash: order.plan_vehicle_advance_cash ?? internalOrder.plan_vehicle_advance_cash ?? null,
       }
     }
 
@@ -160,7 +178,14 @@ function groupOrdersByBaseDo(orders: any[], depoFilter: string): any[] {
       orderNo: Array.from(group._allBaseDos).join(", "),
       processId: group._allProducts[0]?.processid || "—",
       uploadSo: group._allProducts[0]?.uploadSo || group._allProducts[0]?.upload_so || null,
-      qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qtyToDispatch || 0), 0),
+      qtyToDispatch: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.qty_to_be_dispatched || p.qtyToDispatch || 0), 0),
+      orderQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.order_qty || p.orderQty || 0), 0),
+      approvalQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.approval_qty || p.approvalQty || 0), 0),
+      altQty: group._allProducts.reduce((sum: number, p: any) => sum + parseFloat(p.alt_qty || p.altQty || 0), 0),
+      totalWithGst: group._allProducts.reduce((sum: number, p: any) => {
+        const val = String(p.total_amount_with_gst || p.totalWithGst || p.data?.orderData?.total_amount_with_gst || "0").replace(/[^0-9.-]+/g, "");
+        return sum + (parseFloat(val) || 0);
+      }, 0),
       orderPunchRemarks: Array.from(new Set(Object.values(group._ordersMap).map((o: any) => o.orderPunchRemarks))).filter(Boolean).join("; ") || "—",
       _productCount: group._allProducts.length
     };
@@ -175,6 +200,7 @@ export default function ActualDispatchPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { toast } = useToast()
+  const wd = useWeightDecimals()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [pendingPage, setPendingPage] = useState(1)
@@ -189,13 +215,30 @@ export default function ActualDispatchPage() {
     manualSaudaNo: ""
   })
   const [activeDepots, setActiveDepots] = useState<any[]>([])
-  const [selectedDepoTab, setSelectedDepoTab] = useState("")
+  // Pending/History tab, depot tab and status buttons are remembered permanently; quick search / customer / oil
+  // filters only for the session (usePersistedFilters). Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("actual-dispatch", {
+    selectedDepoTab: "",
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "GATE_IN" | "READY" | "DRAFT",
+    customerFilter: "ALL",
+    oilFilter: "ALL",
+  }, { permanentKeys: ["selectedDepoTab", "statusFilter"] })
+  const { selectedDepoTab, quickSearch, statusFilter, customerFilter, oilFilter } = listView
+  const setSelectedDepoTab = (v: string) => patchListView({ selectedDepoTab: v })
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "GATE_IN" | "READY" | "DRAFT") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
+  const setOilFilter = (v: string) => patchListView({ oilFilter: v })
   const [isProcessing, setIsProcessing] = useState(false)
   const [skus, setSkus] = useState<any[]>([])
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [docWarningDialog, setDocWarningDialog] = useState<{ open: boolean; messages: string[] }>({ open: false, messages: [] })
   const [confirmDetails, setConfirmDetails] = useState<Record<string, { qty: string }>>({})
+  // The quantity typed in "Actual Qty Dispatched" wins, including an empty or 0 entry; the planned qty is
+  // only the default for a row the user has not touched (so clearing a row no longer falls back to planned).
+  const qtyOr = (entered: any, planned: any) => (entered === undefined || entered === null ? planned : entered)
   const [expandedOrders, setExpandedOrders] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<any[]>([])
   const [dialogSelectedProducts, setDialogSelectedProducts] = useState<string[]>([])
@@ -204,42 +247,24 @@ export default function ActualDispatchPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false)
   const [isSlipDialogOpen, setIsSlipDialogOpen] = useState(false)
   const [gateInData, setGateInData] = useState<any>(null)
+
+  useEffect(() => {
+    if (!isDialogOpen) return
+    const opened = new Date()
+    formOpenedAtRef.current = opened.getTime()
+    setNowTick(opened.getTime())
+    setDocRefDate(localDateStr(opened))
+    setDispatchTime(localTimeStr(opened))
+    const t = setInterval(() => setNowTick(Date.now()), 1000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDialogOpen])
   const [isGateInPopupOpen, setIsGateInPopupOpen] = useState(false)
 
-  // Consolidated State for Stages 6 & 7
-  const [vehicleNumber, setVehicleNumber] = useState("")
-  const [vehicleData, setVehicleData] = useState({
-    checkStatus: "",
-    remarks: "",
-    fitness: "",
-    insurance: "",
-    tax_copy: "",
-    polution: "",
-    permit1: "",
-    permit2_out_state: "",
-    fitness_file_name: "",
-    insurance_file_name: "",
-    tax_file_name: "",
-    pollution_file_name: "",
-    permit1_file_name: "",
-    permit2_file_name: "",
-    fitness_end_date: "",
-    insurance_end_date: "",
-    tax_end_date: "",
-    pollution_end_date: "",
-    permit1_end_date: "",
-    permit2_end_date: "",
-    registration_no: "",
-    vehicle_type: "",
-    rto: "",
-    passing_weight: "",
-    road_tax: "",
-    is_lifetime_tax: false,
-    fuel_type: "",
-    gvw: "",
-    ulw: "",
-  })
-
+  // Consolidated State for Stage 7 (Weightment Audit). Vehicle/transporter/
+  // documents/overload/freight are no longer collected here — they're confirmed
+  // upstream at Plan Vehicle (Stage 5) and surfaced read-only via planVehicleInfo
+  // below. Driver and the 3 advance amounts stay editable at this stage.
   const [loadData, setLoadData] = useState({
     actualQty: "",
     weightmentSlip: "",
@@ -252,18 +277,14 @@ export default function ActualDispatchPage() {
     otherItemWeight: "",
     dharamkataWeight: "",
     differanceWeight: "",
-    transporterName: "",
     reason: "",
     truckNo: "",
     vehicleNoPlateImage: "",
     vehicleNoPlateImage_file_name: "",
     checkStatus: "",
     remarks: "",
-    overloadRemarks: "",
     extraWeight: "0",
     weightmentSlip_file_name: "",
-    freightRateType: "",
-    freightAmount: "",
     cash_bank: "",
     diesel_advance: "",
     bhada: ""
@@ -283,13 +304,6 @@ export default function ActualDispatchPage() {
     lmv_valid_upto: ""
   })
 
-  const vehicleOptions = useMemo(() => (
-    vehicleMaster
-      .filter(v => v.registration_no && v.status === 'Active')
-      .map(v => ({ value: v.registration_no, label: v.registration_no }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
-  ), [vehicleMaster])
-
   const driverOptions = useMemo(() => (
     driverMaster
       .filter(d => d.driver_name && d.status === 'Active')
@@ -297,81 +311,86 @@ export default function ActualDispatchPage() {
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
   ), [driverMaster])
 
-  const transporterOptions = useMemo(() => ([
-    { value: "Company Vehicle", label: "Company Vehicle" },
-    { value: "Party Vehicle", label: "Party Vehicle" },
-    ...transporterMaster
-      .filter(t => t.transporter_name)
-      .map(t => ({ value: t.transporter_name, label: t.transporter_name }))
-  ]), [transporterMaster])
-
-  // TEMP: manual override for expiry check while old Vehicle Master records get
-  // backfilled with real dates — remove docRefDate and revert minDate to `new Date()`
-  // once Vehicle Master documents are cleaned up.
+  // TEMP: manual override for the Actual Dispatch Date while historical dates get
+  // backfilled — remove this and docRefDate once no longer needed.
   const [docRefDate, setDocRefDate] = useState<string>(() => new Date().toISOString().split("T")[0])
 
-  // Date validation for vehicle documents (Min docRefDate + 5 days)
-  const minDate = useMemo(() => {
-    const parsed = new Date(docRefDate)
-    // Fall back to today while the field is empty/mid-edit, so an invalid
-    // date never reaches toISOString() (which throws on an Invalid Date).
-    const d = isNaN(parsed.getTime()) ? new Date() : parsed
-    d.setDate(d.getDate() + 5)
-    return d.toISOString().split("T")[0]
-  }, [docRefDate])
+  // Actual Dispatch Date & Time: the date (docRefDate) plus this time. A fresh form starts at "now".
+  const localDateStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  const localTimeStr = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  const [dispatchTime, setDispatchTime] = useState<string>(() => localTimeStr(new Date()))
+  // When the form was opened + a live clock. Actual Dispatch Date & Time shows "now" and is stamped at
+  // Confirm; Actual Completion is how long the user has taken since opening the form.
+  const formOpenedAtRef = useRef<number>(Date.now())
+  const [nowTick, setNowTick] = useState<number>(() => Date.now())
+  const fmtDuration = (ms: number) => {
+    const total = Math.max(0, Math.floor(ms / 1000))
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60
+    return h > 0 ? `${h} hr ${m} min ${sec} sec` : m > 0 ? `${m} min ${sec} sec` : `${sec} sec`
+  }
 
-  // Interstate detection logic: Check if any selected order address state differs from vehicle RTO state
-  const isInterState = useMemo(() => {
-    if (selectedGroups.length === 0 || !vehicleData.rto) return false;
-
-    const rtoPrefix = vehicleData.rto.substring(0, 2).toUpperCase();
-    const statePrefixMap: Record<string, string> = {
-      "CG": "chhattisgarh", "KA": "karnataka", "MH": "maharashtra", "DL": "delhi",
-      "UP": "uttar pradesh", "HR": "haryana", "RJ": "rajasthan", "MP": "madhya pradesh",
-      "GJ": "gujarat", "PB": "punjab", "WB": "west bengal", "BR": "bihar",
-      "OD": "odisha", "AS": "assam", "TS": "telangana", "AP": "andhra pradesh",
-      "TN": "tamil nadu", "KL": "kerala", "UK": "uttarakhand", "UA": "uttarakhand",
-      "HP": "himachal pradesh", "JH": "jharkhand", "GA": "goa", "JK": "jammu",
-      "PY": "puducherry", "TR": "tripura", "MZ": "mizoram", "NL": "nagaland",
-      "MN": "manipur", "ML": "meghalaya", "SK": "sikkim", "AR": "arunachal",
+  // Read-only reference to the vehicle/transporter/freight already confirmed at
+  // Plan Vehicle (Stage 5) — Actual Dispatch no longer re-collects or re-validates
+  // any of this, it just displays what was decided upstream. Derived from the
+  // first selected group; every group in one dialog shares the same vehicle.
+  const planVehicleInfo = useMemo(() => {
+    const g: any = selectedGroups[0] || {};
+    return {
+      confirmed: !!g.plan_vehicle_confirmed,
+      registrationNo: g.plan_vehicle_registration_no || null,
+      transporterName: g.plan_vehicle_transporter_name || null,
+      driverName: g.plan_vehicle_driver_name || null,
+      freightRateType: g.plan_vehicle_freight_rate_type || null,
+      freightAmount: g.plan_vehicle_freight_amount ?? null,
     };
+  }, [selectedGroups]);
 
-    const vehicleState = statePrefixMap[rtoPrefix];
-    if (!vehicleState) return true; // Assume interstate if prefix unknown
+  // Vehicle master record for the registration confirmed at Plan Vehicle. The Vehicle Setup
+  // card below shows its details and (read-only) digital documents straight from master.
+  const planVehicleRecord = useMemo(() => {
+    if (!planVehicleInfo.registrationNo) return null;
+    return vehicleMaster.find(v => v.registration_no === planVehicleInfo.registrationNo) || null;
+  }, [vehicleMaster, planVehicleInfo.registrationNo]);
 
-    let hasInterStateOrder = false;
-    selectedGroups.forEach(group => {
-      Object.values(group._ordersMap).forEach((order: any) => {
-        const addr = (order.address || "").toLowerCase();
-        if (!addr.includes(vehicleState)) {
-          hasInterStateOrder = true;
-        }
-      });
-    });
+  const planVehicleType = planVehicleRecord?.vehicle_type || "";
 
-    return hasInterStateOrder;
-  }, [selectedGroups, vehicleData.rto]);
+  const vehicleOptions = useMemo(() => (
+    vehicleMaster
+      .filter(v => v.registration_no)
+      .map(v => ({ value: v.registration_no, label: v.registration_no }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
+  ), [vehicleMaster])
 
-  const handleFileChange = async (field: string, fileNameField: string, file: File | null, type: 'vehicle' | 'load' = 'vehicle') => {
+  // Digital documents shown (disabled) in Vehicle Setup, derived from vehicle master.
+  const vehicleDocs = useMemo(() => {
+    const v: any = planVehicleRecord || {};
+    const toDate = (d: any) => (d ? new Date(d).toISOString().split('T')[0] : "");
+    const isLifetimeTax = !!(v.life_time_tax || v.life_time_tax_image);
+    const isElectric = v.fuel_type === 'Electrical';
+    const gvwOk = Number(v.gvw) > 3000;
+    const gvwNote = gvwOk ? '' : '(Disabled: GVW must be > 3000 KGS)';
+    return [
+      { key: 'fitness', label: 'Fitness', file: v.fitness_image, date: toDate(v.fitness), enabled: true, note: '' },
+      { key: 'insurance', label: 'Insurance', file: v.insurance_image, date: toDate(v.insurance), enabled: true, note: '' },
+      { key: 'tax', label: 'Tax Copy', file: isLifetimeTax ? v.life_time_tax_image : v.road_tax_image, date: isLifetimeTax ? "" : toDate(v.road_tax), lifetime: isLifetimeTax, enabled: true, note: '' },
+      { key: 'pollution', label: 'Pollution', file: v.pollution_image, date: isElectric ? "" : toDate(v.pollution), enabled: true, note: isElectric ? '(N/A - Electrical)' : '' },
+      { key: 'state_permit', label: 'State Permit', file: v.state_permit_image, date: toDate(v.state_permit), enabled: gvwOk, note: gvwNote },
+      { key: 'national_permit', label: 'National / Other State Permit', file: v.national_permit_image, date: toDate(v.national_permit), enabled: gvwOk, note: gvwNote },
+    ] as { key: string; label: string; file?: string; date: string; lifetime?: boolean; enabled: boolean; note: string }[];
+  }, [planVehicleRecord]);
+
+  const handleFileChange = async (field: string, fileNameField: string, file: File | null) => {
     if (!file) return
 
     setIsUploading(field)
     try {
       const response = await orderApi.uploadFile(file)
       if (response.success) {
-        if (type === 'vehicle') {
-          setVehicleData(p => ({
-            ...p,
-            [field]: response.data.url,
-            [fileNameField]: file.name
-          }))
-        } else {
-          setLoadData(p => ({
-            ...p,
-            [field]: response.data.url,
-            [fileNameField]: file.name
-          }))
-        }
+        setLoadData(p => ({
+          ...p,
+          [field]: response.data.url,
+          [fileNameField]: file.name
+        }))
         toast({
           title: "Upload Successful",
           description: `${file.name} has been uploaded.`,
@@ -450,10 +469,10 @@ export default function ActualDispatchPage() {
     { id: "deliveryDate", label: "Delivery Date" },
     { id: "customerName", label: "Customer Name" },
     { id: "oilType", label: "Oil Type" },
-    { id: "ratePer15Kg", label: "Rate Per 15 kg" },
-    { id: "ratePerLtr", label: "Rate Per Ltr." },
-    { id: "rateOfMaterial", label: "Rate of Material" },
-    { id: "rate", label: "Rate" },
+    { id: "ratePer15Kg", label: "Rate Per 15 kg (₹)" },
+    { id: "ratePerLtr", label: "Rate Per Ltr. (₹)" },
+    { id: "rateOfMaterial", label: "Rate of Material (₹)" },
+    { id: "rate", label: "Rate (₹)" },
     { id: "productName", label: "Product Name" },
     { id: "uom", label: "UOM" },
     { id: "orderQty", label: "Order Qty" },
@@ -463,14 +482,14 @@ export default function ActualDispatchPage() {
     { id: "approvalQty", label: "Approval Qty" },
     { id: "qtyToDispatch", label: "Qty to Dispatch" },
     { id: "deliveryFrom", label: "Delivery From" },
-    { id: "totalWithGst", label: "Total Amount with GST" },
+    { id: "totalWithGst", label: "Total Amount with GST (₹)" },
     { id: "transportType", label: "Type of Transporting" },
     { id: "contactPerson", label: "Customer Contact Person Name" },
     { id: "whatsapp", label: "Customer Contact Person Whatsapp No." },
     { id: "address", label: "Customer Address" },
     { id: "paymentTerms", label: "Payment Terms" },
     { id: "advanceTaken", label: "Advance Payment to be Taken" },
-    { id: "advanceAmount", label: "Advance Amount" },
+    { id: "advanceAmount", label: "Advance Amount (₹)" },
     { id: "isBroker", label: "Is this order Through Broker" },
     { id: "brokerName", label: "Broker Name (If Order Through Broker)" },
     { id: "uploadSo", label: "Upload DO" },
@@ -665,9 +684,9 @@ export default function ActualDispatchPage() {
 
     setLoadData(prev => ({
       ...prev,
-      netWeightPacking: (loadData.grossWeight || loadData.tareWeight) ? net.toFixed(2) : prev.netWeightPacking
+      netWeightPacking: (loadData.grossWeight || loadData.tareWeight) ? net.toFixed(wd) : prev.netWeightPacking
     }))
-  }, [loadData.grossWeight, loadData.tareWeight])
+  }, [loadData.grossWeight, loadData.tareWeight, wd])
 
   // Calculate Expected SKU Weight for calculations
   const totalPackingWeightFromSku = useMemo(() => {
@@ -675,16 +694,13 @@ export default function ActualDispatchPage() {
       .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
       .reduce((total, prod) => {
         const rowKey = prod._rowKey
-        return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
+        return total + calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch))
       }, 0)
   }, [selectedGroups, confirmDetails, skus, dialogSelectedProducts])
 
-  // Auto-fill Gross Weight from calculated total packing weight
-  useEffect(() => {
-    if (totalPackingWeightFromSku > 0 && !loadData.grossWeight) {
-      setLoadData(p => ({ ...p, grossWeight: totalPackingWeightFromSku.toFixed(4) }))
-    }
-  }, [totalPackingWeightFromSku])
+  // Gross Weight is NOT pre-filled: per the spec the user enters the weighbridge
+  // Gross (loaded vehicle) and Tare (empty vehicle) weights; the goods' expected
+  // weight is only used below to compute the Difference.
 
   // Auto-calculate Total Weight and Difference
   const totalCombinedWeight = useMemo(() => {
@@ -699,16 +715,83 @@ export default function ActualDispatchPage() {
 
     setLoadData(prev => ({
       ...prev,
-      differanceWeight: (loadData.netWeightPacking || totalCombinedWeight > 0) ? diff.toFixed(4) : ""
+      // Only once Gross/Tare have been entered (Net is computed) — otherwise the
+      // Difference would show a meaningless negative before the user types anything.
+      differanceWeight: loadData.netWeightPacking ? diff.toFixed(wd) : ""
     }))
-  }, [loadData.netWeightPacking, totalCombinedWeight])
+  }, [loadData.netWeightPacking, totalCombinedWeight, wd])
+
+  // Baseline tare for the confirmed vehicle: average of the tare weights recorded on its
+  // earlier dispatches, or the vehicle's ULW on its first trip. It prefills Tare Wt and
+  // defines the payload limit: passing weight = GVW - baseline tare.
+  const [vehicleTareStats, setVehicleTareStats] = useState<{ avgTare: number | null; count: number } | null>(null)
+  const tareEditedRef = useRef(false)
+
+  useEffect(() => {
+    const vehicleId = planVehicleRecord?.id
+    if (!vehicleId) { setVehicleTareStats(null); return }
+    let cancelled = false
+    actualDispatchApi.getVehicleTareStats(vehicleId).then((res: any) => {
+      if (!cancelled && res?.success) setVehicleTareStats({ avgTare: res.data?.avgTare ?? null, count: res.data?.count ?? 0 })
+    }).catch(() => { if (!cancelled) setVehicleTareStats(null) })
+    return () => { cancelled = true }
+  }, [planVehicleRecord?.id])
+
+  const baselineTare = useMemo(() => {
+    if (!planVehicleRecord) return { value: 0, source: "" }
+    const avg = vehicleTareStats && vehicleTareStats.count > 0 ? Number(vehicleTareStats.avgTare) || 0 : 0
+    if (avg > 0) return { value: avg, source: `Auto: average of ${vehicleTareStats!.count} earlier trip(s)` }
+    const ulw = Number(planVehicleRecord.ulw) || 0
+    return { value: ulw, source: ulw > 0 ? "Auto: vehicle ULW (first trip)" : "" }
+  }, [planVehicleRecord, vehicleTareStats])
+
+  // A fresh dialog starts with Tare Wt empty and unedited; prefill it from the baseline once known.
+  useEffect(() => {
+    if (!isDialogOpen) { tareEditedRef.current = false; return }
+    if (tareEditedRef.current || baselineTare.value <= 0) return
+    setLoadData(prev => (prev.tareWeight ? prev : { ...prev, tareWeight: baselineTare.value.toFixed(2) }))
+  }, [isDialogOpen, baselineTare.value])
+
+  // Payload limit: passing weight = GVW - baseline tare, falling back to the master's own passing value.
+  const effectivePassing = useMemo(() => {
+    const gvw = Number(planVehicleRecord?.gvw) || 0
+    return gvw > 0 && baselineTare.value > 0 ? gvw - baselineTare.value : Number(planVehicleRecord?.passing) || 0
+  }, [planVehicleRecord, baselineTare.value])
+
+  // Overload detection: GVW = max loaded weight; passing weight (payload) = effectivePassing.
+  const overloadMessages = useMemo(() => {
+    const gvw = Number(planVehicleRecord?.gvw) || 0
+    const passing = effectivePassing
+    const gross = parseFloat(loadData.grossWeight) || 0
+    const net = parseFloat(loadData.netWeightPacking) || 0
+    const msgs: string[] = []
+    if (gvw > 0 && gross > gvw) {
+      msgs.push(`Weighbridge gross ${gross.toFixed(wd)} KG exceeds vehicle GVW ${gvw.toFixed(wd)} KG`)
+    }
+    if (passing > 0 && net > passing) {
+      msgs.push(`Weighbridge net ${net.toFixed(wd)} KG exceeds vehicle passing weight ${passing.toFixed(wd)} KG`)
+    }
+    if (passing > 0 && totalCombinedWeight > passing) {
+      msgs.push(`Total planned weight ${totalCombinedWeight.toFixed(wd)} KG exceeds vehicle passing weight ${passing.toFixed(wd)} KG`)
+    }
+    return msgs
+  }, [planVehicleRecord, effectivePassing, loadData.grossWeight, loadData.netWeightPacking, totalCombinedWeight, wd])
+
+  // Status (STG 7) is detected automatically: any overload selects "Reject Load", otherwise "Approved Quality".
+  // It is only re-selected when the overload result changes, so the user can still change it by hand.
+  const autoCheckStatus = overloadMessages.length > 0 ? "Reject" : "Accept"
+  useEffect(() => {
+    if (!isDialogOpen) return
+    setLoadData(prev => (prev.checkStatus === autoCheckStatus ? prev : { ...prev, checkStatus: autoCheckStatus }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDialogOpen, autoCheckStatus])
 
   // Auto-update Actual Qty when selected products or their confirmed quantities change
   useEffect(() => {
     if (selectedGroups.length === 0) return;
     const totalQty = selectedGroups.flatMap(g => g._allProducts)
       .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
-      .reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0);
+      .reduce((sum, p) => sum + parseFloat(qtyOr(confirmDetails[p._rowKey]?.qty, p.qtyToDispatch) || "0"), 0);
 
     setLoadData(prev => ({
       ...prev,
@@ -812,26 +895,6 @@ export default function ActualDispatchPage() {
     return byKey
   }, [user?.depo_access])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
   // Product-level columns (Product Name, Oil Type, Rate, UOM, etc.) only exist on
   // individual line items inside _allProducts — the flattened group row never carries
   // them — so any renderer reading row[colId] directly for these gets blank. Read from
@@ -859,32 +922,87 @@ export default function ActualDispatchPage() {
     return "—"
   }
 
-  const getSortValue = (row: any, colId: string): string => {
-    if (colId === "status") {
-      return row.has_draft ? "Draft Saved" : row.has_gate_in ? "Ready for Dispatch" : "Ready for Gate In"
-    }
-    if (colId === "qtyToDispatch") {
-      return String(row.qtyToDispatch || 0)
-    }
-    return getColumnDisplayValue(row, colId)
+  // ── Stage table (column search / date range / sort / totals) ──
+
+  const rowStatusText = (row: any) =>
+    row.has_draft ? (row.has_gate_in ? "Draft Saved" : "Draft Saved · Gate-In Pending") : row.has_gate_in ? "Ready for Dispatch" : "Gate-In Pending"
+
+  const NUMERIC_COLS = ["qtyToDispatch", "orderQty", "approvalQty", "altQty", "totalWithGst"]
+  const DATE_COLS = ["partySoDate", "startDate", "endDate", "deliveryDate"]
+  const parseAmount = (v: any) => parseFloat(String(v ?? "0").replace(/[^0-9.-]+/g, "")) || 0
+
+  const RATE_COLS = ["ratePer15Kg", "ratePerLtr", "rateOfMaterial", "rate", "advanceAmount"]
+  const RIGHT_COLS = [...NUMERIC_COLS, ...DATE_COLS, ...RATE_COLS]
+  const colWidth = (id: string) => (RIGHT_COLS.includes(id) ? "min-w-[125px]" : undefined)
+  // Display formatting for table cells + mobile cards (plain numbers, dd/mm/yyyy dates, no units).
+  const formatCellValue = (row: any, colId: string): string => {
+    const v = getColumnDisplayValue(row, colId)
+    if (v === "—") return v
+    if (colId === "partySoDate") return v
+    if (DATE_COLS.includes(colId)) return formatDate(v)
+    if (colId === "totalWithGst") return fmtAmount(parseAmount(v), 2)
+    if (NUMERIC_COLS.includes(colId)) return fmtNum(parseAmount(v), 4)
+    if (RATE_COLS.includes(colId)) return Number.isFinite(Number(v)) ? fmtAmount(v, 2) : v
+    return v
   }
 
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
+  const tableCols = useMemo<StageColDef<any>[]>(() => {
+    return orderedVisibleCols.map((col): StageColDef<any> => {
+      if (col.id === "status") return { id: col.id, label: col.label, accessor: (r: any) => rowStatusText(r) }
+      if (NUMERIC_COLS.includes(col.id)) {
+        return { id: col.id, label: col.label, type: "number", total: !["qtyToDispatch", "orderQty", "approvalQty"].includes(col.id), accessor: (r: any) => parseAmount(getColumnDisplayValue(r, col.id)) }
+      }
+      if (DATE_COLS.includes(col.id)) {
+        return {
+          id: col.id,
+          label: col.label,
+          type: "date",
+          accessor: (r: any) => (col.id === "partySoDate" ? r._allProducts?.[0]?.party_so_date || r._allProducts?.[0]?.partySoDate : r[col.id]),
+        }
+      }
+      return { id: col.id, label: col.label, accessor: (r: any) => getColumnDisplayValue(r, col.id) }
     })
-  }, [displayRows, pendingSortField, pendingSortDir])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedVisibleCols.map(c => c.id).join("|")])
 
+  const baseFilter = useCallback((row: any) => {
+    if (statusFilter === "DRAFT" && !row.has_draft) return false
+    if (statusFilter === "READY" && (row.has_draft || !row.has_gate_in)) return false
+    if (statusFilter === "GATE_IN" && row.has_gate_in) return false
+    if (customerFilter !== "ALL" && row.customerName !== customerFilter) return false
+    if (oilFilter !== "ALL" && getColumnDisplayValue(row, "oilType") !== oilFilter) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [row.orderNo, row.processId, row.customerName, getColumnDisplayValue(row, "productName"), row.orderPunchRemarks].join(" ").toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, customerFilter, oilFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: tableCols, baseFilter, persistKey: "actual-dispatch" })
+  const sortedDisplayRows = table.rows
+  const uniqueCustomerNames = useMemo(
+    () => Array.from(new Set(displayRows.map((r: any) => String(r.customerName || "")).filter(Boolean))).sort() as string[],
+    [displayRows]
+  )
+  const uniqueOilTypes = useMemo(
+    () => Array.from(new Set(displayRows.map((r: any) => getColumnDisplayValue(r, "oilType")).filter((v: string) => v && v !== "—"))).sort() as string[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (oilFilter !== "ALL" ? 1 : 0) +
+    (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllTableFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", oilFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const statusLabel = (s: string) => (s === "GATE_IN" ? "Gate-In Pending" : s === "READY" ? "Ready for Dispatch" : "Draft Saved")
 
 
   const toggleSelectAll = () => {
-    const currentPageKeys = displayRows.map((row) => row._rowKey)
+    const currentPageKeys = sortedDisplayRows.map((row) => row._rowKey)
     const allCurrentSelected = currentPageKeys.length > 0 && currentPageKeys.every((k) => selectedOrders.includes(k))
     if (allCurrentSelected) {
       // Only drop this page's keys — leave selections made on other pages/searches intact
@@ -905,42 +1023,6 @@ export default function ActualDispatchPage() {
   }
 
 
-  // Fills vehicleData/loadData from a vehicle_master record. Always call this with a fresh
-  // `selectedV` (from a just-refetched vehicleMaster) rather than trusting a saved draft —
-  // these fields are master-derived, and a stale draft can clobber documents renewed since.
-  const autofillVehicleData = (selectedV: any) => {
-    const isLifetimeTax = !!(selectedV.life_time_tax || selectedV.life_time_tax_image);
-    setVehicleData(p => ({
-      ...p,
-      registration_no: selectedV.registration_no || "",
-      vehicle_type: selectedV.vehicle_type || "",
-      rto: selectedV.rto || "",
-      passing_weight: selectedV.passing || "",
-      fitness_end_date: selectedV.fitness ? new Date(selectedV.fitness).toISOString().split('T')[0] : "",
-      insurance_end_date: selectedV.insurance ? new Date(selectedV.insurance).toISOString().split('T')[0] : "",
-      tax_end_date: (!isLifetimeTax && selectedV.road_tax) ? new Date(selectedV.road_tax).toISOString().split('T')[0] : "",
-      is_lifetime_tax: isLifetimeTax,
-      fuel_type: selectedV.fuel_type || "",
-      pollution_end_date: selectedV.fuel_type === 'Electrical' ? "" : (selectedV.pollution ? new Date(selectedV.pollution).toISOString().split('T')[0] : ""),
-      permit1_end_date: selectedV.state_permit ? new Date(selectedV.state_permit).toISOString().split('T')[0] : "",
-      permit2_end_date: selectedV.national_permit ? new Date(selectedV.national_permit).toISOString().split('T')[0] : "",
-      // Images
-      fitness: selectedV.fitness_image || p.fitness,
-      insurance: selectedV.insurance_image || p.insurance,
-      tax_copy: (isLifetimeTax ? selectedV.life_time_tax_image : selectedV.road_tax_image) || p.tax_copy,
-      polution: selectedV.pollution_image || p.polution,
-      permit1: selectedV.state_permit_image || p.permit1,
-      permit2_out_state: selectedV.national_permit_image || p.permit2_out_state,
-      gvw: selectedV.gvw || "",
-      ulw: selectedV.ulw || "",
-    }));
-    setLoadData(p => ({
-      ...p,
-      truckNo: selectedV.registration_no || "",
-      transporterName: selectedV.transporter || p.transporterName
-    }));
-  };
-
   const handleOpenDialog = async (group?: any) => {
     // Resolve selected DOs to a fresh, complete, authoritative set fetched
     // directly from the server (see fetchCompleteGroupsForKeys) — a DO's
@@ -955,11 +1037,11 @@ export default function ActualDispatchPage() {
       .filter(Boolean);
 
     if (targetGroups.length > 0) {
-      // Refresh vehicle/driver/transporter master data so the dialog's autofill
-      // (e.g. Permit 1/State Permit) reflects documents uploaded since page load.
-      // Awaited so the draft-restore step below can re-derive vehicle docs from
-      // current master data instead of trusting a possibly stale saved draft.
-      const { vehicles: freshVehicles, drivers: freshDrivers } = await fetchMasterData();
+      // Refresh driver master data so the driver combobox/badges reflect records
+      // updated since page load. Awaited so the draft-restore step below can
+      // re-derive driver data from current master data instead of trusting a
+      // possibly stale saved draft.
+      const { drivers: freshDrivers } = await fetchMasterData();
 
       // TEMP: reset the manual expiry-check reference date to today on every
       // dialog open, so a backdated value doesn't leak into an unrelated dispatch.
@@ -983,41 +1065,25 @@ export default function ActualDispatchPage() {
 
       setIsDialogOpen(true)
 
-      // Reset consolidated forms
-      setVehicleNumber("")
-      setVehicleData({
-        checkStatus: "",
-        remarks: "",
-        fitness: "",
-        insurance: "",
-        tax_copy: "",
-        polution: "",
-        permit1: "",
-        permit2_out_state: "",
-        fitness_file_name: "",
-        insurance_file_name: "",
-        tax_file_name: "",
-        pollution_file_name: "",
-        permit1_file_name: "",
-        permit2_file_name: "",
-        fitness_end_date: "",
-        insurance_end_date: "",
-        tax_end_date: "",
-        pollution_end_date: "",
-        permit1_end_date: "",
-        permit2_end_date: "",
-        registration_no: "",
-        vehicle_type: "",
-        rto: "",
-        passing_weight: "",
-        road_tax: "",
-        is_lifetime_tax: false,
-        fuel_type: "",
-        gvw: "",
-        ulw: "",
-      })
-      setDriverName("")
-      setDriverData({
+      // Reset consolidated forms. Vehicle/transporter/documents/freight are no
+      // longer collected here — they were confirmed at Plan Vehicle (Stage 5)
+      // and are read straight off the row's plan_vehicle_* fields (see
+      // planVehicleInfo above). Driver and the 3 advance amounts stay editable
+      // at this stage, so pre-fill them from Plan Vehicle's values below.
+      const planInfo: any = targetGroups[0] || {};
+
+      setDriverName(planInfo.plan_vehicle_driver_name || "")
+      const planDriver = planInfo.plan_vehicle_driver_name
+        ? freshDrivers.find((drv: any) => drv.driver_name === planInfo.plan_vehicle_driver_name)
+        : null;
+      setDriverData(planDriver ? {
+        contact_no: planDriver.mobile_no || "",
+        license_no: planDriver.driving_licence_no || "",
+        license_type: planDriver.driving_licence_type || "",
+        valid_upto: planDriver.valid_upto ? new Date(planDriver.valid_upto).toISOString().split('T')[0] : "",
+        trans_valid_upto: planDriver.trans_valid_upto ? new Date(planDriver.trans_valid_upto).toISOString().split('T')[0] : "",
+        lmv_valid_upto: planDriver.lmv_valid_upto ? new Date(planDriver.lmv_valid_upto).toISOString().split('T')[0] : ""
+      } : {
         contact_no: "",
         license_no: "",
         license_type: "",
@@ -1037,47 +1103,29 @@ export default function ActualDispatchPage() {
         otherItemWeight: "",
         dharamkataWeight: "",
         differanceWeight: "",
-        transporterName: "",
         reason: "",
-        truckNo: "",
+        truckNo: planInfo.plan_vehicle_registration_no || "",
         vehicleNoPlateImage: "",
         checkStatus: "",
         remarks: "",
         extraWeight: "0",
         weightmentSlip_file_name: "",
         vehicleNoPlateImage_file_name: "",
-        overloadRemarks: "",
-        freightRateType: "",
-        freightAmount: "",
-        cash_bank: "",
-        diesel_advance: "",
-        bhada: ""
+        cash_bank: planInfo.plan_vehicle_advance_bank != null ? String(planInfo.plan_vehicle_advance_bank) : "",
+        diesel_advance: planInfo.plan_vehicle_advance_diesel != null ? String(planInfo.plan_vehicle_advance_diesel) : "",
+        bhada: planInfo.plan_vehicle_advance_cash != null ? String(planInfo.plan_vehicle_advance_cash) : ""
       })
 
       // Silently restore saved draft if one exists — shared per order, so this
-      // restores drafts saved by any user, not just the current one
+      // restores drafts saved by any user, not just the current one. Restoring
+      // (below) intentionally happens after the Plan Vehicle-derived defaults
+      // above, so an in-progress draft for THIS stage wins over those defaults.
       if (targetGroups.length > 0) {
         const orderKey = targetGroups[0]._rowKey;
         try {
           const res = await draftApi.get(orderKey);
           if (res.success && res.data?.draft_data) {
             const d = res.data.draft_data;
-            if (d.vehicleNumber !== undefined) setVehicleNumber(d.vehicleNumber);
-            // Vehicle documents (fitness/insurance/tax/pollution/permits/gvw/ulw) are
-            // master-derived — re-fetch them fresh instead of trusting the draft snapshot,
-            // which may predate documents renewed/uploaded since the draft was saved.
-            // Only checkStatus/remarks are genuinely manual dialog inputs worth restoring.
-            const draftVehicle = d.vehicleNumber
-              ? freshVehicles.find((veh: any) => veh.registration_no === d.vehicleNumber)
-              : null;
-            if (draftVehicle) autofillVehicleData(draftVehicle);
-            if (d.vehicleData) {
-              setVehicleData(prev => ({
-                ...prev,
-                checkStatus: d.vehicleData.checkStatus ?? prev.checkStatus,
-                remarks: d.vehicleData.remarks ?? prev.remarks,
-              }));
-            }
             if (d.loadData) setLoadData(prev => ({ ...prev, ...d.loadData }));
             // Driver fields are entirely master-derived (license no/type/expiry, contact) —
             // re-fetch fresh from driverMaster rather than trusting the draft snapshot.
@@ -1146,7 +1194,7 @@ export default function ActualDispatchPage() {
 
     const OIL_COLORS: Record<string, string> = { "RICE OIL": "#FCE4D6", "SOYA OIL": "#E2EFDA", "PALM OIL": "#C5D9F1", "OTHERS": "#E5E7EB" };
     const OIL_TITLES: Record<string, string> = { "RICE OIL": "Rice Oil", "SOYA OIL": "Soya Oil", "PALM OIL": "Palm Oil", "OTHERS": "Other" };
-    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    const fmtWt = (n: number) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: wd, maximumFractionDigits: wd });
     const fmtDT = (s: any) => {
       if (!s) return "";
       const d = new Date(s);
@@ -1192,7 +1240,7 @@ export default function ActualDispatchPage() {
 
           partyProducts.forEach(prod => {
             const name = (prod.productName || "").toUpperCase();
-            const qty = parseFloat(confirmDetails[prod._rowKey]?.qty || prod.qtyToDispatch || "0");
+            const qty = parseFloat(qtyOr(confirmDetails[prod._rowKey]?.qty, prod.qtyToDispatch) || "0");
             const unit = prod.uom || "PCS";
             const weight = calculateWeight(prod.productName, qty);
             const grossWeight = calculateGrossWeight(prod.productName, qty);
@@ -1218,7 +1266,7 @@ export default function ActualDispatchPage() {
                 <div className="border-b border-black p-1.5"><span className="font-bold">DO Date:</span> {date}</div>
                 <div className="border-b border-r border-black p-1.5"><span className="font-bold">Customer:</span> {party}</div>
                 <div className="border-b border-black p-1.5">{referenceLabel ? <><span className="font-bold">{referenceLabel}:</span> {referenceValue}</> : referenceValue}</div>
-                <div className="border-b border-r border-black p-1.5"><span className="font-bold">Address:</span> {place}</div>
+                <div className="border-b border-r border-black p-1.5 break-words min-w-0"><span className="font-bold">Address:</span> <span className="break-all">{place}</span></div>
                 <div className="border-b border-black p-1.5">
                   <span className="font-bold">Mob.:</span> {partyMo}<br />
                   <span className="font-bold">Status:</span> {status}
@@ -1265,10 +1313,10 @@ export default function ActualDispatchPage() {
                   })}
                   <tr className="bg-black text-white font-bold">
                     <td className="border border-black p-1.5 text-xs text-center">Grand Total</td>
-                    <td className="border border-black p-1.5 text-xs text-center">{partyProducts.reduce((s, p) => s + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}</td>
+                    <td className="border border-black p-1.5 text-xs text-center">{partyProducts.reduce((s, p) => s + parseFloat(qtyOr(confirmDetails[p._rowKey]?.qty, p.qtyToDispatch) || "0"), 0)}</td>
                     <td className="border border-black p-1.5 text-xs"></td>
-                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
-                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || p.qtyToDispatch), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateWeight(p.productName, qtyOr(confirmDetails[p._rowKey]?.qty, p.qtyToDispatch)), 0))} KGS</td>
+                    <td className="border border-black p-1.5 text-xs text-right whitespace-nowrap">{fmtWt(partyProducts.reduce((s, p) => s + calculateGrossWeight(p.productName, qtyOr(confirmDetails[p._rowKey]?.qty, p.qtyToDispatch)), 0))} KGS</td>
                   </tr>
                   <tr>
                     <td colSpan={5} className="border border-black p-2 align-top">
@@ -1324,7 +1372,7 @@ export default function ActualDispatchPage() {
         approveBy: firstProd.order_approval_user || "—",
         approveAt: firstProd.order_approval_at || null,
         products: partyProducts.map((prod: any) => {
-          const qty = parseFloat(confirmDetails[prod._rowKey]?.qty || prod.qtyToDispatch || "0");
+          const qty = parseFloat(qtyOr(confirmDetails[prod._rowKey]?.qty, prod.qtyToDispatch) || "0");
           return {
             productName: prod.productName || "—",
             uom: prod.uom || "PCS",
@@ -1363,8 +1411,6 @@ export default function ActualDispatchPage() {
       return;
     }
     const draftData = {
-      vehicleNumber,
-      vehicleData,
       loadData,
       confirmDetails,
       dialogSelectedProducts,
@@ -1397,128 +1443,73 @@ export default function ActualDispatchPage() {
   };
 
   const performDispatchConfirmation = async () => {
-    // ONLY IF DEPO IS BANARI — vehicle selection/details are optional for other depots
+    // A rejected load must not move on to the next stage.
+    if (loadData.checkStatus === "Reject") {
+      toast({
+        title: "Load rejected",
+        description: "Dispatch cannot proceed while the status is Reject Load. Change it to Approved Quality once the issue is resolved, or revert this order.",
+        variant: "destructive",
+      })
+      return
+    }
+    // Gate-In must be completed before a dispatch can be confirmed.
+    if (!gateInData) {
+      toast({
+        title: "Gate-In pending",
+        description: "Complete Gate-In for this order first. Dispatch can be confirmed only after Gate-In.",
+        variant: "destructive",
+      })
+      return
+    }
+    // ONLY IF DEPO IS BANARI — the Stage 7 weightment requirements below are optional for other depots
     const isBanari = selectedDepoTab?.toUpperCase() === 'BANARI';
 
     // Collect every validation issue up front so the user sees them all in one toast,
     // instead of fixing them one at a time across repeated submit attempts.
     const validationErrors: string[] = [];
-    // Tax copy / Pollution certificate issues are soft — warn and let the user
-    // choose to continue instead of blocking the dispatch.
-    const docWarnings: string[] = [];
 
-    // 1. Basic Vehicle Check
-    if (isBanari && !vehicleNumber.trim()) {
-      validationErrors.push("Vehicle Registration Number is required");
+    // Vehicle/transporter/documents/overload/interstate-permit are validated and
+    // confirmed upstream at Plan Vehicle (Stage 5) — this stage only re-validates
+    // what it actually collects: the Stage 7 weightment audit, the (still-editable)
+    // driver, and the (still-editable) advance amounts.
+    // Every selected product must have an Actual Qty Dispatched above 0 (untick a product to leave it out).
+    selectedGroups.flatMap((g: any) => g._allProducts)
+      .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
+      .forEach((prod: any) => {
+        const q = parseFloat(qtyOr(confirmDetails[prod._rowKey]?.qty, prod.qtyToDispatch) || "0")
+        if (!(q > 0)) validationErrors.push(`Actual Qty Dispatched must be greater than 0 for ${prod.productName || "the selected product"}`)
+      })
+
+    // Client spec (Stage 7): Actual Qty Loaded, Weighment Slip, Gross/Tare Weight and
+    // Driver are required at EVERY depot (the spec names no depot).
+    if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
+      validationErrors.push("Valid Actual Qty is required");
+    }
+    if (!loadData.weightmentSlip) {
+      validationErrors.push("Weighment Slip upload is required");
+    }
+    // No Plate Image stays optional — not part of the Stage 7 spec's task list.
+    if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
+      validationErrors.push("Valid Gross Weight is required");
+    }
+    if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
+      validationErrors.push("Valid Tare Weight is required");
+    }
+    if (!driverName.trim()) {
+      validationErrors.push("Driver selection is required");
     }
 
-    // 2. Stage 6: Vehicle Document Validation
     if (isBanari) {
-      const vehicleDocs = [
-        { key: 'fitness', label: 'Fitness' },
-        { key: 'fitness_end_date', label: 'Fitness Expiry' },
-        { key: 'insurance', label: 'Insurance' },
-        { key: 'insurance_end_date', label: 'Insurance Expiry' },
-        { key: 'tax_copy', label: 'Tax' },
-        { key: 'tax_end_date', label: 'Tax Expiry' },
-        { key: 'polution', label: 'Pollution' },
-        { key: 'pollution_end_date', label: 'Pollution Expiry' },
-        { key: 'permit1', label: 'Permit 1' },
-        { key: 'permit1_end_date', label: 'Permit 1 Expiry' },
-        { key: 'permit2_out_state', label: 'Permit 2' },
-        { key: 'permit2_end_date', label: 'Permit 2 Expiry' },
-      ];
-
-      // Permit documents only apply when GVW > 3000 (same rule as Vehicle Master)
-      const isPermitApplicable = vehicleData.gvw !== '' && Number(vehicleData.gvw) > 3000;
-
-      for (const doc of vehicleDocs) {
-        const val = vehicleData[doc.key as keyof typeof vehicleData];
-        // Skip required check for Permit 2 (both file and date are optional)
-        if (doc.key === 'permit2_out_state' || doc.key === 'permit2_end_date') continue;
-        // Permit 1 is only required for vehicles with GVW > 3000
-        if ((doc.key === 'permit1' || doc.key === 'permit1_end_date') && !isPermitApplicable) continue;
-        // Lifetime tax vehicles have no expiry date — only the certificate is required
-        if (doc.key === 'tax_end_date' && vehicleData.is_lifetime_tax) continue;
-        // Electrical vehicles have no pollution certificate/expiry (matches Vehicle Master)
-        if ((doc.key === 'polution' || doc.key === 'pollution_end_date') && vehicleData.fuel_type === 'Electrical') continue;
-
-        if (!val) {
-          const message = `${doc.label} is missing for this vehicle. Please upload/fill it in Stage 6 before confirming dispatch to BANARI.`;
-          // Tax copy & Pollution certificate are optional — warn only, don't block.
-          if (doc.key === 'tax_copy' || doc.key === 'tax_end_date' || doc.key === 'polution' || doc.key === 'pollution_end_date') {
-            docWarnings.push(message);
-          } else {
-            validationErrors.push(message);
-          }
-        }
-      }
-
-      if (!vehicleData.checkStatus) {
-        validationErrors.push("Vehicle Check Status is required");
-      }
-      // Remarks mandatory ONLY if status is Reject
-      if (vehicleData.checkStatus === "Reject" && !vehicleData.remarks.trim()) {
-        validationErrors.push("Vehicle Remarks are required for rejection");
-      }
-
-      // 3. Stage 7: Weightment Audit Validation
-      if (!loadData.actualQty || parseFloat(loadData.actualQty) <= 0) {
-        validationErrors.push("Valid Actual Qty is required");
-      }
+      // Not in the spec — kept as-is for BANARI only.
       if (!loadData.rstNo.trim()) {
         validationErrors.push("RST No is required");
-      }
-      // Weightment Slip and No Plate Image are now optional per user request
-      if (!loadData.grossWeight || parseFloat(loadData.grossWeight) <= 0) {
-        validationErrors.push("Valid Gross Weight is required");
-      }
-      if (!loadData.tareWeight || parseFloat(loadData.tareWeight) <= 0) {
-        validationErrors.push("Valid Tare Weight is required");
       }
       if (!loadData.checkStatus) {
         validationErrors.push("Quality Status (STG 7) is required");
       }
-      if (!loadData.transporterName.trim()) {
-        validationErrors.push("Transporter Name is required");
-      }
       // Reason mandatory ONLY if status is Reject
       if (loadData.checkStatus === "Reject" && !loadData.reason.trim()) {
         validationErrors.push("Weight Difference Reason is required for load rejection");
-      }
-
-      // 4. Validate Document End Dates (Min docRefDate + 5 Days)
-      const dateFields = [
-        { key: 'fitness_end_date', label: 'Fitness' },
-        { key: 'insurance_end_date', label: 'Insurance' },
-        { key: 'tax_end_date', label: 'Tax' },
-        { key: 'pollution_end_date', label: 'Pollution' },
-        { key: 'permit1_end_date', label: 'Permit 1' },
-        { key: 'permit2_end_date', label: 'Permit 2' },
-      ];
-
-      for (const field of dateFields) {
-        const dateVal = vehicleData[field.key as keyof typeof vehicleData];
-        if (dateVal && dateVal < minDate) {
-          const message = `${field.label} End Date must be at least 5 days from today (Min: ${formatDate(minDate)})`;
-          // Tax & Pollution expiry are optional — warn only, don't block.
-          if (field.key === 'tax_end_date' || field.key === 'pollution_end_date') {
-            docWarnings.push(message);
-          } else {
-            validationErrors.push(message);
-          }
-        }
-      }
-
-      // 5. Validation for Overload (only mandatory for Banari depot; optional for other depots)
-      const isOverloaded = totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0);
-      if (isOverloaded && !loadData.overloadRemarks.trim()) {
-        validationErrors.push("Overload remarks are mandatory as the vehicle is overloaded.");
-      }
-
-      // 6. Validation for Interstate Permit (only mandatory for Banari depot, and only when GVW > 3000)
-      if (isInterState && Number(vehicleData.gvw) > 3000 && (!vehicleData.permit2_end_date || !vehicleData.permit2_out_state || vehicleData.permit2_out_state === 'pending')) {
-        validationErrors.push("National / Other State Permit is mandatory for interstate dispatches.");
       }
     }
 
@@ -1532,11 +1523,6 @@ export default function ActualDispatchPage() {
         ),
         variant: "destructive"
       });
-      return;
-    }
-
-    if (docWarnings.length > 0) {
-      setDocWarningDialog({ open: true, messages: docWarnings });
       return;
     }
 
@@ -1571,7 +1557,7 @@ export default function ActualDispatchPage() {
         const dispatchId = item.id;
         const dsrNumber = item.d_sr_number || item.dsrNumber; // display only
         const rowKey = item._rowKey;
-        const confirmedQty = confirmDetails[rowKey]?.qty || item.qtyToDispatch;
+        const confirmedQty = qtyOr(confirmDetails[rowKey]?.qty, item.qtyToDispatch);
 
         try {
           // v2-native camelCase payload (backend: services/actualDispatchService.js#submitActualDispatch)
@@ -1582,31 +1568,21 @@ export default function ActualDispatchPage() {
             // Persisted as the source-of-truth dispatch date. Temporary until
             // historical dates are fully backfilled.
             actualDispatchDate: docRefDate || null,
+            // When the dispatch actually happened: the moment of confirming. Plus when the form was
+            // opened, so the server can record how long the user took.
+            actualDispatchAt: new Date().toISOString(),
+            formOpenedAt: new Date(formOpenedAtRef.current).toISOString(),
 
-            // Vehicle/driver/transporter: resolved server-side by id (not
-            // collected here) or natural-key fallback.
-            registrationNo: vehicleNumber || vehicleData.registration_no || undefined,
+            // Vehicle/transporter/documents/overload are no longer entered here —
+            // they were confirmed at Plan Vehicle (Stage 5) and are left untouched
+            // by this (sparse) patch. Driver stays editable at this stage.
             driverName: driverName || undefined,
             drivingLicenceNo: driverData.license_no || undefined,
-            transporterName: loadData.transporterName || undefined,
 
-            checkStatus: vehicleData.checkStatus || undefined,
-            remarks: vehicleData.remarks || loadData.remarks || undefined,
+            checkStatus: loadData.checkStatus || undefined,
+            remarks: loadData.remarks || undefined,
 
             vehicleNoPlateImage: loadData.vehicleNoPlateImage || undefined,
-
-            fitnessImage: vehicleData.fitness || undefined,
-            fitnessEndDate: vehicleData.fitness_end_date || undefined,
-            insuranceImage: vehicleData.insurance || undefined,
-            insuranceEndDate: vehicleData.insurance_end_date || undefined,
-            taxCopyImage: vehicleData.tax_copy || undefined,
-            taxEndDate: vehicleData.tax_end_date || undefined,
-            pollutionImage: vehicleData.polution || undefined,
-            pollutionEndDate: vehicleData.pollution_end_date || undefined,
-            permit1Image: vehicleData.permit1 || undefined,
-            permit1EndDate: vehicleData.permit1_end_date || undefined,
-            permit2OutStateImage: vehicleData.permit2_out_state || undefined,
-            permit2EndDate: vehicleData.permit2_end_date || undefined,
 
             weightmentSlipCopy: loadData.weightmentSlip || undefined,
             rstNo: loadData.rstNo || undefined,
@@ -1614,14 +1590,13 @@ export default function ActualDispatchPage() {
             tareWeight: numOrUndef(loadData.tareWeight),
             netWeight: numOrUndef(loadData.netWeightPacking),
             extraWeight: numOrUndef(loadData.extraWeight),
-            passingWeight: numOrUndef(vehicleData.passing_weight),
             difference: numOrUndef(loadData.differanceWeight),
 
             reasonOfWeightDifference: loadData.reason || undefined,
-            vehicleOverloadRemarks: loadData.overloadRemarks || undefined,
 
-            freightRateType: loadData.freightRateType || undefined,
-            freightAmount: numOrUndef(loadData.freightAmount),
+            // Freight Rate Type/Amount are read-only reference at this stage —
+            // omitted so this sparse patch leaves Plan Vehicle's values in place.
+            // The 3 advance amounts stay editable and are always sent.
             advanceBhadaBank: numOrUndef(loadData.cash_bank),
             advanceBhadaDieselAdvance: numOrUndef(loadData.diesel_advance),
             advanceBhadaCash: numOrUndef(loadData.bhada),
@@ -1891,7 +1866,8 @@ export default function ActualDispatchPage() {
 
   return (
     <WorkflowStageShell
-      title="Stage 5: Actual Dispatch"
+      persistKey="actual-dispatch"
+      title="Stage 7: Actual Dispatch"
       description="Confirm actual dispatch details before vehicle assignment."
       pendingCount={displayRows.length}
       historyData={[]}
@@ -1930,29 +1906,17 @@ export default function ActualDispatchPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row justify-end gap-2">
+        <StageActionBar>
           <Button
             onClick={() => handleOpenDialog()}
             disabled={selectedOrders.length === 0}
-            className="h-9 text-xs font-black uppercase tracking-tight"
+            className="hidden h-9 text-xs font-black uppercase tracking-tight md:inline-flex"
             title={isReadOnly ? "View Dispatch Details" : "Confirm Dispatch"}
           >
             Confirm Dispatch ({selectedOrders.length})
           </Button>
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent h-9 text-xs">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-62.5" collisionPadding={16}>
-                <ColumnToggleContent columns={PAGE_COLUMNS} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
+                </StageActionBar>
+
 
         {availableDepots.length > 0 && (
           <div className="mt-4 mb-2">
@@ -1972,48 +1936,108 @@ export default function ActualDispatchPage() {
           </div>
         )}
 
-        <Card className="border-none shadow-sm overflow-auto max-h-150">
-          {/* Desktop Table View */}
-          <Table className="hidden md:table">
-            <TableHeader className="sticky top-0 z-10 bg-card shadow-sm">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && displayRows.every((row) => selectedOrders.includes(row._rowKey))}
-                    onCheckedChange={toggleSelectAll}
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Pending Dispatches"
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            description="Confirm actual dispatch details before vehicle assignment"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Product..."
+          >
+            <StageToolbar
+              shown={sortedDisplayRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllTableFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "GATE_IN", label: "Gate-In Pending" },
+                      { value: "READY", label: "Ready" },
+                      { value: "DRAFT", label: "Draft" },
+                    ]}
                   />
+                  <StageFilterSelect value={oilFilter} onChange={setOilFilter} allLabel="All Oils" options={uniqueOilTypes} />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
+                  <StageColumnsMenu
+                    columns={PAGE_COLUMNS}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusLabel(statusFilter)}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(oilFilter !== "ALL" ? [{ label: `Oil: ${oilFilter}`, onClear: () => setOilFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          {/* Desktop Table View */}
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
+              <TableRow>
+                <TableHead className="w-12 text-left align-top py-2.5 px-4">
+                  <div className="mt-8 flex justify-start">
+                    <Checkbox
+                      checked={sortedDisplayRows.length > 0 && sortedDisplayRows.every((row) => selectedOrders.includes(row._rowKey))}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </div>
                 </TableHead>
                 <ColumnDragProvider columnIds={orderedVisibleCols.map(c => c.id)} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map((col) => (
-                    <SortableTableHead key={col.id} id={col.id} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(col.id)}>
-                      {col.label}<PendingSortIcon field={col.id} />
-                    </SortableTableHead>
+                  {tableCols.map((col) => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={RIGHT_COLS.includes(col.id) ? "right" : "left"} width={colWidth(col.id)} />
                   ))}
                 </ColumnDragProvider>
 
               </TableRow>
             </TableHeader>
             <TableBody>
+              {sortedDisplayRows.length > 0 && (
+                <StageTotalsRow
+                  columns={[{ id: "__select", label: "" }, ...tableCols]}
+                  totals={table.totals}
+                  count={sortedDisplayRows.length}
+                  labelColumnId={tableCols[0]?.id}
+                  unit=""
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : n.toFixed(4))}
+                  tones={{ qtyToDispatch: "blue", orderQty: "purple", approvalQty: "emerald", altQty: "amber", totalWithGst: "default" }}
+                  align={Object.fromEntries([["__select", "center" as const], ...tableCols.map(c => [c.id, (RIGHT_COLS.includes(c.id) ? "right" : "left") as "right" | "left"])])}
+                />
+              )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
+                    <TableCell className="px-4 text-left py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded" /></TableCell>
                     {orderedVisibleCols.map(col => (
                       <TableCell key={col.id} className="py-4">
                         <div className={cn(
-                          "h-3 bg-slate-200 animate-pulse rounded-full mx-auto",
+                          "h-3 bg-slate-200 animate-pulse rounded-full",
                           col.id === 'customerName' ? "w-32" : col.id === 'orderNo' ? "w-24" : "w-16"
                         )} />
                       </TableCell>
                     ))}
                   </TableRow>
                 ))
-              ) : displayRows.length > 0 ? (
+              ) : sortedDisplayRows.length > 0 ? (
                 sortedDisplayRows.map((row) => {
                   const rowKey = row._rowKey;
                   return (
                     <TableRow key={rowKey} className={selectedOrders.includes(rowKey) ? "bg-blue-50/50" : ""}>
-                      <TableCell className="text-center">
+                      <TableCell className="px-4 text-left">
                         <Checkbox
                           checked={selectedOrders.includes(rowKey)}
                           onCheckedChange={() => toggleSelectOrder(rowKey)}
@@ -2021,29 +2045,30 @@ export default function ActualDispatchPage() {
                       </TableCell>
                       {orderedVisibleCols.map((col) => (
                         <TableCell key={col.id} className={cn(
-                          "whitespace-nowrap text-center text-xs",
+                          "whitespace-nowrap text-xs px-4",
+                          RIGHT_COLS.includes(col.id) ? "text-right tabular-nums" : "text-left",
+                          [...NUMERIC_COLS, ...RATE_COLS].includes(col.id) && "font-mono",
+                          colWidth(col.id),
                           col.id === 'orderNo' ? "text-blue-700 font-bold" : "text-slate-600"
                         )}>
                           {col.id === "status" ? (
-                            <div className="flex justify-center flex-col items-center gap-1">
+                            <div className="flex items-center gap-2">
                               {row.has_draft ? (
                                 <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">Draft Saved</Badge>
                               ) : row.has_gate_in ? (
                                 <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">Ready for Dispatch</Badge>
-                              ) : (
-                                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Ready for Gate In</Badge>
+                              ) : null}
+                              {!row.has_gate_in && (
+                                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200">Gate-In Pending</Badge>
                               )}
                               {row._productCount > 1 && (
                                 <span className="text-[10px] text-slate-500 font-medium">({row._productCount} Items)</span>
                               )}
                             </div>
                           ) : col.id === "qtyToDispatch" ? (
-                            <div className="flex flex-col items-center">
-                              <span>{row.qtyToDispatch}</span>
-                              {row._productCount > 1 && <span className="text-[10px] text-slate-500">(Total)</span>}
-                            </div>
+                            <span title={row._productCount > 1 ? "Total across products" : undefined}>{fmtNum(parseAmount(row.qtyToDispatch))}</span>
                           ) : (
-                            getColumnDisplayValue(row, col.id)
+                            formatCellValue(row, col.id)
                           )}
                         </TableCell>
                       ))}
@@ -2052,18 +2077,22 @@ export default function ActualDispatchPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
-                    No orders pending for actual dispatch
+                  <TableCell colSpan={tableCols.length + 1} className="text-center py-8 text-muted-foreground">
+                    {displayRows.length > 0 ? "No matching records found for the applied filters" : "No orders pending for actual dispatch"}
+                    {displayRows.length > 0 && (
+                      <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-1 font-semibold">Clear Filters</button>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </div>
 
           {/* Mobile Card View */}
           <div className="md:hidden grid grid-cols-1 gap-4 p-4">
-            {displayRows.length > 0 ? (
-              displayRows.map((row) => {
+            {sortedDisplayRows.length > 0 ? (
+              sortedDisplayRows.map((row) => {
                 const rowKey = row._rowKey;
                 return (
                   <Card key={rowKey} className={cn(
@@ -2083,13 +2112,16 @@ export default function ActualDispatchPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        {row.has_draft ? (
-                          <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] uppercase font-black">Draft</Badge>
-                        ) : row.has_gate_in ? (
-                          <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[9px] uppercase font-black">Ready</Badge>
-                        ) : (
-                          <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[9px] uppercase font-black">Gate-In</Badge>
-                        )}
+                        <div className="flex flex-col items-end gap-1">
+                          {row.has_draft ? (
+                            <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] uppercase font-black">Draft</Badge>
+                          ) : row.has_gate_in ? (
+                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[9px] uppercase font-black">Ready</Badge>
+                          ) : null}
+                          {!row.has_gate_in && (
+                            <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[9px] uppercase font-black">Gate-In Pending</Badge>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -2100,9 +2132,9 @@ export default function ActualDispatchPage() {
                           <p className="text-sm font-bold text-slate-800 capitalize leading-tight">{row.customerName || "—"}</p>
                         </div>
                         <div className="text-right space-y-1">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty</p>
-                          <p className="text-sm font-black text-blue-600">
-                            {row.qtyToDispatch}
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty to Dispatch</p>
+                          <p className="text-sm font-black text-blue-600 font-mono tabular-nums">
+                            {fmtNum(parseAmount(row.qtyToDispatch))}
                             {row._productCount > 1 && <span className="ml-1 text-[10px] text-slate-500">(Total {row._productCount})</span>}
                           </p>
                         </div>
@@ -2113,7 +2145,7 @@ export default function ActualDispatchPage() {
                         {orderedVisibleCols.filter(col =>
                           !['orderNo', 'partySoDate', 'status', 'customerName', 'qtyToDispatch'].includes(col.id)
                         ).map(col => {
-                          let val = getColumnDisplayValue(row, col.id);
+                          let val = formatCellValue(row, col.id);
                           if (col.id === 'revertSecurityRemarks') val = row.revertSecurityRemarks || row.revert_security_remarks || "—";
                           if (col.id === 'orderPunchRemarks') val = row.orderPunchRemarks || row.order_punch_remarks || "—";
 
@@ -2131,50 +2163,34 @@ export default function ActualDispatchPage() {
               })
             ) : (
               <div className="text-center py-12 text-slate-400 font-bold uppercase tracking-widest text-xs italic">
-                No pending items available
+                {displayRows.length > 0 ? "No matching records found" : "No pending items available"}
+                {displayRows.length > 0 && (
+                  <button onClick={clearAllTableFilters} className="block mx-auto text-xs text-blue-600 hover:underline mt-2 font-semibold normal-case not-italic tracking-normal">Clear Filters</button>
+                )}
               </div>
             )}
           </div>
-          <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50/50 rounded-b-2xl">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-              Showing Page <span className="text-slate-900 mx-1">{displayRows.length > 0 ? pendingPage : 0}</span>
-              {displayRows.length > 0 && (
-                <> of <span className="text-slate-900 mx-1">
-                  {/* Backend paginates pending rows by whole order now, so totalPages is
-                      authoritative — no need to guess from raw row count vs limit. */}
-                  {pendingResult?.pagination?.totalPages || 1}
-                </span></>
-              )}
-              <span className="ml-2 text-slate-300">|</span>
-              <span className="ml-2 text-[10px] lowercase italic font-normal text-slate-400">{displayRows.length} item{displayRows.length !== 1 ? 's' : ''} in this depot</span>
-            </div>
-            <div className="flex gap-2">
+          <StagePagination
+            sticky
+            mobileAction={
               <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-                disabled={pendingPage === 1 || displayRows.length === 0}
-                className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                onClick={() => handleOpenDialog()}
+                disabled={selectedOrders.length === 0}
+                className="h-10 w-full text-xs font-black uppercase tracking-tight"
               >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                {isReadOnly ? "View Dispatch Details" : "Confirm Dispatch"} ({selectedOrders.length})
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => p + 1)}
-                disabled={
-                  displayRows.length === 0 ||
-                  pendingPage >= (pendingResult?.pagination?.totalPages || 1)
-                }
-                className="h-8 rounded-lg font-bold shadow-sm bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                Next <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
-
-
-
+            }
+            page={pendingPage}
+            totalPages={pendingResult?.pagination?.totalPages || 1}
+            total={displayRows.length}
+            noun="Items"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || displayRows.length === 0}
+            nextDisabled={displayRows.length === 0 || pendingPage >= (pendingResult?.pagination?.totalPages || 1)}
+          />
+          </CardContent>
         </Card>
       </div>
 
@@ -2203,29 +2219,37 @@ export default function ActualDispatchPage() {
             </DialogHeader>
 
             {/* Gate-In Status Banner */}
-            <div className={`flex items-start sm:items-center gap-3 px-3 sm:px-5 py-3 rounded-xl mb-4 border-2 ${gateInData ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+            <div className={`flex items-start sm:items-center gap-3 px-3 sm:px-5 py-3 rounded-xl mb-4 border-2 ${gateInData ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
               <button
                 type="button"
                 onClick={() => { if (gateInData) setIsGateInPopupOpen(true); }}
-                className={`flex items-start sm:items-center gap-2 text-left font-black text-xs sm:text-sm uppercase tracking-tight ${gateInData ? 'text-emerald-700 cursor-pointer hover:underline' : 'text-red-600 cursor-default'}`}
+                className={`flex items-start sm:items-center gap-2 text-left font-black text-xs sm:text-sm uppercase tracking-tight ${gateInData ? 'text-emerald-700 cursor-pointer hover:underline' : 'text-slate-500 cursor-default'}`}
               >
                 {gateInData
                   ? <><CheckCircle2 className="h-5 w-5 text-emerald-500" /> Gate-In Verified — Click to View Images</>
-                  : <><XCircle className="h-5 w-5 text-red-400" /> Gate-In Not Done Yet</>
+                  : <><Info className="h-5 w-5 text-slate-400" /> Gate-In Pending (After Slip Generation)</>
                 }
               </button>
             </div>
 
-            {/* TEMP: manual override for the expiry check while old Vehicle Master records
-                get backfilled — remove this input and the docRefDate state once done. */}
-            <div className="flex justify-end mb-4">
+            {/* Actual Dispatch Date & Time (when the user dispatched) / Actual Completion (time the user took) */}
+            <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-2 mb-4">
               <div className="flex items-center gap-2">
-                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none whitespace-nowrap">Actual Dispatch Date</Label>
+                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none whitespace-nowrap">Actual Dispatch Date &amp; Time</Label>
                 <Input
-                  type="date"
-                  className="h-8 text-[11px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-white"
-                  value={docRefDate}
-                  onChange={(e) => setDocRefDate(e.target.value)}
+                  readOnly
+                  className="h-8 w-[170px] text-[11px] border-slate-200 rounded-lg px-2 font-bold bg-slate-50 text-slate-600 tabular-nums"
+                  title="Set automatically at the moment you confirm the dispatch"
+                  value={new Date(nowTick).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).replace(",", "")}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none whitespace-nowrap">Actual Completion (Time Taken)</Label>
+                <Input
+                  readOnly
+                  className="h-8 w-[150px] text-[11px] border-slate-200 rounded-lg px-2 font-bold bg-slate-50 text-slate-600 tabular-nums"
+                  title="How long you have taken since opening this form; fixed when you confirm"
+                  value={fmtDuration(nowTick - formOpenedAtRef.current)}
                 />
               </div>
             </div>
@@ -2259,6 +2283,11 @@ export default function ActualDispatchPage() {
                           </a>
                         ) : (
                           <div className="w-full h-32 md:h-40 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 font-bold uppercase tracking-tighter">NO IMAGE</div>
+                        )}
+                        {getOriginalImageUrl(img.url) && (
+                          <a href={getOriginalImageUrl(img.url)!} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-blue-600 hover:underline">
+                            View original
+                          </a>
                         )}
                       </div>
                     ))}
@@ -2385,7 +2414,7 @@ export default function ActualDispatchPage() {
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Advance Amount</p>
-                                      <p className="text-base font-black text-blue-700 leading-tight">₹{orderDetails.advanceAmount || 0} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}</p>
+                                      <p className="text-base font-black text-blue-700 leading-tight">₹{fmtAmount(orderDetails.advanceAmount || 0)} {orderDetails.advanceTaken ? "(REQ)" : "(NO)"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider mb-1">Broker</p>
@@ -2480,9 +2509,36 @@ export default function ActualDispatchPage() {
                   <div className="border border-slate-200 rounded-xl sm:rounded-3xl overflow-hidden shadow-sm bg-white">
                     {/* Desktop Table View */}
                     <Table className="hidden xl:table">
-                      <TableHeader className="bg-slate-50 sticky top-0 z-10">
-                        <TableRow>
-                          <TableHead className="w-12.5 text-center text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                      <TableHeader className="bg-slate-50 sticky top-0 z-10 border-b">
+                        <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4 text-left font-black text-slate-900 uppercase tracking-wider text-[11px]">
+                            Total ({dialogSelectedProducts.length})
+                          </TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          {/* Planned Qty total of the selected products */}
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                            {fmtNum(selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + (parseFloat(p.qtyToDispatch) || 0), 0))}
+                          </TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          <TableCell className="px-4"></TableCell>
+                          {/* Actual Qty Dispatched total of the selected products (same figure as Weightment Audit's Actual Qty) */}
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                            {fmtNum(selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + (parseFloat(qtyOr(confirmDetails[p._rowKey]?.qty, p.qtyToDispatch) || "0") || 0), 0))}
+                          </TableCell>
+                          <TableCell className="px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                            {fmtNum(selectedGroups.flatMap(g => g._allProducts)
+                              .filter((p: any) => dialogSelectedProducts.includes(p._rowKey))
+                              .reduce((sum: number, p: any) => sum + calculateGrossWeight(p.productName, confirmDetails[p._rowKey]?.qty || 0), 0), wd)}
+                          </TableCell>
+                          <TableCell className="px-4"></TableCell>
+                        </TableRow>
+                        <TableRow className="bg-slate-50">
+                          <TableHead className="w-12.5 text-left px-4">
                             <Checkbox
                               checked={dialogSelectedProducts.length > 0 && dialogSelectedProducts.length === selectedGroups.reduce((s, g) => s + g._allProducts.length, 0)}
                               onCheckedChange={(checked) => {
@@ -2495,13 +2551,14 @@ export default function ActualDispatchPage() {
                               }}
                             />
                           </TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">CUSTOMER / DO</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">PRODUCT NAME</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">PLANNED QTY</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">DELIVERY FROM</TableHead>
-                          <TableHead className="w-45 text-[10px] uppercase font-black text-slate-500 tracking-wider">ACTUAL QTY DISPATCHED</TableHead>
-                          <TableHead className="w-30 text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">GROSS WEIGHT (KG)</TableHead>
-                          <TableHead className="text-[10px] uppercase font-black text-slate-500 tracking-wider text-center">STATUS</TableHead>
+                          <TableHead className="px-4 text-left">Customer / DO</TableHead>
+                          <TableHead className="px-4 text-left">Product Name</TableHead>
+                          <TableHead className="px-4 text-right min-w-[120px]">Planned Qty</TableHead>
+                          <TableHead className="px-4 text-left">UOM</TableHead>
+                          <TableHead className="px-4 text-left">Delivery From</TableHead>
+                          <TableHead className="w-45 px-4 text-right min-w-[160px]">Actual Qty Dispatched</TableHead>
+                          <TableHead className="w-30 px-4 text-right min-w-[130px]">Gross Weight (kg)</TableHead>
+                          <TableHead className="px-4 text-left">Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2509,28 +2566,28 @@ export default function ActualDispatchPage() {
                           const rowKey = prod._rowKey;
                           return (
                             <TableRow key={rowKey} className={cn(dialogSelectedProducts.includes(rowKey) ? "bg-blue-50/30" : "")}>
-                              <TableCell className="text-center p-3">
+                              <TableCell className="text-left px-4 py-3">
                                 <Checkbox
                                   checked={dialogSelectedProducts.includes(rowKey)}
                                   onCheckedChange={() => toggleSelectDialogProduct(rowKey)}
                                 />
                               </TableCell>
-                              <TableCell className="p-3">
+                              <TableCell className="px-4 py-3 text-left">
                                 <div className="flex flex-col">
                                   <span className="text-[9px] font-black text-blue-600 uppercase leading-none mb-1">{prod.customerName}</span>
                                   <span className="text-[10px] font-bold text-slate-700">{prod.orderNo || "—"}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="font-bold text-[11px] p-3 text-slate-900">{prod.productName || "—"}</TableCell>
-                              <TableCell className="text-[11px] font-black p-3 text-center text-blue-700">
-                                {prod.qtyToDispatch}
-                                <span className="ml-1 text-[9px] text-slate-400 font-bold uppercase">{prod.uom}</span>
+                              <TableCell className="font-bold text-[11px] px-4 py-3 text-left text-slate-900">{prod.productName || "—"}</TableCell>
+                              <TableCell className="text-[11px] font-black px-4 py-3 text-right font-mono tabular-nums text-blue-700 min-w-[120px]">
+                                {fmtNum(prod.qtyToDispatch)}
                               </TableCell>
-                              <TableCell className="text-[10px] font-black p-3 uppercase text-slate-400 tracking-tighter">{prod.deliveryFrom}</TableCell>
-                              <TableCell className="p-3">
+                              <TableCell className="text-[10px] font-bold px-4 py-3 text-left uppercase text-slate-500">{prod.uom || "—"}</TableCell>
+                              <TableCell className="text-[10px] font-black px-4 py-3 uppercase text-slate-400 tracking-tighter text-left">{prod.deliveryFrom}</TableCell>
+                              <TableCell className="px-4 py-3 min-w-[160px]">
                                 <Input
                                   type="number"
-                                  className="h-10 text-xs font-black border-2 border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm"
+                                  className="h-10 text-right font-mono tabular-nums text-xs font-black border-2 border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm"
                                   placeholder="Actual Qty"
                                   value={confirmDetails[rowKey]?.qty || ""}
                                   onChange={(e) => {
@@ -2562,48 +2619,17 @@ export default function ActualDispatchPage() {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell className="p-3 text-center">
-                                <div className="font-black text-sm text-purple-700">
-                                  {calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch).toFixed(4)} kg
+                              <TableCell className="px-4 py-3 text-right min-w-[130px]">
+                                <div className="font-mono tabular-nums font-black text-sm text-purple-700">
+                                  {calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch)).toFixed(wd)}
                                 </div>
                               </TableCell>
-                              <TableCell className="p-3 text-center">
+                              <TableCell className="px-4 py-3 text-left">
                                 <Badge variant="outline" className="text-[9px] bg-orange-50 text-orange-700 border-orange-200 uppercase font-black px-2 py-0.5">Pending</Badge>
                               </TableCell>
                             </TableRow>
                           )
                         })}
-                        {/* Total Weight Row */}
-                        <TableRow className="bg-purple-50 border-t-2 border-purple-200">
-                          <TableCell colSpan={3} className="text-right p-4 font-black text-xs uppercase text-purple-900 tracking-wider">
-                            TOTALS:
-                          </TableCell>
-                          <TableCell className="p-4 text-center">
-                            <div className="font-black text-sm text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(p.qtyToDispatch || "0"), 0)}
-                            </div>
-                          </TableCell>
-                          <TableCell />
-                          <TableCell className="p-4 text-center">
-                            <div className="font-black text-sm text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-4 text-center">
-                            <div className="flex flex-col items-center">
-                              <span className="text-[9px] font-black text-purple-400 uppercase tracking-tighter mb-1">TOTAL PACKING WEIGHT</span>
-                              <div className="font-black text-lg text-purple-700">
-                                {selectedGroups.flatMap(g => g._allProducts)
-                                  .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
-                                  .reduce((total, prod) => {
-                                    const rowKey = prod._rowKey
-                                    return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                  }, 0).toFixed(4)} kg
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell colSpan={1} />
-                        </TableRow>
                       </TableBody>
                     </Table>
 
@@ -2612,7 +2638,7 @@ export default function ActualDispatchPage() {
                       {selectedGroups.flatMap(group => group._allProducts).map((prod: any) => {
                         const rowKey = prod._rowKey;
                         const isSelected = dialogSelectedProducts.includes(rowKey);
-                        const currentQty = confirmDetails[rowKey]?.qty || prod.qtyToDispatch || 0;
+                        const currentQty = qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch) || 0;
                         const weight = calculateGrossWeight(prod.productName, currentQty);
 
                         return (
@@ -2633,8 +2659,8 @@ export default function ActualDispatchPage() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-1">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Planned Qty</p>
-                                <p className="text-sm font-black text-blue-700">{prod.qtyToDispatch} <span className="text-[9px] font-bold uppercase">{prod.uom}</span></p>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Planned Qty ({prod.uom || "UOM"})</p>
+                                <p className="text-sm font-black text-blue-700 font-mono tabular-nums">{fmtNum(prod.qtyToDispatch)}</p>
                               </div>
                               <div className="space-y-1">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Delivery From</p>
@@ -2675,8 +2701,8 @@ export default function ActualDispatchPage() {
 
                             <div className="grid grid-cols-1 gap-2 pt-2">
                               <div className="bg-purple-50 p-2 rounded-lg">
-                                <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-center">Weight</p>
-                                <p className="text-[10px] font-black text-purple-700 text-center">{weight.toFixed(4)} kg</p>
+                                <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-0.5 text-left">Weight (kg)</p>
+                                <p className="text-[10px] font-black text-purple-700 text-left font-mono tabular-nums">{weight.toFixed(wd)}</p>
                               </div>
                             </div>
                           </div>
@@ -2685,23 +2711,17 @@ export default function ActualDispatchPage() {
 
                       {/* Mobile Totals Summary */}
                       <div className="p-4 bg-purple-50 border-t-2 border-purple-200 space-y-4">
-                        <p className="text-xs font-black text-purple-900 uppercase tracking-widest text-center">Consolidated Totals</p>
+                        <p className="text-xs font-black text-purple-900 uppercase tracking-widest text-left">Consolidated Totals</p>
                         <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3">
                           <div className="bg-white/60 p-3 rounded-2xl border border-purple-100">
-                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Qty</p>
-                            <p className="text-base font-black text-purple-700">
-                              {selectedGroups.flatMap(g => g._allProducts).filter((p: any) => dialogSelectedProducts.includes(p._rowKey)).reduce((sum, p) => sum + parseFloat(confirmDetails[p._rowKey]?.qty || p.qtyToDispatch || "0"), 0)}
-                            </p>
-                          </div>
-                          <div className="bg-white/60 p-3 rounded-2xl border border-purple-100">
-                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Weight</p>
-                            <p className="text-base font-black text-purple-700 leading-none">
+                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Weight (kg)</p>
+                            <p className="text-base font-black text-purple-700 leading-none font-mono tabular-nums">
                               {selectedGroups.flatMap(g => g._allProducts)
                                 .filter((prod: any) => dialogSelectedProducts.includes(prod._rowKey))
                                 .reduce((total, prod) => {
                                   const rowKey = prod._rowKey
-                                  return total + calculateGrossWeight(prod.productName, confirmDetails[rowKey]?.qty || prod.qtyToDispatch)
-                                }, 0).toFixed(4)} <span className="text-[10px]">kg</span>
+                                  return total + calculateGrossWeight(prod.productName, qtyOr(confirmDetails[rowKey]?.qty, prod.qtyToDispatch))
+                                }, 0).toFixed(wd)}
                             </p>
                           </div>
                         </div>
@@ -2717,35 +2737,72 @@ export default function ActualDispatchPage() {
                     <div className="bg-purple-600 px-4 sm:px-6 py-4 rounded-xl sm:rounded-3xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
                       <div className="flex items-center gap-3">
                         <Truck className="h-6 w-6 text-white" />
-                        <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tighter italic">Vehicle Setup</h3>
+                        <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tighter italic">Vehicle &amp; Driver Details</h3>
                       </div>
-                      <Badge className="bg-white text-purple-700 font-black">STAGE 6</Badge>
                     </div>
 
                     <div className="bg-slate-50 border-2 border-slate-200 rounded-xl sm:rounded-3xl p-4 sm:p-6 space-y-6 shadow-md transition-all hover:shadow-lg">
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-start">
+                        <div className="space-y-3">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Vehicle Registration Number {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                            Vehicle Registration Number <span className="text-red-500">*</span>
                           </Label>
+                          {/* Vehicle is fixed at Plan Vehicle (Stage 5) — shown here, not re-selected. */}
                           <Combobox
-                            value={vehicleNumber}
-                            onValueChange={(v) => {
-                              setVehicleNumber(v);
-                              const selectedV = vehicleMaster.find(veh => veh.registration_no === v);
-                              if (selectedV) autofillVehicleData(selectedV);
-                            }}
+                            value={planVehicleInfo.registrationNo || ""}
+                            onValueChange={() => {}}
                             options={vehicleOptions}
                             placeholder="Select Vehicle"
                             searchPlaceholder="Search vehicle..."
                             emptyText="No vehicle found."
-                            className="h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-black text-sm sm:text-lg focus:border-purple-500 transition-colors uppercase bg-white shadow-sm"
+                            disabled
+                            className="h-12 border-2 border-slate-200 rounded-xl px-3 sm:px-4 font-black text-sm sm:text-lg uppercase bg-white shadow-sm"
                           />
+                          {!planVehicleInfo.confirmed && (
+                            <p className="text-[10px] font-bold text-amber-700 uppercase tracking-tight ml-1">Vehicle plan not yet confirmed for this dispatch</p>
+                          )}
                         </div>
 
+                        {/* Vehicle Details Badges */}
+                        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2">
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Type</p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{planVehicleRecord?.vehicle_type || '---'}</p>
+                          </div>
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">RTO</p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{planVehicleRecord?.rto || '---'}</p>
+                          </div>
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
+                            <p className={cn("text-[11px] font-black uppercase leading-none", (effectivePassing > 0 && totalCombinedWeight > effectivePassing) ? "text-red-600" : "text-purple-600")}>
+                              {effectivePassing > 0 ? effectivePassing.toFixed(wd) : (0).toFixed(wd)} KG
+                            </p>
+                          </div>
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{planVehicleRecord?.gvw || '---'} KG</p>
+                          </div>
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">ULW</p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{planVehicleRecord?.ulw || '---'} KG</p>
+                          </div>
+                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
+                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Avg Tare Wt</p>
+                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
+                              {vehicleTareStats && vehicleTareStats.count > 0
+                                ? <>{Number(vehicleTareStats.avgTare).toFixed(wd)} KG <span className="text-[9px] font-semibold text-slate-400 normal-case">({vehicleTareStats.count} trip{vehicleTareStats.count > 1 ? 's' : ''})</span></>
+                                : <>--- <span className="text-[9px] font-semibold text-slate-400 normal-case">{planVehicleRecord ? '(first trip, ULW used)' : ''}</span></>}
+                            </p>
+                          </div>
+                        </div>
+                        </div>
+
+                        <div className="space-y-3">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Driver Name {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
+                            Driver Name <span className="text-red-500">*</span>
                           </Label>
                           <Combobox
                             value={driverName}
@@ -2761,6 +2818,15 @@ export default function ActualDispatchPage() {
                                   trans_valid_upto: selectedD.trans_valid_upto ? new Date(selectedD.trans_valid_upto).toISOString().split('T')[0] : "",
                                   lmv_valid_upto: selectedD.lmv_valid_upto ? new Date(selectedD.lmv_valid_upto).toISOString().split('T')[0] : ""
                                 });
+                              } else if (!v) {
+                                setDriverData({
+                                  contact_no: "",
+                                  license_no: "",
+                                  license_type: "",
+                                  valid_upto: "",
+                                  trans_valid_upto: "",
+                                  lmv_valid_upto: ""
+                                });
                               }
                             }}
                             options={driverOptions}
@@ -2771,34 +2837,8 @@ export default function ActualDispatchPage() {
                           />
                         </div>
 
-                        {/* Vehicle Details Badges */}
-                        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 mt-auto pb-1">
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Type</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.vehicle_type || '---'}</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">RTO</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.rto || '---'}</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Pass Wt</p>
-                            <p className={cn("text-[11px] font-black uppercase leading-none", (totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0)) ? "text-red-600" : "text-purple-600")}>
-                              {vehicleData.passing_weight || '0.00'} KG
-                            </p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">GVW</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.gvw || '---'} KG</p>
-                          </div>
-                          <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">ULW</p>
-                            <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{vehicleData.ulw || '---'} KG</p>
-                          </div>
-                        </div>
-
                         {/* Driver Details Badges */}
-                        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 mt-2">
+                        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2">
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Contact</p>
                             <p className="text-[11px] font-black text-slate-700 uppercase leading-none">{driverData.contact_no || '---'}</p>
@@ -2818,214 +2858,92 @@ export default function ActualDispatchPage() {
                           {/* Trans Valid Upto for Truck/Tanker/Pickup/Hiva/Trailer, LMV Valid Upto otherwise (review Section 10) */}
                           <div className="bg-white border-2 border-slate-100 rounded-xl px-3 py-1.5 shadow-sm">
                             <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">
-                              {['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? 'Trans Valid Upto' : 'LMV Valid Upto'}
+                              {['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(planVehicleType) ? 'Trans Valid Upto' : 'LMV Valid Upto'}
                             </p>
                             <p className="text-[11px] font-black text-slate-700 uppercase leading-none">
-                              {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(vehicleData.vehicle_type) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
+                              {formatDate(['Truck', 'Tanker', 'Pickup', 'Hiva', 'Trailer'].includes(planVehicleType) ? driverData.trans_valid_upto : driverData.lmv_valid_upto) || '---'}
                             </p>
                           </div>
+                          {/* Driver licence photo sits in the empty cell to the right of Trans/LMV Valid Upto */}
+                          {(() => {
+                            const selectedDriverObj = driverName ? driverMaster.find((d: any) => d.driver_name === driverName) : null
+                            const dlUrl: string | null = selectedDriverObj?.dl_upload || null
+                            const dlIsPdf = !!dlUrl && dlUrl.toLowerCase().split('?')[0].endsWith('.pdf')
+                            return (
+                              <div
+                                onClick={() => dlUrl && window.open(dlUrl, "_blank")}
+                                title={dlUrl ? "Click to view Driver Licence" : undefined}
+                                className={cn(
+                                  "bg-white border-2 rounded-xl px-3 py-1.5 flex items-center gap-2.5 shadow-sm",
+                                  dlUrl ? "border-slate-100 cursor-pointer hover:border-slate-300 transition-colors" : "border-dashed border-slate-200"
+                                )}
+                              >
+                                <div className="h-9 w-12 shrink-0 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+                                  {dlUrl ? (
+                                    dlIsPdf ? (
+                                      <FileText className="h-5 w-5 text-rose-600" />
+                                    ) : (
+                                      <img src={dlUrl} alt="Driver Licence" className="h-full w-full object-cover" />
+                                    )
+                                  ) : (
+                                    <ImageIcon className="h-4 w-4 text-slate-300" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Driver Licence</p>
+                                  <p className="text-[11px] font-black text-slate-700 uppercase leading-none truncate">
+                                    {!driverName ? "Select driver" : dlUrl ? (dlIsPdf ? "PDF Document" : "Licence Image") : "Not Uploaded"}
+                                  </p>
+                                </div>
+                                {dlUrl && <Eye className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                              </div>
+                            )
+                          })()}
+                        </div>
                         </div>
                       </div>
 
                       <div className="pt-4 border-t border-slate-200">
-                        <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest leading-none">Digital Documents (STAGE 6)</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest leading-none">Digital Documents (from Vehicle Master)</p>
+                        {/* Disabled: documents come from Vehicle Master and can't be changed here. */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Fitness {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.fitness && vehicleData.fitness !== 'pending' ? vehicleData.fitness : null}
-                                fileName={vehicleData.fitness_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'fitness'}
-                                buttonText={vehicleData.fitness_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('fitness', 'fitness_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.fitness_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, fitness_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Insurance {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.insurance && vehicleData.insurance !== 'pending' ? vehicleData.insurance : null}
-                                fileName={vehicleData.insurance_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'insurance'}
-                                buttonText={vehicleData.insurance_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('insurance', 'insurance_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.insurance_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, insurance_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Tax Copy {selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.tax_copy && vehicleData.tax_copy !== 'pending' ? vehicleData.tax_copy : null}
-                                fileName={vehicleData.tax_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'tax_copy'}
-                                buttonText={vehicleData.tax_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('tax_copy', 'tax_file_name', files[0] || null)}
-                              />
-                            </div>
-                            {vehicleData.is_lifetime_tax ? (
-                              <div className="h-7 text-[10px] border border-slate-200 rounded-lg px-2 font-bold bg-slate-100 opacity-80 flex items-center text-slate-500" title="Lifetime Tax">
-                                LTT
+                          {vehicleDocs.map(doc => (
+                            <div
+                              key={doc.key}
+                              className={cn(
+                                "bg-white border border-dashed rounded-xl p-2.5 flex flex-col gap-2 min-w-0 cursor-not-allowed",
+                                doc.enabled ? "border-slate-300" : "opacity-40 grayscale bg-slate-50 border-slate-200"
+                              )}
+                            >
+                              <div className="flex flex-col gap-2 w-full min-w-0">
+                                <span className="text-[10px] font-black text-slate-500 uppercase break-words">
+                                  {doc.label}{" "}
+                                  {doc.note
+                                    ? <span className="text-slate-400 normal-case font-medium">{doc.note}</span>
+                                    : selectedDepoTab?.toUpperCase() === 'BANARI' && doc.enabled && <span className="text-red-500">*</span>}
+                                </span>
+                                <FileUploadField className="w-full min-w-0"
+                                  accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                                  value={doc.file || null}
+                                  helperText="Max file size: 20 MB"
+                                  buttonText="UPLOAD"
+                                  disabled
+                                  onFilesSelected={() => {}}
+                                />
                               </div>
-                            ) : (
-                              <Input
-                                type="date"
-                                className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                                min={minDate}
-                                value={vehicleData.tax_end_date}
-                                onChange={(e) => setVehicleData(p => ({ ...p, tax_end_date: e.target.value }))}
-                                readOnly
-                              />
-                            )}
-                          </div>
-                          <div className="bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group cursor-pointer hover:border-purple-400 transition-colors min-w-0">
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className="text-[10px] font-black text-slate-500 group-hover:text-purple-600 transition-colors uppercase break-words">
-                                Pollution {vehicleData.fuel_type === 'Electrical' ? <span className="text-slate-400 normal-case font-medium">(N/A - Electrical)</span> : selectedDepoTab?.toUpperCase() === 'BANARI' ? <span className="text-red-500">*</span> : <span className="text-slate-400 normal-case font-medium">(Optional)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.polution && vehicleData.polution !== 'pending' ? vehicleData.polution : null}
-                                fileName={vehicleData.pollution_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'polution'}
-                                buttonText={vehicleData.pollution_file_name ? 'REPLACE' : 'UPLOAD'}
-                                onFilesSelected={(files) => handleFileChange('polution', 'pollution_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors bg-slate-100 cursor-not-allowed opacity-80"
-                              min={minDate}
-                              value={vehicleData.pollution_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, pollution_end_date: e.target.value }))}
-                              readOnly
-                            />
-                          </div>
-                          <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
-                            !(Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
-                          )}>
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase transition-colors break-words",
-                                Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
-                              )}>
-                                State Permit {Number(vehicleData.gvw) > 3000 ? (selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>) : <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.permit1 && vehicleData.permit1 !== 'pending' ? vehicleData.permit1 : null}
-                                fileName={vehicleData.permit1_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'permit1'}
-                                buttonText={vehicleData.permit1_file_name ? 'REPLACE' : 'UPLOAD'}
-                                disabled={!(Number(vehicleData.gvw) > 3000)}
-                                onFilesSelected={(files) => handleFileChange('permit1', 'permit1_file_name', files[0] || null)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              className={cn(
-                                "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
-                                Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed opacity-80"
+                              {doc.lifetime ? (
+                                <div className="h-7 text-[10px] border border-slate-200 rounded-lg px-2 font-bold bg-slate-100 opacity-80 flex items-center text-slate-500" title="Lifetime Tax">LTT</div>
+                              ) : (
+                                <Input
+                                  type="date"
+                                  className="h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold bg-slate-100 cursor-not-allowed opacity-80"
+                                  value={doc.date}
+                                  readOnly
+                                  disabled
+                                />
                               )}
-                              min={minDate}
-                              value={vehicleData.permit1_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, permit1_end_date: e.target.value }))}
-                              disabled={!(Number(vehicleData.gvw) > 3000)}
-                            />
-                          </div>
-                          <div className={cn(
-                            "bg-white border border-dashed border-slate-300 rounded-xl p-2.5 flex flex-col gap-2 group transition-colors min-w-0",
-                            !(isInterState && Number(vehicleData.gvw) > 3000) ? "opacity-40 grayscale cursor-not-allowed bg-slate-50 border-slate-200" : "hover:border-purple-400 cursor-pointer"
-                          )}>
-                            <div className="flex flex-col gap-2 w-full min-w-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase transition-colors break-words",
-                                isInterState && Number(vehicleData.gvw) > 3000 ? "text-slate-500 group-hover:text-purple-600" : "text-slate-400"
-                              )}>
-                                National / Other State Permit {isInterState && Number(vehicleData.gvw) > 3000 ? <span className="text-red-500">*</span> : (Number(vehicleData.gvw) <= 3000 && <span className="text-slate-400 normal-case font-medium">(Disabled: GVW must be &gt; 3000 KGS)</span>)}
-                              </span>
-                              <FileUploadField className="w-full min-w-0"
-                                accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                                value={vehicleData.permit2_out_state && vehicleData.permit2_out_state !== 'pending' ? vehicleData.permit2_out_state : null}
-                                fileName={vehicleData.permit2_file_name}
-                                helperText="Max file size: 20 MB"
-                                uploading={isUploading === 'permit2_out_state'}
-                                buttonText={vehicleData.permit2_file_name ? 'REPLACE' : 'UPLOAD'}
-                                disabled={!(isInterState && Number(vehicleData.gvw) > 3000)}
-                                onFilesSelected={(files) => handleFileChange('permit2_out_state', 'permit2_file_name', files[0] || null)}
-                              />
                             </div>
-                            <Input
-                              type="date"
-                              className={cn(
-                                "h-7 text-[10px] border-slate-200 rounded-lg px-2 font-bold focus:border-purple-500 transition-colors",
-                                isInterState && Number(vehicleData.gvw) > 3000 ? "bg-white" : "bg-slate-100 cursor-not-allowed"
-                              )}
-                              min={minDate}
-                              value={vehicleData.permit2_end_date}
-                              onChange={(e) => setVehicleData(p => ({ ...p, permit2_end_date: e.target.value }))}
-                              disabled={!(isInterState && Number(vehicleData.gvw) > 3000) || isReadOnly}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Check Status <span className="text-red-500">*</span></Label>
-                          <Select value={vehicleData.checkStatus} onValueChange={(v) => setVehicleData(p => ({ ...p, checkStatus: v }))}>
-                            <SelectTrigger className="h-12 border-2 border-slate-200 rounded-xl font-bold bg-white focus:ring-2 focus:ring-purple-500">
-                              <SelectValue placeholder="Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Accept">Accept</SelectItem>
-                              <SelectItem value="Reject">Reject</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">
-                            Remarks {vehicleData.checkStatus === "Reject" ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal normal-case">(Optional)</span>}
-                          </Label>
-                          <Input
-                            placeholder="Add notes..."
-                            className="h-12 border-2 border-slate-200 rounded-xl bg-white font-medium focus:border-purple-500 transition-colors"
-                            value={vehicleData.remarks}
-                            onChange={(e) => setVehicleData(p => ({ ...p, remarks: e.target.value }))}
-                          />
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -3038,15 +2956,15 @@ export default function ActualDispatchPage() {
                         <Weight className="h-6 w-6 text-white" />
                         <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tighter italic">Weightment Audit</h3>
                       </div>
-                      <Badge className="bg-white text-blue-800 font-black">STAGE 7</Badge>
                     </div>
 
                     <div className="bg-white border-2 border-slate-200 rounded-xl sm:rounded-3xl p-4 sm:p-6 space-y-5 shadow-md overflow-hidden relative group hover:shadow-lg transition-all">
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1">Actual Qty <span className="text-red-500">*</span></Label>
-                          <Input type="number" step="0.01" className="h-10 border-2 border-slate-200 rounded-lg font-bold bg-white focus:border-blue-500 transition-colors"
-                            value={loadData.actualQty} onChange={(e) => setLoadData(p => ({ ...p, actualQty: e.target.value }))} />
+                          {/* Locked: always the total of the confirmed quantities of the selected products. */}
+                          <Input type="number" step="0.01" readOnly title="Calculated from the confirmed quantities of the selected products" className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50 cursor-not-allowed"
+                            value={loadData.actualQty} />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1">RST No <span className="text-red-500">*</span></Label>
@@ -3055,11 +2973,11 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1">Truck No</Label>
-                          <Input className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50 font-mono uppercase" value={loadData.truckNo || vehicleNumber} readOnly />
+                          <Input className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50 font-mono uppercase" value={loadData.truckNo || planVehicleInfo.registrationNo || ''} readOnly />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-400 tracking-tighter ml-1 flex flex-col min-[380px]:flex-row min-[380px]:items-center justify-between gap-1">
-                            Weightment Slip <span className="text-slate-400 font-normal normal-case">(Optional)</span> {loadData.weightmentSlip_file_name && <span className="text-blue-600 text-[8px] truncate max-w-20">({loadData.weightmentSlip_file_name})</span>}
+                            Weightment Slip <span className="text-red-500">*</span> {loadData.weightmentSlip_file_name && <span className="text-blue-600 text-[8px] truncate max-w-20">({loadData.weightmentSlip_file_name})</span>}
                           </Label>
                           <FileUploadField
                             accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
@@ -3068,7 +2986,8 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'weightmentSlip'}
                             buttonText={loadData.weightmentSlip_file_name ? 'REPLACE' : 'UPLOAD'}
-                            onFilesSelected={(files) => handleFileChange('weightmentSlip', 'weightmentSlip_file_name', files[0] || null, 'load')}
+                            onRemove={() => setLoadData(p => ({ ...p, weightmentSlip: "", weightmentSlip_file_name: "" }))}
+                            onFilesSelected={(files) => handleFileChange('weightmentSlip', 'weightmentSlip_file_name', files[0] || null)}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -3082,7 +3001,8 @@ export default function ActualDispatchPage() {
                             helperText="Max file size: 20 MB"
                             uploading={isUploading === 'vehicleNoPlateImage'}
                             buttonText={loadData.vehicleNoPlateImage_file_name ? 'REPLACE' : 'UPLOAD'}
-                            onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null, 'load')}
+                            onRemove={() => setLoadData(p => ({ ...p, vehicleNoPlateImage: "", vehicleNoPlateImage_file_name: "" }))}
+                            onFilesSelected={(files) => handleFileChange('vehicleNoPlateImage', 'vehicleNoPlateImage_file_name', files[0] || null)}
                           />
                         </div>
                       </div>
@@ -3096,7 +3016,8 @@ export default function ActualDispatchPage() {
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Tare Wt <span className="text-red-500">*</span></Label>
                           <Input type="number" step="0.01" className="h-10 border-slate-200 rounded-lg font-bold"
-                            value={loadData.tareWeight} onChange={(e) => setLoadData(p => ({ ...p, tareWeight: e.target.value }))} />
+                            value={loadData.tareWeight} onChange={(e) => { tareEditedRef.current = true; setLoadData(p => ({ ...p, tareWeight: e.target.value })) }} />
+                          {baselineTare.source && <p className="ml-1 text-[10px] font-medium text-slate-400">{baselineTare.source}</p>}
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Net Weight</Label>
@@ -3110,10 +3031,19 @@ export default function ActualDispatchPage() {
                         </div>
                       </div>
 
+                      {overloadMessages.length > 0 && (
+                        <div className="p-4 rounded-xl border-2 border-red-200 bg-red-50 space-y-1">
+                          <p className="text-sm font-black uppercase text-red-600">Vehicle is overweight!</p>
+                          {overloadMessages.map(m => (
+                            <p key={m} className="text-xs font-bold text-red-700">{m}</p>
+                          ))}
+                        </div>
+                      )}
+
                       <div className="pt-4 border-t-2 border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total packing weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(4)} />
+                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Items Gross Weight</Label>
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-slate-50" value={totalPackingWeightFromSku.toFixed(wd)} />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Extra packing material weight</Label>
@@ -3123,11 +3053,11 @@ export default function ActualDispatchPage() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-tighter ml-1">Total Weight</Label>
-                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(4)} />
+                          <Input readOnly className="h-10 border-slate-200 rounded-lg font-bold bg-blue-50 text-blue-700" value={totalCombinedWeight.toFixed(wd)} />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Status (STG 7) <span className="text-red-500">*</span></Label>
                           <Select value={loadData.checkStatus} onValueChange={(v) => setLoadData(p => ({ ...p, checkStatus: v }))}>
@@ -3139,68 +3069,34 @@ export default function ActualDispatchPage() {
                               <SelectItem value="Reject">Reject Load</SelectItem>
                             </SelectContent>
                           </Select>
-                        </div>
-                        <div className={cn("space-y-1.5 w-full transition-all duration-300", (loadData.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(loadData.transporterName)) ? "col-span-1 sm:col-span-2 md:col-span-2" : "col-span-1 sm:col-span-2")}>
-                          <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Transporter <span className="text-red-500">*</span></Label>
-                          <Combobox
-                            value={loadData.transporterName}
-                            onValueChange={(v) => {
-                              const isNormal = !['Company Vehicle', 'Party Vehicle'].includes(v);
-                              setLoadData(p => ({
-                                ...p,
-                                transporterName: v,
-                                freightRateType: isNormal ? p.freightRateType : "",
-                                freightAmount: isNormal ? p.freightAmount : "",
-                                cash_bank: isNormal ? p.cash_bank : "",
-                                diesel_advance: isNormal ? p.diesel_advance : "",
-                                bhada: isNormal ? p.bhada : ""
-                              }));
-                            }}
-                            options={transporterOptions}
-                            placeholder="Select Transporter"
-                            searchPlaceholder="Search transporter..."
-                            emptyText="No transporter found."
-                            className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white w-full shadow-sm text-blue-700"
-                          />
+                          <p className={cn("ml-1 text-[10px] font-medium", autoCheckStatus === "Reject" ? "text-red-500" : "text-slate-400")}>
+                            Auto-detected: {autoCheckStatus === "Reject" ? "vehicle is overloaded, so Reject Load is selected" : "not overloaded, so Approved Quality is selected"}
+                          </p>
+                          {loadData.checkStatus === "Reject" && (
+                            <p className="ml-1 text-[11px] font-bold text-red-600">Load rejected: this dispatch will not move to the next stage.</p>
+                          )}
                         </div>
                       </div>
 
-                      {loadData.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(loadData.transporterName) && (
+                      {/* Freight Rate Type/Amount: read-only reference confirmed at Plan
+                          Vehicle — not editable here, only the advance amounts below are. */}
+                      {planVehicleInfo.transporterName && !['Company Vehicle', 'Party Vehicle'].includes(planVehicleInfo.transporterName) && (
                         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Freight Rate Type <span className="text-red-500">*</span></Label>
-                              <Select
-                                value={loadData.freightRateType}
-                                onValueChange={(v) => setLoadData(p => ({ ...p, freightRateType: v }))}
-                              >
-                                <SelectTrigger className="h-10 border-2 border-slate-200 rounded-xl font-bold bg-white focus:ring-2 focus:ring-blue-500">
-                                  <SelectValue placeholder="Select Type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Fixed Bhada" className="font-medium">Fixed Bhada</SelectItem>
-                                  <SelectItem value="Bhada Rate" className="font-medium">Bhada Rate</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {loadData.freightRateType && (
-                              <div className="space-y-1.5 animate-in slide-in-from-right-2 duration-300">
-                                <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">
-                                  {loadData.freightRateType === 'Bhada Rate' ? 'Bhada Rate (Per MT)' : 'Fixed Bhada Amount'} <span className="text-red-500">*</span>
-                                </Label>
-                                <div className="relative">
-                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    className="h-10 pl-7 border-2 border-slate-200 rounded-lg font-bold bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-                                    placeholder="0.00"
-                                    value={loadData.freightAmount}
-                                    onChange={(e) => setLoadData(p => ({ ...p, freightAmount: e.target.value }))}
-                                  />
-                                </div>
+                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">Freight Rate Type</Label>
+                              <div className="h-10 flex items-center px-3 border-2 border-slate-200 rounded-xl font-bold bg-slate-50 text-slate-700">
+                                {planVehicleInfo.freightRateType || '---'}
                               </div>
-                            )}
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 italic font-serif leading-none">
+                                {planVehicleInfo.freightRateType === 'Bhada Rate' ? 'Bhada Rate (Per MT)' : 'Fixed Bhada Amount'}
+                              </Label>
+                              <div className="h-10 flex items-center px-3 border-2 border-slate-200 rounded-xl font-bold bg-slate-50 text-slate-700">
+                                {planVehicleInfo.freightAmount != null ? `₹${fmtAmount(planVehicleInfo.freightAmount)}` : '---'}
+                              </div>
+                            </div>
                           </div>
 
                           {/* Advance Bhada Section */}
@@ -3259,27 +3155,6 @@ export default function ActualDispatchPage() {
                             placeholder={Math.abs(parseFloat(loadData.differanceWeight) || 0) > 20 ? "Required: explain weight difference..." : "Specify reason..."}
                             value={loadData.reason} onChange={(e) => setLoadData(p => ({ ...p, reason: e.target.value }))} />
                         </div>
-
-                        {/* Overload Alert & Remarks */}
-                        {totalCombinedWeight > (parseFloat(vehicleData.passing_weight) || 0) && (
-                          <div className="p-4 bg-red-50 border-2 border-red-100 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                              <p className="text-sm font-black text-red-600 uppercase tracking-tighter">Vehicle is overload!</p>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-[10px] font-black uppercase text-red-500 tracking-widest ml-1">
-                                Overload Remarks {selectedDepoTab?.toUpperCase() === 'BANARI' && <span className="text-red-500">*</span>}
-                              </Label>
-                              <Input
-                                placeholder={selectedDepoTab?.toUpperCase() === 'BANARI' ? "Why is the vehicle being overloaded? (MANDATORY)" : "Why is the vehicle being overloaded? (Optional)"}
-                                className="h-10 border-2 border-red-200 rounded-xl bg-white font-bold text-red-700 placeholder:text-red-300 focus:border-red-500 transition-all"
-                                value={loadData.overloadRemarks}
-                                onChange={(e) => setLoadData(p => ({ ...p, overloadRemarks: e.target.value }))}
-                              />
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -3288,54 +3163,38 @@ export default function ActualDispatchPage() {
             )}
           </div>
 
-          <DialogFooter className="mt-4 border-t pt-4 px-4 md:px-8 pb-8 flex flex-col gap-6 w-full">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full">
-              <div className="flex-1 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-red-500 tracking-tighter ml-1">Revert Remarks <span className="text-red-500">*</span></Label>
-                <Input
-                  className="h-10 border-2 border-red-200 rounded-lg font-medium bg-white focus:border-red-400 transition-colors"
-                  disabled={isReadOnly}
-                  placeholder="Enter reason for reverting..."
-                  value={revertRemarks}
-                  onChange={(e) => setRevertRemarks(e.target.value)}
-                />
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleRevertToDispatchPlanning}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                className="font-black uppercase tracking-tight h-10 px-6 border-amber-500 text-amber-600 hover:bg-amber-50"
-              >
-                {isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`}
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleRevert}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim()}
-                className="font-black uppercase tracking-tight h-10 px-6"
-              >
-                {isProcessing ? "Wait..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:flex sm:justify-end gap-3 w-full">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="order-last sm:order-none">Cancel</Button>
-              <Button
-                variant="outline"
-                onClick={handleSaveDraft}
-                disabled={isSavingDraft || isProcessing || (selectedDepoTab?.toUpperCase() === 'BANARI' && (!vehicleNumber || !loadData.transporterName))}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50 font-semibold h-11 sm:h-10"
-              >
-                {isSavingDraft ? "Saving..." : "Save Draft"}
-              </Button>
-              <Button
-                onClick={performDispatchConfirmation}
-                disabled={isProcessing || dialogSelectedProducts.length === 0 || isReadOnly}
-                className="h-11 sm:h-10 font-black bg-blue-600 hover:bg-blue-700"
-              >
-                {isProcessing ? "Wait..." : `Confirm Dispatch (${dialogSelectedProducts.length})`}
-              </Button>
-            </div>
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={revertRemarks}
+              onRemarksChange={setRevertRemarks}
+              disabled={isReadOnly}
+              revertActions={[
+                {
+                  label: isProcessing ? "Wait..." : `Revert to Dispatch Planning (${dialogSelectedProducts.length})`,
+                  onClick: handleRevertToDispatchPlanning,
+                  disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                },
+                {
+                  label: isProcessing ? "Wait..." : `Revert to Pre-Approval (${dialogSelectedProducts.length})`,
+                  onClick: handleRevert,
+                  disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !revertRemarks.trim(),
+                },
+              ]}
+              extraActions={[
+                {
+                  label: isSavingDraft ? "Saving..." : "Save Draft",
+                  onClick: handleSaveDraft,
+                  disabled: isSavingDraft || isProcessing || (selectedDepoTab?.toUpperCase() === 'BANARI' && (!planVehicleInfo.confirmed || !driverName.trim())),
+                },
+              ]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Wait..." : `Confirm Dispatch (${dialogSelectedProducts.length})`,
+                onClick: performDispatchConfirmation,
+                disabled: isProcessing || dialogSelectedProducts.length === 0 || isReadOnly || !gateInData || loadData.checkStatus === "Reject",
+                title: loadData.checkStatus === "Reject" ? "Load is rejected. Dispatch cannot proceed." : !gateInData ? "Gate-In is pending. Complete Gate-In first." : undefined,
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -3380,23 +3239,22 @@ export default function ActualDispatchPage() {
             {renderSlipContent()}
           </div>
 
-          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-3 mt-4">
-            <Button variant="outline" onClick={() => setIsSlipDialogOpen(false)} className="sm:order-first">Close</Button>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={handlePrintSlip}
-                className="border-blue-600 text-blue-600 hover:bg-blue-50"
-              >
-                <Printer className="mr-2 h-4 w-4" /> Print Slip
-              </Button>
-              <Button
-                onClick={handleDownloadSlip}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Download className="mr-2 h-4 w-4" /> Download PDF
-              </Button>
-            </div>
+          <DialogFooter className="mt-4 w-full border-t bg-slate-50/50 p-4 sm:flex-col sm:justify-start">
+            <StageActionFooter
+              onCancel={() => setIsSlipDialogOpen(false)}
+              cancelLabel="Close"
+              actions={[
+                {
+                  label: <><Printer className="mr-2 h-4 w-4" /> Print Slip</>,
+                  onClick: handlePrintSlip,
+                  variant: "outline",
+                },
+                {
+                  label: <><Download className="mr-2 h-4 w-4" /> Download PDF</>,
+                  onClick: handleDownloadSlip,
+                },
+              ]}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

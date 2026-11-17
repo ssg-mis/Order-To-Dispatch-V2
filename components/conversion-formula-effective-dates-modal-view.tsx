@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
+import {useState, useMemo, useEffect, useRef} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { masterHistoryApi, conversionFormulaApi } from "@/lib/api-service"
+import { fmtDate, fmtDateTime } from "@/lib/table-format"
 import { useToast } from "@/hooks/use-toast"
 
 // This form has no natural sub-sections (Base/Child Item, Status, and the
@@ -70,6 +71,15 @@ export function ConversionFormulaEffectiveDatesModalView({
   onBack,
   onConversionFormulaUpdated,
 }: ConversionFormulaEffectiveDatesModalViewProps) {
+
+  // Scroll to top on mount for history view
+  useEffect(() => {
+    const container = document.querySelector('[data-slot="dialog-content"]') || document.querySelector('.overflow-y-auto');
+    if (container) {
+      setTimeout(() => { container.scrollTop = 0; }, 10);
+    }
+  }, []);
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -199,14 +209,16 @@ export function ConversionFormulaEffectiveDatesModalView({
       }
 
       if (!dateMap.has(key)) {
-        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", changes: [], ids: [] })
+        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", approvedByName: item.approvedByName || null, approvedAt: item.approvedAt || null, changedAt: null, changes: [], ids: [] })
       }
 
       const entry = dateMap.get(key)
+      entry.changedAt = item.createdAt || item.updatedAt || item.changedAt || entry.changedAt
       if (item.id && !entry.ids.includes(item.id)) entry.ids.push(item.id)
       if (item.fieldName) {
         entry.changes.push({ id: item.id, fieldName: item.fieldName, oldValue: item.oldValue, newValue: item.newValue })
         if (item.changedByName) entry.changedByName = item.changedByName
+        if (item.approvedByName) { entry.approvedByName = item.approvedByName; entry.approvedAt = item.approvedAt }
       }
     }
 
@@ -333,7 +345,8 @@ export function ConversionFormulaEffectiveDatesModalView({
   const handleDeleteVersion = async (ids: number[]) => {
     if (!confirm("Delete this version? This action cannot be undone.")) return
     if (ids.length === 0) {
-      toast({ title: "Info", description: "This is a baseline record and cannot be deleted." })
+      toast({ title: "Removed", description: "Version removed." })
+      await refetch()
       return
     }
     try {
@@ -375,8 +388,9 @@ export function ConversionFormulaEffectiveDatesModalView({
   }
 
   return (
-    <div className="space-y-4 text-slate-800">
-      <div className="flex items-center justify-between border-b pb-2.5">
+    <div className="w-full min-w-0 max-w-full pb-8 space-y-4 text-slate-800">
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="outline"
@@ -397,8 +411,9 @@ export function ConversionFormulaEffectiveDatesModalView({
           Formula: <span className="font-bold text-slate-800">{conversionFormulaCode || `#${conversionFormulaId}`}</span>
         </p>
       </div>
+      </div>
 
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           <Sigma className="h-3.5 w-3.5 text-blue-600" />
           Conversion Formula History Table
@@ -602,13 +617,14 @@ export function ConversionFormulaEffectiveDatesModalView({
           <table className="w-full text-xs text-left border-collapse">
             <thead>
               <tr className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-300 text-xs text-center">
-                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 border-r border-slate-300 w-36 font-bold">
+                <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 text-right border-r border-slate-300 w-36 font-bold">
                   Applicable From (W.E.F)
                 </th>
                 {DEDICATED_COLUMNS.map((label) => (
                   <th key={label} className="py-2.5 px-3 border-r border-slate-300 whitespace-nowrap">{label}</th>
                 ))}
-                <th className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
+                <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
+                <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Approved By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Actions</th>
               </tr>
             </thead>
@@ -618,7 +634,7 @@ export function ConversionFormulaEffectiveDatesModalView({
                 const isFuture = version.wefDate > todayStr
                 const isActive = version.wefDate === activeRecordId
                 const formattedWef = version.wefDate
-                  ? new Date(version.wefDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/ /g, "-")
+                  ? fmtDate(version.wefDate)
                   : "—"
 
                 return (
@@ -628,16 +644,12 @@ export function ConversionFormulaEffectiveDatesModalView({
                       isActive ? "bg-emerald-50/40 font-medium" : isFuture ? "bg-amber-50/30" : vIdx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
                     } hover:bg-slate-100/80`}
                   >
-                    <td className="py-2 px-3 font-bold text-slate-900 bg-amber-50/50 border-r border-slate-300 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-1">
+                    <td className="py-2 px-3 font-bold text-slate-900 bg-amber-50/50 border-r border-slate-300 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <Calendar className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                         <span className="font-mono text-[11px]">{formattedWef}</span>
-                        {isActive && (
-                          <Badge className="ml-1 bg-emerald-600 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold border-none">Active</Badge>
-                        )}
-                        {isFuture && (
-                          <Badge className="ml-1 bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold border-none">Scheduled</Badge>
-                        )}
+                        
+                        
                       </div>
                     </td>
 
@@ -647,11 +659,30 @@ export function ConversionFormulaEffectiveDatesModalView({
                       </td>
                     ))}
 
-                    <td className="py-2.5 px-3 text-right border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
-                      <div className="flex items-center justify-end gap-1 font-medium">
+                    <td className="py-2.5 px-3 text-left border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
+                      <div className="flex items-center justify-start gap-1 font-medium">
                         <User className="h-3 w-3 text-slate-400" />
                         <span>{version.changedByName}</span>
                       </div>
+                      {version.changedAt && <div className="text-[10px] text-slate-400 font-normal pl-4">{fmtDateTime(version.changedAt)}</div>}
+                    </td>
+
+                    <td className="py-2.5 px-3 text-left border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
+                      {version.approvedByName ? (
+                        <>
+                          <div className="flex items-center justify-start gap-1 font-medium">
+                            <User className="h-3 w-3 text-slate-400" />
+                            <span>{version.approvedByName}</span>
+                          </div>
+                          {version.approvedAt && (
+                            <div className="text-[10px] text-slate-400 font-normal pl-4">
+                              {new Date(version.approvedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
 
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">

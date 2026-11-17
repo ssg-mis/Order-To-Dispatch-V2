@@ -5,6 +5,8 @@ import { TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/compon
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Pencil, Trash2, CheckCircle2, Eye, SortAsc, SortDesc, Check, X } from "lucide-react"
+import { fmtWeight } from "@/lib/weight-format"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
 
 interface SkuDetailsMasterTableProps {
   subTab: "active" | "pending"
@@ -56,6 +58,7 @@ export const SkuDetailsMasterTable: React.FC<SkuDetailsMasterTableProps> = ({
   openApprovalModal,
   setRejectDialogContext,
 }) => {
+  const wd = useWeightDecimals()
   if (subTab === "pending") {
     return (
       <div className="flex flex-col h-[600px]">
@@ -276,11 +279,11 @@ export const SkuDetailsMasterTable: React.FC<SkuDetailsMasterTableProps> = ({
                   </div>
                   <div>
                     <span className="font-medium text-slate-600">Pack Wt: </span>
-                    {item.packing_weight}
+                    {fmtWeight(item.packing_weight, wd)}
                   </div>
                   <div>
                     <span className="font-medium text-slate-600">Gross Wt: </span>
-                    {item.gross_weight}
+                    {fmtWeight(item.gross_weight, wd)}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -405,8 +408,8 @@ export const SkuDetailsMasterTable: React.FC<SkuDetailsMasterTableProps> = ({
                       <TableCell className="text-slate-700">{item.sku_name}</TableCell>
                       <TableCell className="text-slate-600">{item.main_uom}</TableCell>
                       <TableCell className="text-slate-600">{item.alternate_uom}</TableCell>
-                      <TableCell className="text-slate-600 font-medium">{item.packing_weight}</TableCell>
-                      <TableCell className="text-slate-600 font-medium">{item.gross_weight}</TableCell>
+                      <TableCell className="text-slate-600 font-medium">{fmtWeight(item.packing_weight, wd)}</TableCell>
+                      <TableCell className="text-slate-600 font-medium">{fmtWeight(item.gross_weight, wd)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge

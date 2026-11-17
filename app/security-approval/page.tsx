@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { usePersistedFilters } from "@/hooks/use-persisted-filters"
+import { useStageTable, type StageColDef } from "@/hooks/use-stage-table"
+import { StageListHeader, StageToolbar, StageSegmented, StageFilterSelect, StageColumnsMenu, StageDivider, StageActiveChips, StageHeadCell, StageTotalsRow, StageSortIcon, StageActionBar, StagePagination, StageDecisionFooter } from "@/components/stage-list"
 import { WorkflowStageShell } from "@/components/workflow/workflow-stage-shell"
 import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -37,6 +40,8 @@ import { usePersistedColumns } from "@/hooks/use-persisted-columns"
 import { useColumnOrder } from "@/hooks/use-column-order"
 import { SortableTableHead } from "@/components/ui/sortable-table-head"
 import { ColumnDragProvider } from "@/components/ui/column-drag-provider"
+import { useWeightDecimals } from "@/hooks/use-weight-decimals"
+import { fmtNum, fmtDate, fmtAmount, isAmountCol } from "@/lib/table-format"
 
 const MAX_COMPRESSED_IMAGE_BYTES = 850 * 1024
 const MAX_COMPRESSED_IMAGE_DIMENSION = 1600
@@ -102,6 +107,7 @@ type ColId = typeof PAGE_COLUMNS[number]["id"]
 
 export default function SecurityApprovalPage() {
   const queryClient = useQueryClient()
+  const wd = useWeightDecimals()
   const router = useRouter()
   const { toast } = useToast()
   const { isReadOnly, user, isAdmin, isFeatureEnabled } = useAuth()
@@ -186,9 +192,17 @@ export default function SecurityApprovalPage() {
     biltyNo: "",
     biltyImage: null as File | null,
     biltyImageName: "",
-    vehicleImages: [] as File[],
-    vehicleImagePreviews: [] as string[],
-    vehicleImageNames: [] as string[],
+    biltyImagePreview: "",
+    // Segregated vehicle images
+    frontImage: null as File | null,
+    frontImagePreview: "",
+    frontImageName: "",
+    backImage: null as File | null,
+    backImagePreview: "",
+    backImageName: "",
+    loadedImage: null as File | null,
+    loadedImagePreview: "",
+    loadedImageName: "",
     checklist: {
       mallLoad: false,
       qtyMatch: false,
@@ -230,7 +244,7 @@ export default function SecurityApprovalPage() {
         manual_sauda_no: filterValues.manualSaudaNo,
         do_date_from: filterValues.startDate,
         do_date_to: filterValues.endDate,
-        customer_name: filterValues.partyName === "all" ? undefined : filterValues.partyName,
+        customer_name: !filterValues.partyName || filterValues.partyName === "all" ? undefined : filterValues.partyName,
       });
       return response.success ? response.data : { approvals: [], pagination: { total: 0 } };
     },
@@ -245,29 +259,34 @@ export default function SecurityApprovalPage() {
     setPendingPage(1);
   }, [filterValues]);
 
-  const handleFileUpload = (file: File, type: 'bilty' | 'vehicle') => {
+  const MAX_UPLOAD_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+  const handleFileUpload = (file: File, type: 'bilty' | 'front' | 'back' | 'loaded') => {
     if (!file) return;
 
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      toast({
+        title: "File too large",
+        description: `"${file.name}" is larger than 15 MB. Please select a file up to 15 MB.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const preview = URL.createObjectURL(file);
     if (type === 'bilty') {
-      setUploadData(p => ({
-        ...p,
-        biltyImage: file,
-        biltyImageName: file.name
-      }));
-    } else {
-      setUploadData(p => ({
-        ...p,
-        vehicleImages: [...p.vehicleImages, file],
-        vehicleImagePreviews: [...p.vehicleImagePreviews, URL.createObjectURL(file)],
-        vehicleImageNames: [...p.vehicleImageNames, file.name]
-      }));
+      setUploadData(p => { if (p.biltyImagePreview) URL.revokeObjectURL(p.biltyImagePreview); return { ...p, biltyImage: file, biltyImageName: file.name, biltyImagePreview: preview }; });
+    } else if (type === 'front') {
+      setUploadData(p => { if (p.frontImagePreview) URL.revokeObjectURL(p.frontImagePreview); return { ...p, frontImage: file, frontImagePreview: preview, frontImageName: file.name }; });
+    } else if (type === 'back') {
+      setUploadData(p => { if (p.backImagePreview) URL.revokeObjectURL(p.backImagePreview); return { ...p, backImage: file, backImagePreview: preview, backImageName: file.name }; });
+    } else if (type === 'loaded') {
+      setUploadData(p => { if (p.loadedImagePreview) URL.revokeObjectURL(p.loadedImagePreview); return { ...p, loadedImage: file, loadedImagePreview: preview, loadedImageName: file.name }; });
     }
   };
 
-  const uploadSelectedFile = async (file: File, type: 'bilty' | 'vehicle', index?: number) => {
-    const uploadId = type === 'bilty' ? 'bilty' : `vehicle-${index ?? Date.now()}`;
+  const uploadSelectedFile = async (file: File, uploadId: string) => {
     setIsUploading(uploadId);
-
     try {
       const uploadFile = await compressImageForUpload(file);
       const response = await orderApi.uploadFile(uploadFile);
@@ -287,7 +306,7 @@ export default function SecurityApprovalPage() {
     // refetchPending and refetchHistory are already initiated by the queryKey dependency on filterValues
   }, [])
 
-  const handleBulkSubmit = async () => {
+  const handleBulkSubmit = async (verdict: "APPROVE" | "REJECT") => {
     if (selectedGroups.length === 0) return
 
     // Submit only selected products across all groups
@@ -304,16 +323,7 @@ export default function SecurityApprovalPage() {
       return
     }
 
-    if (!uploadData.verdict) {
-      toast({
-        title: "Error",
-        description: "Please select a Security Verdict",
-        variant: "destructive"
-      })
-      return
-    }
-
-    if (uploadData.verdict === "REJECT" && !uploadData.remarks?.trim()) {
+    if (verdict === "REJECT" && !uploadData.remarks?.trim()) {
       toast({
         title: "Error",
         description: "Please provide a reason for rejecting via the Revert Remarks field",
@@ -329,9 +339,15 @@ export default function SecurityApprovalPage() {
       const biltyImageUrl = uploadData.biltyImage
         ? await uploadSelectedFile(uploadData.biltyImage, 'bilty')
         : null
-      const vehicleImageUrls = await Promise.all(
-        uploadData.vehicleImages.map((file, index) => uploadSelectedFile(file, 'vehicle', index))
-      )
+      const frontImageUrl = uploadData.frontImage
+        ? await uploadSelectedFile(uploadData.frontImage, 'front')
+        : null
+      const backImageUrl = uploadData.backImage
+        ? await uploadSelectedFile(uploadData.backImage, 'back')
+        : null
+      const loadedImageUrl = uploadData.loadedImage
+        ? await uploadSelectedFile(uploadData.loadedImage, 'loaded')
+        : null
 
       // Submit each selected product to backend API
       for (const product of allSelectedProducts) {
@@ -342,10 +358,12 @@ export default function SecurityApprovalPage() {
             const submitData = {
               biltyNo: uploadData.biltyNo || null,
               biltyImage: biltyImageUrl,
-              vehicleImageAttachment: vehicleImageUrls.length > 0 ? vehicleImageUrls.join(',') : null,
-              verdictStatus: uploadData.verdict, // Adding verdict to API
+              frontImage: frontImageUrl,
+              backImage: backImageUrl,
+              loadedVehicleImage: loadedImageUrl,
+              verdictStatus: verdict, // Adding verdict to API
               userId: user?.id || null, // Track acting user's login id
-              remarks: uploadData.verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
+              remarks: verdict === 'REJECT' ? uploadData.remarks : null // Pass remarks if rejecting
             };
 
             console.log('[SECURITY] Submitting approval for ID:', recordId, submitData);
@@ -381,9 +399,16 @@ export default function SecurityApprovalPage() {
           biltyNo: "",
           biltyImage: null,
           biltyImageName: "",
-          vehicleImages: [],
-          vehicleImagePreviews: [],
-          vehicleImageNames: [],
+          biltyImagePreview: "",
+          frontImage: null,
+          frontImagePreview: "",
+          frontImageName: "",
+          backImage: null,
+          backImagePreview: "",
+          backImageName: "",
+          loadedImage: null,
+          loadedImagePreview: "",
+          loadedImageName: "",
           checklist: {
             mallLoad: false,
             qtyMatch: false,
@@ -578,26 +603,6 @@ export default function SecurityApprovalPage() {
     })
   }, [filteredPendingOrders])
 
-  // ── Pending Table Sorting ─────────────────────────────────────
-  const [pendingSortField, setPendingSortField] = useState<string>("")
-  const [pendingSortDir, setPendingSortDir] = useState<"asc" | "desc">("asc")
-
-  const handlePendingSort = (field: string) => {
-    if (pendingSortField === field) {
-      setPendingSortDir(prev => prev === "asc" ? "desc" : "asc")
-    } else {
-      setPendingSortField(field)
-      setPendingSortDir("asc")
-    }
-  }
-
-  const PendingSortIcon = ({ field }: { field: string }) => {
-    if (pendingSortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-slate-400 inline" />
-    return pendingSortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 text-blue-600 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 text-blue-600 inline" />
-  }
-
   function getDynamicColumnValue(group: any, colId: string) {
     const directValue = group?.[colId]
     if (directValue !== undefined && directValue !== null && directValue !== "") return directValue
@@ -614,33 +619,17 @@ export default function SecurityApprovalPage() {
     return "—"
   }
 
-  const getSortValue = (group: any, colId: string): string => {
-    if (colId === "partySoDate") return group.partySoDate || ""
-    // Sort on the raw YYYY-MM-DD (chronological), not the formatted DD/MM/YYYY.
-    if (colId === "actualDispatchDate") return group.actualDate && group.actualDate !== "NoDate" ? group.actualDate : ""
-    if (colId === "doNumber" || colId === "orderNo") return group.doNumber || ""
-    if (colId === "processId" || colId === "processid") return group.processId || ""
-    if (colId === "customerName") return group.customerName || ""
-    if (colId === "productCount") return String(group._productCount || 0)
-    if (colId === "vehicleNo") return group.vehicleNo || ""
-    if (colId === "orderPunchRemarks") return group.orderPunchRemarks || ""
-    if (colId === "status") {
-      return group._allProducts?.every((p: any) => p.status_1 === "Completed") ? "Verified" : "Pending Verification"
-    }
-    return String(getDynamicColumnValue(group, colId))
-  }
-
-  // Sorts displayRows by any field key — dynamic columns are automatically sortable
-  const sortedDisplayRows = useMemo(() => {
-    if (!pendingSortField || displayRows.length === 0) return displayRows
-    return [...displayRows].sort((a, b) => {
-      const aVal = getSortValue(a, pendingSortField).toLowerCase()
-      const bVal = getSortValue(b, pendingSortField).toLowerCase()
-      if (aVal < bVal) return pendingSortDir === "asc" ? -1 : 1
-      if (aVal > bVal) return pendingSortDir === "asc" ? 1 : -1
-      return 0
-    })
-  }, [displayRows, pendingSortField, pendingSortDir])
+  // ── Stage table filter state ──
+  // Status is remembered permanently; the rest is session-scoped (usePersistedFilters). Refresh only reloads data.
+  const [listView, patchListView] = usePersistedFilters("security-approval", {
+    quickSearch: "",
+    statusFilter: "ALL" as "ALL" | "PENDING" | "REJECTED",
+    customerFilter: "ALL",
+  }, { permanentKeys: ["statusFilter"] })
+  const { quickSearch, statusFilter, customerFilter } = listView
+  const setQuickSearch = (v: string) => patchListView({ quickSearch: v })
+  const setStatusFilter = (v: "ALL" | "PENDING" | "REJECTED") => patchListView({ statusFilter: v })
+  const setCustomerFilter = (v: string) => patchListView({ customerFilter: v })
 
   const [columnOrder, setColumnOrder] = useColumnOrder("security-approval", PAGE_COLUMNS.map(c => c.id))
   // actualDispatchDate is a computed core column, always shown (it isn't in the toggle
@@ -659,27 +648,113 @@ export default function SecurityApprovalPage() {
     setColumnOrder([...coreInNewOrder, ...hiddenCols])
   }, [columnOrder, setColumnOrder])
 
-  const COL_SORT_FIELD: Partial<Record<ColId, string>> = {
-    partySoDate:       "partySoDate",
-    actualDispatchDate: "actualDispatchDate",
-    orderNo:           "doNumber",
-    processid:         "processId",
-    customerName:      "customerName",
-    vehicleNo:         "vehicleNo",
-    orderPunchRemarks: "orderPunchRemarks",
+  const EXTRA_COLS_EXCLUDED = ['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products']
+  const NUMERIC_TOTAL_COLS = new Set(["actual_qty_dispatch"])
+  // Table standard: numeric + date extra columns right aligned, plain fixed decimals / dd/mm/yyyy.
+  const NUM_DECIMALS: Record<string, number> = {
+    actual_qty_dispatch: 0, orderQty: 4, qtyToDispatch: 4, actual_qty: 0, actual_approval_qty: 4, altQty: 4, damage_qty: 4,
+    gross_weight: wd, tare_weight: wd, net_weight: wd, extra_weight: wd,
+    rate: 2, ratePerLtr: 2, ratePer15Kg: 2, rateOfMaterial: 2, totalWithGst: 2, advanceAmount: 2, bill_amount: 2,
   }
-  const CENTER_COLS: ColId[] = ["vehicleNo", "orderPunchRemarks"]
+  const DATE_COL_IDS = new Set([
+    "deliveryDate", "invoice_date", "fitness_end_date", "insurance_end_date", "tax_end_date",
+    "pollution_end_date", "permit1_end_date", "permit2_end_date",
+  ])
+  const fmtExtra = (id: string, v: any) => {
+    if (v === "—" || v === null || v === undefined || v === "") return "—"
+    if (id in NUM_DECIMALS) return isAmountCol(id) ? fmtAmount(v, NUM_DECIMALS[id]) : fmtNum(v, NUM_DECIMALS[id])
+    if (DATE_COL_IDS.has(id)) return fmtDate(v)
+    return String(v)
+  }
+  const joinDo = (g: any, key: string) =>
+    (g.doDetails || []).map((d: any) => d[key]).filter((v: any) => v && v !== "—").join(" ") || ""
+  const isRejectedGroup = (g: any) => g._allProducts.some((p: any) => p.security_guard_status === "REJECT")
+
+  const extraColIds = useMemo(
+    () => visibleColumns.filter(colId => !EXTRA_COLS_EXCLUDED.includes(colId) && ALL_COLUMNS.some(c => c.id === colId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleColumns]
+  )
+
+  const tableCols = useMemo<StageColDef<any>[]>(() => {
+    const coreAcc: Record<string, StageColDef<any>> = {
+      partySoDate: { id: "partySoDate", label: "DO Date", type: "date", accessor: g => g._allProducts[0]?.party_so_date || g._allProducts[0]?.partySoDate },
+      actualDispatchDate: { id: "actualDispatchDate", label: "Actual Dispatch Date", type: "date", accessor: g => (g.actualDate && g.actualDate !== "NoDate" ? g.actualDate : "") },
+      orderNo: { id: "orderNo", label: "DO Numbers", accessor: g => joinDo(g, "doNumber") || g.doNumber },
+      processid: { id: "processid", label: "Manual Sauda No.", accessor: g => joinDo(g, "processId") || g.processId },
+      customerName: { id: "customerName", label: "Customer Name", accessor: g => Array.from(g.customerNames as Set<string>).join(", ") },
+      vehicleNo: { id: "vehicleNo", label: "Vehicle No.", accessor: g => g.vehicleNo },
+      orderPunchRemarks: { id: "orderPunchRemarks", label: "Order Punch Remarks", accessor: g => joinDo(g, "orderPunchRemarks") || g.orderPunchRemarks },
+    }
+    const core = orderedVisibleCols.map(c => coreAcc[c.id]).filter(Boolean)
+    const extra: StageColDef<any>[] = extraColIds.map(colId => {
+      const numeric = NUMERIC_TOTAL_COLS.has(colId)
+      const isNum = colId in NUM_DECIMALS
+      const isDate = DATE_COL_IDS.has(colId)
+      return {
+        id: colId,
+        label: numeric ? "Actual Qty Dispatch (MT)" : (ALL_COLUMNS.find(c => c.id === colId)?.label || colId),
+        type: isNum ? "number" : isDate ? "date" : "text",
+        total: numeric,
+        accessor: (g: any) => {
+          const v = getDynamicColumnValue(g, colId)
+          if (isNum) return Number(v) || 0
+          if (isDate) return v === "—" ? "" : v
+          return String(v)
+        },
+      } as StageColDef<any>
+    })
+    const status: StageColDef<any> = {
+      id: "__status",
+      label: "Status",
+      accessor: g => (isRejectedGroup(g) ? "Rejected" : "Pending Guard"),
+    }
+    return [...core, ...extra, status]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedVisibleCols, extraColIds])
+
+  const baseFilter = useCallback((g: any) => {
+    if (statusFilter === "REJECTED" && !isRejectedGroup(g)) return false
+    if (statusFilter === "PENDING" && isRejectedGroup(g)) return false
+    if (customerFilter !== "ALL" && !(g.customerNames as Set<string>).has(customerFilter)) return false
+    const q = quickSearch.trim().toLowerCase()
+    if (q) {
+      const hay = [joinDo(g, "doNumber"), g.doNumber, joinDo(g, "processId"), Array.from(g.customerNames as Set<string>).join(" "), g.vehicleNo, joinDo(g, "orderPunchRemarks")]
+        .join(" ")
+        .toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, customerFilter, quickSearch])
+
+  const table = useStageTable<any>({ rows: displayRows, columns: tableCols, baseFilter, persistKey: "security-approval" })
+  const sortedDisplayRows = table.rows
+  const uniqueCustomerNames = useMemo(
+    () => Array.from(new Set(displayRows.flatMap((g: any) => Array.from(g.customerNames as Set<string>)))).sort() as string[],
+    [displayRows]
+  )
+  const activeFiltersCount =
+    (statusFilter !== "ALL" ? 1 : 0) + (customerFilter !== "ALL" ? 1 : 0) + (quickSearch.trim() ? 1 : 0) + table.activeColumnFilterCount
+  const clearAllTableFilters = () => {
+    patchListView({ statusFilter: "ALL", customerFilter: "ALL", quickSearch: "" })
+    table.clearColumnFilters()
+  }
+  const statusColDef = tableCols[tableCols.length - 1]
+  const statusSortable = true
+  const RIGHT_COLS = new Set<string>(["partySoDate", "actualDispatchDate", ...Object.keys(NUM_DECIMALS), ...Array.from(DATE_COL_IDS)])
+  const colAlign = (id: string): "left" | "right" => (RIGHT_COLS.has(id) ? "right" : "left")
 
   const renderCoreCell = (group: any, colId: ColId) => {
     switch (colId) {
       case "partySoDate":
-        return <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">{group.partySoDate}</TableCell>
+        return <TableCell key={colId} className="p-4 text-right text-xs text-slate-600 font-mono tabular-nums min-w-[115px]">{group.partySoDate}</TableCell>
       case "actualDispatchDate": {
         const dispatchedDates = group.doDetails && group.doDetails.length > 0
           ? Array.from(new Set(group.doDetails.map((d: any) => d.dispatchedDate)))
           : [group.actualDispatchDate]
         return (
-          <TableCell key={colId} className="p-4 text-center text-xs text-slate-600">
+          <TableCell key={colId} className="p-4 text-right text-xs text-slate-600 font-mono tabular-nums min-w-[115px]">
             <div className="flex flex-col gap-1.5">
               {dispatchedDates.map((date: any, idx: number) => (
                 <span key={`${date}-${idx}`}>{date}</span>
@@ -690,7 +765,7 @@ export default function SecurityApprovalPage() {
       }
       case "orderNo":
         return (
-          <TableCell key={colId} className="p-4 text-center">
+          <TableCell key={colId} className="p-4 text-left">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: group.doNumber }]).map((d: any, idx: number) => (
                 <span key={`${d.doNumber}-${idx}`} className="text-xs font-bold text-blue-700">{d.doNumber}</span>
@@ -711,10 +786,10 @@ export default function SecurityApprovalPage() {
       case "customerName":
         return <TableCell key={colId} className="p-4 text-xs text-slate-600"><span className="font-medium text-slate-700">{group.customerName}</span></TableCell>
       case "vehicleNo":
-        return <TableCell key={colId} className="text-center p-4"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
+        return <TableCell key={colId} className="text-left p-4"><span className="text-xs text-slate-600">{group.vehicleNo}</span></TableCell>
       case "orderPunchRemarks":
         return (
-          <TableCell key={colId} className="text-center p-4">
+          <TableCell key={colId} className="text-left p-4">
             <div className="flex flex-col gap-1.5">
               {(group.doDetails && group.doDetails.length > 0 ? group.doDetails : [{ doNumber: "—", orderPunchRemarks: group.orderPunchRemarks }]).map((d: any, idx: number) => (
                 <span key={`${d.doNumber}-${idx}`} className="text-xs text-slate-600">{d.orderPunchRemarks}</span>
@@ -731,27 +806,15 @@ export default function SecurityApprovalPage() {
 
 
 
-  const toggleSelectItem = (itemKey: string) => {
-    setSelectedItems(prev =>
-      prev.includes(itemKey)
-        ? prev.filter(k => k !== itemKey)
-        : [...prev, itemKey]
-    )
-  }
-
-  const toggleSelectAll = () => {
-    const enabledRows = displayRows.filter(r => !r.isDisabled)
-    if (selectedItems.length === enabledRows.length && enabledRows.length > 0) {
-      setSelectedItems([])
-    } else {
-      setSelectedItems(enabledRows.map(r => r._rowKey))
+  // Clicking a row opens the security verification dialog for that order.
+  const handleOpenDialog = (group: any) => {
+    if (!group) return
+    if (group.isDisabled) {
+      toast({ title: "Not dispatched yet", description: "This order can be processed once its dispatch is confirmed.", variant: "destructive" })
+      return
     }
-  }
 
-  const handleOpenDialog = () => {
-    if (selectedItems.length === 0) return
-
-    const targets = displayRows.filter(r => selectedItems.includes(r._rowKey))
+    const targets = [group]
     if (targets.length > 0) {
       setSelectedGroups(targets)
       // Select all products for all selected groups by default
@@ -762,9 +825,15 @@ export default function SecurityApprovalPage() {
         biltyNo: "",
         biltyImage: null,
         biltyImageName: "",
-        vehicleImages: [],
-        vehicleImagePreviews: [],
-        vehicleImageNames: [],
+        frontImage: null,
+        frontImagePreview: "",
+        frontImageName: "",
+        backImage: null,
+        backImagePreview: "",
+        backImageName: "",
+        loadedImage: null,
+        loadedImagePreview: "",
+        loadedImageName: "",
         checklist: {
           mallLoad: false,
           qtyMatch: false,
@@ -781,6 +850,7 @@ export default function SecurityApprovalPage() {
 
   return (
     <WorkflowStageShell
+      persistKey="security-approval"
       title="Stage 8: Security Guard Approval"
       description="Upload bilty and vehicle images for security verification."
       pendingCount={pendingResult?.pagination?.total || 0}
@@ -820,104 +890,109 @@ export default function SecurityApprovalPage() {
       }
     >
       <div className="space-y-4">
-        <div className="flex justify-end gap-2">
-          <Button
-            onClick={handleOpenDialog}
-            disabled={selectedItems.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 shadow-md transition-all active:scale-95"
+
+        <Card className="border border-slate-200/80 shadow-xs overflow-clip py-0 gap-0 stage-card">
+          <StageListHeader
+            title="Pending Security Approvals"
+            shown={sortedDisplayRows.length}
+            total={displayRows.length}
+            description="Vehicles awaiting security guard verification"
+            searchValue={quickSearch}
+            onSearchChange={setQuickSearch}
+            searchPlaceholder="Search DO, Customer, Vehicle..."
           >
-            <Upload className="mr-2 h-4 w-4" />
-            Process Security ({selectedItems.length})
-          </Button>
-
-          {(isAdmin || isFeatureEnabled('can_toggle_columns')) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-transparent border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[250px]" collisionPadding={16}>
-                {/* "products" ("Items") has no real column here — the product list/count is
-                    always shown via the fixed "{n} PRODUCTS" expand header, not a toggleable
-                    cell — so it's excluded here to avoid a broken checkbox. */}
-                <ColumnToggleContent columns={ALL_COLUMNS.filter(c => c.id !== "products")} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-
-        <Card className="hidden md:block border-none shadow-xl rounded-3xl overflow-hidden bg-white/50 backdrop-blur-md">
-          <Table>
-            <TableHeader className="bg-slate-50 sticky top-0 z-10">
-              <TableRow>
-                <TableHead className="w-12 text-center">
-                  <Checkbox
-                    checked={displayRows.length > 0 && selectedItems.length === displayRows.filter(r => !r.isDisabled).length && displayRows.filter(r => !r.isDisabled).length > 0}
-                    onCheckedChange={toggleSelectAll}
+            <StageToolbar
+              shown={sortedDisplayRows.length}
+              total={displayRows.length}
+              activeCount={activeFiltersCount}
+              onReset={clearAllTableFilters}
+              filters={
+                <>
+                  <StageSegmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "PENDING", label: "Pending Guard" },
+                      { value: "REJECTED", label: "Rejected" },
+                    ]}
                   />
-                </TableHead>
-                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId))]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
-                  {orderedVisibleCols.map(col => {
-                    const sf = COL_SORT_FIELD[col.id]
-                    return (
-                      <SortableTableHead
-                        key={col.id}
-                        id={col.id}
-                        className={`whitespace-nowrap text-center${sf ? " cursor-pointer select-none hover:text-blue-600 transition-colors" : ""}`}
-                        onClick={sf ? () => handlePendingSort(sf) : undefined}
-                      >
-                        {col.label}{sf && <PendingSortIcon field={sf} />}
-                      </SortableTableHead>
-                    )
-                  })}
-                  {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
-                    const col = ALL_COLUMNS.find(c => c.id === colId)
-                    if (!col) return null
-                    return (
-                      <SortableTableHead key={colId} id={colId} className="whitespace-nowrap text-center cursor-pointer select-none hover:text-blue-600 transition-colors" onClick={() => handlePendingSort(colId)}>
-                        {col.label}
-                        <PendingSortIcon field={colId} />
-                      </SortableTableHead>
-                    )
-                  })}
+                  <StageDivider />
+                  <StageFilterSelect value={customerFilter} onChange={setCustomerFilter} allLabel="All Customers" options={uniqueCustomerNames} />
+                  {/* "products" ("Items") has no real column here — the product list/count is
+                      always shown via the fixed "{n} PRODUCTS" expand header, not a toggleable
+                      cell — so it's excluded here to avoid a broken checkbox. */}
+                  <StageColumnsMenu
+                    columns={ALL_COLUMNS.filter(c => c.id !== "products")}
+                    visibleColumns={visibleColumns}
+                    setVisibleColumns={setVisibleColumns}
+                    show={isAdmin || isFeatureEnabled('can_toggle_columns')}
+                  />
+                </>
+              }
+            />
+            <StageActiveChips
+              chips={[
+                ...(statusFilter !== "ALL" ? [{ label: `Status: ${statusFilter === "PENDING" ? "Pending Guard" : "Rejected"}`, onClear: () => setStatusFilter("ALL") }] : []),
+                ...(customerFilter !== "ALL" ? [{ label: `Customer: ${customerFilter}`, onClear: () => setCustomerFilter("ALL") }] : []),
+                ...(quickSearch.trim() ? [{ label: `Search: ${quickSearch.trim()}`, onClear: () => setQuickSearch("") }] : []),
+              ]}
+            />
+          </StageListHeader>
+          <CardContent className="p-0">
+          <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader className="bg-slate-50 border-b">
+              <TableRow>
+                <ColumnDragProvider columnIds={[...orderedVisibleCols.map(c => c.id), ...extraColIds]} onReorder={handleColumnReorder} disabled={!isAdmin && !isFeatureEnabled('can_reorder_columns')}>
+                  {[...tableCols.slice(0, -1)].map(col => (
+                    <StageHeadCell key={col.id} col={col} table={table} align={colAlign(col.id)} width={colAlign(col.id) === "right" ? "min-w-[125px]" : undefined} />
+                  ))}
+                  <StageHeadCell key={statusColDef.id} col={statusColDef} table={table} align="left" />
                 </ColumnDragProvider>
-                <TableHead className="whitespace-nowrap text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
+              {sortedDisplayRows.length > 0 && (
+                <StageTotalsRow
+                  columns={[...tableCols]}
+                  totals={table.totals}
+                  count={sortedDisplayRows.length}
+                  labelColumnId={tableCols[0]?.id}
+                  unit=""
+                  format={(n, id) => (isAmountCol(id) ? fmtAmount(n, 2) : n.toFixed(4))}
+                  tones={{ actual_qty_dispatch: "blue" }}
+                  align={Object.fromEntries(tableCols.map(c => [c.id, colAlign(c.id)]))}
+                />
+              )}
               {isPendingLoading && pendingOrders.length === 0 ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i} className="opacity-40 border-b border-slate-50">
-                    <TableCell className="text-center py-4"><div className="h-4 w-4 bg-slate-200 animate-pulse rounded mx-auto" /></TableCell>
-                    <TableCell className="p-4 text-center"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="p-4 text-center"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-16 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="p-4"><div className="h-3 w-40 bg-slate-200 animate-pulse rounded-full" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-3 w-32 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
-                    <TableCell className="text-center p-4"><div className="h-5 w-24 bg-slate-200 animate-pulse rounded-full mx-auto" /></TableCell>
+                    {tableCols.map(c => (
+                      <TableCell key={c.id} className="p-4"><div className="h-3 w-20 bg-slate-200 animate-pulse rounded-full" /></TableCell>
+                    ))}
                   </TableRow>
                 ))
-              ) : displayRows.length > 0 ? (
-                displayRows.map((group) => (
-                  <TableRow key={group._rowKey} className={cn("hover:bg-blue-50/30 transition-colors", selectedItems.includes(group._rowKey) ? "bg-blue-50/50" : "")}>
-                    <TableCell className="text-center p-4">
-                      <Checkbox disabled={group.isDisabled} checked={selectedItems.includes(group._rowKey)} onCheckedChange={() => toggleSelectItem(group._rowKey)} />
-                    </TableCell>
+              ) : sortedDisplayRows.length > 0 ? (
+                sortedDisplayRows.map((group) => (
+                  <TableRow
+                    key={group._rowKey}
+                    onClick={() => handleOpenDialog(group)}
+                    className={cn("hover:bg-blue-50/30 transition-colors", group.isDisabled ? "cursor-not-allowed opacity-70" : "cursor-pointer")}
+                  >
                     {orderedVisibleCols.map(col => renderCoreCell(group, col.id))}
-                    {visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).map(colId => {
-                      const col = ALL_COLUMNS.find(c => c.id === colId)
-                      if (!col) return null
+                    {extraColIds.map(colId => {
                       return (
-                        <TableCell key={colId} className="text-center p-4">
-                          <span className="text-xs text-slate-600">{String(getDynamicColumnValue(group, colId))}</span>
+                        <TableCell key={colId} className={cn("p-4", colAlign(colId) === "right" ? "text-right min-w-[125px]" : "text-left")}>
+                          {colId in NUM_DECIMALS
+                            ? <span className="text-xs text-slate-600 font-mono tabular-nums">{fmtExtra(colId, getDynamicColumnValue(group, colId))}</span>
+                            : DATE_COL_IDS.has(colId)
+                              ? <span className="text-xs text-slate-600 font-mono tabular-nums">{fmtExtra(colId, getDynamicColumnValue(group, colId))}</span>
+                              : <span className="text-xs text-slate-600">{String(getDynamicColumnValue(group, colId))}</span>}
                         </TableCell>
                       )
                     })}
-                    <TableCell className="text-center p-4">
+                    <TableCell className="text-left p-4">
                       {group._allProducts.some((p: any) => p.security_guard_status === 'REJECT') ? (
                         <Badge className="bg-red-100 text-red-700 border-red-200 font-black text-[10px] uppercase">REJECTED</Badge>
                       ) : (
@@ -928,48 +1003,31 @@ export default function SecurityApprovalPage() {
                 ))
               ) : (
                   <TableRow>
-                  <TableCell colSpan={orderedVisibleCols.length + 2 + visibleColumns.filter(colId => !['partySoDate', 'actualDispatchDate', 'orderNo', 'customerName', 'vehicleNo', 'processid', 'status', 'orderPunchRemarks', 'products'].includes(colId)).length} className="text-center py-20">
+                  <TableCell colSpan={orderedVisibleCols.length + 1 + extraColIds.length} className="text-center py-20">
                     <div className="flex flex-col items-center gap-2">
                       <ShieldAlert className="w-12 h-12 text-slate-200" />
-                      <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No vehicles pending for security check</p>
+                      <p className="text-slate-400 font-black uppercase tracking-widest text-xs">{displayRows.length > 0 ? "No matching vehicles for the applied filters" : "No vehicles pending for security check"}</p>
+                      {displayRows.length > 0 && (
+                        <button onClick={clearAllTableFilters} className="text-xs text-blue-600 hover:underline mt-1 font-semibold normal-case tracking-normal">Clear Filters</button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
-
-          {/* Pending Pagination Footer */}
-          <div className="px-6 py-4 border-t bg-slate-50/50 flex items-center justify-between rounded-b-3xl">
-            <div className="text-xs text-slate-500 font-medium tracking-tight">
-              Showing <span className="text-slate-900">{(pendingPage - 1) * 10 + 1}</span> to <span className="text-slate-900">{Math.min(pendingPage * 10, pendingResult?.pagination?.total || 0)}</span> of <span className="text-slate-900">{pendingResult?.pagination?.total || 0}</span> orders
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => Math.max(1, p - 1))}
-                disabled={pendingPage === 1 || isPendingLoading}
-                className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center px-2">
-                <span className="text-xs font-semibold text-slate-900">Page {pendingPage}</span>
-                <span className="text-[10px] text-slate-400 font-medium mx-1">of</span>
-                <span className="text-xs font-semibold text-slate-900">{pendingResult?.pagination?.totalPages || 1}</span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPendingPage(p => p + 1)}
-                disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1) || isPendingLoading}
-                className="h-8 w-8 p-0 border-slate-200 hover:bg-white hover:text-blue-600 disabled:opacity-40 transition-all"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
           </div>
+          <StagePagination
+            page={pendingPage}
+            totalPages={pendingResult?.pagination?.totalPages || 1}
+            total={pendingResult?.pagination?.total || 0}
+            noun="Orders"
+            onPrev={() => setPendingPage(p => Math.max(1, p - 1))}
+            onNext={() => setPendingPage(p => p + 1)}
+            prevDisabled={pendingPage === 1 || isPendingLoading}
+            nextDisabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1) || isPendingLoading}
+          />
+          </CardContent>
         </Card>
 
         {/* Mobile Card View */}
@@ -982,20 +1040,18 @@ export default function SecurityApprovalPage() {
                 <div className="h-4 w-1/2 bg-slate-200 rounded" />
               </Card>
             ))
-          ) : displayRows.length > 0 ? (
+          ) : sortedDisplayRows.length > 0 ? (
             sortedDisplayRows.map((group) => (
-              <Card key={group._rowKey} className={cn("p-4 border-2 transition-all relative overflow-hidden", selectedItems.includes(group._rowKey) ? "border-blue-500 bg-blue-50/30 shadow-lg" : "border-slate-100 bg-white shadow-sm")}>
+              <Card
+                key={group._rowKey}
+                onClick={() => handleOpenDialog(group)}
+                className={cn("p-4 border-2 transition-all relative overflow-hidden border-slate-100 bg-white shadow-sm", group.isDisabled ? "cursor-not-allowed opacity-70" : "cursor-pointer active:scale-[0.99]")}
+              >
                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{group.partySoDate}</span>
-                      <Checkbox 
-                        disabled={group.isDisabled} 
-                        checked={selectedItems.includes(group._rowKey)} 
-                        onCheckedChange={() => toggleSelectItem(group._rowKey)}
-                        className="h-5 w-5 border-2 border-blue-200 data-[state=checked]:bg-blue-600"
-                      />
                     </div>
                     
                     <div className="space-y-1">
@@ -1062,8 +1118,8 @@ export default function SecurityApprovalPage() {
                         const val = getDynamicColumnValue(group, colId);
                         return (
                           <div key={colId} className="space-y-0.5 border-l-2 border-slate-100 pl-3">
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{col.label}</p>
-                            <p className="text-xs font-bold text-slate-700 leading-relaxed">{String(val)}</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{NUMERIC_TOTAL_COLS.has(colId) ? `${col.label} (MT)` : col.label}</p>
+                            <p className={cn("text-xs font-bold text-slate-700 leading-relaxed", colAlign(colId) === "right" && "font-mono tabular-nums")}>{fmtExtra(colId, val)}</p>
                           </div>
                         );
                       })}
@@ -1075,16 +1131,13 @@ export default function SecurityApprovalPage() {
           ) : (
             <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-100">
               <ShieldAlert className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-              <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No pending vehicles</p>
+              <p className="text-slate-400 font-black uppercase tracking-widest text-xs">{displayRows.length > 0 ? "No matching records found" : "No pending vehicles"}</p>
+              {displayRows.length > 0 && (
+                <button onClick={clearAllTableFilters} className="text-xs text-blue-600 hover:underline mt-2 font-semibold">Clear Filters</button>
+              )}
             </div>
           )}
 
-          {/* Mobile Pagination */}
-          <div className="flex items-center justify-between px-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1}>Prev</Button>
-            <span className="text-xs font-black text-slate-500 uppercase">Page {pendingPage} of {pendingResult?.pagination?.totalPages || 1}</span>
-            <Button variant="outline" size="sm" onClick={() => setPendingPage(p => p + 1)} disabled={pendingPage >= (pendingResult?.pagination?.totalPages || 1)}>Next</Button>
-          </div>
         </div>
       </div>
 
@@ -1191,7 +1244,7 @@ export default function SecurityApprovalPage() {
 
                                     <div className="sm:col-span-2">
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Broker / Advance</p>
-                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{orderDetails.advanceAmount || 0}</p>
+                                      <p className="text-xs font-bold text-slate-900 leading-none">{orderDetails.brokerName || "—"} / ₹{fmtAmount(orderDetails.advanceAmount || 0, 2)}</p>
                                     </div>
 
                                     <div className="sm:col-span-2">
@@ -1276,7 +1329,7 @@ export default function SecurityApprovalPage() {
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Passing Weight</p>
-                                      <p className="text-xs font-bold text-slate-900">{firstProd.passing_weight || "—"}</p>
+                                      <p className="text-xs font-bold text-slate-900">{firstProd.passing_weight != null && firstProd.passing_weight !== "" ? fmtNum(firstProd.passing_weight, wd) : "—"}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Road Tax</p>
@@ -1325,13 +1378,13 @@ export default function SecurityApprovalPage() {
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Gross / Tare / Net</p>
                                       <p className="text-[10px] font-black text-slate-700 leading-none">
-                                        {firstProd.gross_weight || 0}/{firstProd.tare_weight || 0}/<span className="text-blue-600">{(Number(firstProd.gross_weight || 0) - Number(firstProd.tare_weight || 0))}</span>
+                                        {fmtNum(firstProd.gross_weight || 0, wd)}/{fmtNum(firstProd.tare_weight || 0, wd)}/<span className="text-blue-600">{fmtNum(Number(firstProd.gross_weight || 0) - Number(firstProd.tare_weight || 0), wd)}</span>
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-1 leading-none">Diff / Extra</p>
                                       <p className="text-xs font-black text-slate-700 leading-none">
-                                        <span className={(parseFloat(firstProd.weight_diff) || 0) < 0 ? "text-red-500" : "text-green-600"}>{firstProd.weight_diff || 0}</span> / {firstProd.extra_weight || 0}
+                                        <span className={(parseFloat(firstProd.weight_diff) || 0) < 0 ? "text-red-500" : "text-green-600"}>{fmtNum(firstProd.weight_diff || 0, wd)}</span> / {fmtNum(firstProd.extra_weight || 0, wd)}
                                       </p>
                                     </div>
                                     <div className="sm:col-span-2 xl:col-span-1">
@@ -1349,9 +1402,24 @@ export default function SecurityApprovalPage() {
                             {/* Desktop Table */}
                             <div className="hidden lg:block">
                               <Table>
-                                <TableHeader className="bg-slate-50">
+                                <TableHeader className="bg-slate-50 border-b">
+                                  <TableRow className="bg-slate-100/90 border-b-2 border-slate-300 font-bold text-xs text-slate-800 hover:bg-slate-100/90">
+                                    <TableCell className="w-12 px-4"></TableCell>
+                                    <TableCell className="px-4 font-black text-slate-900 uppercase tracking-wider text-[11px]">Total ({orderProducts.length})</TableCell>
+                                    <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => sum + (Number(p.actual_qty_dispatch || p.actualQty) || 0), 0), 0)}
+                                    </TableCell>
+                                    <TableCell className="w-[110px] min-w-[110px] px-4 text-center"></TableCell>
+                                    <TableCell className="w-[170px] min-w-[170px] px-4 text-right font-mono tabular-nums font-black text-blue-700">
+                                      {fmtNum(orderProducts.reduce((sum: number, p: any) => {
+                                        const perUnit = Number(p.sku_gross_weight) > 0 ? Number(p.sku_gross_weight) : (Number(p.sku_unit_weight) || 0)
+                                        return sum + perUnit * (Number(p.actual_qty_dispatch || p.actualQty) || 0)
+                                      }, 0), wd)}
+                                    </TableCell>
+                                    <TableCell className="w-[200px] min-w-[200px] px-4 text-left"></TableCell>
+                                  </TableRow>
                                   <TableRow>
-                                    <TableHead className="w-12 text-center h-10">
+                                    <TableHead className="w-12 text-left h-10 px-4">
                                       <Checkbox
                                         checked={allOrderSelected}
                                         disabled={isOrderDisabled}
@@ -1364,15 +1432,17 @@ export default function SecurityApprovalPage() {
                                         }}
                                       />
                                     </TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black h-10">PRODUCT INFO</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-center h-10">QTY</TableHead>
-                                    <TableHead className="text-[10px] uppercase font-black text-center h-10">STATUS</TableHead>
+                                    <TableHead className="px-4 text-left h-10">Product Info</TableHead>
+                                    <TableHead className="w-[170px] min-w-[170px] px-4 text-right h-10">Actual Qty Dispatch</TableHead>
+                                    <TableHead className="w-[110px] min-w-[110px] px-4 text-center h-10">UOM</TableHead>
+                                    <TableHead className="w-[170px] min-w-[170px] px-4 text-right h-10">Gross Weight (kg)</TableHead>
+                                    <TableHead className="w-[200px] min-w-[200px] px-4 text-left h-10">Status</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                   {orderProducts.map((product: any) => (
                                     <TableRow key={product._rowKey} className={cn(selectedProducts.includes(product._rowKey) ? "bg-blue-50/20" : "", "h-14")}>
-                                      <TableCell className="text-center p-2">
+                                      <TableCell className="text-left px-4 py-2">
                                         <Checkbox
                                           checked={selectedProducts.includes(product._rowKey)}
                                           onCheckedChange={() => {
@@ -1384,18 +1454,25 @@ export default function SecurityApprovalPage() {
                                           }}
                                         />
                                       </TableCell>
-                                      <TableCell className="p-2">
+                                      <TableCell className="px-4 py-2 text-left">
                                         <div className="flex flex-col">
                                           <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{product.productName}</span>
                                           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{product.specificOrderNo}</span>
                                         </div>
                                       </TableCell>
-                                      <TableCell className="text-center p-2">
-                                        <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-black text-xs px-3">
-                                          {product.actual_qty_dispatch || product.actualQty || "0"}
-                                        </Badge>
+                                      <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
+                                        {fmtNum(product.actual_qty_dispatch || product.actualQty || 0, 0)}
                                       </TableCell>
-                                      <TableCell className="text-center p-2">
+                                      <TableCell className="w-[110px] min-w-[110px] px-4 text-center py-2 text-xs font-semibold text-slate-600 uppercase">
+                                        {product.uom || "—"}
+                                      </TableCell>
+                                      <TableCell className="w-[170px] min-w-[170px] px-4 text-right py-2 font-mono tabular-nums text-xs font-semibold text-blue-700">
+                                        {(() => {
+                                          const perUnit = Number(product.sku_gross_weight) > 0 ? Number(product.sku_gross_weight) : (Number(product.sku_unit_weight) || 0)
+                                          return fmtNum(perUnit * (Number(product.actual_qty_dispatch || product.actualQty) || 0), wd)
+                                        })()}
+                                      </TableCell>
+                                      <TableCell className="w-[200px] min-w-[200px] px-4 text-left py-2">
                                         {product.security_guard_status === 'REJECT' ? (
                                           <Badge variant="destructive" className="font-black text-[8px] uppercase">REJECTED BY SECURITY</Badge>
                                         ) : product.actual_1 == null ? (
@@ -1433,7 +1510,7 @@ export default function SecurityApprovalPage() {
                                   <div className="flex-1 space-y-1">
                                     <div className="flex flex-col min-[380px]:flex-row min-[380px]:items-center gap-2">
                                       <span className="text-xs font-black text-slate-800 uppercase leading-tight break-words">{product.productName}</span>
-                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">QTY: {product.actual_qty_dispatch || 0}</Badge>
+                                      <Badge className="bg-blue-600 text-white font-black text-[9px] h-4">Actual Qty Dispatch: {fmtNum(product.actual_qty_dispatch || 0, 0)} {product.uom || ""}</Badge>
                                     </div>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#{product.specificOrderNo}</p>
                                     {product.security_guard_status === 'REJECT' ? (
@@ -1473,110 +1550,188 @@ export default function SecurityApprovalPage() {
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest italic">Verification Checklist</h3>
                 </div>
 
-                <div className="bg-slate-50 border-2 border-slate-100 rounded-xl sm:rounded-3xl p-4 md:p-8 space-y-6 sm:space-y-8 shadow-sm">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 md:gap-8">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-6 space-y-6 shadow-sm">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 items-start">
                     <div className="space-y-2">
-                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Bilty/GR No</Label>
+                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Bilty/GR No</Label>
                       <Input
                         placeholder="BL-100293"
-                        className="h-12 md:h-14 border-2 border-slate-200 rounded-2xl px-4 sm:px-6 font-black text-sm sm:text-lg text-slate-700 focus:border-blue-600 transition-all uppercase placeholder:text-slate-300"
+                        className="h-11 border border-slate-300 rounded-xl px-4 font-bold text-sm text-slate-800 focus:border-blue-600 transition-all uppercase placeholder:text-slate-300 placeholder:font-medium"
                         value={uploadData.biltyNo}
                         onChange={(e) => setUploadData(p => ({ ...p, biltyNo: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <FileUploadField
-                        label={<span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Bilty Image</span>}
-                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
-                        fileName={uploadData.biltyImageName}
-                        variant="dropzone"
-                        helperText="Max file size: 20 MB"
-                        uploading={isUploading === 'bilty'}
-                        buttonText="SCAN COPY"
-                        onFilesSelected={(files) => files[0] && handleFileUpload(files[0], 'bilty')}
-                      />
+                      <Label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Bilty Image</Label>
+                      <label className="flex h-11 w-full items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 cursor-pointer hover:border-blue-400 hover:bg-blue-50/20 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif,.pdf"
+                          className="sr-only"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'bilty'); e.target.value = ''; }}
+                          disabled={isUploading === 'bilty'}
+                        />
+                        <svg className="h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        <span className="truncate text-xs font-bold text-slate-500 uppercase tracking-wide flex-1">
+                          {isUploading === 'bilty' ? 'Uploading…' : uploadData.biltyImageName || 'SCAN COPY — Choose file'}
+                        </span>
+                        {!uploadData.biltyImageName && (
+                          <span className="shrink-0 text-[10px] font-semibold text-slate-400">PDF, JPG • Max 15 MB</span>
+                        )}
+                        {uploadData.biltyImageName && (
+                          <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Uploaded</span>
+                        )}
+                      </label>
+                      {/* Preview card below — same as FileUploadField style */}
+                      {uploadData.biltyImagePreview && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => window.open(uploadData.biltyImagePreview, '_blank', 'noopener,noreferrer')}
+                            className="group flex w-full items-center gap-3 rounded-md border border-slate-200 bg-white p-2 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <img src={uploadData.biltyImagePreview} alt={uploadData.biltyImageName} className="h-12 w-12 rounded-md border border-slate-200 object-cover" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-slate-700">{uploadData.biltyImageName}</p>
+                              <p className="truncate text-[10px] text-slate-400">Click to open</p>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { if (uploadData.biltyImagePreview) URL.revokeObjectURL(uploadData.biltyImagePreview); setUploadData(p => ({ ...p, biltyImage: null, biltyImageName: '', biltyImagePreview: '' })); }}
+                            className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm transition-colors hover:bg-rose-700"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Security Verdict</Label>
-                      <Select value={uploadData.verdict} onValueChange={(v) => {
-                        setUploadData(p => ({ ...p, verdict: v, remarks: v === "APPROVE" ? "" : p.remarks }))
-                      }}>
-                        <SelectTrigger className={cn("h-12 md:h-14 border-2 rounded-2xl px-4 sm:px-6 font-black text-sm uppercase transition-all", uploadData.verdict === "APPROVE" ? "border-green-200 bg-green-50 text-green-700" : uploadData.verdict === "REJECT" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white")}>
-                          <SelectValue placeholder="Verdict" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="APPROVE" className="font-bold text-green-700 uppercase">APPROVE GATEPASS</SelectItem>
-                          <SelectItem value="REJECT" className="font-bold text-red-700 uppercase">REJECT & REVERT</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+
                   </div>
 
-                  {uploadData.verdict === "REJECT" && (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
-                      <Label className="text-[10px] font-black uppercase text-red-600 tracking-widest ml-1">Reason for Rejection <span className="text-red-500">*</span></Label>
-                      <textarea
-                        placeholder="Explain why this load is rejected..."
-                        className="w-full h-24 border-2 border-red-200 bg-red-50/50 rounded-2xl p-4 font-medium text-sm text-slate-700 focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all resize-none"
-                        value={uploadData.remarks || ""}
-                        onChange={(e) => setUploadData(p => ({ ...p, remarks: e.target.value }))}
-                      />
-                    </div>
-                  )}
 
+
+                  <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Load Checks</span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {Object.values(uploadData.checklist).filter(Boolean).length} / {Object.values(uploadData.checklist).length} checked
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-5 gap-3">
                     {Object.entries(uploadData.checklist).map(([key, val]) => (
-                      <div 
-                        key={key} 
+                      <div
+                        key={key}
                         onClick={() => setUploadData(p => ({ ...p, checklist: { ...p.checklist, [key]: !val } }))}
-                        className={cn("flex items-center gap-2 p-3 rounded-xl border-2 transition-all cursor-pointer min-w-0", val ? "bg-blue-600 border-blue-600 shadow-md" : "bg-white border-slate-100")}
+                        className={cn("flex items-center gap-2.5 px-3 py-3 rounded-xl border transition-all cursor-pointer min-w-0 select-none", val ? "bg-blue-600 border-blue-600 shadow-sm" : "bg-white border-slate-300 hover:border-blue-400 hover:bg-blue-50/40")}
                       >
                         <Checkbox id={key} checked={val} onCheckedChange={(checked) => setUploadData(p => ({ ...p, checklist: { ...p.checklist, [key]: !!checked } }))} className={cn(val ? "border-white bg-white data-[state=checked]:text-blue-600" : "")} />
-                        <Label htmlFor={key} className={cn("text-[9px] font-black uppercase cursor-pointer tracking-tighter leading-none truncate", val ? "text-white" : "text-slate-600")}>{key.replace(/([A-Z])/g, ' $1')}</Label>
+                        <Label htmlFor={key} className={cn("text-[11px] font-bold uppercase cursor-pointer tracking-wide leading-tight", val ? "text-white" : "text-slate-700")}>
+                          {({ mallLoad: "Mal Load", qtyMatch: "Qty Match", gaadiCovered: "Gaadi Covered", image: "Image", driverCond: "Driver Condition" } as Record<string, string>)[key] ?? key.replace(/([A-Z])/g, ' $1')}
+                        </Label>
                       </div>
                     ))}
                   </div>
-
-                  <div className="space-y-3">
-                    <FileUploadField
-                      label={<span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Proof Images</span>}
-                      accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
-                      multiple
-                      value={uploadData.vehicleImagePreviews}
-                      fileName={uploadData.vehicleImageNames}
-                      variant="dropzone"
-                      helperText="Max file size: 20 MB"
-                      uploading={isUploading?.startsWith('vehicle')}
-                      buttonText="Add vehicle images"
-                      previewClassName="grid grid-cols-3 min-[420px]:grid-cols-4 sm:grid-cols-5"
-                      onFilesSelected={(files) => files.forEach((file) => handleFileUpload(file, 'vehicle'))}
-                      onRemove={(idx) => {
-                        const images = [...uploadData.vehicleImages]
-                        const previews = [...uploadData.vehicleImagePreviews]
-                        const names = [...uploadData.vehicleImageNames]
-                        URL.revokeObjectURL(previews[idx])
-                        images.splice(idx, 1)
-                        previews.splice(idx, 1)
-                        names.splice(idx, 1)
-                        setUploadData(p => ({ ...p, vehicleImages: images, vehicleImagePreviews: previews, vehicleImageNames: names }))
-                      }}
-                    />
                   </div>
+
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Proof Images</span>
+                    <div className="flex flex-row gap-3 w-full">
+                      {/* Front Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>🚗</span> Front</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.frontImagePreview ? [uploadData.frontImagePreview] : []}
+                          fileName={uploadData.frontImageName ? [uploadData.frontImageName] : []}
+                          variant="dropzone"
+                          placeholder="Front photo"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'front'}
+                          buttonText="Front Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'front') }}
+                          onRemove={() => {
+                            if (uploadData.frontImagePreview) URL.revokeObjectURL(uploadData.frontImagePreview)
+                            setUploadData(p => ({ ...p, frontImage: null, frontImagePreview: '', frontImageName: '' }))
+                          }}
+                        />
+                      </div>
+                      {/* Back Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>🔙</span> Back</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.backImagePreview ? [uploadData.backImagePreview] : []}
+                          fileName={uploadData.backImageName ? [uploadData.backImageName] : []}
+                          variant="dropzone"
+                          placeholder="Back photo"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'back'}
+                          buttonText="Back Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'back') }}
+                          onRemove={() => {
+                            if (uploadData.backImagePreview) URL.revokeObjectURL(uploadData.backImagePreview)
+                            setUploadData(p => ({ ...p, backImage: null, backImagePreview: '', backImageName: '' }))
+                          }}
+                        />
+                      </div>
+                      {/* Loaded Vehicle Image */}
+                      <div className="flex-1 min-w-0">
+                        <FileUploadField
+                          label={<span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest flex items-center gap-1.5"><span>📦</span> Loaded</span>}
+                          accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.heic,.heif"
+                          value={uploadData.loadedImagePreview ? [uploadData.loadedImagePreview] : []}
+                          fileName={uploadData.loadedImageName ? [uploadData.loadedImageName] : []}
+                          variant="dropzone"
+                          placeholder="Loaded vehicle"
+                          dropzoneHint="JPG, PNG, HEIC • Max 15 MB"
+                          triggerClassName="flex-col justify-center gap-2 py-4 rounded-xl border-slate-300 bg-white"
+                          uploading={isUploading === 'loaded'}
+                          buttonText="Loaded Image"
+                          onFilesSelected={(files) => { if (files[0]) handleFileUpload(files[0], 'loaded') }}
+                          onRemove={() => {
+                            if (uploadData.loadedImagePreview) URL.revokeObjectURL(uploadData.loadedImagePreview)
+                            setUploadData(p => ({ ...p, loadedImage: null, loadedImagePreview: '', loadedImageName: '' }))
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
           )}
 
-          <DialogFooter className="mt-8 border-t p-4 md:p-8 bg-slate-50/50 flex flex-col sm:flex-row gap-4">
-            <Button variant="ghost" className="font-bold text-slate-500 uppercase text-xs order-last sm:order-none h-11 sm:h-10" onClick={() => setIsDialogOpen(false)}>Cancel Action</Button>
-            <Button
-              onClick={handleBulkSubmit}
-              disabled={isProcessing || selectedProducts.length === 0 || isReadOnly}
-              className="bg-blue-600 hover:bg-blue-700 h-14 md:h-12 px-10 rounded-2xl md:rounded-xl shadow-lg font-black uppercase tracking-tighter italic text-base md:text-lg flex-1 sm:flex-none"
-            >
-              {isProcessing ? "WAIT..." : `Authorize Gatepass (${selectedProducts.length})`}
-            </Button>
+          <DialogFooter className="mt-8 w-full border-t bg-slate-50/50 p-4 md:p-8 sm:flex-col sm:justify-start">
+            <StageDecisionFooter
+              remarks={uploadData.remarks || ""}
+              onRemarksChange={(v) => setUploadData(p => ({ ...p, remarks: v }))}
+              remarksPlaceholder="Enter reason for rejecting..."
+              disabled={isReadOnly}
+              revertActions={[{
+                label: isProcessing ? "Wait..." : `Reject & Revert (${selectedProducts.length})`,
+                onClick: () => handleBulkSubmit("REJECT"),
+                disabled: isProcessing || selectedProducts.length === 0 || isReadOnly || !uploadData.remarks?.trim(),
+                title: "Rejects this load and returns it to Actual Dispatch",
+              }]}
+              onCancel={() => setIsDialogOpen(false)}
+              approve={{
+                label: isProcessing ? "Wait..." : `Approve (${selectedProducts.length})`,
+                onClick: () => handleBulkSubmit("APPROVE"),
+                disabled: isProcessing || selectedProducts.length === 0 || isReadOnly,
+                title: "Approves the gatepass and sends this load to Make Invoice (Proforma)",
+              }}
+            />
           </DialogFooter>
+
+
+
+
+
+
         </DialogContent>
       </Dialog>
     </WorkflowStageShell>

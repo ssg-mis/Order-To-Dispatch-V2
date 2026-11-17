@@ -3,6 +3,7 @@
 
 export interface CustomerAddress {
   id?: number
+  status?: string // Active / Inactive
   address_line_1?: string
   address_line_2?: string
   city?: string
@@ -20,6 +21,7 @@ export interface CustomerBankAccount {
   account_holder_name?: string
   account_number?: string
   ifsc_code?: string
+  status?: "Active" | "Inactive"
 }
 
 export interface Customer {
@@ -44,14 +46,17 @@ export interface Customer {
   msme_registration_type?: string | null
   msme_registration_wef?: string | null
   fssai_no?: string | null
+  fssai_registration_wef?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
   msme_certificate_upload?: string | null
   fssai_certificate_upload?: string | null
   addresses?: CustomerAddress[]
+  primary_address_status?: string
   godown_ids?: number[]
   is_required_for_commitment?: string
   bank_accounts?: CustomerBankAccount[]
@@ -75,6 +80,7 @@ export interface PartyParityFields {
   fssai_no?: string | null
   fssai_valid_upto?: string | null
   fssai_licence_type?: string | null
+  aadhaar_number?: string | null
   aadhaar_upload?: string | null
   pan_upload?: string | null
   gst_certificate_upload?: string | null
@@ -143,6 +149,11 @@ export interface Unit {
   id: number
   unit_code: string
   unit_name: string
+  short_name?: string | null
+  decimal_places?: number
+  uqc_id?: number | null
+  uqc_code?: string | null
+  uqc_name?: string | null
   status: string
 }
 

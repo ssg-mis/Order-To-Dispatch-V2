@@ -42,11 +42,19 @@ export const API_ENDPOINTS = {
     submit: (id: number) => `/dispatch-planning/submit/${id}`,
   },
   
-  // Actual Dispatch Endpoints (Stage 5)
+  // Actual Dispatch Endpoints (Stage 7)
   actualDispatch: {
     pending: '/actual-dispatch/pending',
     history: '/actual-dispatch/history',
     submit: (dsrNumber: string) => `/actual-dispatch/submit/${dsrNumber}`,
+  },
+  
+  // Reach Vehicle Endpoints (Stage 13)
+  reachVehicle: {
+    pending: '/reach-vehicle/pending',
+    history: '/reach-vehicle/history',
+    submit: (id: number) => `/reach-vehicle/submit/${id}`,
+    revert: (id: number) => `/reach-vehicle/revert/${id}`,
   },
   
   // Dashboard Endpoints
@@ -75,5 +83,6 @@ export const API_ENDPOINTS = {
     pendingSaudaSku: '/reports/pending-sauda-sku',
     oilDispatchVoucher: '/reports/oil-dispatch-voucher',
     dailyDispatch: '/reports/daily-dispatch',
+    transitLoss: '/reports/transit-loss',
   },
 };
