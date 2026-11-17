@@ -13,17 +13,20 @@ interface MasterTabMeta {
   icon: React.ComponentType<{ className?: string }>
 }
 
-/** Searchable master picker; options are listed A→Z by label. */
+/** Searchable master picker; the pinned master (Reference Data) is always first, the rest are listed A→Z by label. */
 export function MasterTabPicker({
   tabs,
   meta,
   value,
   onChange,
+  pinnedTab = "reference_data",
 }: {
   tabs: string[]
   meta: Record<string, MasterTabMeta | undefined>
   value: string
   onChange: (tab: string) => void
+  /** Tab key that is always listed first, regardless of alphabetical order. */
+  pinnedTab?: string
 }) {
   const [open, setOpen] = React.useState(false)
 
@@ -31,8 +34,12 @@ export function MasterTabPicker({
     () =>
       tabs
         .filter((t) => meta[t])
-        .sort((a, b) => meta[a]!.label.localeCompare(meta[b]!.label, undefined, { sensitivity: "base" })),
-    [tabs, meta],
+        .sort((a, b) => {
+          if (a === pinnedTab) return -1
+          if (b === pinnedTab) return 1
+          return meta[a]!.label.localeCompare(meta[b]!.label, undefined, { sensitivity: "base" })
+        }),
+    [tabs, meta, pinnedTab],
   )
 
   const current = meta[value]

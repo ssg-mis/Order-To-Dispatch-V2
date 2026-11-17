@@ -32,7 +32,7 @@ export const normalizeGstField = (v: string) => v.trim().toUpperCase()
 
 export const blankCustomerAddress = (): CustomerAddress => ({
   address_line_1: "", address_line_2: "", city: "", post: "", thana: "",
-  sub_district: "", district: "", state_id: null, pincode: "",
+  sub_district: "", district: "", state_id: null, pincode: "", status: "Active",
 })
 
 export const blankCustomerBankAccount = (): CustomerBankAccount => ({

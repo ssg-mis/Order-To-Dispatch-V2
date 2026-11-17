@@ -1,12 +1,11 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState, useMemo, useEffect, Fragment, type ReactNode } from "react"
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -36,7 +35,6 @@ import {
   ShieldCheck,
   Fuel,
   Info,
-  Power,
   RefreshCw,
   SlidersHorizontal,
   ChevronLeft,
@@ -45,12 +43,58 @@ import {
   AlertTriangle,
   Upload,
   Download,
-  Loader2
+  Loader2,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  GripVertical
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { COUNTRIES } from "@/lib/countries"
 import { stateApi, districtApi, subDistrictApi, lookupApi, oilTagApi, type LookupType } from "@/lib/api-service"
-import { DEFAULT_MASTER_RECORDS, formatDropdownLabel } from "@/lib/dropdown-masters"
+import { DEFAULT_MASTER_RECORDS, formatDropdownLabel, compareMasterRecords, isPrimaryMasterRecord, formatBankLabel } from "@/lib/dropdown-masters"
+
+interface RefColumn {
+  key: string
+  label: string
+  sort: (item: any) => string | number
+  cell: (item: any) => ReactNode
+}
+
+/** The API stores PUCC applicability as a boolean; the UI works with "Applicable" / "Not Applicable". */
+function puccLabel(v: any): "Applicable" | "Not Applicable" {
+  if (v === false || v === "false" || v === 0 || v === "Not Applicable") return "Not Applicable"
+  return "Applicable"
+}
+
+/** Fetch the records of one reference master from the API (same shape for every consumer of the query cache). */
+async function fetchMasterRecords(category: LookupType): Promise<any[]> {
+  if (category === "state") {
+    const res = await stateApi.getAll({ all: "true" })
+    return res.success ? (res.data?.states || []) : []
+  }
+  if (category === "district") {
+    const res = await districtApi.getAll({ all: "true" })
+    return res.success ? (res.data?.districts || []) : []
+  }
+  if (category === "sub_district") {
+    const res = await subDistrictApi.getAll({ all: "true" })
+    return res.success ? (res.data?.sub_districts || res.data?.subDistricts || []) : []
+  }
+  const res = await lookupApi.getAll(category, { all: "true" })
+  return res.success ? (res.data?.items || []) : []
+}
 
 export interface ReferenceDataTabProps {
   activeStates?: Array<{ id: number | string; state_name: string; status?: string; gst_state_code?: string; short_name?: string }>
@@ -184,21 +228,26 @@ export function ReferenceDataTab({
     refetch,
   } = useQuery({
     queryKey: ["small-masters", selectedCategory],
+    queryFn: () => fetchMasterRecords(selectedCategory),
+    staleTime: 60 * 1000,
+  })
+
+  // Sidebar badge counts: the real record count of every master (same query keys as the table, so they
+  // share the cache). Falls back to the local list only where the table itself falls back to it.
+  const countQueries = useQueries({
+    queries: CATEGORY_GROUPS.flatMap((g) => g.types).map((t) => ({
+      queryKey: ["small-masters", t.key],
+      queryFn: () => fetchMasterRecords(t.key),
+      staleTime: 60 * 1000,
+    })),
+  })
+
+  // Real districts (shares the cache with the District master query) for State -> District cascading
+  const { data: remoteDistricts } = useQuery({
+    queryKey: ["small-masters", "district"],
     queryFn: async () => {
-      if (selectedCategory === "state") {
-        const res = await stateApi.getAll({ all: "true" })
-        return res.success ? (res.data?.states || []) : []
-      }
-      if (selectedCategory === "district") {
-        const res = await districtApi.getAll({ all: "true" })
-        return res.success ? (res.data?.districts || []) : []
-      }
-      if (selectedCategory === "sub_district") {
-        const res = await subDistrictApi.getAll({ all: "true" })
-        return res.success ? (res.data?.sub_districts || res.data?.subDistricts || []) : []
-      }
-      const res = await lookupApi.getAll(selectedCategory, { all: "true" })
-      return res.success ? (res.data?.items || []) : []
+      const res = await districtApi.getAll({ all: "true" })
+      return res.success ? (res.data?.districts || []) : []
     },
     staleTime: 60 * 1000,
   })
@@ -236,9 +285,13 @@ export function ReferenceDataTab({
       status: s.status || "Active",
     }))
 
+    // De-duplicate by GST code (fallback: name) so the same state coming from the DB
+    // and from local defaults (different ids) doesn't appear twice. DB/props win.
+    const dedupeKey = (st: any) =>
+      st.gst_code ? `code:${String(st.gst_code).trim()}` : `name:${String(st.name || "").trim().toLowerCase()}`
     const map = new Map<string, any>()
-    fromProps.forEach((st) => map.set(String(st.id), st))
-    fromLocal.forEach((st) => map.set(String(st.id), st))
+    fromLocal.forEach((st) => map.set(dedupeKey(st), st))
+    fromProps.forEach((st) => map.set(dedupeKey(st), st))
 
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [activeStates, localRecords.state])
@@ -250,15 +303,109 @@ export function ReferenceDataTab({
 
   // All Districts for Sub-District mapping dropdown & filter
   const allDistricts = useMemo(() => {
-    const list = localRecords.district || DEFAULT_MASTER_RECORDS.district || []
-    return list.map((d: any) => ({
-      id: String(d.id),
-      name: d.district_name || d.name,
-      state_id: String(d.state_id || ""),
-      state_name: d.state_name || stateNameById[String(d.state_id)] || "—",
-      status: d.status || "Active",
-    })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [localRecords.district, stateNameById])
+    // Prefer real (DB) districts so ids line up with real State / Sub-District ids;
+    // fall back to local defaults only when the DB list is empty.
+    const useRemote = Array.isArray(remoteDistricts) && remoteDistricts.length > 0
+    const list = useRemote ? remoteDistricts : (localRecords.district || DEFAULT_MASTER_RECORDS.district || [])
+
+    // Local default districts carry local state ids; map them onto the real state ids via GST code.
+    const localStateCodeById: Record<string, string> = {}
+    ;(localRecords.state || []).forEach((s: any) => {
+      localStateCodeById[String(s.id)] = String(s.gst_state_code || s.state_code || "")
+    })
+    const realStateIdByCode: Record<string, string> = {}
+    allStates.forEach((s) => {
+      if (s.gst_code) realStateIdByCode[String(s.gst_code)] = String(s.id)
+    })
+    const resolveStateId = (rawId: any) => {
+      const id = String(rawId ?? "")
+      if (useRemote) return id
+      const code = localStateCodeById[id]
+      return (code && realStateIdByCode[code]) || id
+    }
+
+    return list.map((d: any) => {
+      const stateId = resolveStateId(d.state_id)
+      return {
+        id: String(d.id),
+        name: d.district_name || d.name,
+        state_id: stateId,
+        state_name: d.state_name || stateNameById[stateId] || "—",
+        status: d.status || "Active",
+      }
+    }).sort((a, b) => a.name.localeCompare(b.name))
+  }, [remoteDistricts, localRecords.district, localRecords.state, allStates, stateNameById])
+
+  // Real sub-districts (shares the cache with the Sub-District master query) for District -> Sub-District cascading
+  const { data: remoteSubDistricts } = useQuery({
+    queryKey: ["small-masters", "sub_district"],
+    queryFn: async () => {
+      const res = await subDistrictApi.getAll({ all: "true" })
+      return res.success ? (res.data?.sub_districts || res.data?.subDistricts || []) : []
+    },
+    staleTime: 60 * 1000,
+  })
+
+  const allSubDistricts = useMemo(() => {
+    const useRemote = Array.isArray(remoteSubDistricts) && remoteSubDistricts.length > 0
+    const list = useRemote ? remoteSubDistricts : (localRecords.sub_district || DEFAULT_MASTER_RECORDS.sub_district || [])
+    return list
+      .map((sd: any) => ({
+        id: String(sd.id),
+        name: sd.sub_district_name || sd.name,
+        district_id: String(sd.district_id || ""),
+      }))
+      .sort((a: any, b: any) => a.name.localeCompare(b.name))
+  }, [remoteSubDistricts, localRecords.sub_district])
+
+  // Cities (shares the cache with the City master query) for the Post form's City dropdown
+  const { data: remoteCities } = useQuery({
+    queryKey: ["small-masters", "city"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll("city", { all: "true" })
+      return res.success ? (res.data?.items || []) : []
+    },
+    staleTime: 60 * 1000,
+  })
+
+  const allCities = useMemo(() => {
+    const useRemote = Array.isArray(remoteCities) && remoteCities.length > 0
+    const list = useRemote ? remoteCities : (localRecords.city || DEFAULT_MASTER_RECORDS.city || [])
+    return list
+      .map((c: any) => ({
+        id: String(c.id),
+        name: c.name,
+        state_id: String(c.state_id || ""),
+        district_id: String(c.district_id || ""),
+        sub_district_id: String(c.sub_district_id || ""),
+      }))
+      .sort((a: any, b: any) => a.name.localeCompare(b.name))
+  }, [remoteCities, localRecords.city])
+
+  // Posts (shares the cache with the Post master query) for the Thana form's Post dropdown
+  const { data: remotePosts } = useQuery({
+    queryKey: ["small-masters", "post"],
+    queryFn: async () => {
+      const res = await lookupApi.getAll("post", { all: "true" })
+      return res.success ? (res.data?.items || []) : []
+    },
+    staleTime: 60 * 1000,
+  })
+
+  const allPosts = useMemo(() => {
+    const useRemote = Array.isArray(remotePosts) && remotePosts.length > 0
+    const list = useRemote ? remotePosts : (localRecords.post || DEFAULT_MASTER_RECORDS.post || [])
+    return list
+      .map((c: any) => ({
+        id: String(c.id),
+        name: c.name,
+        state_id: String(c.state_id || ""),
+        district_id: String(c.district_id || ""),
+        sub_district_id: String(c.sub_district_id || ""),
+        city_id: String(c.city_id || ""),
+      }))
+      .sort((a: any, b: any) => a.name.localeCompare(b.name))
+  }, [remotePosts, localRecords.post])
 
   // District Name lookup map & derived state map
   const districtMapById = useMemo(() => {
@@ -285,10 +432,8 @@ export function ReferenceDataTab({
 
     if (selectedCategory === "fuel_type") {
       initialDefaults.pucc_applicable = "Applicable"
-    } else if (selectedCategory === "district" && allStates.length > 0) {
-      initialDefaults.state_id = allStates[0].id
-    } else if (selectedCategory === "sub_district" && allDistricts.length > 0) {
-      initialDefaults.district_id = allDistricts[0].id
+    } else if (selectedCategory === "bank_name") {
+      initialDefaults.country = "India"
     } else if (selectedCategory === "is_gst_registered") {
       initialDefaults.name = "Registered"
     } else if (selectedCategory === "gst_registration_type") {
@@ -315,11 +460,17 @@ export function ReferenceDataTab({
       description: item.description || "",
       code: item.code || item.gst_state_code || item.state_code || item.hsn_code || item.sac_code || "",
       short_name: item.short_name || "",
+      country: item.country || "",
       state_code: item.gst_state_code || item.state_code || "",
-      state_id: String(item.state_id || ""),
+      state_id: String(
+        item.state_id || (selectedCategory === "sub_district" ? districtMapById[String(item.district_id)]?.state_id : "") || ""
+      ),
       district_id: String(item.district_id || ""),
+      sub_district_id: String(item.sub_district_id || ""),
+      city_id: String(item.city_id || ""),
+      post_id: String(item.post_id || ""),
       rate: item.rate !== undefined && item.rate !== null ? String(item.rate) : "",
-      pucc_applicable: item.pucc_applicable ?? item.puccApplicable ?? "Applicable",
+      pucc_applicable: puccLabel(item.pucc_applicable ?? item.puccApplicable),
       rto_name: item.rto_name || item.name || "",
       status: item.status || "Active",
     })
@@ -327,49 +478,82 @@ export function ReferenceDataTab({
     setIsDialogOpen(true)
   }
 
-  // Activate / Deactivate Toggle
-  const handleToggleStatus = async (item: any) => {
-    const newStatus = item.status === "Active" ? "Inactive" : "Active"
-    const actionLabel = newStatus === "Active" ? "Activated" : "Deactivated"
+  // A row coming from the database (as opposed to the built-in demo rows shown while a master is still empty)
+  const isRemoteRecord = (item: any) =>
+    Array.isArray(remoteData) && remoteData.some((r: any) => String(r.id) === String(item.id))
 
+  // Delete (confirmed in a dialog)
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const handleConfirmDelete = async () => {
+    const item = deleteTarget
+    if (!item) return
+    setIsDeleting(true)
     try {
-      // Optimistic local update
-      setLocalRecords((prev) => ({
-        ...prev,
-        [selectedCategory]: (prev[selectedCategory] || []).map((r) =>
-          String(r.id) === String(item.id) ? { ...r, status: newStatus } : r
-        ),
-      }))
-
-      // Call Backend API
-      if (selectedCategory === "state") {
-        await stateApi.update(item.id, { status: newStatus })
-      } else if (selectedCategory === "district") {
-        await districtApi.update(item.id, { status: newStatus })
-      } else if (selectedCategory === "sub_district") {
-        await subDistrictApi.update(item.id, { status: newStatus })
+      if (isRemoteRecord(item)) {
+        let res: any
+        if (selectedCategory === "state") {
+          res = await stateApi.delete(item.id)
+        } else if (selectedCategory === "district") {
+          res = await districtApi.delete(item.id)
+        } else if (selectedCategory === "sub_district") {
+          res = await subDistrictApi.delete(item.id)
+        } else {
+          res = await lookupApi.delete(selectedCategory, item.id)
+        }
+        if (res && res.success === false) throw new Error(res.message || "Failed to delete record")
+        queryClient.invalidateQueries({ queryKey: ["small-masters", selectedCategory] })
       } else {
-        await lookupApi.update(selectedCategory, item.id, { status: newStatus })
+        setLocalRecords((prev) => ({
+          ...prev,
+          [selectedCategory]: (prev[selectedCategory] || []).filter((r) => String(r.id) !== String(item.id)),
+        }))
       }
-
-      queryClient.invalidateQueries({ queryKey: ["small-masters", selectedCategory] })
-
-      toast({
-        title: `Record ${actionLabel}`,
-        description: `"${item.name || item.code}" is now ${newStatus}.`,
-      })
+      toast({ title: "Record Deleted", description: `"${item.name || item.code}" has been deleted.` })
+      setDeleteTarget(null)
     } catch (err: any) {
-      console.warn("Status toggle backend sync note:", err)
       toast({
-        title: `Status set to ${newStatus}`,
-        description: `"${item.name || item.code}" updated successfully.`,
+        title: "Could not delete record",
+        description: err?.message || "Failed to delete record.",
+        variant: "destructive",
       })
+    } finally {
+      setIsDeleting(false)
     }
   }
 
   // Form Field Change Handler
   const handleFieldChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((prev) => {
+      const next = { ...prev, [field]: value }
+      if (selectedCategory === "sub_district") {
+        if (field === "state_id" && String(prev.state_id || "") !== String(value || "")) {
+          next.district_id = ""
+        }
+      }
+      if (selectedCategory === "city" || selectedCategory === "post" || selectedCategory === "thana") {
+        if (field === "state_id" && String(prev.state_id || "") !== String(value || "")) {
+          next.district_id = ""
+          next.sub_district_id = ""
+          next.city_id = ""
+          next.post_id = ""
+        }
+        if (field === "district_id" && String(prev.district_id || "") !== String(value || "")) {
+          next.sub_district_id = ""
+          next.city_id = ""
+          next.post_id = ""
+        }
+        if (field === "sub_district_id" && String(prev.sub_district_id || "") !== String(value || "")) {
+          next.city_id = ""
+          next.post_id = ""
+        }
+        if (field === "city_id" && String(prev.city_id || "") !== String(value || "")) {
+          next.post_id = ""
+        }
+      }
+      return next
+    })
     if (formErrors[field]) {
       setFormErrors((prev) => ({ ...prev, [field]: "" }))
     }
@@ -424,6 +608,7 @@ export function ReferenceDataTab({
 
       case "sub_district": {
         if (!formData.name?.trim()) errors.name = "Sub-District Name is required"
+        if (!formData.state_id) errors.state_id = "Please select a State"
         if (!formData.district_id) errors.district_id = "Please select a parent District"
 
         // Prevent duplicate sub-district within the same district
@@ -433,6 +618,52 @@ export function ReferenceDataTab({
             String(sd.district_id) === String(formData.district_id)
         )
         if (dupInDist) errors.name = "This Sub-District already exists in the selected District"
+        break
+      }
+
+      case "bank_name": {
+        if (!formData.name?.trim()) errors.name = "Bank Name is required"
+        if (!formData.short_name?.trim()) errors.short_name = "Short Name is required (e.g. SBI, PNB, ICICI)"
+        if (!formData.country?.trim()) errors.country = "Please select a Country"
+        const dupBank = activeExisting.some(
+          (b) => b.name?.toLowerCase().trim() === formData.name?.toLowerCase().trim()
+        )
+        if (dupBank) errors.name = "A bank with this name already exists"
+        break
+      }
+
+      case "thana": {
+        if (!formData.name?.trim()) errors.name = "Thana Name is required"
+        if (!formData.state_id) errors.state_id = "Please select a State"
+        const dupThana = activeExisting.some(
+          (c) => c.name?.toLowerCase().trim() === formData.name?.toLowerCase().trim()
+        )
+        if (dupThana) errors.name = "A thana with this name already exists"
+        break
+      }
+
+      case "post": {
+        if (!formData.name?.trim()) errors.name = "Post Name is required"
+        if (!String(formData.code || "").trim()) {
+          errors.code = "Postal Code is required"
+        } else if (!/^[0-9]{6}$/.test(String(formData.code).trim())) {
+          errors.code = "Postal Code must be exactly 6 digits (e.g. 492001)"
+        }
+        if (!formData.state_id) errors.state_id = "Please select a State"
+        const dupPost = activeExisting.some(
+          (c) => c.name?.toLowerCase().trim() === formData.name?.toLowerCase().trim()
+        )
+        if (dupPost) errors.name = "A post with this name already exists"
+        break
+      }
+
+      case "city": {
+        if (!formData.name?.trim()) errors.name = "City Name is required"
+        if (!formData.state_id) errors.state_id = "Please select a State"
+        const dupCity = activeExisting.some(
+          (c) => c.name?.toLowerCase().trim() === formData.name?.toLowerCase().trim()
+        )
+        if (dupCity) errors.name = "A city with this name already exists"
         break
       }
 
@@ -565,6 +796,57 @@ export function ReferenceDataTab({
         payload.district_name = parentDist?.name || ""
         payload.state_name = parentDist?.state_name || ""
         formattedDisplayName = `${payload.sub_district_name} (${payload.district_name})`
+      } else if (selectedCategory === "city") {
+        payload.name = formData.name.trim()
+        payload.state_id = parseInt(formData.state_id, 10)
+        payload.district_id = formData.district_id ? parseInt(formData.district_id, 10) : null
+        payload.sub_district_id = formData.sub_district_id ? parseInt(formData.sub_district_id, 10) : null
+        payload.state_name = stateNameById[String(formData.state_id)] || ""
+        payload.district_name = formData.district_id ? districtMapById[String(formData.district_id)]?.name || "" : ""
+        payload.sub_district_name = formData.sub_district_id
+          ? allSubDistricts.find((sd: any) => sd.id === String(formData.sub_district_id))?.name || ""
+          : ""
+        formattedDisplayName = payload.name
+      } else if (selectedCategory === "bank_name") {
+        payload.name = formData.name.trim()
+        payload.short_name = (formData.short_name || "").trim().toUpperCase()
+        payload.country = (formData.country || "").trim()
+        formattedDisplayName = formatBankLabel(payload)
+      } else if (selectedCategory === "thana") {
+        payload.name = formData.name.trim()
+        payload.state_id = parseInt(formData.state_id, 10)
+        payload.district_id = formData.district_id ? parseInt(formData.district_id, 10) : null
+        payload.sub_district_id = formData.sub_district_id ? parseInt(formData.sub_district_id, 10) : null
+        payload.city_id = formData.city_id ? parseInt(formData.city_id, 10) : null
+        payload.post_id = formData.post_id ? parseInt(formData.post_id, 10) : null
+        payload.state_name = stateNameById[String(formData.state_id)] || ""
+        payload.district_name = formData.district_id ? districtMapById[String(formData.district_id)]?.name || "" : ""
+        payload.sub_district_name = formData.sub_district_id
+          ? allSubDistricts.find((sd: any) => sd.id === String(formData.sub_district_id))?.name || ""
+          : ""
+        payload.city_name = formData.city_id
+          ? allCities.find((c: any) => c.id === String(formData.city_id))?.name || ""
+          : ""
+        payload.post_name = formData.post_id
+          ? allPosts.find((c: any) => c.id === String(formData.post_id))?.name || ""
+          : ""
+        formattedDisplayName = payload.name
+      } else if (selectedCategory === "post") {
+        payload.name = formData.name.trim()
+        payload.code = String(formData.code || "").trim()
+        payload.state_id = parseInt(formData.state_id, 10)
+        payload.district_id = formData.district_id ? parseInt(formData.district_id, 10) : null
+        payload.sub_district_id = formData.sub_district_id ? parseInt(formData.sub_district_id, 10) : null
+        payload.city_id = formData.city_id ? parseInt(formData.city_id, 10) : null
+        payload.state_name = stateNameById[String(formData.state_id)] || ""
+        payload.district_name = formData.district_id ? districtMapById[String(formData.district_id)]?.name || "" : ""
+        payload.sub_district_name = formData.sub_district_id
+          ? allSubDistricts.find((sd: any) => sd.id === String(formData.sub_district_id))?.name || ""
+          : ""
+        payload.city_name = formData.city_id
+          ? allCities.find((c: any) => c.id === String(formData.city_id))?.name || ""
+          : ""
+        formattedDisplayName = payload.name
       } else if (selectedCategory === "uqc") {
         payload.code = formData.code.trim().toUpperCase()
         payload.name = formData.name.trim()
@@ -587,8 +869,9 @@ export function ReferenceDataTab({
         formattedDisplayName = `${payload.code} – ${payload.description}`
       } else if (selectedCategory === "fuel_type") {
         payload.name = formData.name.trim()
-        payload.pucc_applicable = formData.pucc_applicable || "Applicable"
-        formattedDisplayName = `${payload.name} (${payload.pucc_applicable})`
+        const puccText = puccLabel(formData.pucc_applicable)
+        payload.pucc_applicable = puccText === "Applicable" // boolean column in the database
+        formattedDisplayName = `${payload.name} (${puccText})`
       } else if (selectedCategory === "rto_code") {
         payload.code = formData.code.trim().toUpperCase()
         payload.name = formData.rto_name.trim()
@@ -604,57 +887,47 @@ export function ReferenceDataTab({
       let savedRecordId = editingItem?.id
 
       if (dialogMode === "add") {
-        savedRecordId = `id-${Date.now()}`
-        payload.id = savedRecordId
-        payload.created_at = new Date().toISOString()
-        payload.created_by = "Admin"
-
+        // Send ONLY real fields to the API (a made-up client id used to be sent here, which the database
+        // rejected). API errors are NOT swallowed any more - they surface in the catch below as a toast.
+        let res: any
         if (selectedCategory === "state") {
-          await stateApi.create(payload).catch((e) => console.warn("API state create fallback:", e))
+          res = await stateApi.create(payload)
         } else if (selectedCategory === "district") {
-          await districtApi.create(payload).catch((e) => console.warn("API district create fallback:", e))
+          res = await districtApi.create(payload)
         } else if (selectedCategory === "sub_district") {
-          await subDistrictApi.create(payload).catch((e) => console.warn("API sub_district create fallback:", e))
+          res = await subDistrictApi.create(payload)
         } else {
-          await lookupApi.create(selectedCategory, payload).catch((e) => console.warn("API lookup create fallback:", e))
+          res = await lookupApi.create(selectedCategory, payload)
         }
-
-        // Local state update
-        setLocalRecords((prev) => ({
-          ...prev,
-          [selectedCategory]: [{ ...payload, id: savedRecordId }, ...(prev[selectedCategory] || [])],
-        }))
+        if (res && res.success === false) throw new Error(res.message || "Failed to save record")
 
         toast({
           title: "Record Created",
-          description: `"${formattedDisplayName}" has been successfully added to ${label}.`,
+          description:
+            res?.message && /approval/i.test(res.message)
+              ? `"${formattedDisplayName}" was submitted for approval in ${label}.`
+              : `"${formattedDisplayName}" has been successfully added to ${label}.`,
         })
       } else {
         // Edit Mode
-        payload.updated_at = new Date().toISOString()
-        payload.updated_by = "Admin"
-
+        let res: any
         if (selectedCategory === "state") {
-          await stateApi.update(editingItem.id, payload).catch((e) => console.warn("API state update fallback:", e))
+          res = await stateApi.update(editingItem.id, payload)
         } else if (selectedCategory === "district") {
-          await districtApi.update(editingItem.id, payload).catch((e) => console.warn("API district update fallback:", e))
+          res = await districtApi.update(editingItem.id, payload)
         } else if (selectedCategory === "sub_district") {
-          await subDistrictApi.update(editingItem.id, payload).catch((e) => console.warn("API sub_district update fallback:", e))
+          res = await subDistrictApi.update(editingItem.id, payload)
         } else {
-          await lookupApi.update(selectedCategory, editingItem.id, payload).catch((e) => console.warn("API lookup update fallback:", e))
+          res = await lookupApi.update(selectedCategory, editingItem.id, payload)
         }
-
-        // Local state update
-        setLocalRecords((prev) => ({
-          ...prev,
-          [selectedCategory]: (prev[selectedCategory] || []).map((r) =>
-            String(r.id) === String(editingItem.id) ? { ...r, ...payload, id: editingItem.id } : r
-          ),
-        }))
+        if (res && res.success === false) throw new Error(res.message || "Failed to update record")
 
         toast({
           title: "Record Updated",
-          description: `"${formattedDisplayName}" has been successfully updated.`,
+          description:
+            res?.message && /approval/i.test(res.message)
+              ? `"${formattedDisplayName}" edit was submitted for approval.`
+              : `"${formattedDisplayName}" has been successfully updated.`,
         })
       }
 
@@ -697,6 +970,15 @@ export function ReferenceDataTab({
       list = list.filter((d) => String(d.state_id) === String(parentFilterStateId))
     }
 
+    // Parent State filter for Sub-District Master (via the mapped district's state)
+    if (selectedCategory === "sub_district" && parentFilterStateId !== "ALL") {
+      list = list.filter(
+        (sd) =>
+          String(sd.state_id || districtMapById[String(sd.district_id)]?.state_id || "") ===
+          String(parentFilterStateId)
+      )
+    }
+
     // Parent District filter for Sub-District Master
     if (selectedCategory === "sub_district" && parentFilterDistrictId !== "ALL") {
       list = list.filter((sd) => String(sd.district_id) === String(parentFilterDistrictId))
@@ -706,12 +988,20 @@ export function ReferenceDataTab({
     if (tableSearch.trim()) {
       const q = tableSearch.toLowerCase().trim()
       list = list.filter((r) => {
+        // Sub-District search matches the Sub-District Name column only
+        if (selectedCategory === "sub_district") {
+          return !!r.name && String(r.name).toLowerCase().includes(q)
+        }
         return (
           (r.name && String(r.name).toLowerCase().includes(q)) ||
           (r.code && String(r.code).toLowerCase().includes(q)) ||
           (r.description && String(r.description).toLowerCase().includes(q)) ||
           (r.state_name && String(r.state_name).toLowerCase().includes(q)) ||
           (r.district_name && String(r.district_name).toLowerCase().includes(q)) ||
+          (r.sub_district_name && String(r.sub_district_name).toLowerCase().includes(q)) ||
+          (r.city_name && String(r.city_name).toLowerCase().includes(q)) ||
+          (r.country && String(r.country).toLowerCase().includes(q)) ||
+          (r.post_name && String(r.post_name).toLowerCase().includes(q)) ||
           (r.short_name && String(r.short_name).toLowerCase().includes(q)) ||
           (r.rto_name && String(r.rto_name).toLowerCase().includes(q)) ||
           (r.rate && String(r.rate).includes(q)) ||
@@ -721,14 +1011,487 @@ export function ReferenceDataTab({
     }
 
     return list
-  }, [masterRecords, statusFilter, parentFilterStateId, parentFilterDistrictId, tableSearch, selectedCategory])
+  }, [masterRecords, statusFilter, parentFilterStateId, parentFilterDistrictId, tableSearch, selectedCategory, districtMapById])
+
+  // ---- Column definitions (per master), sorting & drag-reorder ----
+  const columnDefs = useMemo<RefColumn[]>(() => {
+    const nameCell = (item: any) => (
+      <TableCell className="font-semibold text-slate-900">
+        <span className="inline-flex items-center gap-2">
+          {item.name}
+          {isPrimaryMasterRecord(selectedCategory, item) && (
+            <Badge className="bg-primary/10 text-primary border-none text-[10px] font-semibold hover:bg-primary/10">
+              Primary
+            </Badge>
+          )}
+        </span>
+      </TableCell>
+    )
+    const statusCol: RefColumn = {
+      key: "status",
+      label: "Status",
+      sort: (i) => i.status || "Active",
+      cell: (item) => {
+        const active = item.status === "Active"
+        return (
+          <TableCell>
+            <Badge
+              variant={active ? "default" : "secondary"}
+              className={
+                active
+                  ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none font-medium text-[10px]"
+                  : "bg-slate-100 text-slate-500 border-none font-medium text-[10px]"
+              }
+            >
+              {item.status || "Active"}
+            </Badge>
+          </TableCell>
+        )
+      },
+    }
+    let cols: RefColumn[]
+    switch (selectedCategory) {
+      case "state":
+        cols = [
+          { key: "name", label: "State Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "code",
+            label: "GST State Code",
+            sort: (i) => i.code || i.gst_state_code || i.state_code || "",
+            cell: (i) => (
+              <TableCell className="font-mono font-bold text-slate-700">
+                {i.code || i.gst_state_code || i.state_code || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "short_name",
+            label: "GST Short Name",
+            sort: (i) => i.short_name || "",
+            cell: (i) => <TableCell className="font-semibold text-primary">{i.short_name || "—"}</TableCell>,
+          },
+        ]
+        break
+      case "district":
+        cols = [
+          { key: "name", label: "District Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "state",
+            label: "Mapped State",
+            sort: (i) => i.state_name || stateNameById[String(i.state_id)] || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-primary" />
+                {i.state_name || stateNameById[String(i.state_id)] || "—"}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "sub_district":
+        cols = [
+          { key: "name", label: "Sub-District Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "district",
+            label: "Mapped District",
+            sort: (i) => i.district_name || districtMapById[String(i.district_id)]?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.district_name || districtMapById[String(i.district_id)]?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "state",
+            label: "Derived State",
+            sort: (i) => i.state_name || districtMapById[String(i.district_id)]?.state_name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-500">
+                {i.state_name || districtMapById[String(i.district_id)]?.state_name || "—"}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "bank_name":
+        cols = [
+          { key: "name", label: "Bank Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "short_name",
+            label: "Short Name",
+            sort: (i) => i.short_name || "",
+            cell: (i) => <TableCell className="font-mono font-bold text-primary text-xs">{i.short_name || "—"}</TableCell>,
+          },
+          {
+            key: "country",
+            label: "Country",
+            sort: (i) => i.country || "",
+            cell: (i) => <TableCell className="text-slate-700 font-medium">{i.country || "—"}</TableCell>,
+          },
+          {
+            key: "display",
+            label: "Dropdown Display",
+            sort: (i) => formatBankLabel(i),
+            cell: (i) => <TableCell className="text-[11px] text-slate-500 font-medium">{formatBankLabel(i)}</TableCell>,
+          },
+        ]
+        break
+      case "thana":
+        cols = [
+          { key: "name", label: "Thana Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "state",
+            label: "State",
+            sort: (i) => i.state_name || stateNameById[String(i.state_id)] || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.state_name || stateNameById[String(i.state_id)] || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "district",
+            label: "District",
+            sort: (i) => i.district_name || districtMapById[String(i.district_id)]?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.district_name || districtMapById[String(i.district_id)]?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "sub_district",
+            label: "Sub-District",
+            sort: (i) =>
+              i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-500">
+                {i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "city",
+            label: "City",
+            sort: (i) => i.city_name || allCities.find((c: any) => c.id === String(i.city_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.city_name || allCities.find((c: any) => c.id === String(i.city_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "post",
+            label: "Post",
+            sort: (i) => i.post_name || allPosts.find((c: any) => c.id === String(i.post_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.post_name || allPosts.find((c: any) => c.id === String(i.post_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "post":
+        cols = [
+          { key: "name", label: "Post Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "code",
+            label: "Postal Code",
+            sort: (i) => i.code || "",
+            cell: (i) => <TableCell className="font-mono font-bold text-primary text-xs">{i.code || "—"}</TableCell>,
+          },
+          {
+            key: "state",
+            label: "State",
+            sort: (i) => i.state_name || stateNameById[String(i.state_id)] || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.state_name || stateNameById[String(i.state_id)] || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "district",
+            label: "District",
+            sort: (i) => i.district_name || districtMapById[String(i.district_id)]?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.district_name || districtMapById[String(i.district_id)]?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "sub_district",
+            label: "Sub-District",
+            sort: (i) =>
+              i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-500">
+                {i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "city",
+            label: "City",
+            sort: (i) => i.city_name || allCities.find((c: any) => c.id === String(i.city_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.city_name || allCities.find((c: any) => c.id === String(i.city_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "city":
+        cols = [
+          { key: "name", label: "City Name", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "state",
+            label: "State",
+            sort: (i) => i.state_name || stateNameById[String(i.state_id)] || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.state_name || stateNameById[String(i.state_id)] || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "district",
+            label: "District",
+            sort: (i) => i.district_name || districtMapById[String(i.district_id)]?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-700 font-medium">
+                {i.district_name || districtMapById[String(i.district_id)]?.name || "—"}
+              </TableCell>
+            ),
+          },
+          {
+            key: "sub_district",
+            label: "Sub-District",
+            sort: (i) =>
+              i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "",
+            cell: (i) => (
+              <TableCell className="text-slate-500">
+                {i.sub_district_name || allSubDistricts.find((sd: any) => sd.id === String(i.sub_district_id))?.name || "—"}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "uqc":
+        cols = [
+          {
+            key: "code",
+            label: "UQC Code",
+            sort: (i) => i.code || "",
+            cell: (i) => <TableCell className="font-mono font-bold text-primary">{i.code}</TableCell>,
+          },
+          {
+            key: "name",
+            label: "Unit Quantity Description",
+            sort: (i) => i.name,
+            cell: (i) => <TableCell className="font-medium text-slate-900">{i.name}</TableCell>,
+          },
+          {
+            key: "display",
+            label: "Dropdown Display",
+            sort: (i) => formatDropdownLabel("uqc", i),
+            cell: (i) => (
+              <TableCell className="font-mono text-[11px] text-slate-500 bg-slate-50 px-2 py-0.5 rounded w-fit">
+                {formatDropdownLabel("uqc", i)}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "gst_rate":
+        cols = [
+          {
+            key: "rate",
+            label: "GST Rate (%)",
+            sort: (i) => Number(i.rate) || 0,
+            cell: (i) => <TableCell className="font-bold text-emerald-600 text-sm">{i.rate}%</TableCell>,
+          },
+          {
+            key: "name",
+            label: "Description / Label",
+            sort: (i) => i.name,
+            cell: (i) => <TableCell className="text-slate-700 font-medium">{i.name}</TableCell>,
+          },
+        ]
+        break
+      case "hsn_code":
+      case "sac_code": {
+        const isHsn = selectedCategory === "hsn_code"
+        cols = [
+          {
+            key: "code",
+            label: isHsn ? "8-digit HSN Code" : "6-digit SAC Code",
+            sort: (i) => i.code || i.hsn_code || i.sac_code || "",
+            cell: (i) => (
+              <TableCell className="font-mono font-bold text-primary text-xs">
+                {i.code || (isHsn ? i.hsn_code : i.sac_code)}
+              </TableCell>
+            ),
+          },
+          {
+            key: "description",
+            label: isHsn ? "Commodity Description" : "Service Description",
+            sort: (i) => i.description || i.name || "",
+            cell: (i) => <TableCell className="text-slate-700 font-medium">{i.description || i.name}</TableCell>,
+          },
+          {
+            key: "display",
+            label: "Dropdown Display",
+            sort: (i) => formatDropdownLabel(selectedCategory as any, i),
+            cell: (i) => (
+              <TableCell className="text-[11px] text-slate-500 font-medium">
+                {formatDropdownLabel(selectedCategory as any, i)}
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      }
+      case "fuel_type":
+        cols = [
+          { key: "name", label: "Fuel Type", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "pucc",
+            label: "PUCC Applicability",
+            sort: (i) => puccLabel(i.pucc_applicable ?? i.puccApplicable),
+            cell: (i) => (
+              <TableCell>
+                <Badge
+                  variant="outline"
+                  className={
+                    puccLabel(i.pucc_applicable ?? i.puccApplicable) === "Applicable"
+                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  }
+                >
+                  {puccLabel(i.pucc_applicable ?? i.puccApplicable)}
+                </Badge>
+              </TableCell>
+            ),
+          },
+        ]
+        break
+      case "rto_code":
+        cols = [
+          {
+            key: "code",
+            label: "RTO Code",
+            sort: (i) => i.code || "",
+            cell: (i) => <TableCell className="font-mono font-bold text-primary">{i.code}</TableCell>,
+          },
+          {
+            key: "name",
+            label: "RTO Location Name",
+            sort: (i) => i.rto_name || i.name || "",
+            cell: (i) => <TableCell className="font-medium text-slate-900">{i.rto_name || i.name}</TableCell>,
+          },
+          {
+            key: "display",
+            label: "Dropdown Display",
+            sort: (i) => formatDropdownLabel("rto_code", i),
+            cell: (i) => (
+              <TableCell className="font-medium text-slate-600">{formatDropdownLabel("rto_code", i)}</TableCell>
+            ),
+          },
+        ]
+        break
+      default:
+        cols = [
+          { key: "name", label: "Name / Value", sort: (i) => i.name, cell: nameCell },
+          {
+            key: "description",
+            label: "Description / Details",
+            sort: (i) => i.description || "",
+            cell: (i) => <TableCell className="text-slate-600">{i.description || "—"}</TableCell>,
+          },
+        ]
+    }
+    return [...cols, statusCol]
+  }, [selectedCategory, stateNameById, districtMapById, allSubDistricts, allCities, allPosts])
+
+  const [columnOrders, setColumnOrders] = useState<Record<string, string[]>>({})
+  const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null)
+  const [dragColKey, setDragColKey] = useState<string | null>(null)
+  const [dragOverColKey, setDragOverColKey] = useState<string | null>(null)
+
+  // Restore saved column order (client only, avoids SSR hydration mismatch)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("refdata_column_orders")
+      if (raw) setColumnOrders(JSON.parse(raw))
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    setSortConfig(null)
+  }, [selectedCategory])
+
+  const orderedColumns = useMemo(() => {
+    const saved = columnOrders[selectedCategory] || []
+    const byKey = new Map(columnDefs.map((c) => [c.key, c]))
+    const ordered = saved.filter((k) => byKey.has(k)).map((k) => byKey.get(k)!)
+    columnDefs.forEach((c) => {
+      if (!saved.includes(c.key)) ordered.push(c)
+    })
+    return ordered
+  }, [columnDefs, columnOrders, selectedCategory])
+
+  const moveColumn = (from: string, to: string) => {
+    if (from === to) return
+    const keys = orderedColumns.map((c) => c.key)
+    const fromIdx = keys.indexOf(from)
+    const toIdx = keys.indexOf(to)
+    if (fromIdx < 0 || toIdx < 0) return
+    keys.splice(fromIdx, 1)
+    keys.splice(toIdx, 0, from)
+    setColumnOrders((prev) => {
+      const next = { ...prev, [selectedCategory]: keys }
+      try {
+        localStorage.setItem("refdata_column_orders", JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  const toggleSort = (key: string) => {
+    setSortConfig((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" }
+      if (prev.dir === "asc") return { key, dir: "desc" }
+      return null
+    })
+    setCurrentPage(1)
+  }
+
+  const sortedRecords = useMemo(() => {
+    // Default order (no column sort chosen): a master's fixed business order, e.g. MSME = Micro, Small, Medium
+    if (!sortConfig) {
+      return [...filteredRecords].sort((a, b) => compareMasterRecords(selectedCategory, a, b))
+    }
+    const col = columnDefs.find((c) => c.key === sortConfig.key)
+    if (!col) return filteredRecords
+    const mul = sortConfig.dir === "asc" ? 1 : -1
+    return [...filteredRecords].sort((a, b) => {
+      const av = col.sort(a)
+      const bv = col.sort(b)
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * mul
+      return String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" }) * mul
+    })
+  }, [filteredRecords, columnDefs, sortConfig, selectedCategory])
 
   // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize))
+  const totalPages = Math.max(1, Math.ceil(sortedRecords.length / pageSize))
   const paginatedRecords = useMemo(() => {
     const start = (currentPage - 1) * pageSize
-    return filteredRecords.slice(start, start + pageSize)
-  }, [filteredRecords, currentPage, pageSize])
+    return sortedRecords.slice(start, start + pageSize)
+  }, [sortedRecords, currentPage, pageSize])
 
   // Active / Total stats for category
   const activeCount = useMemo(() => masterRecords.filter((r) => r.status === "Active").length, [masterRecords])
@@ -748,9 +1511,9 @@ export function ReferenceDataTab({
   const CategoryIcon = selectedCategoryMeta.icon
 
   return (
-    <Card className="shadow-xl border-none rounded-2xl bg-white w-full overflow-hidden">
+    <Card className="shadow-xl border-none rounded-2xl bg-white w-full overflow-hidden py-0 gap-0">
       {/* Top Header */}
-      <CardHeader className="bg-slate-50/80 border-b p-6">
+      <CardHeader className="bg-slate-50/80 border-b px-6 py-3">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -786,7 +1549,7 @@ export function ReferenceDataTab({
       <CardContent className="p-0">
         <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[720px]">
           {/* Left Sidebar: Categorized 20 Masters */}
-          <div className="lg:col-span-4 xl:col-span-3 border-r border-slate-100 bg-slate-50/40 p-4 flex flex-col gap-4">
+          <div className="lg:col-span-4 xl:col-span-3 border-r border-slate-100 bg-slate-50/40 px-4 pt-3 pb-4 flex flex-col gap-3">
             {/* Category Search */}
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -812,7 +1575,12 @@ export function ReferenceDataTab({
                     <div className="space-y-0.5">
                       {group.types.map((type) => {
                         const isActive = selectedCategory === type.key
-                        const count = (localRecords[type.key] || DEFAULT_MASTER_RECORDS[type.key] || []).length
+                        const typeIdx = CATEGORY_GROUPS.flatMap((g) => g.types).findIndex((t) => t.key === type.key)
+        const remoteForType = countQueries[typeIdx]?.data
+        const count =
+          Array.isArray(remoteForType) && remoteForType.length > 0
+            ? remoteForType.length
+            : (localRecords[type.key] || DEFAULT_MASTER_RECORDS[type.key] || []).length
                         const TypeIcon = type.icon
 
                         return (
@@ -861,9 +1629,9 @@ export function ReferenceDataTab({
           </div>
 
           {/* Right Main Area: Filter toolbar, Table, Actions & Pagination */}
-          <div className="lg:col-span-8 xl:col-span-9 p-6 flex flex-col gap-6 bg-white">
+          <div className="lg:col-span-8 xl:col-span-9 px-6 pt-3 pb-6 flex flex-col gap-3 bg-white">
             {/* Top Master Header & Action Bar */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="p-3 rounded-2xl bg-primary/10 text-primary">
                   <CategoryIcon className="h-6 w-6" />
@@ -924,9 +1692,11 @@ export function ReferenceDataTab({
             </div>
 
             {/* Filter Toolbar */}
-            <div className="bg-slate-50/60 rounded-2xl border border-slate-100 p-4 flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="bg-slate-50/60 rounded-2xl border border-slate-100 p-3 flex flex-col gap-2">
+              {/* Row 1: Search + State + District */}
+              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 w-full">
               {/* Search Bar */}
-              <div className="w-full sm:w-72 relative">
+              <div className="w-full sm:w-64 shrink-0 relative">
                 <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
                 <Input
                   placeholder={`Search ${selectedCategoryMeta.label.toLowerCase()}...`}
@@ -939,60 +1709,60 @@ export function ReferenceDataTab({
                 />
               </div>
 
-              {/* Filter Pills & Relational Cascading Filters */}
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-                {/* Dependent State Filter for District Master */}
-                {selectedCategory === "district" && (
-                  <div className="w-48">
-                    <Select
+                <div className="flex flex-wrap items-center gap-2 ml-auto">
+                {/* State Filter for District & Sub-District Masters */}
+                {(selectedCategory === "district" || selectedCategory === "sub_district") && (
+                  <div className="w-full sm:w-60 shrink-0">
+                    <Combobox
+                      options={[
+                        { value: "ALL", label: "All States" },
+                        ...allStates.map((s) => ({ value: String(s.id), label: [s.gst_code, s.short_name, s.name].filter(Boolean).join(" ") })),
+                      ]}
                       value={parentFilterStateId}
                       onValueChange={(val) => {
-                        setParentFilterStateId(val)
+                        setParentFilterStateId(val || "ALL")
+                        // District options depend on the chosen state, so reset the district filter
+                        setParentFilterDistrictId("ALL")
                         setCurrentPage(1)
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-white border-slate-200">
-                        <SelectValue placeholder="Filter by State" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ALL">All States</SelectItem>
-                        {allStates.map((s) => (
-                          <SelectItem key={s.id} value={String(s.id)}>
-                            {s.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Filter by State"
+                      searchPlaceholder="Search states..."
+                      className="h-8 text-xs bg-white border-slate-200"
+                      popoverClassName="min-w-[18rem]"
+                    />
                   </div>
                 )}
 
                 {/* Dependent District Filter for Sub-District Master */}
                 {selectedCategory === "sub_district" && (
-                  <div className="w-52">
-                    <Select
+                  <div className="w-full sm:w-60 shrink-0">
+                    <Combobox
+                      options={[
+                        { value: "ALL", label: "All Districts" },
+                        ...allDistricts
+                          .filter((d) => parentFilterStateId === "ALL" || String(d.state_id) === String(parentFilterStateId))
+                          .map((d) => ({
+                            value: String(d.id),
+                            label: `${d.name} (${d.state_name})`,
+                          })),
+                      ]}
                       value={parentFilterDistrictId}
                       onValueChange={(val) => {
-                        setParentFilterDistrictId(val)
+                        setParentFilterDistrictId(val || "ALL")
                         setCurrentPage(1)
                       }}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-white border-slate-200">
-                        <SelectValue placeholder="Filter by District" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ALL">All Districts</SelectItem>
-                        {allDistricts.map((d) => (
-                          <SelectItem key={d.id} value={String(d.id)}>
-                            {d.name} ({d.state_name})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Filter by District"
+                      searchPlaceholder="Search districts..."
+                      className="h-8 text-xs bg-white border-slate-200"
+                      popoverClassName="min-w-[18rem]"
+                    />
                   </div>
                 )}
+                </div>
+              </div>
 
-                {/* Status Filter Buttons */}
-                <div className="flex items-center bg-white rounded-lg border border-slate-200 p-0.5 shadow-xs">
+                {/* Row 2: Status Filter Buttons */}
+                <div className="flex items-center w-fit bg-white rounded-lg border border-slate-200 p-0.5 shadow-xs">
                   {(["All", "Active", "Inactive"] as const).map((st) => (
                     <button
                       key={st}
@@ -1011,7 +1781,6 @@ export function ReferenceDataTab({
                     </button>
                   ))}
                 </div>
-              </div>
             </div>
 
             {/* Table of Records */}
@@ -1021,94 +1790,59 @@ export function ReferenceDataTab({
                   <TableRow>
                     <TableHead className="w-12 text-xs font-semibold text-slate-700">#</TableHead>
 
-                    {/* Master-Specific Column Headers */}
-                    {selectedCategory === "state" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">State Name</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">GST State Code</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">GST Short Name</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "district" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">District Name</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Mapped State</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "sub_district" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">Sub-District Name</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Mapped District</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Derived State</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "uqc" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">UQC Code</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Unit Quantity Description</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Dropdown Display</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "gst_rate" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">GST Rate (%)</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Description / Label</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "hsn_code" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">8-digit HSN Code</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Commodity Description</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Dropdown Display</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "sac_code" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">6-digit SAC Code</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Service Description</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Dropdown Display</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "fuel_type" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">Fuel Type</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">PUCC Applicability</TableHead>
-                      </>
-                    )}
-
-                    {selectedCategory === "rto_code" && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">RTO Code</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">RTO Location Name</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Dropdown Display</TableHead>
-                      </>
-                    )}
-
-                    {![
-                      "state",
-                      "district",
-                      "sub_district",
-                      "uqc",
-                      "gst_rate",
-                      "hsn_code",
-                      "sac_code",
-                      "fuel_type",
-                      "rto_code",
-                    ].includes(selectedCategory) && (
-                      <>
-                        <TableHead className="text-xs font-semibold text-slate-700">Name / Value</TableHead>
-                        <TableHead className="text-xs font-semibold text-slate-700">Description / Details</TableHead>
-                      </>
-                    )}
-
-                    <TableHead className="text-xs font-semibold text-slate-700">Status</TableHead>
+                    {orderedColumns.map((col) => {
+                      const isSorted = sortConfig?.key === col.key
+                      return (
+                        <TableHead
+                          key={col.key}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move"
+                            e.dataTransfer.setData("text/plain", col.key)
+                            setDragColKey(col.key)
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            if (dragOverColKey !== col.key) setDragOverColKey(col.key)
+                          }}
+                          onDragLeave={() => setDragOverColKey((k) => (k === col.key ? null : k))}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            if (dragColKey) moveColumn(dragColKey, col.key)
+                            setDragColKey(null)
+                            setDragOverColKey(null)
+                          }}
+                          onDragEnd={() => {
+                            setDragColKey(null)
+                            setDragOverColKey(null)
+                          }}
+                          className={`text-xs font-semibold text-slate-700 select-none ${
+                            dragColKey === col.key ? "opacity-40" : ""
+                          } ${dragOverColKey === col.key && dragColKey !== col.key ? "bg-blue-50 shadow-[inset_2px_0_0_0_#2563eb]" : ""}`}
+                        >
+                          <div className="flex items-center gap-1">
+                            <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-slate-300" />
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(col.key)}
+                              className="flex items-center gap-1 hover:text-primary"
+                              title="Click to sort"
+                            >
+                              {col.label}
+                              {isSorted ? (
+                                sortConfig!.dir === "asc" ? (
+                                  <ArrowUp className="h-3.5 w-3.5 text-primary" />
+                                ) : (
+                                  <ArrowDown className="h-3.5 w-3.5 text-primary" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
+                              )}
+                            </button>
+                          </div>
+                        </TableHead>
+                      )
+                    })}
                     <TableHead className="text-xs font-semibold text-slate-700 text-right pr-6">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1127,149 +1861,9 @@ export function ReferenceDataTab({
                       >
                         <TableCell className="text-slate-400 font-mono pl-4">{rowIdx}</TableCell>
 
-                        {/* State Record Cells */}
-                        {selectedCategory === "state" && (
-                          <>
-                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
-                            <TableCell className="font-mono font-bold text-slate-700">
-                              {item.code || item.gst_state_code || item.state_code || "—"}
-                            </TableCell>
-                            <TableCell className="font-semibold text-primary">
-                              {item.short_name || "—"}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* District Record Cells */}
-                        {selectedCategory === "district" && (
-                          <>
-                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
-                            <TableCell className="text-slate-700 font-medium flex items-center gap-1.5">
-                              <MapPin className="h-3.5 w-3.5 text-primary" />
-                              {item.state_name || stateNameById[String(item.state_id)] || "—"}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* Sub-District Record Cells */}
-                        {selectedCategory === "sub_district" && (
-                          <>
-                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
-                            <TableCell className="text-slate-700 font-medium">
-                              {item.district_name || districtMapById[String(item.district_id)]?.name || "—"}
-                            </TableCell>
-                            <TableCell className="text-slate-500">
-                              {item.state_name || districtMapById[String(item.district_id)]?.state_name || "—"}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* UQC Record Cells */}
-                        {selectedCategory === "uqc" && (
-                          <>
-                            <TableCell className="font-mono font-bold text-primary">{item.code}</TableCell>
-                            <TableCell className="font-medium text-slate-900">{item.name}</TableCell>
-                            <TableCell className="font-mono text-[11px] text-slate-500 bg-slate-50 px-2 py-0.5 rounded w-fit">
-                              {formatDropdownLabel("uqc", item)}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* GST Rate Cells */}
-                        {selectedCategory === "gst_rate" && (
-                          <>
-                            <TableCell className="font-bold text-emerald-600 text-sm">{item.rate}%</TableCell>
-                            <TableCell className="text-slate-700 font-medium">{item.name}</TableCell>
-                          </>
-                        )}
-
-                        {/* HSN Code Cells */}
-                        {selectedCategory === "hsn_code" && (
-                          <>
-                            <TableCell className="font-mono font-bold text-primary text-xs">
-                              {item.code || item.hsn_code}
-                            </TableCell>
-                            <TableCell className="text-slate-700 font-medium">{item.description || item.name}</TableCell>
-                            <TableCell className="text-[11px] text-slate-500 font-medium">
-                              {formatDropdownLabel("hsn_code", item)}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* SAC Code Cells */}
-                        {selectedCategory === "sac_code" && (
-                          <>
-                            <TableCell className="font-mono font-bold text-primary text-xs">
-                              {item.code || item.sac_code}
-                            </TableCell>
-                            <TableCell className="text-slate-700 font-medium">{item.description || item.name}</TableCell>
-                            <TableCell className="text-[11px] text-slate-500 font-medium">
-                              {formatDropdownLabel("sac_code", item)}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* Fuel Type Cells */}
-                        {selectedCategory === "fuel_type" && (
-                          <>
-                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={
-                                  (item.pucc_applicable ?? item.puccApplicable) === "Applicable"
-                                    ? "bg-amber-50 text-amber-700 border-amber-200"
-                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                }
-                              >
-                                {item.pucc_applicable ?? item.puccApplicable ?? "Applicable"}
-                              </Badge>
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* RTO Code Cells */}
-                        {selectedCategory === "rto_code" && (
-                          <>
-                            <TableCell className="font-mono font-bold text-primary">{item.code}</TableCell>
-                            <TableCell className="font-medium text-slate-900">{item.rto_name || item.name}</TableCell>
-                            <TableCell className="font-medium text-slate-600">
-                              {formatDropdownLabel("rto_code", item)}
-                            </TableCell>
-                          </>
-                        )}
-
-                        {/* Default Generic Cells */}
-                        {![
-                          "state",
-                          "district",
-                          "sub_district",
-                          "uqc",
-                          "gst_rate",
-                          "hsn_code",
-                          "sac_code",
-                          "fuel_type",
-                          "rto_code",
-                        ].includes(selectedCategory) && (
-                          <>
-                            <TableCell className="font-semibold text-slate-900">{item.name}</TableCell>
-                            <TableCell className="text-slate-600">{item.description || "—"}</TableCell>
-                          </>
-                        )}
-
-                        {/* Status Column */}
-                        <TableCell>
-                          <Badge
-                            variant={isItemActive ? "default" : "secondary"}
-                            className={
-                              isItemActive
-                                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none font-medium text-[10px]"
-                                : "bg-slate-100 text-slate-500 border-none font-medium text-[10px]"
-                            }
-                          >
-                            {item.status || "Active"}
-                          </Badge>
-                        </TableCell>
+                        {orderedColumns.map((col) => (
+                          <Fragment key={col.key}>{col.cell(item)}</Fragment>
+                        ))}
 
                         {/* Action Buttons */}
                         <TableCell className="text-right pr-6">
@@ -1278,7 +1872,7 @@ export function ReferenceDataTab({
                             <Button
                               variant="ghost"
                               size="icon"
-                              disabled={isMasterTabReadOnly}
+                              disabled={isMasterTabReadOnly || isPrimaryMasterRecord(selectedCategory, item)}
                               onClick={() => handleOpenEditDialog(item)}
                               className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                               title="Edit Record"
@@ -1286,20 +1880,16 @@ export function ReferenceDataTab({
                               <Edit2 className="h-3.5 w-3.5" />
                             </Button>
 
-                            {/* Activate / Deactivate Button */}
+                            {/* Delete Button */}
                             <Button
                               variant="ghost"
                               size="icon"
-                              disabled={isMasterTabReadOnly}
-                              onClick={() => handleToggleStatus(item)}
-                              className={`h-8 w-8 ${
-                                isItemActive
-                                  ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                                  : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                              }`}
-                              title={isItemActive ? "Deactivate (Make Inactive)" : "Activate Record"}
+                              disabled={isMasterTabReadOnly || isPrimaryMasterRecord(selectedCategory, item)}
+                              onClick={() => setDeleteTarget(item)}
+                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              title="Delete Record"
                             >
-                              <Power className="h-3.5 w-3.5" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -1309,7 +1899,7 @@ export function ReferenceDataTab({
 
                   {paginatedRecords.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12 text-slate-400 text-xs">
+                      <TableCell colSpan={orderedColumns.length + 2} className="text-center py-12 text-slate-400 text-xs">
                         No {selectedCategoryMeta.label.toLowerCase()} records match the filter.
                       </TableCell>
                     </TableRow>
@@ -1323,22 +1913,23 @@ export function ReferenceDataTab({
               <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-slate-500 pt-2 border-t border-slate-100">
                 <div className="flex items-center gap-2">
                   <span>Show</span>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(val) => {
-                      setPageSize(Number(val))
-                      setCurrentPage(1)
-                    }}
-                  >
-                    <SelectTrigger className="h-7 w-16 text-xs bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="10">10</SelectItem>
-                      <SelectItem value="25">25</SelectItem>
-                      <SelectItem value="50">50</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="w-20">
+                    <Combobox
+                      options={[
+                        { value: "10", label: "10" },
+                        { value: "25", label: "25" },
+                        { value: "50", label: "50" },
+                      ]}
+                      value={String(pageSize)}
+                      onValueChange={(val) => {
+                        if (!val) return
+                        setPageSize(Number(val))
+                        setCurrentPage(1)
+                      }}
+                      searchPlaceholder="Search..."
+                      className="h-7 text-xs bg-white px-2"
+                    />
+                  </div>
                   <span>
                     records • Showing {(currentPage - 1) * pageSize + 1} to{" "}
                     {Math.min(currentPage * pageSize, filteredRecords.length)} of {filteredRecords.length}
@@ -1479,7 +2070,7 @@ export function ReferenceDataTab({
                   <Combobox
                     options={allStates.map((s) => ({
                       value: String(s.id),
-                      label: `${s.name} (Code: ${s.gst_code || "—"})`,
+                      label: [s.gst_code, s.short_name, s.name].filter(Boolean).join(" "),
                     }))}
                     value={formData.state_id ? String(formData.state_id) : ""}
                     onValueChange={(val) => handleFieldChange("state_id", val)}
@@ -1511,18 +2102,38 @@ export function ReferenceDataTab({
 
                 <div className="grid gap-1.5">
                   <Label>
-                    District Mapping (Dropdown) <span className="text-red-500">*</span>
+                    State <span className="text-red-500">*</span>
                   </Label>
                   <Combobox
-                    options={allDistricts.map((d) => ({
-                      value: String(d.id),
-                      label: `${d.name} (${d.state_name})`,
+                    options={allStates.map((s) => ({
+                      value: String(s.id),
+                      label: [s.gst_code, s.short_name, s.name].filter(Boolean).join(" "),
                     }))}
+                    value={formData.state_id ? String(formData.state_id) : ""}
+                    onValueChange={(val) => handleFieldChange("state_id", val)}
+                    placeholder="Select state..."
+                    searchPlaceholder="Search states..."
+                    emptyText="No state found."
+                  />
+                  {formErrors.state_id && (
+                    <p className="text-[11px] text-red-500 font-medium">{formErrors.state_id}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label>
+                    District <span className="text-red-500">*</span>
+                  </Label>
+                  <Combobox
+                    options={allDistricts
+                      .filter((d) => String(d.state_id) === String(formData.state_id || ""))
+                      .map((d) => ({ value: String(d.id), label: d.name }))}
                     value={formData.district_id ? String(formData.district_id) : ""}
                     onValueChange={(val) => handleFieldChange("district_id", val)}
-                    placeholder="Select mapped parent district..."
+                    placeholder={formData.state_id ? "Select district..." : "Select a state first"}
                     searchPlaceholder="Search districts..."
-                    emptyText="No district found."
+                    emptyText="No district found for this state."
+                    disabled={!formData.state_id}
                   />
                   {formErrors.district_id && (
                     <p className="text-[11px] text-red-500 font-medium">{formErrors.district_id}</p>
@@ -1690,18 +2301,15 @@ export function ReferenceDataTab({
                   <Label htmlFor="dlg_pucc">
                     PUCC Requirement <span className="text-red-500">*</span>
                   </Label>
-                  <Select
+                  <Combobox
+                    options={[
+                      { value: "Applicable", label: "Applicable (PUCC Required)" },
+                      { value: "Not Applicable", label: "Not Applicable (Exempt / Electric)" },
+                    ]}
                     value={formData.pucc_applicable || "Applicable"}
-                    onValueChange={(val) => handleFieldChange("pucc_applicable", val)}
-                  >
-                    <SelectTrigger id="dlg_pucc">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Applicable">Applicable (PUCC Required)</SelectItem>
-                      <SelectItem value="Not Applicable">Not Applicable (Exempt / Electric)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onValueChange={(val) => val && handleFieldChange("pucc_applicable", val)}
+                    searchPlaceholder="Search..."
+                  />
                 </div>
               </>
             )}
@@ -1845,8 +2453,209 @@ export function ReferenceDataTab({
               </div>
             )}
 
+            {selectedCategory === "bank_name" && (
+              <>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="dlg_bank_name">
+                    Bank Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="dlg_bank_name"
+                    value={formData.name || ""}
+                    onChange={(e) => handleFieldChange("name", e.target.value)}
+                    placeholder="e.g. State Bank of India"
+                  />
+                  {formErrors.name && <p className="text-[11px] text-red-500 font-medium">{formErrors.name}</p>}
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label htmlFor="dlg_bank_short">
+                    Short Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="dlg_bank_short"
+                    value={formData.short_name || ""}
+                    maxLength={20}
+                    onChange={(e) => handleFieldChange("short_name", e.target.value.toUpperCase())}
+                    placeholder="e.g. SBI, PNB, ICICI"
+                  />
+                  {formErrors.short_name && (
+                    <p className="text-[11px] text-red-500 font-medium">{formErrors.short_name}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label>
+                    Country <span className="text-red-500">*</span>
+                  </Label>
+                  <Combobox
+                    options={COUNTRIES.map((c) => ({ value: c, label: c }))}
+                    value={formData.country || ""}
+                    onValueChange={(val) => handleFieldChange("country", val)}
+                    placeholder="Select country..."
+                    searchPlaceholder="Search countries..."
+                    emptyText="No country found."
+                  />
+                  {formErrors.country && <p className="text-[11px] text-red-500 font-medium">{formErrors.country}</p>}
+                </div>
+
+                {formData.name?.trim() && (
+                  <p className="text-[11px] text-slate-500">
+                    Dropdown display:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {formatBankLabel({ name: formData.name, country: formData.country })}
+                    </span>
+                  </p>
+                )}
+              </>
+            )}
+
+            {(selectedCategory === "city" || selectedCategory === "post" || selectedCategory === "thana") && (
+              <>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="dlg_city_name">
+                    {selectedCategory === "post" ? "Post Name" : selectedCategory === "thana" ? "Thana Name" : "City Name"}{" "}
+                    <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="dlg_city_name"
+                    value={formData.name || ""}
+                    onChange={(e) => handleFieldChange("name", e.target.value)}
+                    placeholder={
+                      selectedCategory === "post"
+                        ? "Enter post name"
+                        : selectedCategory === "thana"
+                          ? "Enter thana name"
+                          : "Enter city name"
+                    }
+                  />
+                  {formErrors.name && <p className="text-[11px] text-red-500 font-medium">{formErrors.name}</p>}
+                </div>
+
+                {selectedCategory === "post" && (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="dlg_post_code">
+                      Postal Code (PIN) <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="dlg_post_code"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={formData.code || ""}
+                      onChange={(e) => handleFieldChange("code", e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="e.g. 492001"
+                    />
+                    {formErrors.code && <p className="text-[11px] text-red-500 font-medium">{formErrors.code}</p>}
+                  </div>
+                )}
+
+                <div className="grid gap-1.5">
+                  <Label>
+                    State <span className="text-red-500">*</span>
+                  </Label>
+                  <Combobox
+                    options={allStates.map((s) => ({
+                      value: String(s.id),
+                      label: [s.gst_code, s.short_name, s.name].filter(Boolean).join(" "),
+                    }))}
+                    value={formData.state_id ? String(formData.state_id) : ""}
+                    onValueChange={(val) => handleFieldChange("state_id", val)}
+                    placeholder="Select state..."
+                    searchPlaceholder="Search states..."
+                    emptyText="No state found."
+                  />
+                  {formErrors.state_id && (
+                    <p className="text-[11px] text-red-500 font-medium">{formErrors.state_id}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label>District</Label>
+                  <Combobox
+                    options={allDistricts
+                      .filter((d) => String(d.state_id) === String(formData.state_id || ""))
+                      .map((d) => ({ value: String(d.id), label: d.name }))}
+                    value={formData.district_id ? String(formData.district_id) : ""}
+                    onValueChange={(val) => handleFieldChange("district_id", val)}
+                    placeholder={formData.state_id ? "Select district..." : "Select a state first"}
+                    searchPlaceholder="Search districts..."
+                    emptyText="No district found for this state."
+                    disabled={!formData.state_id}
+                  />
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label>Sub-District</Label>
+                  <Combobox
+                    options={allSubDistricts
+                      .filter((sd: any) => String(sd.district_id) === String(formData.district_id || ""))
+                      .map((sd: any) => ({ value: String(sd.id), label: sd.name }))}
+                    value={formData.sub_district_id ? String(formData.sub_district_id) : ""}
+                    onValueChange={(val) => handleFieldChange("sub_district_id", val)}
+                    placeholder={formData.district_id ? "Select sub-district..." : "Select a district first"}
+                    searchPlaceholder="Search sub-districts..."
+                    emptyText="No sub-district found for this district."
+                    disabled={!formData.district_id}
+                  />
+                </div>
+
+                {(selectedCategory === "post" || selectedCategory === "thana") && (
+                  <div className="grid gap-1.5">
+                    <Label>City</Label>
+                    <Combobox
+                      options={allCities
+                        .filter(
+                          (c: any) =>
+                            String(c.state_id) === String(formData.state_id || "") &&
+                            (!c.district_id || !formData.district_id || String(c.district_id) === String(formData.district_id)) &&
+                            (!c.sub_district_id ||
+                              !formData.sub_district_id ||
+                              String(c.sub_district_id) === String(formData.sub_district_id))
+                        )
+                        .map((c: any) => ({ value: String(c.id), label: c.name }))}
+                      value={formData.city_id ? String(formData.city_id) : ""}
+                      onValueChange={(val) => handleFieldChange("city_id", val)}
+                      placeholder={formData.state_id ? "Select city..." : "Select a state first"}
+                      searchPlaceholder="Search cities..."
+                      emptyText="No city found for this selection."
+                      disabled={!formData.state_id}
+                    />
+                  </div>
+                )}
+
+                {selectedCategory === "thana" && (
+                  <div className="grid gap-1.5">
+                    <Label>Post</Label>
+                    <Combobox
+                      options={allPosts
+                        .filter(
+                          (po: any) =>
+                            String(po.state_id) === String(formData.state_id || "") &&
+                            (!po.district_id || !formData.district_id || String(po.district_id) === String(formData.district_id)) &&
+                            (!po.sub_district_id ||
+                              !formData.sub_district_id ||
+                              String(po.sub_district_id) === String(formData.sub_district_id)) &&
+                            (!po.city_id || !formData.city_id || String(po.city_id) === String(formData.city_id))
+                        )
+                        .map((po: any) => ({ value: String(po.id), label: po.name }))}
+                      value={formData.post_id ? String(formData.post_id) : ""}
+                      onValueChange={(val) => handleFieldChange("post_id", val)}
+                      placeholder={formData.state_id ? "Select post..." : "Select a state first"}
+                      searchPlaceholder="Search posts..."
+                      emptyText="No post found for this selection."
+                      disabled={!formData.state_id}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
             {/* Default Generic Form Fields */}
             {![
+              "city",
+              "post",
+              "thana",
+              "bank_name",
               "state",
               "district",
               "sub_district",
@@ -1877,6 +2686,10 @@ export function ReferenceDataTab({
 
             {/* Optional Description for generic types */}
             {![
+              "city",
+              "post",
+              "thana",
+              "bank_name",
               "state",
               "district",
               "sub_district",
@@ -1900,18 +2713,15 @@ export function ReferenceDataTab({
             {/* Active / Inactive Status Selector */}
             <div className="grid gap-1.5 pt-1">
               <Label htmlFor="dlg_status">Status</Label>
-              <Select
+              <Combobox
+                options={[
+                  { value: "Active", label: "Active" },
+                  { value: "Inactive", label: "Inactive" },
+                ]}
                 value={formData.status || "Active"}
-                onValueChange={(val) => handleFieldChange("status", val)}
-              >
-                <SelectTrigger id="dlg_status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Active">Active (Available for selection in dropdowns)</SelectItem>
-                  <SelectItem value="Inactive">Inactive (Excluded from new entries; historical preserved)</SelectItem>
-                </SelectContent>
-              </Select>
+                onValueChange={(val) => val && handleFieldChange("status", val)}
+                searchPlaceholder="Search..."
+              />
             </div>
 
             <DialogFooter className="gap-2 pt-3 border-t border-slate-100">
@@ -1936,6 +2746,32 @@ export function ReferenceDataTab({
           </form>
         </DialogContent>
       </Dialog>
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && !isDeleting && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{deleteTarget?.name || deleteTarget?.code}" will be permanently deleted from {selectedCategoryMeta.label}.
+              This cannot be undone. If it is already used elsewhere, deletion will be refused - mark it Inactive
+              instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirmDelete()
+              }}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
