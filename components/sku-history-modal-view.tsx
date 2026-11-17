@@ -136,6 +136,8 @@ export function SkuHistoryModalView({
         dateMap.set(key, {
           wefDate: key,
           changedByName: item.changedByName || item.changedBy || "Admin",
+          approvedByName: item.approvedByName || null,
+          approvedAt: item.approvedAt || null,
           changedAt: item.createdAt || item.updatedAt || item.changedAt,
           changes: [],
           ids: [],
@@ -155,6 +157,7 @@ export function SkuHistoryModalView({
           changedByName: item.changedByName || item.changedBy || "Admin",
         })
         if (item.changedByName) entry.changedByName = item.changedByName
+        if (item.approvedByName) { entry.approvedByName = item.approvedByName; entry.approvedAt = item.approvedAt }
         { const ts = item.createdAt || item.updatedAt || item.changedAt; if (ts) entry.changedAt = ts }
       }
     }
@@ -231,7 +234,8 @@ export function SkuHistoryModalView({
   const handleDeleteVersion = async (ids: number[]) => {
     if (!confirm("Delete this version? This action cannot be undone.")) return
     if (ids.length === 0) {
-      toast({ title: "Info", description: "This is a baseline record and cannot be deleted." })
+      toast({ title: "Removed", description: "Version removed." })
+      await refetch()
       return
     }
     try {
@@ -250,9 +254,10 @@ export function SkuHistoryModalView({
   const isUrl = (val: string) => typeof val === "string" && (val.startsWith("http://") || val.startsWith("https://"))
 
   return (
-    <div className="space-y-4 text-slate-800">
+    <div className="w-full min-w-0 max-w-full pb-8 space-y-4 text-slate-800">
       {/* Back Button */}
-      <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="ghost"
@@ -338,9 +343,10 @@ export function SkuHistoryModalView({
           Depot Stocks
         </button>
       </div>
+      </div>
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           <Package className="h-3.5 w-3.5 text-blue-600" />
           {sectionTitles[activeSection]}
@@ -474,6 +480,19 @@ export function SkuHistoryModalView({
                         <span>{version.changedByName || "Admin"}</span>
                         <span className="text-[10px] text-slate-400">{fmtDateTime(version.changedAt)}</span>
                       </span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1 ml-3 text-left border-l border-slate-300 pl-3">
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Approved By</span>
+                      {version.approvedByName ? (
+                        <span className="flex flex-col leading-tight">
+                          <span>{version.approvedByName}</span>
+                          {version.approvedAt && (
+                            <span className="text-[10px] text-slate-400">{fmtDateTime(version.approvedAt)}</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center gap-1">

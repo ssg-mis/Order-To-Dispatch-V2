@@ -266,7 +266,7 @@ export function SalespersonEffectiveDatesModalView({
       }
 
       if (!dateMap.has(key)) {
-        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", changedAt: null, changes: [], ids: [] })
+        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", approvedByName: item.approvedByName || null, approvedAt: item.approvedAt || null, changedAt: null, changes: [], ids: [] })
       }
 
       const entry = dateMap.get(key)
@@ -275,6 +275,7 @@ export function SalespersonEffectiveDatesModalView({
       if (item.fieldName) {
         entry.changes.push({ id: item.id, fieldName: item.fieldName, oldValue: item.oldValue, newValue: item.newValue })
         if (item.changedByName) entry.changedByName = item.changedByName
+        if (item.approvedByName) { entry.approvedByName = item.approvedByName; entry.approvedAt = item.approvedAt }
       }
     }
 
@@ -403,7 +404,8 @@ export function SalespersonEffectiveDatesModalView({
   const handleDeleteVersion = async (ids: number[]) => {
     if (!confirm("Delete this version? This action cannot be undone.")) return
     if (ids.length === 0) {
-      toast({ title: "Info", description: "This is a baseline record and cannot be deleted." })
+      toast({ title: "Removed", description: "Version removed." })
+      await refetch()
       return
     }
     try {
@@ -468,7 +470,7 @@ export function SalespersonEffectiveDatesModalView({
     if (key === "state_id") {
       return (
         <Combobox
-          options={activeStates.map((s: any) => ({ value: String(s.id), label: s.state_name }))}
+          options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
           value={newVersionForm.state_id}
           onValueChange={(val: string) => setNewVersionForm(prev => ({ ...prev, state_id: val }))}
           placeholder="Select state"
@@ -564,8 +566,9 @@ export function SalespersonEffectiveDatesModalView({
   ]
 
   return (
-    <div className="space-y-4 text-slate-800">
-      <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
+    <div className="w-full min-w-0 max-w-full pb-8 space-y-4 text-slate-800">
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="outline"
@@ -604,8 +607,9 @@ export function SalespersonEffectiveDatesModalView({
           </button>
         ))}
       </div>
+      </div>
 
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           <User className="h-3.5 w-3.5 text-blue-600" />
           {sectionTitles[activeSection]}
@@ -715,6 +719,7 @@ export function SalespersonEffectiveDatesModalView({
                   <th key={label} className="py-2.5 px-3 border-r border-slate-300 whitespace-nowrap">{label}</th>
                 ))}
                 <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
+                <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Approved By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Actions</th>
               </tr>
             </thead>
@@ -761,6 +766,24 @@ export function SalespersonEffectiveDatesModalView({
                           <span className="text-[10px] text-slate-400 font-normal">{fmtDateTime(version.changedAt)}</span>
                         </div>
                       </div>
+                    </td>
+
+                    <td className="py-2.5 px-3 text-left border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
+                      {version.approvedByName ? (
+                        <>
+                          <div className="flex items-center justify-start gap-1 font-medium">
+                            <User className="h-3 w-3 text-slate-400" />
+                            <span>{version.approvedByName}</span>
+                          </div>
+                          {version.approvedAt && (
+                            <div className="text-[10px] text-slate-400 font-normal pl-4">
+                              {new Date(version.approvedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
 
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">

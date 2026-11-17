@@ -19,6 +19,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Checkbox } from "@/components/ui/checkbox"
 import { Combobox } from "@/components/ui/combobox"
 import { MasterTabPicker } from "@/components/master-tab-picker"
+import { HistoryApprovalsDialog } from "@/components/history-approvals-dialog"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { FileUploadField } from "@/components/file-upload-field"
 import { useToast } from "@/hooks/use-toast"
@@ -1916,6 +1917,7 @@ export default function MasterPage() {
         "MSME W.E.F. Date",
         "FSSAI No",
         "FSSAI Licence Type",
+        "FSSAI W.E.F. Date",
         "FSSAI Valid Upto",
         "Ledger Group ID",
         "Is Required for Commitment",
@@ -1945,6 +1947,7 @@ export default function MasterPage() {
           `"${item.msme_registration_wef ? String(item.msme_registration_wef).split('T')[0] : ''}"`,
           `"${item.fssai_no || ''}"`,
           `"${item.fssai_licence_type || ''}"`,
+          `"${item.fssai_registration_wef ? String(item.fssai_registration_wef).split('T')[0] : ''}"`,
           `"${item.fssai_valid_upto ? String(item.fssai_valid_upto).split('T')[0] : ''}"`,
           `"${item.ledger_group_id || ''}"`,
           `"${item.is_required_for_commitment || 'No'}"`,
@@ -2375,8 +2378,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   })
   const activeMsmeRegTypes = useMemo(() => {
     const filtered = (msmeRegTypeData || []).filter((r: any) => r.status === 'Active')
-    const orderMap: Record<string, number> = { "Micro": 1, "Small": 2, "Medium": 3 }
-    return filtered.sort((a: any, b: any) => (orderMap[a.name] || 99) - (orderMap[b.name] || 99))
+    const orderMap: Record<string, number> = { "Not Applicable": 0, "Micro": 1, "Small": 2, "Medium": 3 }
+    return filtered.sort((a: any, b: any) => (orderMap[a.name] ?? 99) - (orderMap[b.name] ?? 99))
   }, [msmeRegTypeData])
   const { data: fssaiLicenceTypeData } = useQuery({
     queryKey: ["lookup-fssai_licence_type"],
@@ -2386,10 +2389,16 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     },
     staleTime: 5 * 60 * 1000,
   })
-  const activeFssaiLicenceTypes = useMemo(
-    () => (fssaiLicenceTypeData || []).filter((r: any) => r.status === 'Active'),
-    [fssaiLicenceTypeData]
-  )
+  const activeFssaiLicenceTypes = useMemo(() => {
+    const orderMap: Record<string, number> = { "registration": 0, "state licence": 1, "national licence": 2 }
+    return (fssaiLicenceTypeData || [])
+      .filter((r: any) => r.status === 'Active')
+      .sort(
+        (a: any, b: any) =>
+          (orderMap[String(a.name || '').trim().toLowerCase()] ?? 99) -
+          (orderMap[String(b.name || '').trim().toLowerCase()] ?? 99)
+      )
+  }, [fssaiLicenceTypeData])
 
   // Bank Name dropdown options - Reference Data only, free text is deliberately
   // not allowed (same pattern as every other Reference-Data-sourced dropdown).
@@ -3525,8 +3534,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     msme_registration_type: "",
     msme_registration_wef: "",
     fssai_no: "",
+    fssai_registration_wef: "",
     fssai_valid_upto: "",
     fssai_licence_type: "",
+    aadhaar_number: "",
     aadhaar_upload: "",
     pan_upload: "",
     gst_certificate_upload: "",
@@ -3939,8 +3950,10 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       msme_registration_type: "",
       msme_registration_wef: "",
       fssai_no: "",
+      fssai_registration_wef: "",
       fssai_valid_upto: "",
       fssai_licence_type: "",
+      aadhaar_number: "",
       aadhaar_upload: "",
       pan_upload: "",
       gst_certificate_upload: "",
@@ -4324,6 +4337,8 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
         }
         if (res?.success && skuDetailsForm.sku_name) {
           const isStaged = !isAdminOrSuper || res?.data?.staged === true;
+          // Opening qty is keyed by the SKU's id, so a staged rename can't orphan it.
+          const savedSkuId = editingItem?.id ?? res?.data?.id;
           await Promise.allSettled(
             Object.entries(openingStockByDepot)
               .filter(([_, qty]) => qty !== '')
@@ -4331,6 +4346,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                 inventoryApi.upsertOpeningQty({
                   depo_name: depotName,
                   product_name: skuDetailsForm.sku_name as string,
+                  sku_id: savedSkuId,
                   opening_qty: parseInt(qty) || 0,
                   is_staged: isStaged,
                 })
@@ -6906,8 +6922,9 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       </PageHeader>
 
       <Tabs value={activeTab} className="w-full space-y-6" onValueChange={setActiveTab}>
-        <div className="flex items-center">
+        <div className="flex flex-wrap items-center gap-3">
           <MasterTabPicker tabs={visibleTabs} meta={TAB_META} value={activeTab} onChange={setActiveTab} />
+          {isAdminOrSuper && <HistoryApprovalsDialog masterLabels={TAB_META} />}
         </div>
 
 

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronRight, ChevronDown, Clock, User, FileEdit, Loader2, History, ArrowRight } from "lucide-react"
+import { ChevronRight, ChevronDown, Clock, User, FileEdit, Loader2, History, ArrowRight, CheckCircle2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { masterHistoryApi } from "@/lib/api-service"
 import { fmtDate, fmtDateTime, fmtHistoryAmount } from "@/lib/table-format"
@@ -26,6 +26,8 @@ interface HistoryItem {
   oldValue?: string | null
   newValue?: string | null
   changedByName?: string | null
+  approvedByName?: string | null
+  approvedAt?: string | null
   createdAt: string
   applicableFrom?: string | null
   wefDate?: string | null
@@ -35,6 +37,8 @@ interface GroupedHistory {
   groupKey: string
   createdAt: string
   changedByName: string
+  approvedByName: string | null
+  approvedAt: string | null
   items: HistoryItem[]
   summaryFields: string
 }
@@ -103,12 +107,18 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
           groupKey: minuteKey,
           createdAt: item.createdAt,
           changedByName: item.changedByName || '—',
+          approvedByName: item.approvedByName || null,
+          approvedAt: item.approvedAt || null,
           items: [item],
           summaryFields: item.fieldName
         })
       } else {
         const group = groupsMap.get(minuteKey)!
         group.items.push(item)
+        if (!group.approvedByName && item.approvedByName) {
+          group.approvedByName = item.approvedByName
+          group.approvedAt = item.approvedAt || null
+        }
         
         const fieldSet = new Set(group.summaryFields.split(', '))
         fieldSet.add(item.fieldName)
@@ -198,6 +208,24 @@ export function MasterEditHistoryTable({ masterType, recordId }: { masterType: s
                 <div className="flex flex-col items-start leading-tight text-left">
                   <span className="text-slate-700 capitalize">{group.changedByName}</span>
                   <span className="text-[10px] font-normal text-slate-400">{fmtDateTime(group.createdAt)}</span>
+                </div>
+              </div>
+
+              {/* Approved By User */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold shrink-0 ml-2 bg-white border border-emerald-200/80 px-2.5 py-1 rounded-md shadow-2xs">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                <div className="flex flex-col items-start leading-tight text-left">
+                  <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Approved By</span>
+                  {group.approvedByName ? (
+                    <>
+                      <span className="text-slate-700 capitalize">{group.approvedByName}</span>
+                      {group.approvedAt && (
+                        <span className="text-[10px] font-normal text-slate-400">{fmtDateTime(group.approvedAt)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
                 </div>
               </div>
             </div>

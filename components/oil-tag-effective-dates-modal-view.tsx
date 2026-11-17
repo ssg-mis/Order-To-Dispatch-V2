@@ -155,7 +155,7 @@ export function OilTagEffectiveDatesModalView({
       }
 
       if (!dateMap.has(key)) {
-        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", changes: [], ids: [] })
+        dateMap.set(key, { wefDate: key, changedByName: item.changedByName || item.changedBy || "Admin", approvedByName: item.approvedByName || null, approvedAt: item.approvedAt || null, changes: [], ids: [] })
       }
 
       const entry = dateMap.get(key)
@@ -164,6 +164,7 @@ export function OilTagEffectiveDatesModalView({
         const normField = (item.fieldName === "Oil Tag Name" || item.fieldName === "Name") ? "Tag Name" : item.fieldName
         entry.changes.push({ id: item.id, fieldName: normField, oldValue: item.oldValue, newValue: item.newValue })
         if (item.changedByName) entry.changedByName = item.changedByName
+        if (item.approvedByName) { entry.approvedByName = item.approvedByName; entry.approvedAt = item.approvedAt }
         entry.changedAt = item.createdAt || item.updatedAt || item.changedAt || entry.changedAt
       }
     }
@@ -280,7 +281,8 @@ export function OilTagEffectiveDatesModalView({
   const handleDeleteVersion = async (ids: number[]) => {
     if (!confirm("Delete this version? This action cannot be undone.")) return
     if (ids.length === 0) {
-      toast({ title: "Info", description: "This is a baseline record and cannot be deleted." })
+      toast({ title: "Removed", description: "Version removed." })
+      await refetch()
       return
     }
     try {
@@ -295,8 +297,9 @@ export function OilTagEffectiveDatesModalView({
   }
 
   return (
-    <div className="space-y-4 text-slate-800">
-      <div className="sticky -top-6 z-50 -mt-6 -mx-6 px-6 pt-4 pb-2.5 mb-2 rounded-t-lg bg-slate-50 border-b border-slate-200 flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
+    <div className="w-full min-w-0 max-w-full pb-8 space-y-4 text-slate-800">
+      <div className="sticky -top-6 z-10 -mx-6 -mt-6 space-y-4 border-b border-slate-200 bg-background px-6 pb-4 pt-2">
+      <div className="flex items-center justify-between [&>button]:bg-white [&>button]:shadow-sm">
         <Button
           type="button"
           variant="outline"
@@ -317,8 +320,9 @@ export function OilTagEffectiveDatesModalView({
           Oil Tag: <span className="font-bold text-slate-800">{oilTagName || `#${oilTagId}`}</span>
         </p>
       </div>
+      </div>
 
-      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+      <div className="mb-4 flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
         <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
           <Tag className="h-3.5 w-3.5 text-blue-600" />
           Oil Tag History Table
@@ -457,6 +461,7 @@ export function OilTagEffectiveDatesModalView({
                   <th key={label} className={`py-2.5 px-3 border-r border-slate-300 whitespace-nowrap ${isDateLabel(label) ? "text-right" : ""}`}>{label}</th>
                 ))}
                 <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
+                <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Approved By</th>
                 <th className="py-2.5 px-3 text-center whitespace-nowrap w-24">Actions</th>
               </tr>
             </thead>
@@ -497,6 +502,24 @@ export function OilTagEffectiveDatesModalView({
                         <span>{version.changedByName}</span>
                       </div>
                       <div className="pl-4 text-[10px] text-slate-400 font-normal">{fmtDateTime(version.changedAt)}</div>
+                    </td>
+
+                    <td className="py-2.5 px-3 text-left border-r border-slate-200 whitespace-nowrap text-[11px] text-slate-600">
+                      {version.approvedByName ? (
+                        <>
+                          <div className="flex items-center justify-start gap-1 font-medium">
+                            <User className="h-3 w-3 text-slate-400" />
+                            <span>{version.approvedByName}</span>
+                          </div>
+                          {version.approvedAt && (
+                            <div className="text-[10px] text-slate-400 font-normal pl-4">
+                              {new Date(version.approvedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
 
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">

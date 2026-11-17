@@ -3,7 +3,9 @@
  * Centralized API calls for the application
  */
 
+import { sortDepotsBanariFirst } from "./depot-sort"
 import { API_CONFIG, API_ENDPOINTS } from './api-config';
+import { toast as showToast } from '@/hooks/use-toast';
 import {
   adaptList,
   flattenOrderItemStage,
@@ -155,6 +157,12 @@ async function request<T = any>(
 
     if (!response.ok) {
       throw data;
+    }
+
+    // A non-admin's history add / edit / delete is queued for admin approval instead of being applied -
+    // tell the user once, here, for every screen that triggers one.
+    if (data && data.pending === true && typeof window !== 'undefined') {
+      showToast({ title: 'Submitted for approval', description: data.message || 'An admin must approve this change before it is applied.' });
     }
 
     return data;
@@ -1356,7 +1364,12 @@ export const depotApi = {
     const queryString = params
       ? '?' + new URLSearchParams(params as any).toString()
       : '';
-    return request(`/depots${queryString}`);
+    const res: any = await request(`/depots${queryString}`);
+    // Every depot / godown list in the app: Banari first, rest A-Z.
+    if (res?.success && Array.isArray(res.data?.depots)) {
+      res.data.depots = sortDepotsBanariFirst(res.data.depots);
+    }
+    return res;
   },
 
   getById: async (id: string): Promise<ApiResponse> => {
@@ -2174,15 +2187,16 @@ export const inventoryApi = {
     return request('/inventory/data');
   },
 
-  upsertOpeningQty: async (data: { depo_name: string; product_name: string; opening_qty: number; is_staged?: boolean }): Promise<ApiResponse> => {
+  upsertOpeningQty: async (data: { depo_name: string; product_name: string; sku_id?: number | string; opening_qty: number; is_staged?: boolean }): Promise<ApiResponse> => {
     return request('/inventory/opening-qty', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
-  getDetail: async (depot_name: string, product_name: string, type: string): Promise<ApiResponse> => {
+  getDetail: async (depot_name: string, product_name: string, type: string, sku_id?: number | string | null): Promise<ApiResponse> => {
     const params = new URLSearchParams({ depot_name, product_name, type });
+    if (sku_id !== undefined && sku_id !== null && sku_id !== '') params.set('sku_id', String(sku_id));
     return request(`/inventory/detail?${params}`);
   },
 };
@@ -2194,7 +2208,7 @@ export const productionApi = {
   getByRange: async (from: string, to: string): Promise<ApiResponse> => {
     return request(`/production?from=${from}&to=${to}`);
   },
-  bulkUpsert: async (data: { date: string; items: { sku_name: string; qty: number }[] }): Promise<ApiResponse> => {
+  bulkUpsert: async (data: { date: string; items: { sku_id?: number | string; sku_name: string; qty: number }[] }): Promise<ApiResponse> => {
     return request('/production/bulk', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -2215,6 +2229,10 @@ export const masterHistoryApi = {
   deleteHistory: async (id: number | string): Promise<ApiResponse> => {
     return request(`/master-history/${id}`, { method: 'DELETE' });
   },
+  // Admin only: history changes waiting for approval, and approve / reject one group of them
+  getPendingRequests: async (): Promise<ApiResponse> => request('/master-history/requests/pending'),
+  reviewRequest: async (groupKey: string, action: 'approve' | 'reject', reason?: string): Promise<ApiResponse> =>
+    request('/master-history/requests/review', { method: 'PATCH', body: JSON.stringify({ groupKey, action, reason }) }),
   deleteSectionHistory: async (section: string, id: number | string): Promise<ApiResponse> => {
     return request(`/master-history/section/${section}/${id}`, { method: 'DELETE' });
   },
