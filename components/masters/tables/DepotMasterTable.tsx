@@ -94,10 +94,6 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                           {item.state || "—"}
                         </div>
                         <div className="col-span-2">
-                          <span className="font-medium text-slate-600">Salesman/Broker: </span>
-                          {item.salesman_broker_name || "—"}
-                        </div>
-                        <div className="col-span-2">
                           <span className="font-medium text-slate-600">Submitted By: </span>
                           {submittedBy || "—"}
                         </div>
@@ -161,7 +157,6 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                         </TableCell>
                         <TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell>
                         <TableCell>{item.state || "—"}</TableCell>
-                        <TableCell>{item.salesman_broker_name || "—"}</TableCell>
                         <TableCell>{submittedBy || "—"}</TableCell>
                         <TableCell className="text-slate-500 text-xs">
                           {submittedOn ? new Date(submittedOn).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
@@ -237,10 +232,6 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                     <span className="font-medium text-slate-600">State: </span>
                     {item.state || "—"}
                   </div>
-                  <div>
-                    <span className="font-medium text-slate-600">Salesman: </span>
-                    {item.salesman_broker_name || "—"}
-                  </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant={item.status === "Active" ? "default" : "secondary"} className={item.status === "Active" ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none" : ""}>
@@ -284,9 +275,6 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                 <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort("state", depotSort, setDepotSort)}>
                   State <SortIcon col="state" sort={depotSort} />
                 </TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort("salesman_broker_name", depotSort, setDepotSort)}>
-                  Salesman/Broker <SortIcon col="salesman_broker_name" sort={depotSort} />
-                </TableHead>
                 <TableHead className="cursor-pointer select-none hover:bg-slate-100 transition-colors" onClick={() => toggleSort("status", depotSort, setDepotSort)}>
                   Status <SortIcon col="status" sort={depotSort} />
                 </TableHead>
@@ -307,7 +295,7 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                   </TableRow>
                 ))
               ) : depots.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-20 text-slate-400">No depots found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} className="text-center py-20 text-slate-400">No depots found</TableCell></TableRow>
               ) : (
                 <>
                   {sortedDepots.map((item) => (
@@ -316,7 +304,6 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                       <TableCell className="font-semibold text-slate-900">{item.depot_name}</TableCell>
                       <TableCell className="max-w-xs truncate text-slate-600">{item.depot_address || "—"}</TableCell>
                       <TableCell className="text-slate-600">{item.state || "—"}</TableCell>
-                      <TableCell className="text-slate-600">{item.salesman_broker_name || "—"}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant={item.status === "Active" ? "default" : "secondary"} className={item.status === "Active" ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none" : ""}>
@@ -343,7 +330,7 @@ export const DepotMasterTable: React.FC<DepotMasterTableProps> = ({
                   ))}
                   {/* Infinite Scroll Sentinel */}
                   <TableRow ref={depotEndRef}>
-                    <TableCell colSpan={7} className="p-0 h-12 border-none">
+                    <TableCell colSpan={6} className="p-0 h-12 border-none">
                       {isFetchingNextDepot && (
                         <div className="flex items-center justify-center py-4 text-slate-400 bg-slate-50/20">
                           <div className="flex gap-1.5 items-center bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">

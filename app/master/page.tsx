@@ -3131,17 +3131,17 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
   }
 
   // --- Depot field change trigger + audit trail (mirrors Vehicle/Driver/Transport Master) ---
-  const [depotEffectiveDatesSection, setDepotEffectiveDatesSection] = useState<'basic' | 'tags' | 'documents' | null>(null)
+  const [depotEffectiveDatesSection, setDepotEffectiveDatesSection] = useState<'basic' | 'tags' | 'assigned' | 'documents' | null>(null)
   const [depotEffectiveDatesTargetField, setDepotEffectiveDatesTargetField] = useState<string | null>(null)
   const [pendingDepotFieldChangeConfirm, setPendingDepotFieldChangeConfirm] = useState<{
     fieldName: string
-    section: 'basic' | 'tags' | 'documents'
+    section: 'basic' | 'tags' | 'assigned' | 'documents'
     applyChange: () => void
   } | null>(null)
 
   const handleDepotFieldChangeAttempt = (
     fieldName: string,
-    section: 'basic' | 'tags' | 'documents',
+    section: 'basic' | 'tags' | 'assigned' | 'documents',
     applyChange: () => void
   ) => {
     if (editingItem?.id) {
@@ -3555,6 +3555,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
     depot_name: "",
     depot_address: "",
     state: "",
+    district: "",
+    sub_district: "",
+    thana: "",
+    post: "",
+    city: "",
+    pincode: "",
+    assigned_to: null,
     salesman_broker_name: "",
     agent_tags: [],
     agreement_paper_upload: "",
@@ -3972,6 +3979,13 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
       depot_name: "",
       depot_address: "",
       state: "",
+      district: "",
+      sub_district: "",
+      thana: "",
+      post: "",
+      city: "",
+      pincode: "",
+      assigned_to: null,
       salesman_broker_name: "",
       agent_tags: [],
       agreement_paper_upload: "",
@@ -5011,6 +5025,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
           activeStates={activeStates}
           brokerOptions={brokerOptions}
           salespersonOptions={salespersonOptions}
+          customerOptions={customerOptions}
           ledgerGroupOptions={ledgerGroupOptions}
           activeGstRegStatuses={activeGstRegStatuses}
           activeGstRegTypes={activeGstRegTypes}
@@ -6156,6 +6171,7 @@ const { ref: customerEndRef, inView: customerInView } = useInView()
                   targetFieldName={depotEffectiveDatesTargetField || undefined}
                   brokerOptions={brokerOptions}
                   salespersonOptions={salespersonOptions}
+                  customerOptions={customerOptions}
                   activeStates={activeStates}
                   onDepotUpdated={(data) => { populateFormFromData('depots', data); refetchDepot() }}
                   onBack={async () => {

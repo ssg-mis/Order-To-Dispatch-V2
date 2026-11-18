@@ -10,6 +10,7 @@ import {
   Loader2,
   Warehouse,
   Users,
+  UserCheck,
   FileText,
   Plus,
   Save,
@@ -22,7 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
+import { AgentTagsPicker } from "@/components/masters/forms/AgentTagsPicker"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
 import { FileUploadField } from "@/components/file-upload-field"
@@ -30,7 +31,7 @@ import { masterHistoryApi, depotApi, orderApi } from "@/lib/api-service"
 import { fmtDate, fmtDateTime } from "@/lib/table-format"
 import { useToast } from "@/hooks/use-toast"
 
-type DepotSectionType = "basic" | "tags" | "documents"
+type DepotSectionType = "basic" | "tags" | "assigned" | "documents"
 
 interface DepotEffectiveDatesModalViewProps {
   depotId: number
@@ -40,6 +41,7 @@ interface DepotEffectiveDatesModalViewProps {
   targetFieldName?: string
   brokerOptions?: any[]
   salespersonOptions?: any[]
+  customerOptions?: any[]
   activeStates?: any[]
   onBack: () => void
   onDepotUpdated?: (data: any) => void
@@ -53,6 +55,7 @@ export function DepotEffectiveDatesModalView({
   targetFieldName,
   brokerOptions = [],
   salespersonOptions = [],
+  customerOptions = [],
   activeStates = [],
   onBack,
   onDepotUpdated,
@@ -90,7 +93,13 @@ export function DepotEffectiveDatesModalView({
     status: depotForm.status || "Active",
     state_id: depotForm.state_id ? String(depotForm.state_id) : "",
     depot_address: depotForm.depot_address || "",
-    salesman_broker_name: depotForm.salesman_broker_name || "",
+    district: depotForm.district || "",
+    sub_district: depotForm.sub_district || "",
+    thana: depotForm.thana || "",
+    post: depotForm.post || "",
+    city: depotForm.city || "",
+    pincode: depotForm.pincode || "",
+    assigned_to: depotForm.assigned_to ? String(depotForm.assigned_to) : "",
     agent_tags: Array.isArray(depotForm.agent_tags) ? JSON.parse(JSON.stringify(depotForm.agent_tags)) : [],
     agreement_paper_upload: depotForm.agreement_paper_upload || "",
     depot_owner_gst_certificate_upload: depotForm.depot_owner_gst_certificate_upload || "",
@@ -137,12 +146,14 @@ export function DepotEffectiveDatesModalView({
   const sectionTitles: Record<DepotSectionType, string> = {
     basic: "Depot Basic Details History Table",
     tags: "Salesman / Broker Tags History Table",
+    assigned: "Assigned To History Table",
     documents: "Document Uploads History Table",
   }
 
   const DEDICATED_COLUMNS: Record<DepotSectionType, string[]> = {
-    basic: ["Depot ID", "Depot Name", "Status", "State", "Depot Address", "Salesman/Broker Name"],
+    basic: ["Depot ID", "Depot Name", "Status", "State", "Depot Address", "District", "Sub-District", "Thana", "Post", "City", "Pincode"],
     tags: ["Salesman / Broker Tags"],
+    assigned: ["Assigned To"],
     documents: ["Agreement Paper", "Depot Owner GST Certificate", "PAN Card", "Aadhaar Card"],
   }
 
@@ -152,8 +163,14 @@ export function DepotEffectiveDatesModalView({
     "Status": "status",
     "State": "state_id",
     "Depot Address": "depot_address",
-    "Salesman/Broker Name": "salesman_broker_name",
+    "District": "district",
+    "Sub-District": "sub_district",
+    "Thana": "thana",
+    "Post": "post",
+    "City": "city",
+    "Pincode": "pincode",
     "Salesman / Broker Tags": "agent_tags",
+    "Assigned To": "assigned_to",
     "Agreement Paper": "agreement_paper_upload",
     "Depot Owner GST Certificate": "depot_owner_gst_certificate_upload",
     "PAN Card": "pan_card_upload",
@@ -169,6 +186,13 @@ export function DepotEffectiveDatesModalView({
     if (!id) return "—"
     const found = activeStates.find((s: any) => String(s.id) === String(id))
     return found ? `${found.state_name} (#${found.id})` : id
+  }
+
+  // "Assigned To" is logged as "Customer Name (#id)" (same trick as State) so a version can be restored by id.
+  const getCustomerLabel = (id: any) => {
+    if (!id) return "—"
+    const found = customerOptions.find((c: any) => String(c.id) === String(id))
+    return found ? `${found.customer_name} (#${found.id})` : String(id)
   }
 
   const parseIdFromLabel = (label: string): string | null => {
@@ -205,6 +229,23 @@ export function DepotEffectiveDatesModalView({
     if (typeof raw !== "string") return raw
     return raw.replace(/\s*\(#[\w-]+\)/g, "")
   }
+
+  // The history table shows Brokers and Salespersons as two separate columns. They are still logged as ONE
+  // "Salesman / Broker Tags" value ("Name (Broker), Name (Salesperson)"), so split that text for display only.
+  const getSnapshotTagNames = (version: any, type: "Broker" | "Salesperson"): string => {
+    const raw = getSnapshotValue(version, "Salesman / Broker Tags")
+    if (typeof raw !== "string" || !raw || raw === "—" || raw === "None") return "—"
+    const names = [...raw.matchAll(/(.+?) \((Broker|Salesperson)\)(?:, |$)/g)]
+      .filter((m) => m[2] === type)
+      .map((m) => m[1].trim())
+    return names.length ? names.join(", ") : "—"
+  }
+
+  const tableColumns: { label: string; tagType?: "Broker" | "Salesperson" }[] = DEDICATED_COLUMNS[activeSection].flatMap((label) =>
+    label === "Salesman / Broker Tags"
+      ? [{ label: "Brokers", tagType: "Broker" as const }, { label: "Salespersons", tagType: "Salesperson" as const }]
+      : [{ label }]
+  )
 
   const rawItems = (historyData || []).filter((item: any) => DEDICATED_COLUMNS[activeSection].includes(item.fieldName))
 
@@ -284,6 +325,9 @@ export function DepotEffectiveDatesModalView({
         if (key === "agent_tags") {
           return { fieldName: label, oldValue: getAgentTagsLabel(depotForm[key] || []), newValue: getAgentTagsLabel(newVersionForm[key] || []) }
         }
+        if (key === "assigned_to") {
+          return { fieldName: label, oldValue: getCustomerLabel(depotForm[key]), newValue: getCustomerLabel(newVersionForm[key]) }
+        }
         return { fieldName: label, oldValue: depotForm[key] ?? "—", newValue: newVersionForm[key] || "—" }
       })
 
@@ -307,6 +351,8 @@ export function DepotEffectiveDatesModalView({
             payload[key] = newVersionForm[key] ? parseInt(newVersionForm[key], 10) : null
             const selectedState = activeStates.find((s: any) => String(s.id) === String(newVersionForm[key]))
             if (selectedState) payload.state = selectedState.state_name
+          } else if (key === "assigned_to") {
+            payload[key] = newVersionForm[key] ? parseInt(newVersionForm[key], 10) : null
           } else {
             payload[key] = newVersionForm[key]
           }
@@ -360,6 +406,9 @@ export function DepotEffectiveDatesModalView({
       if (key === "state_id") {
         const id = parseIdFromLabel(loggedValue)
         if (id) overrides[key] = id
+      } else if (key === "assigned_to") {
+        const id = parseIdFromLabel(loggedValue)
+        if (id) overrides[key] = id
       } else if (key === "agent_tags") {
         overrides[key] = parseAgentTagsFromLabel(loggedValue)
       } else {
@@ -401,15 +450,6 @@ export function DepotEffectiveDatesModalView({
     )
   }
 
-  const toggleAgentTag = (agentType: "broker" | "salesperson", agentId: number) => {
-    const current: any[] = newVersionForm.agent_tags || []
-    const exists = current.some((t) => t.agent_type === agentType && t.agent_id === agentId)
-    const updated = exists
-      ? current.filter((t) => !(t.agent_type === agentType && t.agent_id === agentId))
-      : [...current, { agent_type: agentType, agent_id: agentId }]
-    setNewVersionForm((prev) => ({ ...prev, agent_tags: updated }))
-  }
-
   const renderField = (label: string) => {
     const key = FIELD_LABEL_TO_KEY[label]
 
@@ -438,27 +478,31 @@ export function DepotEffectiveDatesModalView({
         />
       )
     }
+    if (key === "assigned_to") {
+      return (
+        <Combobox
+          options={customerOptions
+            .filter((c: any) => c.status === "Active" || String(c.id) === String(newVersionForm.assigned_to))
+            .map((c: any) => ({ value: String(c.id), label: c.customer_name, subLabel: c.customer_id }))}
+          value={newVersionForm.assigned_to || ""}
+          onValueChange={(val: string) => setNewVersionForm(prev => ({ ...prev, assigned_to: val }))}
+          placeholder="Select customer"
+          searchPlaceholder="Search customer..."
+          emptyText="No customer found."
+          className="h-9 text-xs bg-white rounded-lg border-slate-200 shadow-xs hover:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/30 transition-colors"
+        />
+      )
+    }
     if (key === "agent_tags") {
       return (
-        <div className="sm:col-span-2 lg:col-span-3 grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-white p-2.5 max-h-40 overflow-y-auto">
-          {brokerOptions.map((b: any) => {
-            const checked = (newVersionForm.agent_tags || []).some((t: any) => t.agent_type === "broker" && t.agent_id === b.id)
-            return (
-              <label key={`broker-${b.id}`} className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                <Checkbox checked={checked} onCheckedChange={() => toggleAgentTag("broker", b.id)} />
-                <span className="font-medium text-slate-800">{b.salesman_name}</span> <span className="text-slate-400 text-[11px]">(Broker)</span>
-              </label>
-            )
-          })}
-          {salespersonOptions.map((s: any) => {
-            const checked = (newVersionForm.agent_tags || []).some((t: any) => t.agent_type === "salesperson" && t.agent_id === s.id)
-            return (
-              <label key={`salesperson-${s.id}`} className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                <Checkbox checked={checked} onCheckedChange={() => toggleAgentTag("salesperson", s.id)} />
-                <span className="font-medium text-slate-800">{s.salesman_name}</span> <span className="text-slate-400 text-[11px]">(Salesperson)</span>
-              </label>
-            )
-          })}
+        <div>
+          <AgentTagsPicker
+            value={newVersionForm.agent_tags || []}
+            labelClassName="text-[11px] font-bold text-slate-500 uppercase tracking-wide"
+            brokerOptions={brokerOptions}
+            salespersonOptions={salespersonOptions}
+            onChange={(updated) => setNewVersionForm((prev) => ({ ...prev, agent_tags: updated }))}
+          />
         </div>
       )
     }
@@ -502,7 +546,8 @@ export function DepotEffectiveDatesModalView({
 
   const SECTION_TABS: { key: DepotSectionType; label: string; icon: any; activeClass: string }[] = [
     { key: "basic", label: "Depot History", icon: Warehouse, activeClass: "bg-slate-900" },
-    { key: "tags", label: "Tags History", icon: Users, activeClass: "bg-blue-600" },
+    { key: "tags", label: "Salesman / Broker Tags History", icon: Users, activeClass: "bg-blue-600" },
+    { key: "assigned", label: "Assigned To History", icon: UserCheck, activeClass: "bg-violet-600" },
     { key: "documents", label: "Document Uploads History", icon: FileText, activeClass: "bg-rose-600" },
   ]
 
@@ -605,8 +650,10 @@ export function DepotEffectiveDatesModalView({
             </div>
 
             {DEDICATED_COLUMNS[activeSection].map((label) => (
-              <div key={label} className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">{label}</Label>
+              <div key={label} className={`space-y-1.5 ${FIELD_LABEL_TO_KEY[label] === "agent_tags" ? "sm:col-span-2" : ""}`}>
+                {FIELD_LABEL_TO_KEY[label] !== "agent_tags" && (
+                  <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">{label}</Label>
+                )}
                 {renderField(label)}
               </div>
             ))}
@@ -656,7 +703,7 @@ export function DepotEffectiveDatesModalView({
                 <th className="py-2.5 px-3 whitespace-nowrap bg-amber-50/80 text-slate-900 text-right border-r border-slate-300 w-36 font-bold">
                   Applicable From (W.E.F)
                 </th>
-                {DEDICATED_COLUMNS[activeSection].map((label) => (
+                {tableColumns.map(({ label }) => (
                   <th key={label} className="py-2.5 px-3 border-r border-slate-300 whitespace-nowrap">{label}</th>
                 ))}
                 <th className="py-2.5 px-3 text-left whitespace-nowrap border-r border-slate-300 w-36">Updated By</th>
@@ -689,12 +736,14 @@ export function DepotEffectiveDatesModalView({
                       </div>
                     </td>
 
-                    {DEDICATED_COLUMNS[activeSection].map((label) => {
+                    {tableColumns.map(({ label, tagType }) => {
                       const key = FIELD_LABEL_TO_KEY[label]
                       const isUpload = UPLOAD_KEYS.has(key)
                       return (
                         <td key={label} className="py-2.5 px-3 border-r border-slate-200 text-slate-700 font-medium">
-                          {isUpload ? renderFileLink(getSnapshotValue(version, label)) : getSnapshotValue(version, label)}
+                          {tagType
+                            ? getSnapshotTagNames(version, tagType)
+                            : isUpload ? renderFileLink(getSnapshotValue(version, label)) : getSnapshotValue(version, label)}
                         </td>
                       )
                     })}

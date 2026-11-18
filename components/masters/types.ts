@@ -102,6 +102,13 @@ export interface Depot {
   depot_address: string
   state: string
   state_id?: number | null
+  district?: string | null
+  sub_district?: string | null
+  thana?: string | null
+  post?: string | null
+  city?: string | null
+  pincode?: string | null
+  assigned_to?: number | null // customer id this depot is assigned to
   salesman_broker_name: string
   agent_tags?: { agent_type: 'broker' | 'salesperson'; agent_id: number }[]
   agreement_paper_upload?: string

@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Combobox } from "@/components/ui/combobox"
-import { Checkbox } from "@/components/ui/checkbox"
+import { AgentTagsPicker, AgentTag } from "@/components/masters/forms/AgentTagsPicker"
 import { FileUploadField } from "@/components/file-upload-field"
-import { Warehouse, Users, FileText } from "lucide-react"
+import { Warehouse, Users, FileText, MapPin, UserCheck } from "lucide-react"
+import { AddressLocationFields } from "@/components/masters/forms/AddressLocationFields"
 import { DepotSectionalHistoryTable } from "@/components/depot-sectional-history-table"
 import { Depot, STATUS_OPTIONS } from "@/components/masters/types"
 
@@ -17,13 +18,14 @@ export interface DepotFormProps {
   setDepotForm: React.Dispatch<React.SetStateAction<Partial<Depot>>>
   handleDepotFieldChangeAttempt: (
     fieldName: string,
-    section: 'basic' | 'tags' | 'documents',
+    section: 'basic' | 'tags' | 'assigned' | 'documents',
     applyChange: () => void
   ) => void
   setDepotEffectiveDatesSection: (sec: any) => void
   activeStates: any[]
   brokerOptions?: any[]
   salespersonOptions?: any[]
+  customerOptions?: any[]
   ledgerGroupOptions?: any[]
   activeGstRegStatuses?: any[]
   activeGstRegTypes?: any[]
@@ -45,6 +47,7 @@ export function DepotForm({
   activeStates,
   brokerOptions,
   salespersonOptions,
+  customerOptions,
   handleFileUpload,
   handleFileRemove,
 }: DepotFormProps) {
@@ -110,45 +113,51 @@ export function DepotForm({
               </SelectContent>
             </Select>
           </div>
+        </div>
+      </div>
+
+      {/* Depot Address (same fields as the customer Primary Address: address line, state, district, sub-district, thana, post, city, pincode) */}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
+            <MapPin className="h-4.5 w-4.5 text-blue-600" />
+            <span>Depot Address</span>
+          </Label>
+        </div>
+        <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/40">
           <div className="space-y-1.5">
-            <Label htmlFor="state" className="text-xs font-semibold text-slate-800">State</Label>
-            <Combobox
-              options={activeStates.map((s: any) => ({ value: String(s.id), label: [s.gst_state_code, s.short_name, s.state_name].filter(Boolean).join(" ") }))}
-              value={depotForm.state_id ? String(depotForm.state_id) : ""}
-              onValueChange={val => {
-                const selected = activeStates.find((s: any) => String(s.id) === val)
-                handleDepotFieldChangeAttempt('State', 'basic', () => setDepotForm({...depotForm, state_id: val ? parseInt(val, 10) : null, state: selected?.state_name || depotForm.state }))
+            <Label htmlFor="depot_address" className="text-xs font-medium text-slate-800">Address Line</Label>
+            <Input
+              id="depot_address"
+              value={depotForm.depot_address || ""}
+              onChange={e => {
+                const val = e.target.value
+                handleDepotFieldChangeAttempt('Depot Address', 'basic', () => setDepotForm({...depotForm, depot_address: val}))
               }}
-              placeholder="Select state"
-              searchPlaceholder="Search state..."
+              placeholder="Address"
+              className="text-xs"
             />
           </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="depot_address" className="text-xs font-semibold text-slate-800">Depot Address</Label>
-          <Input
-            id="depot_address"
-            value={depotForm.depot_address || ""}
-            onChange={e => {
-              const val = e.target.value
-              handleDepotFieldChangeAttempt('Depot Address', 'basic', () => setDepotForm({...depotForm, depot_address: val}))
-            }}
-            placeholder="Full address"
-            className="text-xs"
+          <AddressLocationFields
+            value={depotForm as any}
+            activeStates={activeStates}
+            onChange={(patch, label) =>
+              handleDepotFieldChangeAttempt(label, 'basic', () => setDepotForm({ ...depotForm, ...patch }))
+            }
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="salesman_ref" className="text-xs font-semibold text-slate-800">Salesman/Broker Name</Label>
-          <Input
-            id="salesman_ref"
-            value={depotForm.salesman_broker_name || ""}
-            onChange={e => {
-              const val = e.target.value
-              handleDepotFieldChangeAttempt('Salesman/Broker Name', 'basic', () => setDepotForm({...depotForm, salesman_broker_name: val}))
-            }}
-            placeholder="Enter name"
-            className="text-xs"
-          />
+          <div className="space-y-1.5">
+            <Label htmlFor="depot_pincode" className="text-xs font-medium text-slate-800">Pincode</Label>
+            <Input
+              id="depot_pincode"
+              className="font-mono text-xs"
+              value={depotForm.pincode || ""}
+              onChange={e => {
+                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6)
+                handleDepotFieldChangeAttempt('Pincode', 'basic', () => setDepotForm({ ...depotForm, pincode: val }))
+              }}
+              placeholder="PIN Code (6 digits)"
+            />
+          </div>
         </div>
       </div>
 
@@ -167,49 +176,17 @@ export function DepotForm({
               section="tags"
               depotId={editingItem.id}
               depotName={depotForm.depot_name || ''}
-              title="Tags History"
+              title="Salesman / Broker Tags History"
               onOpenView={handleOpenEffectiveDatesView((sec: any) => setDepotEffectiveDatesSection(sec))}
             />
           )}
         </div>
-        <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-white p-2.5 max-h-40 overflow-y-auto">
-          {(brokerOptions || []).map((b: any) => {
-            const checked = (depotForm.agent_tags || []).some(t => t.agent_type === 'broker' && t.agent_id === b.id)
-            return (
-              <label key={`broker-${b.id}`} className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                <Checkbox
-                  checked={checked}
-                  onCheckedChange={(val) => {
-                    const current = depotForm.agent_tags || []
-                    const updated = val
-                      ? [...current, { agent_type: 'broker' as 'broker', agent_id: b.id }]
-                      : current.filter(t => !(t.agent_type === 'broker' && t.agent_id === b.id))
-                    handleDepotFieldChangeAttempt('Salesman / Broker Tags', 'tags', () => setDepotForm({ ...depotForm, agent_tags: updated }))
-                  }}
-                />
-                <span className="font-medium text-slate-800">{b.salesman_name}</span> <span className="text-slate-400 text-[11px]">(Broker)</span>
-              </label>
-            )
-          })}
-          {(salespersonOptions || []).map((s: any) => {
-            const checked = (depotForm.agent_tags || []).some(t => t.agent_type === 'salesperson' && t.agent_id === s.id)
-            return (
-              <label key={`salesperson-${s.id}`} className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                <Checkbox
-                  checked={checked}
-                  onCheckedChange={(val) => {
-                    const current = depotForm.agent_tags || []
-                    const updated = val
-                      ? [...current, { agent_type: 'salesperson' as 'salesperson', agent_id: s.id }]
-                      : current.filter(t => !(t.agent_type === 'salesperson' && t.agent_id === s.id))
-                    handleDepotFieldChangeAttempt('Salesman / Broker Tags', 'tags', () => setDepotForm({ ...depotForm, agent_tags: updated }))
-                  }}
-                />
-                <span className="font-medium text-slate-800">{s.salesman_name}</span> <span className="text-slate-400 text-[11px]">(Salesperson)</span>
-              </label>
-            )
-          })}
-        </div>
+        <AgentTagsPicker
+          value={(depotForm.agent_tags || []) as AgentTag[]}
+          brokerOptions={brokerOptions}
+          salespersonOptions={salespersonOptions}
+          onChange={(updated) => handleDepotFieldChangeAttempt('Salesman / Broker Tags', 'tags', () => setDepotForm({ ...depotForm, agent_tags: updated }))}
+        />
       </div>
 
       {/* Document Uploads */}
@@ -289,6 +266,44 @@ export function DepotForm({
             onRemove={() => {
               handleDepotFieldChangeAttempt('Aadhaar Card', 'documents', () => handleFileRemove("aadhaar_card_upload"))
             }}
+          />
+        </div>
+      </div>
+
+      {/* Assigned To (last field) - customer this depot is assigned to */}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+          <div>
+            <Label className="text-slate-900 font-bold text-base flex items-center gap-2">
+              <UserCheck className="h-4.5 w-4.5 text-blue-600" />
+              <span>Assigned To</span>
+            </Label>
+            <p className="text-[11px] text-slate-500">Customer this depot is assigned to (Rent / Freight / Hamali / Royalty / Commission, ledger posting and invoice &amp; payment).</p>
+          </div>
+          {editingItem?.id && (
+            <DepotSectionalHistoryTable
+              section="assigned"
+              depotId={editingItem.id}
+              depotName={depotForm.depot_name || ''}
+              title="Assigned To History"
+              onOpenView={handleOpenEffectiveDatesView((sec: any) => setDepotEffectiveDatesSection(sec))}
+            />
+          )}
+        </div>
+        <div className="space-y-1.5 sm:max-w-md">
+          <Label className="text-xs font-semibold text-slate-800">Assigned To</Label>
+          <Combobox
+            options={(customerOptions || [])
+              .filter((c: any) => c.status === 'Active' || c.id === depotForm.assigned_to)
+              .map((c: any) => ({ value: String(c.id), label: c.customer_name, subLabel: c.customer_id }))}
+            value={depotForm.assigned_to ? String(depotForm.assigned_to) : ""}
+            onValueChange={val =>
+              handleDepotFieldChangeAttempt('Assigned To', 'assigned', () =>
+                setDepotForm({ ...depotForm, assigned_to: val ? parseInt(val, 10) : null }))
+            }
+            placeholder="Select customer"
+            searchPlaceholder="Search customer..."
+            emptyText="No customer found."
           />
         </div>
       </div>

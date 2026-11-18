@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button"
 import { masterHistoryApi } from "@/lib/api-service"
 
 interface SectionalHistoryTableProps {
-  section: "basic" | "tags" | "documents"
+  section: "basic" | "tags" | "assigned" | "documents"
   depotId?: number | string
   depotName?: string
   title?: string
-  onOpenView?: (section: "basic" | "tags" | "documents") => void
+  onOpenView?: (section: "basic" | "tags" | "assigned" | "documents") => void
 }
 
 export function DepotSectionalHistoryTable({ section, depotId, title, onOpenView }: SectionalHistoryTableProps) {
@@ -30,12 +30,15 @@ export function DepotSectionalHistoryTable({ section, depotId, title, onOpenView
               "status", "Status",
               "state", "State", "state_id", "State Id",
               "depot_address", "Depot Address",
+              "district", "District", "sub_district", "Sub-District", "thana", "Thana", "post", "Post", "city", "City", "pincode", "Pincode",
               "salesman_broker_name", "Salesman/Broker Name", "Salesman Broker Name",
               "Depot Info", "Depot Details"
             ].includes(h.fieldName)
           )
         }
- else if (section === "tags") {
+else if (section === "assigned") {
+          return res.data.filter((h: any) => h.fieldName === "Assigned To" || h.fieldName === "assigned_to")
+        } else if (section === "tags") {
           return res.data.filter((h: any) =>
             h.fieldName === "Salesman / Broker Tags" ||
             h.fieldName === "Salesperson / Broker Tags" ||
@@ -91,7 +94,9 @@ export function DepotSectionalHistoryTable({ section, depotId, title, onOpenView
           (section === "basic"
             ? "Depot History"
             : section === "tags"
-            ? "Tags History"
+            ? "Salesman / Broker Tags History"
+            : section === "assigned"
+            ? "Assigned To History"
             : "Document Uploads History")}
       </span>
       <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-blue-50 text-blue-700 font-bold border border-blue-200">
