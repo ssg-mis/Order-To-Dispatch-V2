@@ -1,3 +1,8 @@
 {
-  "rewrites": []
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://orderv2.botivate.in/api/v1/:path*"
+    }
+  ]
 }
